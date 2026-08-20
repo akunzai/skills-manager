@@ -25,6 +25,7 @@ This project uses Python (>=3.10) with standard library only (no third-party dep
 - Triage labels: @docs/agents/triage-labels.md
 - Domain docs: @docs/agents/domain.md
 - Release SOP: @docs/release.md
+- Lessons learned: @docs/lessons-learned.md
 
 ## Claude Code Compatibility
 
