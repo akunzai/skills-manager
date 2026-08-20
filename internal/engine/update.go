@@ -33,8 +33,8 @@ func sortedSkillKeys(skills map[string]string) []string {
 }
 
 func CheckRepoUpdateStatus(source string, repoInfo config.RemoteRepo, cacheDir string) UpdateStatusResult {
-	cleanSource := strings.TrimSuffix(source, ".git")
 	parsed := models.ParseRepoSource(source)
+	cleanSource := parsed.SourceKey
 
 	baseCache := cacheDir
 	if baseCache == "" {
@@ -57,15 +57,18 @@ func CheckRepoUpdateStatus(source string, repoInfo config.RemoteRepo, cacheDir s
 	skillList := sortedSkillKeys(repoInfo.Skills)
 
 	localSHA := GetLocalRepoCommit(repoDest)
-	remoteSHA := GetRemoteRepoCommit(source, repoURL, targetBranch)
+	remoteSHA := ""
 
 	status := "up_to_date"
 	if localSHA == "" {
 		status = "not_cached"
-	} else if remoteSHA == "" {
-		status = "error"
-	} else if localSHA != remoteSHA {
-		status = "update_available"
+	} else {
+		remoteSHA = GetRemoteRepoCommit(source, repoURL, targetBranch)
+		if remoteSHA == "" {
+			status = "error"
+		} else if localSHA != remoteSHA {
+			status = "update_available"
+		}
 	}
 
 	return UpdateStatusResult{

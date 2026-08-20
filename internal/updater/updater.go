@@ -63,6 +63,9 @@ func GetCurrentExecutablePath() string {
 		return path
 	}
 
+	if runtime.GOOS == "windows" {
+		return filepath.Join(models.UserHomeDir(), ".local", "bin", "skills.exe")
+	}
 	return filepath.Join(models.UserHomeDir(), ".local", "bin", "skills")
 }
 

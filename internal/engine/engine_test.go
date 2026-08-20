@@ -178,3 +178,93 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 	}
 }
 
+func TestCheckRepoUpdateStatusSourceParsing(t *testing.T) {
+	tmpCache := t.TempDir()
+
+	tests := []struct {
+		source       string
+		expectedDest string
+	}{
+		{
+			source:       "owner/repo",
+			expectedDest: filepath.Join(tmpCache, "owner", "repo"),
+		},
+		{
+			source:       "github:owner/repo",
+			expectedDest: filepath.Join(tmpCache, "owner", "repo"),
+		},
+		{
+			source:       "https://github.com/owner/repo.git",
+			expectedDest: filepath.Join(tmpCache, "owner", "repo"),
+		},
+		{
+			source:       "gitlab:group/project",
+			expectedDest: filepath.Join(tmpCache, "gitlab.com", "group", "project"),
+		},
+	}
+
+	for _, tt := range tests {
+		res := CheckRepoUpdateStatus(tt.source, config.RemoteRepo{
+			Skills: map[string]string{"foo": "skills/foo"},
+		}, tmpCache)
+
+		if res.CachePath != tt.expectedDest {
+			t.Errorf("CheckRepoUpdateStatus(%q).CachePath = %q; want %q", tt.source, res.CachePath, tt.expectedDest)
+		}
+	}
+}
+
+func TestCopySkillFolderWithReadOnlyFilesAndRemoveAll(t *testing.T) {
+	srcDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "target-ro-skill")
+
+	roFile := filepath.Join(srcDir, "README.md")
+	if err := os.WriteFile(roFile, []byte("read only content"), 0444); err != nil {
+		t.Fatalf("failed to write read only file: %v", err)
+	}
+
+	if err := CopySkillFolder(srcDir, targetDir); err != nil {
+		t.Fatalf("CopySkillFolder failed with read-only file: %v", err)
+	}
+
+	copiedFile := filepath.Join(targetDir, "README.md")
+	if _, err := os.Stat(copiedFile); err != nil {
+		t.Fatalf("expected copied file to exist: %v", err)
+	}
+
+	// Verify we can copy over the target again without error (even if target had 0444 permissions)
+	if err := CopySkillFolder(srcDir, targetDir); err != nil {
+		t.Fatalf("second CopySkillFolder failed: %v", err)
+	}
+
+	// Verify RemoveAll cleanly removes the directory
+	if err := RemoveAll(targetDir); err != nil {
+		t.Fatalf("RemoveAll failed on directory with read-only files: %v", err)
+	}
+	if _, err := os.Stat(targetDir); !os.IsNotExist(err) {
+		t.Fatalf("expected targetDir to be completely removed")
+	}
+}
+
+func TestUpdateRemoteSkillsDryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	cacheDir := filepath.Join(tmpDir, "cache")
+
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo1", "skill-1", "skills/skill-1", "github", "")
+	config.AddRemoteSkillEntry(cfg, "github:owner/repo2", "skill-2", "skills/skill-2", "github", "")
+
+	result, err := UpdateRemoteSkills(cfg, []string{"skill-1", "skill-2"}, false, true, skillsDir, cacheDir, false, nil)
+	if err != nil {
+		t.Fatalf("UpdateRemoteSkills dry-run failed: %v", err)
+	}
+
+	if len(result.UpdatedRepos) != 2 {
+		t.Fatalf("expected 2 updated repos in dry run, got %d", len(result.UpdatedRepos))
+	}
+	if len(result.UpdatedSkills) != 2 {
+		t.Fatalf("expected 2 updated skills in dry run, got %d", len(result.UpdatedSkills))
+	}
+}
+

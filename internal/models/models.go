@@ -26,7 +26,7 @@ func ResolveEnvPath(envVar, defaultSubpath string) string {
 }
 
 func ExpandUser(path string) string {
-	if strings.HasPrefix(path, "~/") || path == "~" {
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) || path == "~" {
 		home := UserHomeDir()
 		if path == "~" {
 			return home
@@ -58,11 +58,7 @@ func DefaultCacheDir() string {
 
 // GetProjectRootFromSkillsDir derives the project root directory from a project-scoped skillsDir.
 func GetProjectRootFromSkillsDir(skillsDir string) string {
-	absDir, err := filepath.Abs(skillsDir)
-	if err != nil {
-		absDir = skillsDir
-	}
-	clean := filepath.Clean(absDir)
+	clean := filepath.Clean(skillsDir)
 	parent := filepath.Dir(clean)
 	if filepath.Base(clean) == "skills" && filepath.Base(parent) == ".agents" {
 		return filepath.Dir(parent)

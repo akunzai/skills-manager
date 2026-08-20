@@ -1,6 +1,7 @@
 package models
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -120,8 +121,8 @@ func TestDefaultCacheDir(t *testing.T) {
 }
 
 func TestGetProjectRootAndAgents(t *testing.T) {
-	projDir := "/path/to/my-project"
-	skillsDir := "/path/to/my-project/.agents/skills"
+	projDir := filepath.FromSlash("/path/to/my-project")
+	skillsDir := filepath.Join(projDir, ".agents", "skills")
 
 	root := GetProjectRootFromSkillsDir(skillsDir)
 	if root != projDir {
@@ -133,7 +134,7 @@ func TestGetProjectRootAndAgents(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected claude-code in project agents")
 	}
-	expectedClaude := "/path/to/my-project/.claude/skills"
+	expectedClaude := filepath.Join(projDir, ".claude", "skills")
 	if claudePath != expectedClaude {
 		t.Errorf("claudePath = %q; want %q", claudePath, expectedClaude)
 	}

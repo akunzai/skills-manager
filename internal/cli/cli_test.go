@@ -220,7 +220,7 @@ func TestCLILsFormatting(t *testing.T) {
 	}
 }
 
-func TestCLIOutdatedNotCached(t *testing.T) {
+func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	flagConfigFile = ""
 	flagSkillsDir = ""
 	flagCacheDir = ""
@@ -238,9 +238,13 @@ func TestCLIOutdatedNotCached(t *testing.T) {
 
 	var buf bytes.Buffer
 	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"outdated", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
+	RootCmd.SetArgs([]string{"update", "--dry-run", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
 	if err := RootCmd.Execute(); err != nil {
-		t.Fatalf("outdated failed: %v", err)
+		t.Fatalf("update --dry-run --json failed: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), `"updated_repos"`) {
+		t.Fatalf("expected updated_repos in JSON output, got: %s", buf.String())
 	}
 }
 
