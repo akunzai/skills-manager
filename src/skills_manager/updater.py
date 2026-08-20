@@ -26,12 +26,20 @@ def get_current_executable_path() -> Path:
     if sys.argv and sys.argv[0]:
         candidate = Path(sys.argv[0]).expanduser().resolve()
         if candidate.is_file() and not candidate.name.endswith(".py"):
+            if candidate.suffix.lower() in (".cmd", ".bat", ".ps1"):
+                zipapp_cand = candidate.parent / "skills"
+                if zipapp_cand.exists() or (candidate.parent / "skills.pyz").exists():
+                    return zipapp_cand
             return candidate
 
     which_skills = shutil.which("skills")
     if which_skills:
         cand = Path(which_skills).expanduser().resolve()
         if cand.is_file():
+            if cand.suffix.lower() in (".cmd", ".bat", ".ps1"):
+                zipapp_cand = cand.parent / "skills"
+                if zipapp_cand.exists() or (cand.parent / "skills.pyz").exists():
+                    return zipapp_cand
             return cand
 
     return Path.home() / ".local" / "bin" / "skills"
@@ -163,7 +171,30 @@ def download_and_install_binary(
             raise RuntimeError("Downloaded binary is too small or corrupted.")
 
         os.chmod(tmp_path, 0o755)
+
+        if sys.platform == "win32" and dest.exists():
+            old_backup = dest.with_name(f"{dest.name}.old")
+            if old_backup.exists():
+                try:
+                    old_backup.unlink()
+                except Exception:
+                    pass
+            try:
+                dest.rename(old_backup)
+            except Exception:
+                pass
+
         os.replace(tmp_path, dest)
+
+        # On Windows, ensure skills.cmd and skills.ps1 wrappers exist next to the binary
+        if sys.platform == "win32":
+            cmd_wrapper = dest.parent / "skills.cmd"
+            if not cmd_wrapper.exists():
+                cmd_wrapper.write_text(f'@echo off\npython "%~dp0{dest.name}" %*\n', encoding="ascii")
+            ps1_wrapper = dest.parent / "skills.ps1"
+            if not ps1_wrapper.exists():
+                ps1_wrapper.write_text(f'& python "$PSScriptRoot\\{dest.name}" @args\n', encoding="utf-8")
+
         return dest
     except Exception as e:
         if tmp_path.exists():

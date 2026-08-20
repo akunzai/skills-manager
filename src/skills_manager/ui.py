@@ -1,9 +1,16 @@
-"""Terminal UI utilities for skills-manager."""
-
 import os
 import shutil
 import sys
 from typing import Dict, List, Optional, Set, Tuple
+
+if sys.platform == "win32":
+    try:
+        if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # ANSI Colors
 CYAN = "\033[96m"
@@ -15,35 +22,45 @@ DIM = "\033[2m"
 RESET = "\033[0m"
 
 
+def _safe_write(text: str) -> None:
+    """Write text to stdout with encoding error handling for Windows cp1252/legacy consoles."""
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
+        sys.stdout.write(text.encode(encoding, errors="replace").decode(encoding))
+
+
 def read_key() -> str:
     """Read a single key or ANSI escape sequence from stdin."""
     # Windows support
-    try:
-        import msvcrt
-        ch = msvcrt.getch()
-        if ch in (b'\x00', b'\xe0'):
-            ch2 = msvcrt.getch()
-            if ch2 == b'H':
+    if sys.platform == "win32":
+        try:
+            import msvcrt
+            ch = msvcrt.getch()
+            if ch in (b'\x00', b'\xe0'):
+                ch2 = msvcrt.getch()
+                if ch2 == b'H':
+                    return "up"
+                if ch2 == b'P':
+                    return "down"
+            if ch in (b'\r', b'\n'):
+                return "enter"
+            if ch == b' ':
+                return "space"
+            if ch in (b'\x1b', b'q', b'Q'):
+                return "escape"
+            if ch in (b'a', b'A'):
+                return "a"
+            if ch in (b'k', b'K'):
                 return "up"
-            if ch2 == b'P':
+            if ch in (b'j', b'J'):
                 return "down"
-        if ch in (b'\r', b'\n'):
-            return "enter"
-        if ch == b' ':
-            return "space"
-        if ch in (b'\x1b', b'q', b'Q'):
-            return "escape"
-        if ch in (b'a', b'A'):
-            return "a"
-        if ch in (b'k', b'K'):
-            return "up"
-        if ch in (b'j', b'J'):
-            return "down"
-        if ch == b'\x03':
-            return "interrupt"
+            if ch == b'\x03':
+                return "interrupt"
+        except Exception:
+            pass
         return ""
-    except ImportError:
-        pass
 
     # Unix/macOS support
     import termios
@@ -122,9 +139,9 @@ def prompt_multi_select(
 
     def render(first: bool = False) -> None:
         if not first:
-            sys.stdout.write(f"\033[{num_items + 4}A\r")
+            _safe_write(f"\033[{num_items + 4}A\r")
 
-        sys.stdout.write(f"{BOLD}{CYAN}{title}{RESET}\n\n")
+        _safe_write(f"{BOLD}{CYAN}{title}{RESET}\n\n")
         for i, (name, is_installed, extra) in enumerate(items):
             is_cursor = (i == cursor_idx)
             is_checked = selected[i]
@@ -137,10 +154,10 @@ def prompt_multi_select(
                 badge += f" {DIM}{extra}{RESET}"
 
             line = f"{prefix} {checkbox} {BOLD if is_cursor else ''}{name}{RESET}{badge}"
-            sys.stdout.write(f"{CLEAR_LINE}{line}\n")
+            _safe_write(f"{CLEAR_LINE}{line}\n")
 
         instructions = f"{DIM}Use ↑/↓ (or k/j) to navigate, Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.{RESET}"
-        sys.stdout.write(f"\n{CLEAR_LINE}{instructions}\n")
+        _safe_write(f"\n{CLEAR_LINE}{instructions}\n")
         sys.stdout.flush()
 
     try:
@@ -242,13 +259,13 @@ def prompt_grouped_multi_select(
 
         window_end = min(total_rows, window_start + visible_count)
 
-        sys.stdout.write(f"{BOLD}{CYAN}{title}{RESET}\n\n")
+        _safe_write(f"{BOLD}{CYAN}{title}{RESET}\n\n")
 
         if is_scrollable:
             if window_start > 0:
-                sys.stdout.write(f"{CLEAR_LINE}  {DIM}▲ ({window_start} more above){RESET}\n")
+                _safe_write(f"{CLEAR_LINE}  {DIM}▲ ({window_start} more above){RESET}\n")
             else:
-                sys.stdout.write(f"{CLEAR_LINE}\n")
+                _safe_write(f"{CLEAR_LINE}\n")
 
         for i in range(window_start, window_end):
             row_type, name, data = rows[i]
@@ -269,7 +286,7 @@ def prompt_grouped_multi_select(
 
                 count_str = f"{len(g_skills)} skill" if len(g_skills) == 1 else f"{len(g_skills)} skills"
                 line = f"{cursor_str} {box} {BOLD}📦 {name}{RESET} {DIM}({count_str}){RESET}"
-                sys.stdout.write(f"{CLEAR_LINE}{line}\n")
+                _safe_write(f"{CLEAR_LINE}{line}\n")
             else:
                 is_inst, extra, source = data
                 is_checked = name in selected_skills
@@ -278,17 +295,17 @@ def prompt_grouped_multi_select(
                 if extra:
                     badge += f" {DIM}{extra}{RESET}"
                 line = f"{cursor_str}    {box} {BOLD if is_cursor else ''}{name}{RESET}{badge}"
-                sys.stdout.write(f"{CLEAR_LINE}{line}\n")
+                _safe_write(f"{CLEAR_LINE}{line}\n")
 
         if is_scrollable:
             remaining = total_rows - window_end
             if remaining > 0:
-                sys.stdout.write(f"{CLEAR_LINE}  {DIM}▼ ({remaining} more below){RESET}\n")
+                _safe_write(f"{CLEAR_LINE}  {DIM}▼ ({remaining} more below){RESET}\n")
             else:
-                sys.stdout.write(f"{CLEAR_LINE}\n")
+                _safe_write(f"{CLEAR_LINE}\n")
 
         instructions = f"{DIM}Use ↑/↓ (or k/j) to navigate, Space to toggle item/group, Enter to confirm, Esc/q to cancel.{RESET}"
-        sys.stdout.write(f"\n{CLEAR_LINE}{instructions}\n")
+        _safe_write(f"\n{CLEAR_LINE}{instructions}\n")
         sys.stdout.flush()
 
     try:

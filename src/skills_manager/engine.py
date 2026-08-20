@@ -4,9 +4,10 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from .models import (
     DEFAULT_CACHE_DIR,
@@ -169,6 +170,48 @@ def get_target_agents_for_skill(
     return active_agents
 
 
+def create_symlink(src: Union[Path, str], dst: Path, target_is_directory: bool = True) -> None:
+    """
+    Create a symlink pointing to src at dst with Windows compatibility.
+    On Windows:
+      1. Specifies target_is_directory=True for directory targets.
+      2. If symlink creation fails due to privilege error (WinError 1314 / PermissionError),
+         attempts NTFS directory junction or directory copy fallback.
+    """
+    src_str = str(src)
+    try:
+        os.symlink(src_str, dst, target_is_directory=target_is_directory)
+    except OSError as e:
+        if sys.platform == "win32" and target_is_directory:
+            # 1. Try NTFS directory junction (does not require Developer Mode / admin on Windows)
+            try:
+                import _winapi
+                src_abs = str((dst.parent / src).resolve()) if not os.path.isabs(src_str) else str(Path(src_str).resolve())
+                if os.path.isdir(src_abs):
+                    _winapi.CreateJunction(src_abs, str(dst))
+                    return
+            except Exception:
+                pass
+
+            # 2. Fallback to copytree if junction is not possible
+            try:
+                src_abs_path = (dst.parent / src).resolve() if not os.path.isabs(src_str) else Path(src_str).resolve()
+                if src_abs_path.is_dir():
+                    shutil.copytree(src_abs_path, dst)
+                    return
+            except Exception:
+                pass
+
+        if sys.platform == "win32" and getattr(e, "winerror", None) == 1314:
+            raise OSError(
+                f"Failed to create symlink '{dst}' -> '{src}'. "
+                "Windows Developer Mode is required for non-admin directory symlinks. "
+                "Please enable Developer Mode in Windows Settings > System > For developers, "
+                "or run the terminal as Administrator."
+            ) from e
+        raise
+
+
 def ensure_agent_symlink(
     skill_name: str,
     agent_name: str,
@@ -207,7 +250,7 @@ def ensure_agent_symlink(
     elif agent_link.exists():
         agent_link.unlink()
 
-    os.symlink(rel_target, agent_link)
+    create_symlink(rel_target, agent_link, target_is_directory=True)
     return True
 
 

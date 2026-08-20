@@ -11,15 +11,27 @@ Replaces `npx skills` for global/user-level management with a deterministic `ski
 
 ## Installation
 
+### macOS / Linux
+
 ```bash
-# One-line installer
+# One-line installer (bash / zsh)
 curl -fsSL https://raw.githubusercontent.com/akunzai/skills-manager/main/install.sh | bash
 
-# Or install from local clone
+# Or from local clone
 ./install.sh
 ```
 
-Packages a standalone executable directly to `~/.local/bin/skills`.
+### Windows (PowerShell)
+
+```powershell
+# One-line installer
+irm https://raw.githubusercontent.com/akunzai/skills-manager/main/install.ps1 | iex
+
+# Or from local clone
+.\install.ps1
+```
+
+Packages a standalone executable directly to `~/.local/bin/skills` (`$HOME\.local\bin\skills.cmd` on Windows).
 
 ---
 

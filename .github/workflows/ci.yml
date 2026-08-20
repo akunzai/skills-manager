@@ -8,10 +8,14 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.10", "3.14"]
 
     steps:
@@ -23,12 +27,37 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run unit tests
+      - name: Run unit tests (Unix)
+        if: runner.os != 'Windows'
         run: |
           PYTHONPATH=src python3 -m unittest discover -s tests -v
 
-      - name: Test zipapp build
+      - name: Run unit tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
-          python3 -m zipapp src -m "skills_manager.cli:main" -p "/usr/bin/env python3" -o skills
-          chmod +x skills
-          ./skills --help
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          python -m unittest discover -s tests -v
+
+      - name: Test zipapp build & install.sh (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          ./install.sh
+          ~/.local/bin/skills --help
+
+      - name: Test zipapp build & install.ps1 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          .\install.ps1
+          python "$HOME\.local\bin\skills" --help
