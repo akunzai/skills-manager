@@ -271,8 +271,7 @@ def cmd_add(args: argparse.Namespace) -> int:
 
             chosen = prompt_multi_select(
                 f"📦 Select skills to install from {source}:",
-                items_list,
-                default_all=True
+                items_list
             )
 
             if chosen is None:

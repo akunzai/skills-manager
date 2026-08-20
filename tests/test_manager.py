@@ -529,17 +529,19 @@ class TestUIOperations(unittest.TestCase):
 
     @patch("skills_manager.ui.read_key", side_effect=["enter"])
     @patch("sys.stdin.isatty", return_value=True)
-    def test_prompt_multi_select_confirm_default_all(self, mock_isatty, mock_key):
+    def test_prompt_multi_select_confirm_default_uninstalled_only(self, mock_isatty, mock_key):
+        # skill1 is not installed (False) -> checked
+        # skill2 is already installed (True) -> unchecked
         items = [("skill1", False, None), ("skill2", True, None)]
-        res = prompt_multi_select("Title", items, default_all=True)
-        self.assertEqual(res, ["skill1", "skill2"])
+        res = prompt_multi_select("Title", items)
+        self.assertEqual(res, ["skill1"])
 
     @patch("skills_manager.ui.read_key", side_effect=["space", "down", "space", "enter"])
     @patch("sys.stdin.isatty", return_value=True)
     def test_prompt_multi_select_toggle_items(self, mock_isatty, mock_key):
         items = [("skill1", False, None), ("skill2", False, None)]
         # Initial: [True, True]. Press space on skill1 -> [False, True]. Down -> cursor on skill2. Press space -> [False, False]. Enter -> []
-        res = prompt_multi_select("Title", items, default_all=True)
+        res = prompt_multi_select("Title", items)
         self.assertEqual(res, [])
 
     @patch("skills_manager.ui.read_key", side_effect=["escape"])
@@ -554,7 +556,7 @@ class TestUIOperations(unittest.TestCase):
     def test_prompt_multi_select_toggle_all(self, mock_isatty, mock_key):
         items = [("skill1", False, None), ("skill2", False, None)]
         # Initial: [True, True]. Press 'a' -> all uncheck [False, False]. Enter -> []
-        res = prompt_multi_select("Title", items, default_all=True)
+        res = prompt_multi_select("Title", items)
         self.assertEqual(res, [])
 
 

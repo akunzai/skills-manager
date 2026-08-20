@@ -87,11 +87,12 @@ def read_key() -> str:
 def prompt_multi_select(
     title: str,
     items: List[Tuple[str, bool, Optional[str]]],
-    default_all: bool = True
+    initial_checked: Optional[List[bool]] = None
 ) -> Optional[List[str]]:
     """
     Interactive arrow-key multi-select UI.
     items: list of (name, is_installed, extra_info) tuples.
+    By default, only uninstalled skills (is_installed=False) are pre-checked.
     Returns list of selected item names, or None if cancelled.
     """
     if not sys.stdin.isatty():
@@ -101,7 +102,12 @@ def prompt_multi_select(
     if num_items == 0:
         return []
 
-    selected = [default_all] * num_items
+    if initial_checked is not None:
+        selected = list(initial_checked)
+    else:
+        # Default: check only skills that are not yet installed
+        selected = [not is_inst for (_, is_inst, _) in items]
+
     cursor_idx = 0
 
     HIDE_CURSOR = "\033[?25l"
