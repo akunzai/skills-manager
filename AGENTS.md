@@ -16,6 +16,7 @@ This project uses Python (>=3.10) with standard library only (no third-party dep
 - Schema definition: @skills.schema.json
 - CLI definition: @src/skills_manager/cli.py
 - Engine & Git caching: @src/skills_manager/engine.py
+- Terminal UI prompt: @src/skills_manager/ui.py
 - Updater module: @src/skills_manager/updater.py
 - Config manager: @src/skills_manager/config.py
 - Core models & paths: @src/skills_manager/models.py
