@@ -39,7 +39,7 @@ skills add akunzai/agent-skills --all
 skills add --symlink ~/.local/share/terminal-browser/app/skills/default/terminal-browser --skill terminal-browser
 
 # Add CLI command skill
-skills add --command "agentsview skills install --force" --check "which agentsview" --skill agentsview-finding-history
+skills add --command "agentsview skills install --harness agents" --check "which agentsview" --skill agentsview-finding-history
 
 # Remove skill(s) and unlink from agents
 skills rm ponytail-review
@@ -104,15 +104,9 @@ skills self-update --dry-run
     "agentsview-finding-history": {
       "type": "command",
       "check": "which agentsview",
-      "command": "agentsview skills install --force"
+      "command": "agentsview skills install --harness agents"
     }
-  },
-  "postHooks": [
-    {
-      "name": "agentsview-claude-symlink",
-      "run": "rm -rf ~/.claude/skills/agentsview-finding-history && ln -sf ~/.agents/skills/agentsview-finding-history ~/.claude/skills/agentsview-finding-history"
-    }
-  ]
+  }
 }
 ```
 
