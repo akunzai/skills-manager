@@ -29,10 +29,12 @@ Packages a standalone executable directly to `~/.local/bin/skills`.
 # List installed skills (table or JSON)
 skills ls
 skills ls --json
-skills ls -a claude-code
+skills ls -a claude
+skills ls -s akunzai
+skills ls --source local
 
 # Add remote git skill(s)
-skills add mattpocock/skills --skill ask-matt
+skills add akunzai/agent-skills --skill tidy-commits
 skills add akunzai/agent-skills --all
 
 # Add local symlink skill
@@ -43,7 +45,7 @@ skills add --command "agentsview skills install --harness agents" --check "which
 
 # Remove skill(s) and unlink from agents
 skills rm ponytail-review
-skills rm ask-matt --agent codex
+skills rm tidy-commits --agent codex
 
 # Check for updates in remote skill repositories
 skills outdated
@@ -51,7 +53,7 @@ skills outdated --json
 
 # Update remote skills to latest versions
 skills update
-skills update mattpocock/skills
+skills update akunzai/agent-skills
 skills update triage --force
 skills update --dry-run
 
@@ -81,18 +83,14 @@ skills self-update --dry-run
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "version": 1,
   "settings": {
-    "defaultAgents": ["claude-code", "codex", "cursor", "cline", "gemini-cli", "opencode", "zed"],
-    "excludeAgents": ["promptscript"],
-    "agentExclusions": {
-      "claude-code": []
-    }
+    "defaultAgents": ["claude"]
   },
   "remote": {
-    "mattpocock/skills": {
+    "akunzai/agent-skills": {
       "type": "github",
       "skills": {
-        "ask-matt": "skills/engineering/ask-matt",
-        "code-review": "skills/engineering/code-review"
+        "agents-md": "skills/agents-md",
+        "tidy-commits": "skills/tidy-commits"
       }
     }
   },
