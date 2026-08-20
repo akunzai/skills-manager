@@ -38,7 +38,7 @@ from .models import (
     SkillItem,
     normalize_agent_name,
 )
-from .ui import prompt_multi_select
+from .ui import prompt_grouped_multi_select, prompt_multi_select
 from .updater import (
     check_self_update,
     download_and_install_binary,
@@ -321,7 +321,46 @@ def cmd_rm(args: argparse.Namespace) -> int:
     skills_dir = Path(args.skills_dir) if args.skills_dir else DEFAULT_SKILLS_DIR
     config_data = load_config(config_path)
 
-    for skill_name in args.skills:
+    skills_to_remove = args.skills or []
+
+    if not skills_to_remove:
+        if sys.stdin.isatty():
+            # Interactive multi-select for removal grouped by source
+            all_skills = scan_all_skills(config_data, skills_dir)
+            if not all_skills:
+                print(f"{YELLOW}No global skills installed or configured to remove.{RESET}")
+                return 0
+
+            # Group skills by source
+            from collections import OrderedDict
+            grouped_dict: Dict[str, List[Tuple[str, bool, Optional[str]]]] = OrderedDict()
+            for s in all_skills:
+                source_key = s.source
+                if source_key not in grouped_dict:
+                    grouped_dict[source_key] = []
+                grouped_dict[source_key].append((s.name, s.is_installed, None))
+
+            # Safety: all unchecked by default
+            chosen = prompt_grouped_multi_select(
+                "🗑 Select skills to remove:",
+                grouped_dict,
+                initial_checked=set()
+            )
+
+            if chosen is None:
+                print(f"{YELLOW}Operation cancelled.{RESET}")
+                return 0
+
+            if not chosen:
+                print(f"{YELLOW}No skills selected. Aborted.{RESET}")
+                return 0
+
+            skills_to_remove = chosen
+        else:
+            print(f"{RED}Error: Skill name(s) required.{RESET}")
+            return 1
+
+    for skill_name in skills_to_remove:
         print(f"\n{CYAN}🗑  Removing skill: {BOLD}{skill_name}{RESET}...")
 
         # 1. If removing from specific agent only
@@ -857,7 +896,7 @@ def cmd_self_update(args: argparse.Namespace) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="skills",
-        description="Fast, zero-dependency global skills manager for AI coding agents."
+        description="Global skills manager for AI coding agents."
     )
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", help=f"Path to skills.json (default: {DEFAULT_CONFIG_FILE})")
@@ -892,7 +931,7 @@ def main() -> None:
 
     # rm
     rm_p = subparsers.add_parser("rm", aliases=["remove"], help="Remove one or more skills")
-    rm_p.add_argument("skills", nargs="+", help="Skill names to remove")
+    rm_p.add_argument("skills", nargs="*", help="Skill names to remove (interactive selection if omitted)")
     rm_p.add_argument("-a", "--agent", nargs="*", help="Remove only from specific agents")
     rm_p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
 

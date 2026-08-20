@@ -9,8 +9,8 @@ from pathlib import Path
 
 from unittest.mock import MagicMock, patch
 
-from skills_manager.cli import cmd_add, cmd_ls, cmd_outdated, cmd_self_update, cmd_update
-from skills_manager.ui import prompt_multi_select
+from skills_manager.cli import cmd_add, cmd_ls, cmd_outdated, cmd_rm, cmd_self_update, cmd_update
+from skills_manager.ui import prompt_grouped_multi_select, prompt_multi_select, read_key
 from skills_manager.config import (
     add_local_command_entry,
     add_local_symlink_entry,
@@ -559,6 +559,49 @@ class TestUIOperations(unittest.TestCase):
         res = prompt_multi_select("Title", items)
         self.assertEqual(res, [])
 
+    @patch("sys.stdin.isatty", return_value=False)
+    def test_prompt_grouped_multi_select_non_tty(self, mock_isatty):
+        res = prompt_grouped_multi_select("Title", {"source1": [("skill1", True, None)]})
+        self.assertIsNone(res)
+
+    @patch("skills_manager.ui.read_key", side_effect=["space", "enter"])
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_prompt_grouped_multi_select_group_toggle(self, mock_isatty, mock_key):
+        # Cursor starts on group header. Space toggles all skills in the group.
+        grouped = {
+            "source1": [("skill1", True, None), ("skill2", True, None)],
+            "source2": [("skill3", True, None)]
+        }
+        res = prompt_grouped_multi_select("Title", grouped, initial_checked=set())
+        # Press space on source1 group header -> skill1 and skill2 are selected. Enter -> confirms
+        self.assertEqual(set(res), {"skill1", "skill2"})
+
+    @patch("select.select", return_value=([], [], []))
+    @patch("termios.tcsetattr")
+    @patch("termios.tcgetattr")
+    @patch("tty.setraw")
+    @patch("os.read")
+    def test_read_key_sequences(self, mock_read, mock_setraw, mock_getattr, mock_setattr, mock_select):
+        # Up arrow escape sequence
+        mock_read.return_value = b"\x1b[A"
+        self.assertEqual(read_key(), "up")
+
+        # Down arrow escape sequence
+        mock_read.return_value = b"\x1b[B"
+        self.assertEqual(read_key(), "down")
+
+        # Plain Enter
+        mock_read.return_value = b"\r"
+        self.assertEqual(read_key(), "enter")
+
+        # Plain Space
+        mock_read.return_value = b" "
+        self.assertEqual(read_key(), "space")
+
+        # Plain Escape (no following bytes)
+        mock_read.return_value = b"\x1b"
+        self.assertEqual(read_key(), "escape")
+
 
 class TestInteractiveAdd(unittest.TestCase):
     def setUp(self):
@@ -642,6 +685,83 @@ class TestInteractiveAdd(unittest.TestCase):
         )
 
         ret = cmd_add(args)
+        self.assertEqual(ret, 1)
+
+
+class TestInteractiveRm(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.skills_dir = self.temp_dir / ".agents" / "skills"
+        self.config_path = self.temp_dir / "skills.json"
+        self.skills_dir.mkdir(parents=True)
+
+        self.config = get_default_config()
+        add_remote_skill_entry(self.config, "akunzai/agent-skills", "skill-a", "skills/skill-a")
+        add_remote_skill_entry(self.config, "akunzai/agent-skills", "skill-b", "skills/skill-b")
+        save_config(self.config, self.config_path)
+
+        # Create physical skill folders
+        (self.skills_dir / "skill-a").mkdir(parents=True)
+        (self.skills_dir / "skill-a" / "SKILL.md").write_text("# A", encoding="utf-8")
+        (self.skills_dir / "skill-b").mkdir(parents=True)
+        (self.skills_dir / "skill-b" / "SKILL.md").write_text("# B", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    @patch("skills_manager.cli.remove_agent_symlinks")
+    @patch("skills_manager.cli.prompt_grouped_multi_select")
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_cmd_rm_interactive_selection(self, mock_isatty, mock_prompt, mock_unlink):
+        # User interactively chooses to remove skill-a only
+        mock_prompt.return_value = ["skill-a"]
+
+        import argparse
+        args = argparse.Namespace(
+            skills=[],
+            config=str(self.config_path),
+            skills_dir=str(self.skills_dir),
+            agent=None,
+            yes=False
+        )
+
+        ret = cmd_rm(args)
+        self.assertEqual(ret, 0)
+        self.assertFalse((self.skills_dir / "skill-a").exists())
+        self.assertTrue((self.skills_dir / "skill-b").exists())
+
+    @patch("skills_manager.cli.prompt_grouped_multi_select")
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_cmd_rm_interactive_cancel(self, mock_isatty, mock_prompt):
+        # User cancels (Esc / q)
+        mock_prompt.return_value = None
+
+        import argparse
+        args = argparse.Namespace(
+            skills=[],
+            config=str(self.config_path),
+            skills_dir=str(self.skills_dir),
+            agent=None,
+            yes=False
+        )
+
+        ret = cmd_rm(args)
+        self.assertEqual(ret, 0)
+        self.assertTrue((self.skills_dir / "skill-a").exists())
+        self.assertTrue((self.skills_dir / "skill-b").exists())
+
+    @patch("sys.stdin.isatty", return_value=False)
+    def test_cmd_rm_non_tty_fallback(self, mock_isatty):
+        import argparse
+        args = argparse.Namespace(
+            skills=[],
+            config=str(self.config_path),
+            skills_dir=str(self.skills_dir),
+            agent=None,
+            yes=False
+        )
+
+        ret = cmd_rm(args)
         self.assertEqual(ret, 1)
 
 
