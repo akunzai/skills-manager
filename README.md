@@ -45,6 +45,16 @@ skills add --command "agentsview skills install --force" --check "which agentsvi
 skills rm ponytail-review
 skills rm ask-matt --agent codex
 
+# Check for updates in remote skill repositories
+skills outdated
+skills outdated --json
+
+# Update remote skills to latest versions
+skills update
+skills update mattpocock/skills
+skills update triage --force
+skills update --dry-run
+
 # Sync and restore all skills from ~/.agents/skills.json
 skills sync
 skills sync --force     # force re-fetch & re-link
