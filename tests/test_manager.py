@@ -9,7 +9,7 @@ from pathlib import Path
 
 from unittest.mock import MagicMock, patch
 
-from skills_manager.cli import cmd_outdated, cmd_self_update, cmd_update
+from skills_manager.cli import cmd_ls, cmd_outdated, cmd_self_update, cmd_update
 from skills_manager.config import (
     add_local_command_entry,
     add_local_symlink_entry,
@@ -130,6 +130,97 @@ class TestEngineOperations(unittest.TestCase):
         self.assertTrue(results[0][1])
         self.assertTrue(test_file.exists())
 
+    def test_scan_all_skills_sorted_by_source_and_name(self):
+        config_data = {
+            "remote": {
+                "b-repo/skills": {
+                    "skills": {"alpha": "skills/alpha", "zeta": "skills/zeta"}
+                },
+                "a-repo/skills": {
+                    "skills": {"beta": "skills/beta", "gamma": "skills/gamma"}
+                }
+            },
+            "local": {
+                "local-tool": {
+                    "type": "command",
+                    "command": "tool install"
+                }
+            }
+        }
+        skills = scan_all_skills(config_data, skills_dir=self.skills_dir)
+        # a-repo/skills: beta, gamma
+        # b-repo/skills: alpha, zeta
+        # tool install: local-tool
+        keys = [(s.source.lower(), s.name.lower()) for s in skills]
+        self.assertEqual(keys, sorted(keys))
+
+    def test_cmd_ls_source_filter(self):
+        import argparse
+        import io
+        from unittest.mock import patch
+
+        config_path = self.temp_dir / "skills.json"
+        config_data = {
+            "remote": {
+                "mattpocock/skills": {
+                    "skills": {"ask-matt": "skills/ask-matt"}
+                },
+                "akunzai/agent-skills": {
+                    "skills": {"tidy-commits": "skills/tidy-commits"}
+                }
+            },
+            "local": {
+                "local-tool": {
+                    "type": "command",
+                    "command": "agentsview skills install"
+                }
+            }
+        }
+        save_config(config_data, config_path)
+
+        # 1. Filter by specific remote repo substring
+        args = argparse.Namespace(
+            config=str(config_path),
+            skills_dir=str(self.skills_dir),
+            agent=None,
+            source="mattpocock",
+            json=True
+        )
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            ret = cmd_ls(args)
+            self.assertEqual(ret, 0)
+            data = json.loads(mock_stdout.getvalue())
+            self.assertEqual(len(data), 1)
+            self.assertEqual(data[0]["name"], "ask-matt")
+
+        # 2. Filter by local type
+        args_local = argparse.Namespace(
+            config=str(config_path),
+            skills_dir=str(self.skills_dir),
+            agent=None,
+            source="local",
+            json=True
+        )
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            ret = cmd_ls(args_local)
+            self.assertEqual(ret, 0)
+            data = json.loads(mock_stdout.getvalue())
+            self.assertEqual(len(data), 1)
+            self.assertEqual(data[0]["name"], "local-tool")
+
+        # 3. Filter with no matches
+        args_empty = argparse.Namespace(
+            config=str(config_path),
+            skills_dir=str(self.skills_dir),
+            agent=None,
+            source="nonexistent",
+            json=False
+        )
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            ret = cmd_ls(args_empty)
+            self.assertEqual(ret, 0)
+            self.assertIn("No skills found matching the specified filters.", mock_stdout.getvalue())
+
 
 class TestOutdatedAndUpdateOperations(unittest.TestCase):
     def setUp(self):
@@ -210,9 +301,10 @@ class TestOutdatedAndUpdateOperations(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["status"], "update_available")
 
+    @patch("skills_manager.engine.ensure_agent_symlink")
     @patch("skills_manager.engine.ensure_git_repo")
     @patch("skills_manager.engine.check_repo_update_status")
-    def test_update_remote_skills(self, mock_check_status, mock_ensure_git):
+    def test_update_remote_skills(self, mock_check_status, mock_ensure_git, mock_ensure_symlink):
         # Create mock repo in cache
         mock_repo = self.cache_dir / "mattpocock" / "skills"
         (mock_repo / "skills" / "triage").mkdir(parents=True)
