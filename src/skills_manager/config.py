@@ -14,20 +14,10 @@ def get_default_config() -> Dict[str, Any]:
         "version": 1,
         "settings": {
             "defaultAgents": [
-                "claude-code",
-                "codex",
-                "cursor",
-                "cline",
-                "gemini-cli",
-                "opencode",
-                "zed"
+                "claude-code"
             ],
-            "excludeAgents": [
-                "promptscript"
-            ],
-            "agentExclusions": {
-                "claude-code": []
-            }
+            "excludeAgents": [],
+            "agentExclusions": {}
         },
         "remote": {},
         "local": {},

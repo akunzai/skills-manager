@@ -35,7 +35,9 @@ from .models import (
     DEFAULT_CONFIG_FILE,
     DEFAULT_SKILLS_DIR,
     KNOWN_AGENTS,
+    UNIVERSAL_AGENTS,
     SkillItem,
+    is_universal_agent,
     normalize_agent_name,
 )
 from .ui import prompt_grouped_multi_select, prompt_multi_select
@@ -68,7 +70,10 @@ def cmd_ls(args: argparse.Namespace) -> int:
 
     if args.agent:
         filter_agent = normalize_agent_name(args.agent)
-        skills = [s for s in skills if filter_agent in [normalize_agent_name(a) for a in s.linked_agents]]
+        if is_universal_agent(filter_agent) or filter_agent in ("agents", "all", "universal"):
+            skills = [s for s in skills if s.is_installed]
+        else:
+            skills = [s for s in skills if filter_agent in [normalize_agent_name(a) for a in s.linked_agents]]
 
     if getattr(args, "source", None):
         pattern = args.source.strip().lower()
@@ -144,8 +149,9 @@ def cmd_ls(args: argparse.Namespace) -> int:
             for a in s.linked_agents
             if a not in ("claude-code", "claude", "agents")
         ]
-        if not target_list and other_agents:
-            target_list = other_agents
+        for oa in other_agents:
+            if oa not in target_list:
+                target_list.append(oa)
 
         raw_targets = ", ".join(target_list) if target_list else "-"
         if target_list:
