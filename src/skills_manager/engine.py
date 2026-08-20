@@ -14,6 +14,7 @@ from .models import (
     KNOWN_AGENTS,
     SkillItem,
     normalize_agent_name,
+    parse_repo_source,
 )
 
 # Regex to parse frontmatter skill name
@@ -41,16 +42,19 @@ def ensure_git_repo(
     cache_dir: Optional[Path] = None
 ) -> Path:
     """Clone or update git repo in cache directory with shallow depth."""
+    parsed = parse_repo_source(source)
+    clean_source = parsed.source_key
+    repo_url = url or parsed.url
+    target_branch = branch or parsed.branch
+
     base_cache = cache_dir or DEFAULT_CACHE_DIR
-    clean_source = source.strip().removesuffix(".git")
     repo_dest = base_cache / clean_source
-    repo_url = url or f"https://github.com/{clean_source}.git"
 
     if repo_dest.exists() and (repo_dest / ".git").exists():
         if force_update:
             try:
                 # Fetch latest shallow commit
-                run_cmd(f"git fetch --depth 1 origin {branch or 'HEAD'}", cwd=repo_dest, check=False)
+                run_cmd(f"git fetch --depth 1 origin {target_branch or 'HEAD'}", cwd=repo_dest, check=False)
                 run_cmd("git reset --hard FETCH_HEAD", cwd=repo_dest, check=False)
             except Exception:
                 pass
@@ -61,7 +65,7 @@ def ensure_git_repo(
     if repo_dest.exists():
         shutil.rmtree(repo_dest)
 
-    clone_cmd = f"git clone --depth 1 {f'--branch {branch}' if branch else ''} {repo_url} \"{repo_dest}\""
+    clone_cmd = f"git clone --depth 1 {f'--branch {target_branch}' if target_branch else ''} {repo_url} \"{repo_dest}\""
     res = run_cmd(clone_cmd, check=False, capture=True)
     if res.returncode != 0:
         raise RuntimeError(f"Failed to clone {repo_url}: {res.stderr.strip() or res.stdout.strip()}")
@@ -340,9 +344,9 @@ def get_remote_repo_commit(
     branch: Optional[str] = None
 ) -> Optional[str]:
     """Query remote repo commit hash using git ls-remote without fetching objects."""
-    clean_source = source.strip().removesuffix(".git")
-    repo_url = url or f"https://github.com/{clean_source}.git"
-    ref_target = branch or "HEAD"
+    parsed = parse_repo_source(source)
+    repo_url = url or parsed.url
+    ref_target = branch or parsed.branch or "HEAD"
     try:
         res = run_cmd(f"git ls-remote {repo_url} {ref_target}", check=True, capture=True)
         output = res.stdout.strip()
@@ -363,12 +367,13 @@ def check_repo_update_status(
     cache_dir: Optional[Path] = None
 ) -> Dict[str, Any]:
     """Check whether a remote repository in cache is up-to-date with remote HEAD."""
+    parsed = parse_repo_source(source)
+    clean_source = parsed.source_key
     base_cache = cache_dir or DEFAULT_CACHE_DIR
-    clean_source = source.strip().removesuffix(".git")
     repo_dest = base_cache / clean_source
 
-    url = repo_info.get("url")
-    branch = repo_info.get("branch")
+    url = repo_info.get("url") or parsed.url
+    branch = repo_info.get("branch") or parsed.branch
     skills = repo_info.get("skills", {})
 
     local_sha = get_local_repo_commit(repo_dest)
@@ -385,7 +390,7 @@ def check_repo_update_status(
 
     return {
         "source": source,
-        "url": url or f"https://github.com/{clean_source}.git",
+        "url": url,
         "branch": branch or "HEAD",
         "skills": list(skills.keys()),
         "local_sha": local_sha,
