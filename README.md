@@ -47,7 +47,7 @@ skills add --command "agentsview skills install --harness agents" --check "which
 # Remove skill(s) (interactive selection or specific skills)
 skills rm
 skills rm ponytail-review
-skills rm tidy-commits --agent codex
+skills rm tidy-commits --agent claude
 
 # Check for updates in remote skill repositories
 skills outdated

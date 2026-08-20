@@ -41,6 +41,12 @@ from skills_manager.engine import (
     scan_all_skills,
     update_remote_skills,
 )
+from skills_manager.models import (
+    KNOWN_AGENTS,
+    UNIVERSAL_AGENTS,
+    is_universal_agent,
+    normalize_agent_name,
+)
 
 
 class TestConfigManagement(unittest.TestCase):
@@ -54,7 +60,9 @@ class TestConfigManagement(unittest.TestCase):
     def test_default_config(self):
         cfg = get_default_config()
         self.assertEqual(cfg["version"], 1)
-        self.assertIn("claude-code", cfg["settings"]["defaultAgents"])
+        self.assertEqual(cfg["settings"]["defaultAgents"], ["claude-code"])
+        self.assertEqual(cfg["settings"]["excludeAgents"], [])
+        self.assertEqual(cfg["settings"]["agentExclusions"], {})
 
     def test_save_and_load_config(self):
         cfg = get_default_config()
@@ -765,5 +773,188 @@ class TestInteractiveRm(unittest.TestCase):
         self.assertEqual(ret, 1)
 
 
+class TestHarnessSupport(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.skills_dir = self.temp_dir / ".agents" / "skills"
+        self.skills_dir.mkdir(parents=True)
+        self.config_path = self.temp_dir / "skills.json"
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_non_universal_harnesses_registered(self):
+        """Verify non-universal harnesses from vercel-labs/skills are registered in KNOWN_AGENTS."""
+        expected_non_universal = [
+            "claude-code",
+            "windsurf",
+            "roo",
+            "goose",
+            "continue",
+            "devin",
+            "trae",
+            "trae-cn",
+            "qwen-code",
+            "kilo",
+            "mcpjam",
+            "minimax-code",
+            "openhands",
+            "tabnine-cli",
+            "terramind",
+            "zcode",
+            "zencoder",
+            "mistral-vibe",
+            "hermes-agent",
+            "autohand-code",
+            "grok",
+            "aider-desk",
+            "astrbot",
+            "augment",
+            "bob",
+            "codearts-agent",
+            "codebuddy",
+            "codemaker",
+            "codestudio",
+            "command-code",
+            "cortex",
+            "crush",
+            "droid",
+            "forgecode",
+            "inference-sh",
+            "jazz",
+            "junie",
+            "iflow-cli",
+            "kimchi",
+            "kiro-cli",
+            "kode",
+            "lingma",
+            "moxby",
+            "mux",
+            "neovate",
+            "ona",
+            "openclaw",
+            "openhands",
+            "pi",
+            "pochi",
+            "posit-assistant",
+            "qoder",
+            "qoder-cn",
+            "reasonix",
+            "rovodev",
+            "tinycloud",
+            "adal",
+        ]
+        for agent in expected_non_universal:
+            self.assertIn(agent, KNOWN_AGENTS, f"Expected {agent} to be in KNOWN_AGENTS")
+            self.assertIsInstance(KNOWN_AGENTS[agent], Path)
+
+    def test_universal_harnesses_not_in_known_agents(self):
+        """Universal harnesses natively read ~/.agents/skills and are excluded from KNOWN_AGENTS symlinks."""
+        universal_list = [
+            "codex",
+            "opencode",
+            "cursor",
+            "cline",
+            "gemini-cli",
+            "zed",
+            "warp",
+            "amp",
+            "deepagents",
+            "github-copilot",
+            "replit",
+        ]
+        for agent in universal_list:
+            self.assertNotIn(agent, KNOWN_AGENTS, f"Universal agent {agent} should not need KNOWN_AGENTS symlinks")
+            self.assertTrue(is_universal_agent(agent), f"is_universal_agent({agent}) should return True")
+
+    def test_agent_aliases(self):
+        """Verify normalization of aliases to canonical names."""
+        self.assertEqual(normalize_agent_name("claude"), "claude-code")
+        self.assertEqual(normalize_agent_name("roo-code"), "roo")
+        self.assertEqual(normalize_agent_name("vibe"), "mistral-vibe")
+        self.assertEqual(normalize_agent_name("hermes"), "hermes-agent")
+        self.assertEqual(normalize_agent_name("autohand"), "autohand-code")
+        self.assertEqual(normalize_agent_name("aider"), "aider-desk")
+        self.assertEqual(normalize_agent_name("qwen"), "qwen-code")
+        self.assertEqual(normalize_agent_name("kilocode"), "kilo")
+        self.assertEqual(normalize_agent_name("minimax"), "minimax-code")
+        self.assertEqual(normalize_agent_name("posit"), "posit-assistant")
+        self.assertEqual(normalize_agent_name("tabnine"), "tabnine-cli")
+        self.assertEqual(normalize_agent_name("factory"), "droid")
+        self.assertEqual(normalize_agent_name("forge"), "forgecode")
+        self.assertEqual(normalize_agent_name("clawdbot"), "openclaw")
+        self.assertEqual(normalize_agent_name("moltbot"), "openclaw")
+        self.assertEqual(normalize_agent_name("opendevin"), "openhands")
+        self.assertEqual(normalize_agent_name("zenflow"), "zencoder")
+        self.assertEqual(normalize_agent_name("copilot"), "github-copilot")
+        self.assertEqual(normalize_agent_name("gemini"), "gemini-cli")
+        self.assertEqual(normalize_agent_name("antigravity"), "antigravity-cli")
+        self.assertEqual(normalize_agent_name("codex"), "codex")
+
+    def test_get_target_agents_for_skill_filtering(self):
+        """Verify get_target_agents_for_skill only targets registered non-universal agents."""
+        config_data = {
+            "settings": {
+                "defaultAgents": ["claude", "codex", "opencode", "windsurf", "cursor"],
+                "excludeAgents": ["windsurf"],
+                "agentExclusions": {}
+            }
+        }
+        targets = get_target_agents_for_skill("test-skill", "source", config_data)
+        # claude normalizes to claude-code and is in KNOWN_AGENTS
+        # codex, opencode, cursor are universal so not in KNOWN_AGENTS
+        # windsurf is in excludeAgents
+        self.assertEqual(targets, ["claude-code"])
+
+    def test_cmd_ls_agent_filter_universal_and_non_universal(self):
+        """Verify cmd_ls -a codex returns all installed skills, while -a claude only returns linked skills."""
+        import argparse
+        import io
+        from unittest.mock import patch
+
+        # Create physical skill
+        (self.skills_dir / "my-skill").mkdir(parents=True)
+        (self.skills_dir / "my-skill" / "SKILL.md").write_text("# My Skill", encoding="utf-8")
+
+        config_data = {
+            "remote": {
+                "repo/skills": {
+                    "skills": {"my-skill": "skills/my-skill"}
+                }
+            }
+        }
+        save_config(config_data, self.config_path)
+
+        # 1. Query with universal agent: codex (should see installed skill in ~/.agents/skills)
+        args_codex = argparse.Namespace(
+            config=str(self.config_path),
+            skills_dir=str(self.skills_dir),
+            agent="codex",
+            source=None,
+            json=True
+        )
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            ret = cmd_ls(args_codex)
+            self.assertEqual(ret, 0)
+            data = json.loads(mock_stdout.getvalue())
+            self.assertEqual(len(data), 1)
+            self.assertEqual(data[0]["name"], "my-skill")
+
+        # 2. Query with non-universal agent: claude (not yet linked, so should be empty)
+        args_claude = argparse.Namespace(
+            config=str(self.config_path),
+            skills_dir=str(self.skills_dir),
+            agent="claude",
+            source=None,
+            json=True
+        )
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            ret = cmd_ls(args_claude)
+            self.assertEqual(ret, 0)
+            data = json.loads(mock_stdout.getvalue())
+            self.assertEqual(len(data), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+

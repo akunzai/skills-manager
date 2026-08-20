@@ -148,7 +148,7 @@ def get_target_agents_for_skill(
 ) -> List[str]:
     """Calculate the list of active agents that should receive symlinks for this skill."""
     settings = config_data.get("settings", {})
-    default_agents = settings.get("defaultAgents", list(KNOWN_AGENTS.keys()))
+    default_agents = settings.get("defaultAgents", ["claude-code"])
     exclude_agents = set(normalize_agent_name(a) for a in settings.get("excludeAgents", []))
     agent_exclusions = settings.get("agentExclusions", {})
 
@@ -159,7 +159,8 @@ def get_target_agents_for_skill(
             continue
         if is_skill_excluded_for_agent(skill_name, source, norm, agent_exclusions):
             continue
-        active_agents.append(norm)
+        if norm in KNOWN_AGENTS:
+            active_agents.append(norm)
 
     return active_agents
 
@@ -178,14 +179,6 @@ def ensure_agent_symlink(
     master_skill_path = skills_dir / skill_name
     if not master_skill_path.exists() and not master_skill_path.is_symlink():
         return False
-
-    # Special handling for gemini-cli which links the whole directory if desired
-    if norm_agent == "gemini-cli" and agent_dir.is_symlink():
-        try:
-            if os.path.realpath(agent_dir) == os.path.realpath(skills_dir):
-                return True
-        except Exception:
-            pass
 
     agent_dir.mkdir(parents=True, exist_ok=True)
     agent_link = agent_dir / skill_name
