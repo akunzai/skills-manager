@@ -21,14 +21,36 @@ REPO_URL="https://github.com/akunzai/skills-manager.git"
 echo -e "${CYAN}${BOLD}🚀 Installing Skills Manager (skills)...${RESET}\n"
 
 # 1. Check Python 3.10+
-if ! command -v python3 >/dev/null 2>&1; then
-  echo -e "${RED}❌ Error: python3 is required but not found in PATH.${RESET}" >&2
+PYTHON_BIN=""
+python_version=""
+py_major=""
+py_minor=""
+
+for cand in python3 python; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    if ver="$("$cand" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)"; then
+      maj="$(echo "$ver" | cut -d. -f1)"
+      min="$(echo "$ver" | cut -d. -f2)"
+      if [[ "$maj" -gt 3 || ("$maj" -eq 3 && "$min" -ge 10) ]]; then
+        PYTHON_BIN="$cand"
+        python_version="$ver"
+        py_major="$maj"
+        py_minor="$min"
+        break
+      elif [[ -z "$PYTHON_BIN" ]]; then
+        PYTHON_BIN="$cand"
+        python_version="$ver"
+        py_major="$maj"
+        py_minor="$min"
+      fi
+    fi
+  fi
+done
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo -e "${RED}❌ Error: Python 3.10 or higher is required but not found in PATH.${RESET}" >&2
   exit 1
 fi
-
-python_version="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-py_major="$(echo "$python_version" | cut -d. -f1)"
-py_minor="$(echo "$python_version" | cut -d. -f2)"
 
 if [[ "$py_major" -lt 3 || ("$py_major" -eq 3 && "$py_minor" -lt 10) ]]; then
   echo -e "${RED}❌ Error: Python 3.10 or higher is required (found Python ${python_version}).${RESET}" >&2
@@ -65,7 +87,7 @@ fi
 
 # 3. Package single-file standalone zipapp directly to ~/.local/bin/skills
 echo -e "⚙️  Building standalone executable ${BOLD}${TARGET_BIN}${RESET}..."
-python3 -m zipapp "$SCRIPT_SOURCE_DIR" -m "skills_manager.cli:main" -p "/usr/bin/env python3" -o "$TARGET_BIN"
+"$PYTHON_BIN" -m zipapp "$SCRIPT_SOURCE_DIR" -m "skills_manager.cli:main" -p "/usr/bin/env python3" -o "$TARGET_BIN"
 chmod +x "$TARGET_BIN"
 
 # Remove any old legacy executable name if present
