@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from . import __version__
 from .config import (
     add_local_command_entry,
     add_local_symlink_entry,
@@ -35,6 +36,11 @@ from .models import (
     DEFAULT_SKILLS_DIR,
     KNOWN_AGENTS,
     normalize_agent_name,
+)
+from .updater import (
+    check_self_update,
+    download_and_install_binary,
+    get_current_executable_path,
 )
 
 # ANSI Colors
@@ -711,16 +717,92 @@ def cmd_update(args: argparse.Namespace) -> int:
     return 0 if not result["errors"] else 1
 
 
+def cmd_self_update(args: argparse.Namespace) -> int:
+    """Update the skills CLI binary to the latest release."""
+    target_version = args.version if hasattr(args, "version") and args.version else None
+
+    if not args.json:
+        print(f"\n{BOLD}{CYAN}🔍 Checking for skills CLI updates from GitHub Releases...{RESET}\n")
+
+    try:
+        info = check_self_update(target_version=target_version)
+    except Exception as e:
+        if args.json:
+            print(json.dumps({"status": "error", "error": str(e)}, indent=2))
+        else:
+            print(f"{RED}✖ Failed to check for updates: {e}{RESET}\n")
+        return 1
+
+    curr_v = info["current_version"]
+    latest_v = info["latest_version"]
+    latest_tag = info["latest_tag"]
+    update_avail = info["update_available"]
+    asset_url = info["asset_url"]
+
+    if args.json:
+        print(json.dumps(info, indent=2, ensure_ascii=False))
+        if args.check:
+            return 0
+        if not update_avail and not args.force:
+            return 0
+
+    if args.check:
+        print(f"Current version: {BOLD}v{curr_v}{RESET}")
+        print(f"Latest version:  {BOLD}{latest_tag}{RESET}")
+        if update_avail:
+            print(f"\n{YELLOW}{BOLD}✨ Update available: v{curr_v} -> {latest_tag}{RESET}")
+            print(f"Run '{BOLD}skills self-update{RESET}' to upgrade.\n")
+        else:
+            print(f"\n{GREEN}✔ skills is already on the latest version ({latest_tag}).{RESET}\n")
+        return 0
+
+    if not update_avail and not args.force:
+        print(f"Current version: {BOLD}v{curr_v}{RESET}")
+        print(f"Latest version:  {BOLD}{latest_tag}{RESET}")
+        print(f"\n{GREEN}✔ skills is already on the latest version ({latest_tag}).{RESET}\n")
+        return 0
+
+    if not asset_url:
+        print(f"{RED}✖ No standalone binary asset found in release {latest_tag}.{RESET}\n")
+        return 1
+
+    target_path = get_current_executable_path()
+    print(f"Upgrading skills CLI:")
+    print(f"  Version:   {YELLOW}v{curr_v}{RESET} -> {GREEN}{latest_tag}{RESET}")
+    print(f"  Target:    {target_path}")
+    print(f"  Download:  {asset_url}")
+
+    if args.dry_run:
+        print(f"\n{CYAN}ℹ [Dry-run]{RESET} Would download and replace {target_path} with {latest_tag}\n")
+        return 0
+
+    print(f"\n📥 Downloading and installing {latest_tag}...")
+    try:
+        installed_dest = download_and_install_binary(asset_url, target_path=target_path)
+        print(f"{GREEN}✔ Successfully updated skills to {BOLD}{latest_tag}{RESET}! ({installed_dest})\n")
+        return 0
+    except PermissionError:
+        print(f"{RED}✖ Permission denied writing to {target_path}. Please run with appropriate permissions (e.g. sudo).{RESET}\n")
+        return 1
+    except Exception as e:
+        print(f"{RED}✖ Update failed: {e}{RESET}\n")
+        return 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="skills",
         description="Fast, zero-dependency global skills manager for AI coding agents."
     )
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", help=f"Path to skills.json (default: {DEFAULT_CONFIG_FILE})")
     parser.add_argument("--skills-dir", help=f"Path to ~/.agents/skills (default: {DEFAULT_SKILLS_DIR})")
     parser.add_argument("--cache-dir", help=f"Path to cache directory (default: {DEFAULT_CACHE_DIR})")
 
     subparsers = parser.add_subparsers(dest="subcommand", help="Available subcommands")
+
+    # version
+    subparsers.add_parser("version", help="Print skills manager version")
 
     # ls
     ls_p = subparsers.add_parser("ls", aliases=["list"], help="List installed and configured skills")
@@ -766,17 +848,24 @@ def main() -> None:
     update_p.add_argument("--dry-run", action="store_true", help="Preview updates without making changes")
     update_p.add_argument("--json", action="store_true", help="Output machine-readable JSON")
 
+    # self-update / self-upgrade
+    self_up_p = subparsers.add_parser("self-update", aliases=["self-upgrade"], help="Update skills CLI itself to latest release")
+    self_up_p.add_argument("--check", action="store_true", help="Only check for updates without installing")
+    self_up_p.add_argument("--version", help="Specify target version/tag to install (e.g. v0.1.1)")
+    self_up_p.add_argument("--force", action="store_true", help="Force re-download even if already up to date")
+    self_up_p.add_argument("--dry-run", action="store_true", help="Preview update without downloading")
+    self_up_p.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+
     # doctor
     doc_p = subparsers.add_parser("doctor", help="Diagnose and repair skills health")
     doc_p.add_argument("--fix", action="store_true", help="Automatically repair detected issues")
 
     args = parser.parse_args()
 
-    if not args.subcommand:
-        parser.print_help()
+    if args.subcommand == "version":
+        print(f"skills {__version__}")
         sys.exit(0)
-
-    if args.subcommand in ("ls", "list"):
+    elif args.subcommand in ("ls", "list"):
         sys.exit(cmd_ls(args))
     elif args.subcommand == "add":
         sys.exit(cmd_add(args))
@@ -788,6 +877,8 @@ def main() -> None:
         sys.exit(cmd_outdated(args))
     elif args.subcommand in ("update", "upgrade"):
         sys.exit(cmd_update(args))
+    elif args.subcommand in ("self-update", "self-upgrade"):
+        sys.exit(cmd_self_update(args))
     elif args.subcommand == "doctor":
         sys.exit(cmd_doctor(args))
     else:

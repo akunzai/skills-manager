@@ -9,7 +9,7 @@ from pathlib import Path
 
 from unittest.mock import MagicMock, patch
 
-from skills_manager.cli import cmd_outdated, cmd_update
+from skills_manager.cli import cmd_outdated, cmd_self_update, cmd_update
 from skills_manager.config import (
     add_local_command_entry,
     add_local_symlink_entry,
@@ -18,6 +18,13 @@ from skills_manager.config import (
     load_config,
     remove_skill_entry,
     save_config,
+)
+from skills_manager.updater import (
+    check_self_update,
+    download_and_install_binary,
+    fetch_release_info,
+    get_current_executable_path,
+    parse_semver,
 )
 from skills_manager.engine import (
     check_all_remote_skills_outdated,
@@ -287,6 +294,110 @@ class TestOutdatedAndUpdateOperations(unittest.TestCase):
         ret = cmd_update(Args())
         self.assertEqual(ret, 0)
         mock_update.assert_called_once()
+
+
+class TestSelfUpdateOperations(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_parse_semver(self):
+        self.assertEqual(parse_semver("v0.1.0"), (0, 1, 0))
+        self.assertEqual(parse_semver("1.2.3"), (1, 2, 3))
+        self.assertEqual(parse_semver("v2.0"), (2, 0, 0))
+        self.assertEqual(parse_semver("v0.2.0-beta.1"), (0, 2, 0))
+        self.assertTrue(parse_semver("v0.2.0") > parse_semver("v0.1.0"))
+
+    def test_get_current_executable_path(self):
+        p = get_current_executable_path()
+        self.assertIsInstance(p, Path)
+
+    @patch("skills_manager.updater.urllib.request.urlopen")
+    def test_fetch_release_info(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps({
+            "tag_name": "v0.2.0",
+            "body": "Release notes for v0.2.0",
+            "assets": [
+                {
+                    "name": "skills",
+                    "browser_download_url": "https://github.com/akunzai/skills-manager/releases/download/v0.2.0/skills",
+                    "size": 12345
+                }
+            ]
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        data = fetch_release_info()
+        self.assertEqual(data["tag_name"], "v0.2.0")
+        self.assertEqual(len(data["assets"]), 1)
+
+    @patch("skills_manager.updater.fetch_release_info")
+    def test_check_self_update(self, mock_fetch):
+        mock_fetch.return_value = {
+            "tag_name": "v99.0.0",
+            "body": "Future version",
+            "assets": [
+                {
+                    "name": "skills",
+                    "browser_download_url": "https://example.com/skills",
+                    "size": 10000
+                }
+            ]
+        }
+
+        info = check_self_update()
+        self.assertTrue(info["update_available"])
+        self.assertEqual(info["latest_tag"], "v99.0.0")
+        self.assertEqual(info["asset_url"], "https://example.com/skills")
+
+    @patch("skills_manager.updater.urllib.request.urlopen")
+    def test_download_and_install_binary(self, mock_urlopen):
+        target_binary = self.temp_dir / "skills"
+        target_binary.write_text("#!/usr/bin/env python3\nold", encoding="utf-8")
+
+        mock_resp = MagicMock()
+        mock_resp.read = MagicMock(side_effect=[b"#!/usr/bin/env python3\nnew_binary_content_bytes" * 10, b""])
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        installed = download_and_install_binary("https://example.com/skills", target_path=target_binary)
+        self.assertEqual(installed, target_binary)
+        self.assertTrue(target_binary.exists())
+        self.assertIn("new_binary_content_bytes", target_binary.read_text(encoding="utf-8"))
+
+    @patch("skills_manager.cli.check_self_update")
+    def test_cmd_self_update_check(self, mock_check):
+        mock_check.return_value = {
+            "current_version": "0.1.0",
+            "latest_version": "0.2.0",
+            "latest_tag": "v0.2.0",
+            "update_available": True,
+            "asset_url": "https://example.com/skills",
+            "asset_size": 10000,
+            "release_notes": "Notes",
+        }
+
+        class Args:
+            version = None
+            check = True
+            force = False
+            dry_run = False
+            json = True
+
+        ret = cmd_self_update(Args())
+        self.assertEqual(ret, 0)
+
+    @patch("sys.argv", ["skills", "--version"])
+    def test_cli_version_flag(self):
+        from skills_manager.cli import main
+        with self.assertRaises(SystemExit) as cm:
+            main()
+        self.assertEqual(cm.exception.code, 0)
 
 
 if __name__ == "__main__":

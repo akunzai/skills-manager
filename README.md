@@ -64,6 +64,12 @@ skills sync --dry-run
 # Health check & auto-repair
 skills doctor
 skills doctor --fix
+
+# Self-update skills CLI binary to latest release
+skills self-update
+skills self-update --check
+skills self-update --version v0.1.1
+skills self-update --dry-run
 ```
 
 ---

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "skills-manager"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Fast, zero-dependency global skills manager for AI coding agents"
 readme = "README.md"
 license = "MIT"
@@ -37,6 +37,9 @@ Repository = "https://github.com/akunzai/skills-manager"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/skills_manager"]
+
+[tool.hatch.version]
+path = "src/skills_manager/__init__.py"
 
 [tool.ruff]
 line-length = 100

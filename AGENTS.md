@@ -16,12 +16,14 @@ This project uses Python (>=3.10) with standard library only (no third-party dep
 - Schema definition: @skills.schema.json
 - CLI definition: @src/skills_manager/cli.py
 - Engine & Git caching: @src/skills_manager/engine.py
+- Updater module: @src/skills_manager/updater.py
 - Config manager: @src/skills_manager/config.py
 - Core models & paths: @src/skills_manager/models.py
 - Unit tests: @tests/test_manager.py
 - Issue tracker: @docs/agents/issue-tracker.md
 - Triage labels: @docs/agents/triage-labels.md
 - Domain docs: @docs/agents/domain.md
+- Release SOP: @docs/release.md
 
 ## Claude Code Compatibility
 
