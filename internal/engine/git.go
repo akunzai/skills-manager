@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/models"
@@ -14,7 +15,7 @@ import (
 func RunCmd(cmdStr string, cwd string) (string, string, error) {
 	var cmd *exec.Cmd
 	// Use sh on unix or cmd.exe on windows
-	if os.Getenv("OS") == "Windows_NT" {
+	if runtime.GOOS == "windows" {
 		cmd = exec.Command("cmd.exe", "/c", cmdStr)
 	} else {
 		cmd = exec.Command("sh", "-c", cmdStr)
@@ -64,8 +65,28 @@ func EnsureGitRepo(
 				ref = "HEAD"
 			}
 			fetchCmd := fmt.Sprintf("git fetch --depth 1 origin %s", ref)
-			_, _, _ = RunCmd(fetchCmd, repoDest)
-			_, _, _ = RunCmd("git reset --hard FETCH_HEAD", repoDest)
+			stdout, stderr, err := RunCmd(fetchCmd, repoDest)
+			if err != nil {
+				errMsg := stderr
+				if errMsg == "" {
+					errMsg = stdout
+				}
+				if errMsg == "" {
+					errMsg = err.Error()
+				}
+				return "", fmt.Errorf("failed to fetch %s: %s", repoURL, errMsg)
+			}
+			stdout, stderr, err = RunCmd("git reset --hard FETCH_HEAD", repoDest)
+			if err != nil {
+				errMsg := stderr
+				if errMsg == "" {
+					errMsg = stdout
+				}
+				if errMsg == "" {
+					errMsg = err.Error()
+				}
+				return "", fmt.Errorf("failed to reset %s: %s", repoURL, errMsg)
+			}
 		}
 		return repoDest, nil
 	}
@@ -74,13 +95,13 @@ func EnsureGitRepo(
 	if err := os.MkdirAll(filepath.Dir(repoDest), 0755); err != nil {
 		return "", fmt.Errorf("failed to create cache directory: %w", err)
 	}
-	_ = os.RemoveAll(repoDest)
+	_ = RemoveAll(repoDest)
 
 	branchFlag := ""
 	if targetBranch != "" {
-		branchFlag = fmt.Sprintf("--branch %s", targetBranch)
+		branchFlag = fmt.Sprintf("--branch %s ", targetBranch)
 	}
-	cloneCmd := fmt.Sprintf("git clone --depth 1 %s %s %q", branchFlag, repoURL, repoDest)
+	cloneCmd := fmt.Sprintf("git clone --depth 1 %s%s %q", branchFlag, repoURL, filepath.ToSlash(repoDest))
 	stdout, stderr, err := RunCmd(cloneCmd, "")
 	if err != nil {
 		errMsg := stderr
