@@ -9,7 +9,8 @@ from pathlib import Path
 
 from unittest.mock import MagicMock, patch
 
-from skills_manager.cli import cmd_ls, cmd_outdated, cmd_self_update, cmd_update
+from skills_manager.cli import cmd_add, cmd_ls, cmd_outdated, cmd_self_update, cmd_update
+from skills_manager.ui import prompt_multi_select
 from skills_manager.config import (
     add_local_command_entry,
     add_local_symlink_entry,
@@ -518,6 +519,128 @@ class TestSelfUpdateOperations(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             main()
         self.assertEqual(cm.exception.code, 0)
+
+
+class TestUIOperations(unittest.TestCase):
+    @patch("sys.stdin.isatty", return_value=False)
+    def test_prompt_multi_select_non_tty(self, mock_isatty):
+        res = prompt_multi_select("Title", [("skill1", False, None)])
+        self.assertIsNone(res)
+
+    @patch("skills_manager.ui.read_key", side_effect=["enter"])
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_prompt_multi_select_confirm_default_all(self, mock_isatty, mock_key):
+        items = [("skill1", False, None), ("skill2", True, None)]
+        res = prompt_multi_select("Title", items, default_all=True)
+        self.assertEqual(res, ["skill1", "skill2"])
+
+    @patch("skills_manager.ui.read_key", side_effect=["space", "down", "space", "enter"])
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_prompt_multi_select_toggle_items(self, mock_isatty, mock_key):
+        items = [("skill1", False, None), ("skill2", False, None)]
+        # Initial: [True, True]. Press space on skill1 -> [False, True]. Down -> cursor on skill2. Press space -> [False, False]. Enter -> []
+        res = prompt_multi_select("Title", items, default_all=True)
+        self.assertEqual(res, [])
+
+    @patch("skills_manager.ui.read_key", side_effect=["escape"])
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_prompt_multi_select_cancel_escape(self, mock_isatty, mock_key):
+        items = [("skill1", False, None)]
+        res = prompt_multi_select("Title", items)
+        self.assertIsNone(res)
+
+    @patch("skills_manager.ui.read_key", side_effect=["a", "enter"])
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_prompt_multi_select_toggle_all(self, mock_isatty, mock_key):
+        items = [("skill1", False, None), ("skill2", False, None)]
+        # Initial: [True, True]. Press 'a' -> all uncheck [False, False]. Enter -> []
+        res = prompt_multi_select("Title", items, default_all=True)
+        self.assertEqual(res, [])
+
+
+class TestInteractiveAdd(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.skills_dir = self.temp_dir / ".agents" / "skills"
+        self.cache_dir = self.temp_dir / "cache"
+        self.config_path = self.temp_dir / "skills.json"
+        self.skills_dir.mkdir(parents=True)
+        self.cache_dir.mkdir(parents=True)
+
+        self.config = get_default_config()
+        save_config(self.config, self.config_path)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    @patch("skills_manager.cli.ensure_agent_symlink")
+    @patch("skills_manager.cli.prompt_multi_select")
+    @patch("skills_manager.cli.ensure_git_repo")
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_cmd_add_interactive_selection(self, mock_isatty, mock_git, mock_prompt, mock_ensure_link):
+        mock_repo = self.cache_dir / "repo"
+        (mock_repo / "skills" / "skill-a").mkdir(parents=True)
+        (mock_repo / "skills" / "skill-a" / "SKILL.md").write_text("# A", encoding="utf-8")
+        (mock_repo / "skills" / "skill-b").mkdir(parents=True)
+        (mock_repo / "skills" / "skill-b" / "SKILL.md").write_text("# B", encoding="utf-8")
+        mock_git.return_value = mock_repo
+
+        # User chooses only skill-b
+        mock_prompt.return_value = ["skill-b"]
+
+        import argparse
+        args = argparse.Namespace(
+            source="akunzai/agent-skills",
+            config=str(self.config_path),
+            skills_dir=str(self.skills_dir),
+            cache_dir=str(self.cache_dir),
+            skill=None,
+            all=False,
+            path=None,
+            url=None,
+            branch=None,
+            agent=None,
+            symlink=None,
+            command=None,
+            check=None,
+            description=None
+        )
+
+        ret = cmd_add(args)
+        self.assertEqual(ret, 0)
+        self.assertTrue((self.skills_dir / "skill-b" / "SKILL.md").exists())
+        self.assertFalse((self.skills_dir / "skill-a").exists())
+
+    @patch("skills_manager.cli.ensure_git_repo")
+    @patch("sys.stdin.isatty", return_value=False)
+    def test_cmd_add_non_tty_fallback(self, mock_isatty, mock_git):
+        mock_repo = self.cache_dir / "repo"
+        (mock_repo / "skills" / "skill-a").mkdir(parents=True)
+        (mock_repo / "skills" / "skill-a" / "SKILL.md").write_text("# A", encoding="utf-8")
+        (mock_repo / "skills" / "skill-b").mkdir(parents=True)
+        (mock_repo / "skills" / "skill-b" / "SKILL.md").write_text("# B", encoding="utf-8")
+        mock_git.return_value = mock_repo
+
+        import argparse
+        args = argparse.Namespace(
+            source="akunzai/agent-skills",
+            config=str(self.config_path),
+            skills_dir=str(self.skills_dir),
+            cache_dir=str(self.cache_dir),
+            skill=None,
+            all=False,
+            path=None,
+            url=None,
+            branch=None,
+            agent=None,
+            symlink=None,
+            command=None,
+            check=None,
+            description=None
+        )
+
+        ret = cmd_add(args)
+        self.assertEqual(ret, 1)
 
 
 if __name__ == "__main__":
