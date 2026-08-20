@@ -240,15 +240,43 @@ class TestOutdatedAndUpdateOperations(unittest.TestCase):
         self.assertEqual(res_dry["updated_repos"][0]["dry_run"], True)
 
         # Real update
+        progress_events = []
+        def on_prog(event, data):
+            progress_events.append(event)
+
         res_real = update_remote_skills(
             self.config,
             dry_run=False,
             skills_dir=self.skills_dir,
-            cache_dir=self.cache_dir
+            cache_dir=self.cache_dir,
+            on_progress=on_prog,
         )
         self.assertEqual(len(res_real["updated_skills"]), 2)
         self.assertTrue((self.skills_dir / "triage" / "SKILL.md").exists())
         self.assertTrue((self.skills_dir / "to-tickets" / "SKILL.md").exists())
+        self.assertIn("update_start", progress_events)
+        self.assertIn("skill_restored", progress_events)
+        self.assertIn("repo_done", progress_events)
+
+    def test_repo_suffix_stripping(self):
+        """Ensure repositories ending in g, i, t are not truncated by rstrip."""
+        from skills_manager.engine import ensure_git_repo
+        with patch("skills_manager.engine.run_cmd") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "mock-sha"
+
+            test_cases = [
+                ("openclaw/imsg", "openclaw/imsg"),
+                ("openclaw/imsg.git", "openclaw/imsg"),
+                ("shadcn/ui", "shadcn/ui"),
+                ("shadcn/ui.git", "shadcn/ui"),
+                ("microsoft/playwright-cli", "microsoft/playwright-cli"),
+                ("microsoft/webwright", "microsoft/webwright"),
+                ("dgrr/tgcli", "dgrr/tgcli"),
+            ]
+            for raw_source, expected_path in test_cases:
+                dest = ensure_git_repo(raw_source, cache_dir=self.cache_dir)
+                self.assertEqual(dest.name, expected_path.split("/")[-1])
 
     @patch("skills_manager.engine.check_all_remote_skills_outdated")
     def test_cmd_outdated_json(self, mock_check_all):

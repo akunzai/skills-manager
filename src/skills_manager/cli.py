@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from . import __version__
 from .config import (
@@ -656,9 +656,43 @@ def cmd_update(args: argparse.Namespace) -> int:
 
     if not args.json:
         if args.dry_run:
-            print(f"\n{BOLD}{CYAN}🔍 [Dry-Run] Checking and previewing skills update...{RESET}\n")
+            print(f"\n{BOLD}{CYAN}🔍 [Dry-Run] Checking and previewing skills update...{RESET}\n", flush=True)
         else:
-            print(f"\n{BOLD}{CYAN}🚀 Updating skills from remote repositories...{RESET}\n")
+            print(f"\n{BOLD}{CYAN}🚀 Updating skills from remote repositories...{RESET}\n", flush=True)
+
+    def on_progress(event: str, data: Dict[str, Any]) -> None:
+        if args.json:
+            return
+        if event == "check_start":
+            print(f"  🔍 Checking {data['total']} remote repositories in parallel...", flush=True)
+        elif event == "check_done":
+            outdated = data.get("outdated", 0)
+            up_to_date = data.get("up_to_date", 0)
+            if outdated == 0:
+                print(f"  {GREEN}✔ All {up_to_date} repositories are already up to date.{RESET}\n", flush=True)
+            else:
+                print(f"  {CYAN}ℹ {outdated} repository update(s) needed, {up_to_date} already up to date.{RESET}\n", flush=True)
+        elif event == "update_start":
+            idx = data.get("index", 1)
+            total = data.get("total", 1)
+            source = data["source"]
+            skills_list = ", ".join(data.get("skills", []))
+            if data.get("dry_run"):
+                print(f"  [{idx}/{total}] {CYAN}ℹ [Dry-run]{RESET} Would update {BOLD}{source}{RESET} ({skills_list})", flush=True)
+            else:
+                print(f"  [{idx}/{total}] 📦 Updating {BOLD}{source}{RESET} ({skills_list})...", flush=True)
+        elif event == "skill_restored":
+            print(f"      📥 Restored {BOLD}{data['skill']}{RESET}", flush=True)
+        elif event == "repo_done":
+            sha_str = f" ({data['new_sha'][:7]})" if data.get("new_sha") else ""
+            print(f"      {GREEN}✔{RESET} Successfully updated {BOLD}{data['source']}{RESET}{sha_str}", flush=True)
+        elif event == "repo_error":
+            print(f"      {RED}✖ Error updating {data['source']}: {data['error']}{RESET}", flush=True)
+        elif event == "hooks_start":
+            print(f"\n{CYAN}⚡ Running post-sync hooks...{RESET}", flush=True)
+        elif event == "hook_done":
+            badge = f"{GREEN}✔{RESET}" if data.get("ok") else f"{RED}✖{RESET}"
+            print(f"  {badge} [{data.get('name')}] {data.get('msg')}", flush=True)
 
     result = update_remote_skills(
         config_data,
@@ -666,53 +700,27 @@ def cmd_update(args: argparse.Namespace) -> int:
         force=args.force,
         dry_run=args.dry_run,
         skills_dir=skills_dir,
-        cache_dir=cache_dir
+        cache_dir=cache_dir,
+        on_progress=on_progress,
     )
 
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0 if not result["errors"] else 1
 
-    # Report results
-    if result["updated_repos"]:
-        for repo_res in result["updated_repos"]:
-            source = repo_res["source"]
-            skills = repo_res["skills"]
-            if repo_res.get("dry_run"):
-                print(f"  {CYAN}ℹ [Dry-run]{RESET} Would update {BOLD}{source}{RESET} ({', '.join(skills)})")
-            else:
-                sha_str = f" ({repo_res['new_sha'][:7]})" if repo_res.get("new_sha") else ""
-                print(f"  {GREEN}✔{RESET} Updated {BOLD}{source}{RESET}{sha_str}: {', '.join(skills)}")
-
-    if result["skipped_repos"]:
-        for sk_res in result["skipped_repos"]:
-            source = sk_res["source"]
-            sha_str = f" ({sk_res['local_sha'][:7]})" if sk_res.get("local_sha") else ""
-            print(f"  {DIM}✔ {source}{sha_str} is already up to date (skipped){RESET}")
-
-    if result["errors"]:
-        for err in result["errors"]:
-            source = err.get("source", "unknown")
-            msg = err.get("error", "Unknown error")
-            print(f"  {RED}✖ Error updating {source}: {msg}{RESET}")
-
-    if result.get("post_hooks"):
-        print(f"\n{CYAN}⚡ Running post-sync hooks...{RESET}")
-        for name, ok, msg in result["post_hooks"]:
-            badge = f"{GREEN}✔{RESET}" if ok else f"{RED}✖{RESET}"
-            print(f"  {badge} [{name}] {msg}")
-
     total_updated = len(result["updated_skills"])
+    total_skipped = len(result["skipped_repos"])
     if total_updated > 0:
+        skip_msg = f" ({total_skipped} repository/repositories were already up to date)" if total_skipped > 0 else ""
         if args.dry_run:
-            print(f"\n{BOLD}{GREEN}✨ Dry-run complete: {total_updated} skill(s) would be updated.{RESET}\n")
+            print(f"\n{BOLD}{GREEN}✨ Dry-run complete: {total_updated} skill(s) would be updated.{RESET}{skip_msg}\n", flush=True)
         else:
-            print(f"\n{BOLD}{GREEN}✨ Successfully updated {total_updated} skill(s)!{RESET}\n")
+            print(f"\n{BOLD}{GREEN}✨ Successfully updated {total_updated} skill(s)!{RESET}{skip_msg}\n", flush=True)
     else:
         if not result["errors"]:
-            print(f"\n{BOLD}{GREEN}✨ Everything is already up to date.{RESET}\n")
+            print(f"\n{BOLD}{GREEN}✨ Everything is already up to date.{RESET}\n", flush=True)
         else:
-            print(f"\n{BOLD}{YELLOW}Update completed with errors.{RESET}\n")
+            print(f"\n{BOLD}{YELLOW}Update completed with errors.{RESET}\n", flush=True)
 
     return 0 if not result["errors"] else 1
 
