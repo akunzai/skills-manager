@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentSkillsConfig",
+  "description": "Configuration schema for managing global AI agent skills",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "defaultAgents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of target agents to link skills to by default"
+        },
+        "excludeAgents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of agents globally excluded from receiving skills"
+        },
+        "agentExclusions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Per-agent exclusions mapping agent names to lists of excluded skill names or sources"
+        }
+      },
+      "additionalProperties": false
+    },
+    "remote": {
+      "type": "object",
+      "description": "Remote Git/GitHub skill repositories",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["github", "git"]
+          },
+          "url": {
+            "type": "string",
+            "description": "Optional custom Git clone URL"
+          },
+          "branch": {
+            "type": "string",
+            "description": "Optional branch or tag"
+          },
+          "skills": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Map of skill name to its relative path within the repository"
+          }
+        },
+        "required": ["skills"],
+        "additionalProperties": false
+      }
+    },
+    "local": {
+      "type": "object",
+      "description": "Locally managed skills (symlinks or CLI-installed tools)",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["symlink", "command"]
+          },
+          "source": {
+            "type": "string",
+            "description": "Path to local skill directory (for symlink type)"
+          },
+          "check": {
+            "type": "string",
+            "description": "Command to check if tool is available (for command type)"
+          },
+          "command": {
+            "type": "string",
+            "description": "Command to install the skill (for command type)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description of the skill"
+          }
+        },
+        "required": ["type"],
+        "additionalProperties": false
+      }
+    },
+    "postHooks": {
+      "type": "array",
+      "description": "Commands executed after syncing skills to ensure custom symlinks/states",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string",
+            "description": "Optional shell command to check before running"
+          },
+          "run": {
+            "type": "string",
+            "description": "Shell command to execute"
+          }
+        },
+        "required": ["name", "run"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["version"],
+  "additionalProperties": false
+}
