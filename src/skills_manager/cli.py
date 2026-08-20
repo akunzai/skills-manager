@@ -17,6 +17,7 @@ from .config import (
     save_config,
 )
 from .engine import (
+    check_all_remote_skills_outdated,
     copy_skill_folder,
     discover_skills_in_repo,
     ensure_agent_symlink,
@@ -26,6 +27,7 @@ from .engine import (
     remove_agent_symlinks,
     run_cmd,
     scan_all_skills,
+    update_remote_skills,
 )
 from .models import (
     DEFAULT_CACHE_DIR,
@@ -536,6 +538,179 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_outdated(args: argparse.Namespace) -> int:
+    """Check for new versions in remote skill repositories."""
+    config_path = Path(args.config) if args.config else DEFAULT_CONFIG_FILE
+    cache_dir = Path(args.cache_dir) if args.cache_dir else DEFAULT_CACHE_DIR
+    config_data = load_config(config_path)
+
+    remote_repos = config_data.get("remote", {})
+    if not remote_repos:
+        if args.json:
+            print(json.dumps([], indent=2))
+        else:
+            print(f"{YELLOW}No remote repositories configured in {config_path.name}.{RESET}")
+        return 0
+
+    if not args.json:
+        print(f"\n{BOLD}{CYAN}🔍 Checking remote repositories for updates...{RESET}\n")
+
+    results = check_all_remote_skills_outdated(config_data, cache_dir=cache_dir)
+
+    if args.json:
+        out_json = []
+        for r in results:
+            out_json.append({
+                "source": r["source"],
+                "url": r["url"],
+                "branch": r["branch"],
+                "status": r["status"],
+                "localSha": r["local_sha"],
+                "remoteSha": r["remote_sha"],
+                "skills": r["skills"],
+            })
+        print(json.dumps(out_json, indent=2, ensure_ascii=False))
+        return 0
+
+    print(f"{BOLD}{'REPOSITORY / SKILL':<40} {'CURRENT':<12} {'LATEST':<12} {'STATUS'}{RESET}")
+    print("─" * 80)
+
+    outdated_count = 0
+    up_to_date_count = 0
+    error_count = 0
+
+    for r in results:
+        status = r["status"]
+        local_raw = r["local_sha"][:7] if r["local_sha"] else "none"
+        remote_raw = r["remote_sha"][:7] if r["remote_sha"] else "none"
+
+        local_padded = f"{local_raw:<12}"
+        remote_padded = f"{remote_raw:<12}"
+
+        local_display = f"{DIM}{local_padded}{RESET}" if not r["local_sha"] else local_padded
+        remote_display = f"{DIM}{remote_padded}{RESET}" if not r["remote_sha"] else remote_padded
+
+        if status == "update_available":
+            outdated_count += 1
+            status_display = f"{YELLOW}{BOLD}Update available{RESET}"
+        elif status == "up_to_date":
+            up_to_date_count += 1
+            status_display = f"{GREEN}Up to date{RESET}"
+        elif status == "not_installed":
+            outdated_count += 1
+            status_display = f"{CYAN}Not installed (New){RESET}"
+        else:
+            error_count += 1
+            status_display = f"{RED}Check failed{RESET}"
+
+        repo_name = r["source"]
+        print(f"{BOLD}{repo_name:<40}{RESET} {local_display} {remote_display} {status_display}")
+
+        # List individual skills under this repository
+        skills = r["skills"]
+        for i, sk in enumerate(skills):
+            is_last = (i == len(skills) - 1)
+            prefix = "  └─ " if is_last else "  ├─ "
+            print(f"{DIM}{prefix}{sk}{RESET}")
+
+    print("─" * 80)
+    summary_parts = []
+    if outdated_count:
+        summary_parts.append(f"{YELLOW}{BOLD}{outdated_count} update(s) available{RESET}")
+    if up_to_date_count:
+        summary_parts.append(f"{GREEN}{up_to_date_count} up to date{RESET}")
+    if error_count:
+        summary_parts.append(f"{RED}{error_count} error(s){RESET}")
+
+    print(f"Summary: {', '.join(summary_parts)}")
+    if outdated_count > 0:
+        print(f"\n💡 Run '{BOLD}skills update{RESET}' to upgrade outdated skills.\n")
+    else:
+        print(f"\n{GREEN}✨ All skills are up to date!{RESET}\n")
+
+    return 0
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Update remote repositories and sync skills."""
+    config_path = Path(args.config) if args.config else DEFAULT_CONFIG_FILE
+    skills_dir = Path(args.skills_dir) if args.skills_dir else DEFAULT_SKILLS_DIR
+    cache_dir = Path(args.cache_dir) if args.cache_dir else DEFAULT_CACHE_DIR
+    config_data = load_config(config_path)
+
+    remote_repos = config_data.get("remote", {})
+    if not remote_repos:
+        if args.json:
+            print(json.dumps({"updated": [], "skipped": [], "errors": []}, indent=2))
+        else:
+            print(f"{YELLOW}No remote repositories configured in {config_path.name}.{RESET}")
+        return 0
+
+    targets = args.targets if hasattr(args, "targets") and args.targets else None
+
+    if not args.json:
+        if args.dry_run:
+            print(f"\n{BOLD}{CYAN}🔍 [Dry-Run] Checking and previewing skills update...{RESET}\n")
+        else:
+            print(f"\n{BOLD}{CYAN}🚀 Updating skills from remote repositories...{RESET}\n")
+
+    result = update_remote_skills(
+        config_data,
+        targets=targets,
+        force=args.force,
+        dry_run=args.dry_run,
+        skills_dir=skills_dir,
+        cache_dir=cache_dir
+    )
+
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0 if not result["errors"] else 1
+
+    # Report results
+    if result["updated_repos"]:
+        for repo_res in result["updated_repos"]:
+            source = repo_res["source"]
+            skills = repo_res["skills"]
+            if repo_res.get("dry_run"):
+                print(f"  {CYAN}ℹ [Dry-run]{RESET} Would update {BOLD}{source}{RESET} ({', '.join(skills)})")
+            else:
+                sha_str = f" ({repo_res['new_sha'][:7]})" if repo_res.get("new_sha") else ""
+                print(f"  {GREEN}✔{RESET} Updated {BOLD}{source}{RESET}{sha_str}: {', '.join(skills)}")
+
+    if result["skipped_repos"]:
+        for sk_res in result["skipped_repos"]:
+            source = sk_res["source"]
+            sha_str = f" ({sk_res['local_sha'][:7]})" if sk_res.get("local_sha") else ""
+            print(f"  {DIM}✔ {source}{sha_str} is already up to date (skipped){RESET}")
+
+    if result["errors"]:
+        for err in result["errors"]:
+            source = err.get("source", "unknown")
+            msg = err.get("error", "Unknown error")
+            print(f"  {RED}✖ Error updating {source}: {msg}{RESET}")
+
+    if result.get("post_hooks"):
+        print(f"\n{CYAN}⚡ Running post-sync hooks...{RESET}")
+        for name, ok, msg in result["post_hooks"]:
+            badge = f"{GREEN}✔{RESET}" if ok else f"{RED}✖{RESET}"
+            print(f"  {badge} [{name}] {msg}")
+
+    total_updated = len(result["updated_skills"])
+    if total_updated > 0:
+        if args.dry_run:
+            print(f"\n{BOLD}{GREEN}✨ Dry-run complete: {total_updated} skill(s) would be updated.{RESET}\n")
+        else:
+            print(f"\n{BOLD}{GREEN}✨ Successfully updated {total_updated} skill(s)!{RESET}\n")
+    else:
+        if not result["errors"]:
+            print(f"\n{BOLD}{GREEN}✨ Everything is already up to date.{RESET}\n")
+        else:
+            print(f"\n{BOLD}{YELLOW}Update completed with errors.{RESET}\n")
+
+    return 0 if not result["errors"] else 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="skills",
@@ -580,6 +755,17 @@ def main() -> None:
     sync_p.add_argument("--prune-only", action="store_true", help="Remove untracked skills without restoring")
     sync_p.add_argument("--dry-run", action="store_true", help="Preview actions without making changes")
 
+    # outdated / check
+    outdated_p = subparsers.add_parser("outdated", aliases=["check", "check-update"], help="Check for newer versions of remote skills")
+    outdated_p.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+
+    # update / upgrade
+    update_p = subparsers.add_parser("update", aliases=["upgrade"], help="Update remote skills to latest versions")
+    update_p.add_argument("targets", nargs="*", help="Optional repository name or skill name(s) to update")
+    update_p.add_argument("--force", action="store_true", help="Force re-fetch and overwrite even if commit SHA is unchanged")
+    update_p.add_argument("--dry-run", action="store_true", help="Preview updates without making changes")
+    update_p.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+
     # doctor
     doc_p = subparsers.add_parser("doctor", help="Diagnose and repair skills health")
     doc_p.add_argument("--fix", action="store_true", help="Automatically repair detected issues")
@@ -598,6 +784,10 @@ def main() -> None:
         sys.exit(cmd_rm(args))
     elif args.subcommand in ("sync", "restore"):
         sys.exit(cmd_sync(args))
+    elif args.subcommand in ("outdated", "check", "check-update"):
+        sys.exit(cmd_outdated(args))
+    elif args.subcommand in ("update", "upgrade"):
+        sys.exit(cmd_update(args))
     elif args.subcommand == "doctor":
         sys.exit(cmd_doctor(args))
     else:
