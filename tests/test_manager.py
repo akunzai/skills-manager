@@ -1,11 +1,20 @@
-"""Unit tests for skills-manager."""
-
+import io
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+if sys.platform == "win32":
+    try:
+        if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from unittest.mock import MagicMock, patch
 
@@ -31,6 +40,7 @@ from skills_manager.engine import (
     check_all_remote_skills_outdated,
     check_repo_update_status,
     copy_skill_folder,
+    create_symlink,
     discover_skills_in_repo,
     ensure_agent_symlink,
     execute_post_hooks,
@@ -234,6 +244,9 @@ class TestEngineOperations(unittest.TestCase):
 
 class TestOutdatedAndUpdateOperations(unittest.TestCase):
     def setUp(self):
+        self._orig_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+
         self.temp_dir = Path(tempfile.mkdtemp())
         self.cache_dir = self.temp_dir / "cache"
         self.skills_dir = self.temp_dir / ".agents" / "skills"
@@ -248,6 +261,7 @@ class TestOutdatedAndUpdateOperations(unittest.TestCase):
         save_config(self.config, self.config_path)
 
     def tearDown(self):
+        sys.stdout = self._orig_stdout
         shutil.rmtree(self.temp_dir)
 
     @patch("skills_manager.engine.run_cmd")
@@ -531,6 +545,13 @@ class TestSelfUpdateOperations(unittest.TestCase):
 
 
 class TestUIOperations(unittest.TestCase):
+    def setUp(self):
+        self._orig_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+
+    def tearDown(self):
+        sys.stdout = self._orig_stdout
+
     @patch("sys.stdin.isatty", return_value=False)
     def test_prompt_multi_select_non_tty(self, mock_isatty):
         res = prompt_multi_select("Title", [("skill1", False, None)])
@@ -585,35 +606,51 @@ class TestUIOperations(unittest.TestCase):
         # Press space on source1 group header -> skill1 and skill2 are selected. Enter -> confirms
         self.assertEqual(set(res), {"skill1", "skill2"})
 
-    @patch("select.select", return_value=([], [], []))
-    @patch("termios.tcsetattr")
-    @patch("termios.tcgetattr")
-    @patch("tty.setraw")
-    @patch("os.read")
-    def test_read_key_sequences(self, mock_read, mock_setraw, mock_getattr, mock_setattr, mock_select):
-        # Up arrow escape sequence
-        mock_read.return_value = b"\x1b[A"
-        self.assertEqual(read_key(), "up")
+    @unittest.skipIf(sys.platform == "win32", "termios and tty are Unix-only")
+    def test_read_key_sequences(self):
+        with patch("select.select", return_value=([], [], [])), \
+             patch("termios.tcsetattr"), \
+             patch("termios.tcgetattr"), \
+             patch("tty.setraw"), \
+             patch("os.read") as mock_read:
+            # Up arrow escape sequence
+            mock_read.return_value = b"\x1b[A"
+            self.assertEqual(read_key(), "up")
 
-        # Down arrow escape sequence
-        mock_read.return_value = b"\x1b[B"
-        self.assertEqual(read_key(), "down")
+            # Down arrow escape sequence
+            mock_read.return_value = b"\x1b[B"
+            self.assertEqual(read_key(), "down")
 
-        # Plain Enter
-        mock_read.return_value = b"\r"
-        self.assertEqual(read_key(), "enter")
+            # Plain Enter
+            mock_read.return_value = b"\r"
+            self.assertEqual(read_key(), "enter")
 
-        # Plain Space
-        mock_read.return_value = b" "
-        self.assertEqual(read_key(), "space")
+            # Plain Space
+            mock_read.return_value = b" "
+            self.assertEqual(read_key(), "space")
 
-        # Plain Escape (no following bytes)
-        mock_read.return_value = b"\x1b"
-        self.assertEqual(read_key(), "escape")
+            # Plain Escape (no following bytes)
+            mock_read.return_value = b"\x1b"
+            self.assertEqual(read_key(), "escape")
+
+    @unittest.skipUnless(sys.platform == "win32", "msvcrt is Windows-only")
+    def test_read_key_windows(self):
+        import msvcrt
+        with patch("msvcrt.getch", side_effect=[b"\r"]):
+            self.assertEqual(read_key(), "enter")
+        with patch("msvcrt.getch", side_effect=[b" "]):
+            self.assertEqual(read_key(), "space")
+        with patch("msvcrt.getch", side_effect=[b"\xe0", b"H"]):
+            self.assertEqual(read_key(), "up")
+        with patch("msvcrt.getch", side_effect=[b"\xe0", b"P"]):
+            self.assertEqual(read_key(), "down")
 
 
 class TestInteractiveAdd(unittest.TestCase):
     def setUp(self):
+        self._orig_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+
         self.temp_dir = Path(tempfile.mkdtemp())
         self.skills_dir = self.temp_dir / ".agents" / "skills"
         self.cache_dir = self.temp_dir / "cache"
@@ -625,6 +662,7 @@ class TestInteractiveAdd(unittest.TestCase):
         save_config(self.config, self.config_path)
 
     def tearDown(self):
+        sys.stdout = self._orig_stdout
         shutil.rmtree(self.temp_dir)
 
     @patch("skills_manager.cli.ensure_agent_symlink")
@@ -660,7 +698,8 @@ class TestInteractiveAdd(unittest.TestCase):
             description=None
         )
 
-        ret = cmd_add(args)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            ret = cmd_add(args)
         self.assertEqual(ret, 0)
         self.assertTrue((self.skills_dir / "skill-b" / "SKILL.md").exists())
         self.assertFalse((self.skills_dir / "skill-a").exists())
@@ -693,12 +732,16 @@ class TestInteractiveAdd(unittest.TestCase):
             description=None
         )
 
-        ret = cmd_add(args)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            ret = cmd_add(args)
         self.assertEqual(ret, 1)
 
 
 class TestInteractiveRm(unittest.TestCase):
     def setUp(self):
+        self._orig_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+
         self.temp_dir = Path(tempfile.mkdtemp())
         self.skills_dir = self.temp_dir / ".agents" / "skills"
         self.config_path = self.temp_dir / "skills.json"
@@ -716,6 +759,7 @@ class TestInteractiveRm(unittest.TestCase):
         (self.skills_dir / "skill-b" / "SKILL.md").write_text("# B", encoding="utf-8")
 
     def tearDown(self):
+        sys.stdout = self._orig_stdout
         shutil.rmtree(self.temp_dir)
 
     @patch("skills_manager.cli.remove_agent_symlinks")
@@ -776,12 +820,16 @@ class TestInteractiveRm(unittest.TestCase):
 
 class TestHarnessSupport(unittest.TestCase):
     def setUp(self):
+        self._orig_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+
         self.temp_dir = Path(tempfile.mkdtemp())
         self.skills_dir = self.temp_dir / ".agents" / "skills"
         self.skills_dir.mkdir(parents=True)
         self.config_path = self.temp_dir / "skills.json"
 
     def tearDown(self):
+        sys.stdout = self._orig_stdout
         shutil.rmtree(self.temp_dir)
 
     def test_non_universal_harnesses_registered(self):
@@ -1069,8 +1117,8 @@ class TestUrlAndProtocolParsing(unittest.TestCase):
             check=None,
             description=None
         )
-
-        ret = cmd_add(args)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            ret = cmd_add(args)
         self.assertEqual(ret, 0)
         self.assertTrue((self.skills_dir / "gitlab-tool" / "SKILL.md").exists())
 
@@ -1082,7 +1130,47 @@ class TestUrlAndProtocolParsing(unittest.TestCase):
         self.assertEqual(entry["skills"]["gitlab-tool"], "skills/gitlab-tool")
 
 
+class TestWindowsCompatibility(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.src_dir = self.temp_dir / "src_skill"
+        self.src_dir.mkdir(parents=True)
+        (self.src_dir / "SKILL.md").write_text("# Test Skill", encoding="utf-8")
+        self.dst_link = self.temp_dir / "dst_link"
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_create_symlink_success(self):
+        """Verify normal create_symlink operation."""
+        create_symlink(self.src_dir, self.dst_link, target_is_directory=True)
+        self.assertTrue(self.dst_link.exists())
+        self.assertTrue((self.dst_link / "SKILL.md").exists())
+
+    def test_create_symlink_windows_junction_fallback(self):
+        """Verify create_symlink falls back to junction/copy when WinError 1314 is raised."""
+        with patch("sys.platform", "win32"):
+            with patch("os.symlink", side_effect=OSError(1314, "Privilege not held")):
+                create_symlink(self.src_dir, self.dst_link, target_is_directory=True)
+                self.assertTrue(self.dst_link.exists())
+                self.assertTrue((self.dst_link / "SKILL.md").exists())
+
+    def test_get_current_executable_path_windows_wrappers(self):
+        """Verify get_current_executable_path resolves .cmd / .ps1 wrappers to the zipapp file."""
+        fake_bin_dir = self.temp_dir / "bin"
+        fake_bin_dir.mkdir(parents=True)
+        zipapp_file = fake_bin_dir / "skills"
+        zipapp_file.write_text("fake zipapp", encoding="utf-8")
+        cmd_wrapper = fake_bin_dir / "skills.cmd"
+        cmd_wrapper.write_text("@echo off", encoding="utf-8")
+
+        with patch("sys.argv", [str(cmd_wrapper)]):
+            resolved = get_current_executable_path()
+            self.assertEqual(resolved, zipapp_file.resolve())
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

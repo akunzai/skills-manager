@@ -8,6 +8,15 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+if sys.platform == "win32":
+    try:
+        if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from . import __version__
 from .config import (
     add_local_command_entry,
@@ -20,6 +29,7 @@ from .config import (
 from .engine import (
     check_all_remote_skills_outdated,
     copy_skill_folder,
+    create_symlink,
     discover_skills_in_repo,
     ensure_agent_symlink,
     ensure_git_repo,
@@ -191,7 +201,7 @@ def cmd_add(args: argparse.Namespace) -> int:
             dest_link.unlink()
         elif dest_link.is_dir():
             shutil.rmtree(dest_link)
-        os.symlink(source_path, dest_link)
+        create_symlink(source_path, dest_link, target_is_directory=True)
 
         # Dispatch symlinks to agents
         target_agents = args.agent or get_target_agents_for_skill(skill_name, "local", config_data)
@@ -553,7 +563,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
                     target_link.unlink()
                 elif target_link.is_dir():
                     shutil.rmtree(target_link)
-                os.symlink(src, target_link)
+                create_symlink(src, target_link, target_is_directory=True)
                 print(f"  {GREEN}✔{RESET} Linked local skill {BOLD}{name}{RESET} -> {src}")
 
                 # Dispatch links
