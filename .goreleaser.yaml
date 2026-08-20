@@ -41,5 +41,29 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
+      - "^Merge "
+      - "^merge "
+  groups:
+    - title: "🚀 Features & Enhancements"
+      regexp: '^.*?feat(\([^\)]+\))?:.*$'
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: '^.*?fix(\([^\)]+\))?:.*$'
+      order: 1
+    - title: "📦 Dependency Updates"
+      regexp: '^.*?(deps|dependencies)(\([^\)]+\))?:.*$'
+      order: 2
+    - title: "📚 Documentation"
+      regexp: '^.*?docs?(\([^\)]+\))?:.*$'
+      order: 3
+    - title: "⚙️ CI/CD & Build"
+      regexp: '^.*?(ci|build|workflow)(\([^\)]+\))?:.*$'
+      order: 4
+    - title: "🧹 Refactoring & Chores"
+      regexp: '^.*?(refactor|chore|maintenance|perf)(\([^\)]+\))?:.*$'
+      order: 5
+    - title: "🧪 Tests"
+      regexp: '^.*?tests?(\([^\)]+\))?:.*$'
+      order: 6
+    - title: "💬 Other Changes"
+      order: 99
