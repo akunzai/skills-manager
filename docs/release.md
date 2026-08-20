@@ -44,3 +44,16 @@ git push origin vX.Y.Z
    ```bash
    skills self-update --check
    ```
+
+### 6. Milestone Management
+1. **Close the released milestone**:
+   ```bash
+   # Find milestone number
+   gh api repos/akunzai/skills-manager/milestones
+   # Close it
+   gh api repos/akunzai/skills-manager/milestones/<number> --method PATCH -f state="closed"
+   ```
+2. **Create the next milestone** (if not already created):
+   ```bash
+   gh api repos/akunzai/skills-manager/milestones --method POST -f title="X.Y+1.0" -f description="Next feature release."
+   ```
