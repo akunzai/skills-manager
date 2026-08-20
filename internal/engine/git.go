@@ -12,6 +12,21 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
+// RunGit executes a git command directly without passing through a shell.
+func RunGit(cwd string, args ...string) (string, string, error) {
+	cmd := exec.Command("git", args...)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+}
+
 func RunCmd(cmdStr string, cwd string) (string, string, error) {
 	var cmd *exec.Cmd
 	// Use sh on unix or cmd.exe on windows
@@ -64,8 +79,7 @@ func EnsureGitRepo(
 			if ref == "" {
 				ref = "HEAD"
 			}
-			fetchCmd := fmt.Sprintf("git fetch --depth 1 origin %s", ref)
-			stdout, stderr, err := RunCmd(fetchCmd, repoDest)
+			stdout, stderr, err := RunGit(repoDest, "fetch", "--depth", "1", "origin", ref)
 			if err != nil {
 				errMsg := stderr
 				if errMsg == "" {
@@ -76,7 +90,7 @@ func EnsureGitRepo(
 				}
 				return "", fmt.Errorf("failed to fetch %s: %s", repoURL, errMsg)
 			}
-			stdout, stderr, err = RunCmd("git reset --hard FETCH_HEAD", repoDest)
+			stdout, stderr, err = RunGit(repoDest, "reset", "--hard", "FETCH_HEAD")
 			if err != nil {
 				errMsg := stderr
 				if errMsg == "" {
@@ -97,12 +111,13 @@ func EnsureGitRepo(
 	}
 	_ = RemoveAll(repoDest)
 
-	branchFlag := ""
+	cloneArgs := []string{"clone", "--depth", "1"}
 	if targetBranch != "" {
-		branchFlag = fmt.Sprintf("--branch %s ", targetBranch)
+		cloneArgs = append(cloneArgs, "--branch", targetBranch)
 	}
-	cloneCmd := fmt.Sprintf("git clone --depth 1 %s%s %q", branchFlag, repoURL, filepath.ToSlash(repoDest))
-	stdout, stderr, err := RunCmd(cloneCmd, "")
+	cloneArgs = append(cloneArgs, repoURL, repoDest)
+
+	stdout, stderr, err := RunGit("", cloneArgs...)
 	if err != nil {
 		errMsg := stderr
 		if errMsg == "" {
@@ -122,7 +137,7 @@ func GetLocalRepoCommit(repoDest string) string {
 	if _, err := os.Stat(gitDir); err != nil {
 		return ""
 	}
-	stdout, _, err := RunCmd("git rev-parse HEAD", repoDest)
+	stdout, _, err := RunGit(repoDest, "rev-parse", "HEAD")
 	if err != nil {
 		return ""
 	}
@@ -143,8 +158,7 @@ func GetRemoteRepoCommit(source, url, branch string) string {
 		refTarget = "HEAD"
 	}
 
-	cmdStr := fmt.Sprintf("git ls-remote %s %s", repoURL, refTarget)
-	stdout, _, err := RunCmd(cmdStr, "")
+	stdout, _, err := RunGit("", "ls-remote", repoURL, refTarget)
 	if err != nil || stdout == "" {
 		return ""
 	}
