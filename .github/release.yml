@@ -9,6 +9,9 @@ changelog:
       labels:
         - "bug"
         - "fix"
+    - title: "📦 Dependency Updates"
+      labels:
+        - "dependencies"
     - title: "📚 Documentation"
       labels:
         - "documentation"
@@ -18,9 +21,6 @@ changelog:
         - "ci"
         - "build"
         - "github-actions"
-    - title: "📦 Dependency Updates"
-      labels:
-        - "dependencies"
     - title: "🧹 Refactoring & Chores"
       labels:
         - "refactor"

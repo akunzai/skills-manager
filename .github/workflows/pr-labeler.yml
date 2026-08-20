@@ -40,9 +40,38 @@ jobs:
               perf: "enhancement",
             };
 
+            const primaryCategoryLabels = [
+              "enhancement",
+              "bug",
+              "documentation",
+              "ci",
+              "chore",
+              "refactor",
+              "tests",
+              "dependencies"
+            ];
+
             const targetLabel = prefixMap[prefix];
             if (targetLabel) {
               const currentLabels = (context.payload.pull_request.labels || []).map(l => l.name);
+
+              // Remove other conflicting primary category labels
+              for (const oldLabel of currentLabels) {
+                if (oldLabel !== targetLabel && primaryCategoryLabels.includes(oldLabel)) {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: context.payload.pull_request.number,
+                      name: oldLabel
+                    });
+                    console.log(`Removed conflicting label "${oldLabel}" from PR #${context.payload.pull_request.number}`);
+                  } catch (err) {
+                    console.log(`Failed to remove label "${oldLabel}": ${err.message}`);
+                  }
+                }
+              }
+
               if (!currentLabels.includes(targetLabel)) {
                 await github.rest.issues.addLabels({
                   owner: context.repo.owner,
