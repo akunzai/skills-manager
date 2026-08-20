@@ -35,8 +35,10 @@ from .models import (
     DEFAULT_CONFIG_FILE,
     DEFAULT_SKILLS_DIR,
     KNOWN_AGENTS,
+    SkillItem,
     normalize_agent_name,
 )
+from .ui import prompt_multi_select
 from .updater import (
     check_self_update,
     download_and_install_binary,
@@ -260,6 +262,27 @@ def cmd_add(args: argparse.Namespace) -> int:
         # If single skill in repo, install it
         if len(discovered) == 1:
             skills_to_install = discovered
+        elif sys.stdin.isatty():
+            # Interactive multi-selection prompt
+            items_list = []
+            for sk_name in sorted(discovered.keys()):
+                is_inst = (skills_dir / sk_name).exists()
+                items_list.append((sk_name, is_inst, None))
+
+            chosen = prompt_multi_select(
+                f"📦 Select skills to install from {source}:",
+                items_list
+            )
+
+            if chosen is None:
+                print(f"{YELLOW}Operation cancelled.{RESET}")
+                return 0
+
+            if not chosen:
+                print(f"{YELLOW}No skills selected. Aborted.{RESET}")
+                return 0
+
+            skills_to_install = {k: discovered[k] for k in chosen}
         else:
             print(f"{YELLOW}Repository contains multiple skills:{RESET} {', '.join(discovered.keys())}")
             print(f"Please specify --skill <name> or --all")
