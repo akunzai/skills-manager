@@ -68,6 +68,13 @@ def cmd_ls(args: argparse.Namespace) -> int:
         filter_agent = normalize_agent_name(args.agent)
         skills = [s for s in skills if filter_agent in [normalize_agent_name(a) for a in s.linked_agents]]
 
+    if getattr(args, "source", None):
+        pattern = args.source.strip().lower()
+        skills = [
+            s for s in skills
+            if pattern in s.source.lower() or pattern in s.source_type.lower()
+        ]
+
     if args.json:
         # Output JSON compatible with skills CLI
         out_list = []
@@ -87,12 +94,15 @@ def cmd_ls(args: argparse.Namespace) -> int:
         return 0
 
     if not skills:
-        print(f"{YELLOW}No global skills installed or configured.{RESET}")
+        if getattr(args, "source", None) or getattr(args, "agent", None):
+            print(f"{YELLOW}No skills found matching the specified filters.{RESET}")
+        else:
+            print(f"{YELLOW}No global skills installed or configured.{RESET}")
         return 0
 
     print(f"\n{BOLD}{CYAN}Global Skills ({len(skills)} total):{RESET}\n")
-    print(f"{BOLD}{'NAME':<32} {'SOURCE':<35} {'AGENTS':<25} {'STATUS'}{RESET}")
-    print("─" * 105)
+    print(f"{BOLD}{'NAME':<32} {'SOURCE':<38} {'AGENTS':<12} {'STATUS'}{RESET}")
+    print("─" * 94)
 
     for s in skills:
         status_badges = []
@@ -105,23 +115,47 @@ def cmd_ls(args: argparse.Namespace) -> int:
             status_badges.append(f"{YELLOW}Missing{RESET}")
 
         if s.source_type.startswith("local_"):
-            source_display = f"{DIM}[local]{RESET} {s.source}"
+            raw_src = f"[local] {s.source}"
+            if len(raw_src) > 38:
+                raw_src = raw_src[:35] + "..."
+            source_display = f"{DIM}[local]{RESET} {raw_src[8:]:<30}"
         elif s.source_type == "symlink":
-            source_display = f"{DIM}[symlink]{RESET} {s.source}"
+            raw_src = f"[symlink] {s.source}"
+            if len(raw_src) > 38:
+                raw_src = raw_src[:35] + "..."
+            source_display = f"{DIM}[symlink]{RESET} {raw_src[10:]:<28}"
         elif s.source_type == "untracked":
-            source_display = f"{YELLOW}[untracked]{RESET}"
+            source_display = f"{YELLOW}{'[untracked]':<38}{RESET}"
         else:
-            source_display = s.source
+            raw_src = s.source
+            if len(raw_src) > 38:
+                raw_src = raw_src[:35] + "..."
+            source_display = f"{raw_src:<38}"
 
-        agents_str = ", ".join(s.linked_agents) if s.linked_agents else f"{DIM}none{RESET}"
-        if len(agents_str) > 24:
-            agents_str = agents_str[:21] + "..."
+        # All skills are in ~/.agents/skills by default; list claude (and custom non-default agents)
+        target_list = []
+        if "claude-code" in s.linked_agents or "claude" in s.linked_agents:
+            target_list.append("claude")
+
+        other_agents = [
+            a.replace("-code", "")
+            for a in s.linked_agents
+            if a not in ("claude-code", "claude", "agents")
+        ]
+        if not target_list and other_agents:
+            target_list = other_agents
+
+        raw_targets = ", ".join(target_list) if target_list else "-"
+        if target_list:
+            agents_display = f"{raw_targets:<12}"
+        else:
+            agents_display = f"{DIM}{raw_targets:<12}{RESET}"
 
         name_display = f"{BOLD}{s.name:<32}{RESET}"
         status_str = " ".join(status_badges)
-        print(f"{name_display} {source_display:<35} {agents_str:<25} {status_str}")
+        print(f"{name_display} {source_display} {agents_display} {status_str}")
 
-    print("─" * 105 + "\n")
+    print("─" * 94 + "\n")
     return 0
 
 
@@ -816,10 +850,11 @@ def main() -> None:
     ls_p = subparsers.add_parser("ls", aliases=["list"], help="List installed and configured skills")
     ls_p.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     ls_p.add_argument("-a", "--agent", help="Filter by target agent name")
+    ls_p.add_argument("-s", "--source", help="Filter skills by source repository or type (e.g. akunzai, local)")
 
     # add
     add_p = subparsers.add_parser("add", help="Add a new skill (remote git, local symlink, or CLI command)")
-    add_p.add_argument("source", nargs="?", help="GitHub repo (e.g. mattpocock/skills)")
+    add_p.add_argument("source", nargs="?", help="GitHub repo (e.g. akunzai/agent-skills)")
     add_p.add_argument("-s", "--skill", nargs="*", help="Specific skill name(s)")
     add_p.add_argument("--all", action="store_true", help="Install all skills found in the repository")
     add_p.add_argument("--path", help="Relative path within repo")

@@ -327,7 +327,7 @@ def scan_all_skills(config_data: Dict[str, Any], skills_dir: Optional[Path] = No
                 linked.append(agent_name)
         item.linked_agents = linked
 
-    return sorted(items.values(), key=lambda x: x.name.lower())
+    return sorted(items.values(), key=lambda x: (x.source.lower(), x.name.lower()))
 
 
 def get_local_repo_commit(repo_dest: Path) -> Optional[str]:
