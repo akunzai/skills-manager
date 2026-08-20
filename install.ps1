@@ -14,11 +14,39 @@ Write-Header "Installing Skills Manager (skills) on Windows..."
 Write-Host ""
 
 # 1. Locate Python 3.10+
+$candidates = @("python", "python3", "py")
 $pythonExe = $null
-if (Get-Command python -ErrorAction SilentlyContinue) {
-    $pythonExe = "python"
-} elseif (Get-Command py -ErrorAction SilentlyContinue) {
-    $pythonExe = "py"
+$pyVer = $null
+$foundMajor = 0
+$foundMinor = 0
+
+foreach ($cmd in $candidates) {
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+        try {
+            $verOutput = (& $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null)
+            $verStr = if ($verOutput -is [array]) { ($verOutput | Where-Object { $_ -match '^\d+\.\d+' } | Select-Object -Last 1) } else { [string]$verOutput }
+            if ($LASTEXITCODE -eq 0 -and $verStr -and ($verStr.Trim() -match '^\d+\.\d+')) {
+                $trimmed = $verStr.Trim()
+                $parts = $trimmed.Split(".")
+                $maj = [int]$parts[0]
+                $min = [int]$parts[1]
+                if ($maj -gt 3 -or ($maj -eq 3 -and $min -ge 10)) {
+                    $pythonExe = $cmd
+                    $pyVer = $trimmed
+                    $foundMajor = $maj
+                    $foundMinor = $min
+                    break
+                } elseif (-not $pythonExe) {
+                    $pythonExe = $cmd
+                    $pyVer = $trimmed
+                    $foundMajor = $maj
+                    $foundMinor = $min
+                }
+            }
+        } catch {
+            # Ignore errors and continue to next candidate
+        }
+    }
 }
 
 if (-not $pythonExe) {
@@ -27,13 +55,9 @@ if (-not $pythonExe) {
     exit 1
 }
 
-$pyVer = & $pythonExe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-$verParts = $pyVer.Split(".")
-$major = [int]$verParts[0]
-$minor = [int]$verParts[1]
-
-if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) {
+if ($foundMajor -lt 3 -or ($foundMajor -eq 3 -and $foundMinor -lt 10)) {
     Write-Err "Python 3.10 or higher is required (found Python $pyVer)."
+    Write-Host "Please install Python 3.10 or higher from https://python.org or Microsoft Store."
     exit 1
 }
 
@@ -63,10 +87,10 @@ Write-Host "⚙️  Building standalone executable $targetBin..."
 & $pythonExe -m zipapp "$sourceDir" -m "skills_manager.cli:main" -p "/usr/bin/env python3" -o "$targetBin"
 
 # 5. Create Windows CMD and PowerShell Wrappers
-$cmdContent = "@echo off`r`npython `"%~dp0skills`" %*`r`n"
+$cmdContent = "@echo off`r`n$pythonExe `"%~dp0skills`" %*`r`n"
 [System.IO.File]::WriteAllText($targetCmd, $cmdContent, [System.Text.Encoding]::ASCII)
 
-$ps1Content = "& python `"`$PSScriptRoot\skills`" @args`r`n"
+$ps1Content = "& $pythonExe `"`$PSScriptRoot\skills`" @args`r`n"
 [System.IO.File]::WriteAllText($targetPs1, $ps1Content, [System.Text.Encoding]::UTF8)
 
 Write-Host ""
