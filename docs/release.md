@@ -7,7 +7,19 @@ Standard operating procedure (SOP) for releasing new versions of `skills-manager
 The release pipeline is automated via GitHub Actions (`.github/workflows/release.yml`). Pushing a Git tag (`vX.Y.Z`) triggers:
 1. Multi-version test execution.
 2. Building standalone zipapp executable `skills`.
-3. Creating a GitHub Release with auto-generated notes and attaching the `skills` standalone binary asset.
+3. Generating categorized release notes via `.github/release.yml` and attaching the `skills` standalone binary asset.
+
+## Release Notes Categorization
+
+Release notes are automatically categorized from merged PR labels (applied automatically via `.github/workflows/pr-labeler.yml` from Conventional Commits prefix):
+
+- `feat: ...` -> 🚀 **Features & Enhancements** (`enhancement`)
+- `fix: ...` -> 🐛 **Bug Fixes** (`bug`)
+- `docs: ...` -> 📚 **Documentation** (`documentation`)
+- `ci: ...` -> ⚙️ **CI/CD & Build** (`ci`)
+- `chore: ...` / `refactor: ...` -> 🧹 **Refactoring & Chores** (`chore`, `refactor`)
+- `dependencies` -> 📦 **Dependency Updates** (`dependencies`)
+- `test: ...` -> 🧪 **Tests** (`tests`)
 
 ## Step-by-Step Release Checklist
 

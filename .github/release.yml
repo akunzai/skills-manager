@@ -1,0 +1,40 @@
+changelog:
+  categories:
+    - title: "🚀 Features & Enhancements"
+      labels:
+        - "enhancement"
+        - "feature"
+        - "feat"
+    - title: "🐛 Bug Fixes"
+      labels:
+        - "bug"
+        - "fix"
+    - title: "📚 Documentation"
+      labels:
+        - "documentation"
+        - "docs"
+    - title: "⚙️ CI/CD & Build"
+      labels:
+        - "ci"
+        - "build"
+        - "github-actions"
+    - title: "📦 Dependency Updates"
+      labels:
+        - "dependencies"
+    - title: "🧹 Refactoring & Chores"
+      labels:
+        - "refactor"
+        - "chore"
+        - "maintenance"
+    - title: "🧪 Tests"
+      labels:
+        - "tests"
+        - "test"
+    - title: "💬 Other Changes"
+      labels:
+        - "*"
+  exclude:
+    labels:
+      - "wontfix"
+      - "duplicate"
+      - "invalid"
