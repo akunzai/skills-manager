@@ -13,8 +13,8 @@ updates:
       - "github-actions"
     open-pull-requests-limit: 10
 
-  # Maintain Python dependencies defined in pyproject.toml
-  - package-ecosystem: "pip"
+  # Maintain Go module dependencies
+  - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -23,5 +23,5 @@ updates:
       include: "scope"
     labels:
       - "dependencies"
-      - "python"
+      - "go"
     open-pull-requests-limit: 10

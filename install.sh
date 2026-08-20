@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# install.sh - Single-file installer for skills-manager
-# Packages a standalone executable directly to ~/.local/bin/skills
+# install.sh - Standalone installer for skills-manager (Go)
+# Downloads or builds the single-file binary directly to ~/.local/bin/skills
 # ==============================================================================
 set -euo pipefail
 
@@ -16,94 +16,106 @@ RESET='\033[0m'
 
 TARGET_DIR="${HOME}/.local/bin"
 TARGET_BIN="${TARGET_DIR}/skills"
-REPO_URL="https://github.com/akunzai/skills-manager.git"
+GITHUB_REPO="akunzai/skills-manager"
 
 echo -e "${CYAN}${BOLD}🚀 Installing Skills Manager (skills)...${RESET}\n"
 
-# 1. Check Python 3.10+
-PYTHON_BIN=""
-python_version=""
-py_major=""
-py_minor=""
-
-for cand in python3 python; do
-  if command -v "$cand" >/dev/null 2>&1; then
-    if ver="$("$cand" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)"; then
-      maj="$(echo "$ver" | cut -d. -f1)"
-      min="$(echo "$ver" | cut -d. -f2)"
-      if [[ "$maj" -gt 3 || ("$maj" -eq 3 && "$min" -ge 10) ]]; then
-        PYTHON_BIN="$cand"
-        python_version="$ver"
-        py_major="$maj"
-        py_minor="$min"
-        break
-      elif [[ -z "$PYTHON_BIN" ]]; then
-        PYTHON_BIN="$cand"
-        python_version="$ver"
-        py_major="$maj"
-        py_minor="$min"
-      fi
-    fi
-  fi
-done
-
-if [[ -z "$PYTHON_BIN" ]]; then
-  echo -e "${RED}❌ Error: Python 3.10 or higher is required but not found in PATH.${RESET}" >&2
-  exit 1
-fi
-
-if [[ "$py_major" -lt 3 || ("$py_major" -eq 3 && "$py_minor" -lt 10) ]]; then
-  echo -e "${RED}❌ Error: Python 3.10 or higher is required (found Python ${python_version}).${RESET}" >&2
-  exit 1
-fi
-
-# 2. Determine source directory
 mkdir -p "$TARGET_DIR"
-SCRIPT_SOURCE_DIR=""
 
-# If executing from existing local repository
+# Check if building from local clone
 if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
-  potential_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [[ -f "${potential_dir}/src/skills_manager/cli.py" ]]; then
-    SCRIPT_SOURCE_DIR="${potential_dir}/src"
+  LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "${LOCAL_ROOT}/cmd/skills/main.go" ]] && command -v go >/dev/null 2>&1; then
+    echo -e "⚙️  Building from local source with Go..."
+    rm -f "$TARGET_BIN"
+    (cd "$LOCAL_ROOT" && go build -ldflags="-s -w" -o "$TARGET_BIN" ./cmd/skills)
+    chmod +x "$TARGET_BIN"
+    echo -e "\n${GREEN}${BOLD}✨ Installation successful!${RESET}"
+    echo -e "   Installed at: ${BOLD}${TARGET_BIN}${RESET}\n"
+    exit 0
   fi
 fi
 
-TEMP_DIR=""
+# Detect OS and Architecture
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+  x86_64|amd64)
+    GOARCH="amd64"
+    ;;
+  arm64|aarch64)
+    GOARCH="arm64"
+    ;;
+  *)
+    echo -e "${RED}❌ Unsupported architecture: $ARCH${RESET}" >&2
+    exit 1
+    ;;
+esac
+
+case "$OS" in
+  darwin|linux)
+    GOOS="$OS"
+    ;;
+  *)
+    echo -e "${RED}❌ Unsupported OS: $OS${RESET}" >&2
+    exit 1
+    ;;
+esac
+
+echo -e "🔍 Detected platform: ${BOLD}${GOOS}_${GOARCH}${RESET}"
+
+# Fetch latest release info from GitHub API
+RELEASE_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+echo -e "📦 Fetching latest release information..."
+
+TMP_DIR="$(mktemp -d)"
 cleanup() {
-  if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
-    rm -rf "$TEMP_DIR"
-  fi
+  rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
-if [[ -z "$SCRIPT_SOURCE_DIR" ]]; then
-  # Download / clone repository to temporary directory
-  echo -e "📦 Fetching latest skills-manager from GitHub..."
-  TEMP_DIR="$(mktemp -d)"
-  git clone --depth 1 "$REPO_URL" "${TEMP_DIR}/repo" >/dev/null 2>&1
-  SCRIPT_SOURCE_DIR="${TEMP_DIR}/repo/src"
+RELEASE_JSON="${TMP_DIR}/release.json"
+curl -fsSL -H "Accept: application/vnd.github.v3+json" "$RELEASE_API" -o "$RELEASE_JSON" || {
+  echo -e "${RED}❌ Failed to fetch release metadata from GitHub.${RESET}" >&2
+  exit 1
+}
+
+# Find download URL for the platform archive
+ASSET_URL="$(grep "browser_download_url" "$RELEASE_JSON" | grep -i "${GOOS}" | grep -i "${GOARCH}" | cut -d '"' -f 4 | head -n 1)"
+
+if [[ -z "$ASSET_URL" ]]; then
+  # Fallback to direct 'skills' binary asset if available
+  ASSET_URL="$(grep "browser_download_url" "$RELEASE_JSON" | grep -E '"[^"]*/skills"' | cut -d '"' -f 4 | head -n 1)"
 fi
 
-# 3. Package single-file standalone zipapp directly to ~/.local/bin/skills
-echo -e "⚙️  Building standalone executable ${BOLD}${TARGET_BIN}${RESET}..."
-"$PYTHON_BIN" -m zipapp "$SCRIPT_SOURCE_DIR" -m "skills_manager.cli:main" -p "/usr/bin/env python3" -o "$TARGET_BIN"
+if [[ -z "$ASSET_URL" ]]; then
+  echo -e "${RED}❌ No prebuilt binary found for ${GOOS}_${GOARCH}.${RESET}" >&2
+  exit 1
+fi
+
+echo -e "📥 Downloading: ${DIM}${ASSET_URL}${RESET}"
+ARCHIVE_FILE="${TMP_DIR}/downloaded"
+curl -fsSL "$ASSET_URL" -o "$ARCHIVE_FILE"
+
+if [[ "$ASSET_URL" == *.tar.gz || "$ASSET_URL" == *.tgz ]]; then
+  tar -xzf "$ARCHIVE_FILE" -C "$TMP_DIR"
+  mv "${TMP_DIR}/skills" "$TARGET_BIN"
+elif [[ "$ASSET_URL" == *.zip ]]; then
+  unzip -q -o "$ARCHIVE_FILE" -d "$TMP_DIR"
+  mv "${TMP_DIR}/skills" "$TARGET_BIN"
+else
+  mv "$ARCHIVE_FILE" "$TARGET_BIN"
+fi
+
 chmod +x "$TARGET_BIN"
 
-# Remove any old legacy executable name if present
-rm -f "${TARGET_DIR}/skills-manager"
-
 echo -e "\n${GREEN}${BOLD}✨ Installation successful!${RESET}"
-echo -e "   Installed at: ${BOLD}${TARGET_BIN}${RESET}"
+echo -e "   Installed at: ${BOLD}${TARGET_BIN}${RESET}\n"
 
-# 4. Check PATH
+# Check PATH
 if [[ ":$PATH:" != *":${TARGET_DIR}:"* ]]; then
-  echo -e "\n${YELLOW}⚠️  Note: ${TARGET_DIR} is not currently in your PATH.${RESET}"
-  echo -e "Please add it to your shell configuration (e.g. ~/.zshrc or ~/.bashrc):"
-  echo -e "  ${BOLD}export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
+  echo -e "${YELLOW}⚠️  Note: ${TARGET_DIR} is not currently in your PATH.${RESET}"
+  echo -e "   Add it by running:"
+  echo -e "   ${BOLD}export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}\n"
 fi
-
-echo -e "\n${BOLD}Quick Start:${RESET}"
-echo -e "  ${BOLD}skills ls${RESET}            List all installed global skills"
-echo -e "  ${BOLD}skills sync${RESET}          Sync and restore skills from ~/.agents/skills.json"
-echo -e "  ${BOLD}skills doctor${RESET}        Check and repair global skills health\n"

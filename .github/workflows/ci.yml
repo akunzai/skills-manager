@@ -2,62 +2,27 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/*]
   pull_request:
     branches: [main]
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
-    env:
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: "utf-8"
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10", "3.14"]
-
+    name: Test & Lint
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          go-version-file: "go.mod"
+          check-latest: true
+          cache: true
 
-      - name: Run unit tests (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          PYTHONPATH=src python3 -m unittest discover -s tests -v
+      - name: Run tests
+        run: go test -v -race ./...
 
-      - name: Run unit tests (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          PYTHONPATH: src
-          PYTHONUTF8: "1"
-          PYTHONIOENCODING: "utf-8"
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          python -m unittest discover -s tests -v
-
-      - name: Test zipapp build & install.sh (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          ./install.sh
-          ~/.local/bin/skills --help
-
-      - name: Test zipapp build & install.ps1 (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          PYTHONUTF8: "1"
-          PYTHONIOENCODING: "utf-8"
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          .\install.ps1
-          python "$HOME\.local\bin\skills" --help
+      - name: Build binary
+        run: go build -v ./cmd/skills

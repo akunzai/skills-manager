@@ -1,0 +1,150 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/spf13/cobra"
+)
+
+func newUpdateCmd() *cobra.Command {
+	var (
+		flagForce  bool
+		flagDryRun bool
+		flagJSON   bool
+	)
+
+	cmd := &cobra.Command{
+		Use:     "update [targets...]",
+		Aliases: []string{"upgrade"},
+		Short:   "Update remote skills to latest versions",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configPath, skillsDir, cacheDir := GetEffectivePaths()
+
+			cfg, err := config.LoadConfig(configPath)
+			if err != nil {
+				return err
+			}
+
+			if len(cfg.Remote) == 0 {
+				if flagJSON {
+					fmt.Println(`{"updated_repos":[],"updated_skills":[],"skipped_repos":[],"errors":[],"post_hooks":[]}`)
+				} else {
+					fmt.Printf("%sNo remote repositories configured in %s.%s\n", colorYellow, filepath.Base(configPath), colorReset)
+				}
+				return nil
+			}
+
+			targets := args
+
+			if !flagJSON {
+				if flagDryRun {
+					fmt.Printf("\n%s%s🔍 [Dry-Run] Checking and previewing skills update...%s\n\n", colorBold, colorCyan, colorReset)
+				} else {
+					fmt.Printf("\n%s%s🚀 Updating skills from remote repositories...%s\n\n", colorBold, colorCyan, colorReset)
+				}
+			}
+
+			onProgress := func(event string, data map[string]interface{}) {
+				if flagJSON {
+					return
+				}
+				switch event {
+				case "check_start":
+					fmt.Printf("  🔍 Checking %v remote repositories in parallel...\n", data["total"])
+				case "check_done":
+					outdated, _ := data["outdated"].(int)
+					upToDate, _ := data["up_to_date"].(int)
+					if outdated == 0 {
+						fmt.Printf("  %s✔ All %d repositories are already up to date.%s\n\n", colorGreen, upToDate, colorReset)
+					} else {
+						fmt.Printf("  %sℹ %d repository update(s) needed, %d already up to date.%s\n\n", colorCyan, outdated, upToDate, colorReset)
+					}
+				case "update_start":
+					idx := data["index"]
+					total := data["total"]
+					source := data["source"]
+					skills := data["skills"]
+					skillsList := ""
+					if sList, ok := skills.([]string); ok {
+						skillsList = strings.Join(sList, ", ")
+					}
+					if data["dry_run"] == true {
+						fmt.Printf("  [%v/%v] %sℹ [Dry-run]%s Would update %s%s%s (%s)\n", idx, total, colorCyan, colorReset, colorBold, source, colorReset, skillsList)
+					} else {
+						fmt.Printf("  [%v/%v] 📦 Updating %s%s%s (%s)...\n", idx, total, colorBold, source, colorReset, skillsList)
+					}
+				case "skill_restored":
+					fmt.Printf("      📥 Restored %s%s%s\n", colorBold, data["skill"], colorReset)
+				case "repo_done":
+					shaStr := ""
+					if sha, ok := data["new_sha"].(string); ok && len(sha) >= 7 {
+						shaStr = fmt.Sprintf(" (%s)", sha[:7])
+					}
+					fmt.Printf("      %s✔%s Successfully updated %s%s%s%s\n", colorGreen, colorReset, colorBold, data["source"], colorReset, shaStr)
+				case "repo_error":
+					fmt.Printf("      %s✖ Error updating %s: %s%s\n", colorRed, data["source"], data["error"], colorReset)
+				case "hooks_start":
+					fmt.Printf("\n%s⚡ Running post-sync hooks...%s\n", colorCyan, colorReset)
+				case "hook_done":
+					badge := fmt.Sprintf("%s✔%s", colorGreen, colorReset)
+					if ok, _ := data["ok"].(bool); !ok {
+						badge = fmt.Sprintf("%s✖%s", colorRed, colorReset)
+					}
+					fmt.Printf("  %s [%s] %s\n", badge, data["name"], data["msg"])
+				}
+			}
+
+			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, skillsDir, cacheDir, true, onProgress)
+			if err != nil {
+				return err
+			}
+
+			if flagJSON {
+				data, _ := json.MarshalIndent(result, "", "  ")
+				fmt.Println(string(data))
+				if len(result.Errors) > 0 {
+					return fmt.Errorf("update completed with errors")
+				}
+				return nil
+			}
+
+			totalUpdated := len(result.UpdatedSkills)
+			totalSkipped := len(result.SkippedRepos)
+
+			skipMsg := ""
+			if totalSkipped > 0 {
+				skipMsg = fmt.Sprintf(" (%d repository/repositories were already up to date)", totalSkipped)
+			}
+
+			if totalUpdated > 0 {
+				if flagDryRun {
+					fmt.Printf("\n%s%s✨ Dry-run complete: %d skill(s) would be updated.%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
+				} else {
+					fmt.Printf("\n%s%s✨ Successfully updated %d skill(s)!%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
+				}
+			} else {
+				if len(result.Errors) == 0 {
+					fmt.Printf("\n%s%s✨ Everything is already up to date.%s\n\n", colorBold, colorGreen, colorReset)
+				} else {
+					fmt.Printf("\n%s%sUpdate completed with errors.%s\n\n", colorBold, colorYellow, colorReset)
+				}
+			}
+
+			if len(result.Errors) > 0 {
+				return fmt.Errorf("update completed with %d error(s)", len(result.Errors))
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&flagForce, "force", false, "Force re-fetch and overwrite even if commit SHA is unchanged")
+	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview updates without making changes")
+	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON")
+
+	return cmd
+}
