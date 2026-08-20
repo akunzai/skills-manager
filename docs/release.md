@@ -4,14 +4,14 @@ Standard operating procedure (SOP) for releasing new versions of `skills-manager
 
 ## Pipeline Overview
 
-The release pipeline is automated via GitHub Actions (`.github/workflows/release.yml`). Pushing a Git tag (`vX.Y.Z`) triggers:
-1. Multi-version test execution.
-2. Building standalone zipapp executable `skills`.
-3. Generating categorized release notes via `.github/release.yml` and attaching the `skills` standalone binary asset.
+The release pipeline is automated via GitHub Actions (`.github/workflows/release.yml`) and GoReleaser (`.goreleaser.yaml`). Pushing a Git tag (`vX.Y.Z`) triggers:
+1. Multi-platform cross-compilation for Linux, macOS, and Windows (arm64 & amd64).
+2. Generating checksums and GitHub release assets (`.tar.gz` and `.zip`).
+3. Generating categorized release notes.
 
 ## Release Notes Categorization
 
-Release notes are automatically categorized from merged PR labels (applied automatically via `.github/workflows/pr-labeler.yml` from Conventional Commits prefix):
+Release notes are automatically categorized from merged PR labels:
 
 - `feat: ...` -> 🚀 **Features & Enhancements** (`enhancement`)
 - `fix: ...` -> 🐛 **Bug Fixes** (`bug`)
@@ -26,19 +26,17 @@ Release notes are automatically categorized from merged PR labels (applied autom
 ### 1. Pre-flight Checks
 Ensure test suite passes and working tree is clean:
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+go test -v ./...
 git status
 ```
 
-### 2. Bump Version Number (Single Source of Truth)
-Update the version string only in `src/skills_manager/__init__.py`:
-- `src/skills_manager/__init__.py`: `__version__ = "X.Y.Z"`
-
-*(Note: `pyproject.toml` uses dynamic versioning pointing to `src/skills_manager/__init__.py` as the single source of truth).*
+### 2. Bump Version Number
+Update the version string in `internal/updater/updater.go`:
+- `internal/updater/updater.go`: `var Version = "X.Y.Z"`
 
 ### 3. Commit and Tag
 ```bash
-git add src/skills_manager/__init__.py
+git add internal/updater/updater.go
 git commit -m "chore(release): bump version to vX.Y.Z"
 git tag -a vX.Y.Z -m "Release vX.Y.Z"
 ```

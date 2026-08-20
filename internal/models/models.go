@@ -1,0 +1,483 @@
+package models
+
+import (
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// Default paths resolved from environment or user home.
+func UserHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+	return home
+}
+
+func ResolveEnvPath(envVar, defaultSubpath string) string {
+	val := strings.TrimSpace(os.Getenv(envVar))
+	if val != "" {
+		return ExpandUser(val)
+	}
+	return ExpandUser(defaultSubpath)
+}
+
+func ExpandUser(path string) string {
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		home := UserHomeDir()
+		if path == "~" {
+			return home
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
+func DefaultAgentsDir() string {
+	return ResolveEnvPath("AGENTS_HOME", "~/.agents")
+}
+
+func DefaultSkillsDir() string {
+	return filepath.Join(DefaultAgentsDir(), "skills")
+}
+
+func DefaultConfigFile() string {
+	return filepath.Join(DefaultAgentsDir(), "skills.json")
+}
+
+func DefaultCacheDir() string {
+	if custom := os.Getenv("SKILLS_CACHE_DIR"); custom != "" {
+		return ExpandUser(custom)
+	}
+	stateHome := ResolveEnvPath("XDG_STATE_HOME", "~/.local/state")
+	return filepath.Join(stateHome, "skills-manager", "repo-cache")
+}
+
+// GetProjectRootFromSkillsDir derives the project root directory from a project-scoped skillsDir.
+func GetProjectRootFromSkillsDir(skillsDir string) string {
+	absDir, err := filepath.Abs(skillsDir)
+	if err != nil {
+		absDir = skillsDir
+	}
+	clean := filepath.Clean(absDir)
+	parent := filepath.Dir(clean)
+	if filepath.Base(clean) == "skills" && filepath.Base(parent) == ".agents" {
+		return filepath.Dir(parent)
+	}
+	if filepath.Base(clean) == "skills" {
+		return parent
+	}
+	return parent
+}
+
+// GetProjectKnownAgents returns mapping of agent names to their project-level skills directory.
+func GetProjectKnownAgents(projectRoot string) map[string]string {
+	return map[string]string{
+		"claude-code": filepath.Join(projectRoot, ".claude", "skills"),
+		"continue":    filepath.Join(projectRoot, ".continue", "skills"),
+		"cursor":      filepath.Join(projectRoot, ".cursor", "skills"),
+		"cline":       filepath.Join(projectRoot, ".cline", "skills"),
+		"roo":         filepath.Join(projectRoot, ".roo", "skills"),
+		"windsurf":    filepath.Join(projectRoot, ".codeium", "windsurf", "skills"),
+	}
+}
+
+// GetAgentsForSkillsDir returns the appropriate agent mapping (global or project-scoped).
+func GetAgentsForSkillsDir(skillsDir string) map[string]string {
+	if skillsDir == "" {
+		skillsDir = DefaultSkillsDir()
+	}
+	absSkills, _ := filepath.Abs(skillsDir)
+	absGlobal, _ := filepath.Abs(DefaultSkillsDir())
+	if filepath.Clean(absSkills) == filepath.Clean(absGlobal) {
+		return GetKnownAgents()
+	}
+	projectRoot := GetProjectRootFromSkillsDir(skillsDir)
+	return GetProjectKnownAgents(projectRoot)
+}
+
+// GetKnownAgents returns mapping of non-universal agent names to their global skills directory.
+func GetKnownAgents() map[string]string {
+	xdgConfig := ResolveEnvPath("XDG_CONFIG_HOME", "~/.config")
+	claudeHome := ResolveEnvPath("CLAUDE_CONFIG_DIR", "~/.claude")
+	vibeHome := ResolveEnvPath("VIBE_HOME", "~/.vibe")
+	hermesHome := ResolveEnvPath("HERMES_HOME", "~/.hermes")
+	autohandHome := ResolveEnvPath("AUTOHAND_HOME", "~/.autohand")
+	grokHome := ResolveEnvPath("GROK_HOME", "~/.grok")
+
+	openclawDir := ExpandUser("~/.openclaw/skills")
+	if _, err := os.Stat(ExpandUser("~/.clawdbot")); err == nil {
+		openclawDir = ExpandUser("~/.clawdbot/skills")
+	} else if _, err := os.Stat(ExpandUser("~/.moltbot")); err == nil {
+		openclawDir = ExpandUser("~/.moltbot/skills")
+	}
+
+	return map[string]string{
+		"adal":             ExpandUser("~/.adal/skills"),
+		"aider-desk":       ExpandUser("~/.aider-desk/skills"),
+		"astrbot":          ExpandUser("~/.astrbot/data/skills"),
+		"augment":          ExpandUser("~/.augment/skills"),
+		"autohand-code":    filepath.Join(autohandHome, "skills"),
+		"bob":              ExpandUser("~/.bob/skills"),
+		"claude-code":      filepath.Join(claudeHome, "skills"),
+		"codearts-agent":   ExpandUser("~/.codeartsdoer/skills"),
+		"codebuddy":        ExpandUser("~/.codebuddy/skills"),
+		"codemaker":        ExpandUser("~/.codemaker/skills"),
+		"codestudio":       ExpandUser("~/.codestudio/skills"),
+		"command-code":     ExpandUser("~/.commandcode/skills"),
+		"continue":         ExpandUser("~/.continue/skills"),
+		"cortex":           ExpandUser("~/.snowflake/cortex/skills"),
+		"crush":            ExpandUser("~/.config/crush/skills"),
+		"devin":            filepath.Join(xdgConfig, "devin", "skills"),
+		"droid":            ExpandUser("~/.factory/skills"),
+		"forgecode":        ExpandUser("~/.forge/skills"),
+		"goose":            filepath.Join(xdgConfig, "goose", "skills"),
+		"grok":             filepath.Join(grokHome, "skills"),
+		"hermes-agent":     filepath.Join(hermesHome, "skills"),
+		"iflow-cli":        ExpandUser("~/.iflow/skills"),
+		"inference-sh":     ExpandUser("~/.inferencesh/skills"),
+		"jazz":             ExpandUser("~/.jazz/skills"),
+		"junie":            ExpandUser("~/.junie/skills"),
+		"kilo":             ExpandUser("~/.kilocode/skills"),
+		"kimchi":           ExpandUser("~/.config/kimchi/harness/skills"),
+		"kiro-cli":         ExpandUser("~/.kiro/skills"),
+		"kode":             ExpandUser("~/.kode/skills"),
+		"lingma":           ExpandUser("~/.lingma/skills"),
+		"mcpjam":           ExpandUser("~/.mcpjam/skills"),
+		"minimax-code":     ExpandUser("~/.minimax/skills"),
+		"mistral-vibe":     filepath.Join(vibeHome, "skills"),
+		"moxby":            ExpandUser("~/.moxby/skills"),
+		"mux":              ExpandUser("~/.mux/skills"),
+		"neovate":          ExpandUser("~/.neovate/skills"),
+		"ona":              ExpandUser("~/.ona/skills"),
+		"openclaw":         openclawDir,
+		"openhands":        ExpandUser("~/.openhands/skills"),
+		"pi":               ExpandUser("~/.pi/agent/skills"),
+		"pochi":            ExpandUser("~/.pochi/skills"),
+		"posit-assistant":  ExpandUser("~/.posit/assistant/skills"),
+		"qoder":            ExpandUser("~/.qoder/skills"),
+		"qoder-cn":         ExpandUser("~/.qoder-cn/skills"),
+		"qwen-code":        ExpandUser("~/.qwen/skills"),
+		"reasonix":         ExpandUser("~/.reasonix/skills"),
+		"roo":              ExpandUser("~/.roo/skills"),
+		"rovodev":          ExpandUser("~/.rovodev/skills"),
+		"tabnine-cli":      ExpandUser("~/.tabnine/agent/skills"),
+		"terramind":        ExpandUser("~/.terramind/skills"),
+		"tinycloud":        ExpandUser("~/.tinycloud/skills"),
+		"trae":             ExpandUser("~/.trae/skills"),
+		"trae-cn":          ExpandUser("~/.trae-cn/skills"),
+		"windsurf":         ExpandUser("~/.codeium/windsurf/skills"),
+		"zcode":            ExpandUser("~/.zcode/skills"),
+		"zencoder":         ExpandUser("~/.zencoder/skills"),
+	}
+}
+
+// Universal agents that natively support ~/.agents/skills
+var UniversalAgents = []string{
+	"amp",
+	"antigravity",
+	"antigravity-cli",
+	"cline",
+	"codex",
+	"cursor",
+	"deepagents",
+	"dexto",
+	"firebender",
+	"gemini-cli",
+	"github-copilot",
+	"kimi-code-cli",
+	"loaf",
+	"opencode",
+	"promptscript",
+	"replit",
+	"warp",
+	"zed",
+	"universal",
+}
+
+var AgentAliases = map[string]string{
+	// Non-universal aliases
+	"claude":    "claude-code",
+	"roo-code":  "roo",
+	"vibe":      "mistral-vibe",
+	"hermes":    "hermes-agent",
+	"autohand":  "autohand-code",
+	"aider":     "aider-desk",
+	"codearts":  "codearts-agent",
+	"iflow":     "iflow-cli",
+	"kiro":      "kiro-cli",
+	"kilocode":  "kilo",
+	"minimax":   "minimax-code",
+	"posit":     "posit-assistant",
+	"positai":   "posit-assistant",
+	"tabnine":   "tabnine-cli",
+	"factory":   "droid",
+	"forge":     "forgecode",
+	"clawdbot":  "openclaw",
+	"moltbot":   "openclaw",
+	"opendevin": "openhands",
+	"qwen":      "qwen-code",
+	"zenflow":   "zencoder",
+	// Universal aliases
+	"gemini":      "gemini-cli",
+	"antigravity": "antigravity-cli",
+	"kimi":        "kimi-code-cli",
+	"kimi-code":   "kimi-code-cli",
+	"copilot":     "github-copilot",
+}
+
+func NormalizeAgentName(name string) string {
+	low := strings.ToLower(strings.TrimSpace(name))
+	if canonical, ok := AgentAliases[low]; ok {
+		return canonical
+	}
+	return low
+}
+
+func IsUniversalAgent(name string) bool {
+	norm := NormalizeAgentName(name)
+	for _, u := range UniversalAgents {
+		if u == norm {
+			return true
+		}
+	}
+	return false
+}
+
+type ParsedRepoSource struct {
+	SourceKey string `json:"sourceKey"`
+	URL       string `json:"url"`
+	RepoType  string `json:"repoType"` // "github", "gitlab", "git"
+	Branch    string `json:"branch,omitempty"`
+	Subpath   string `json:"subpath,omitempty"`
+}
+
+var sshURLRegex = regexp.MustCompile(`^git@([^:]+):(.+?)(?:\.git)?$`)
+
+func ParseRepoSource(raw string) ParsedRepoSource {
+	raw = strings.TrimSpace(raw)
+
+	// 1. Prefix: gitlab:group/project
+	if strings.HasPrefix(strings.ToLower(raw), "gitlab:") {
+		repoPath := strings.Trim(strings.TrimPrefix(raw, raw[:7]), "/")
+		return ParsedRepoSource{
+			SourceKey: "gitlab.com/" + repoPath,
+			URL:       "https://gitlab.com/" + repoPath + ".git",
+			RepoType:  "gitlab",
+		}
+	}
+
+	// Prefix: github:owner/repo
+	if strings.HasPrefix(strings.ToLower(raw), "github:") {
+		repoPath := strings.Trim(strings.TrimPrefix(raw, raw[:7]), "/")
+		return ParsedRepoSource{
+			SourceKey: repoPath,
+			URL:       "https://github.com/" + repoPath + ".git",
+			RepoType:  "github",
+		}
+	}
+
+	// 2. SSH URLs: git@host:group/project.git or ssh://git@host/...
+	if strings.HasPrefix(raw, "git@") || strings.HasPrefix(raw, "ssh://") {
+		if strings.HasPrefix(raw, "git@") {
+			match := sshURLRegex.FindStringSubmatch(raw)
+			if match != nil {
+				host := match[1]
+				path := strings.Trim(match[2], "/")
+				isGitHub := strings.EqualFold(host, "github.com") || strings.EqualFold(host, "github")
+				repoType := "git"
+				if isGitHub {
+					repoType = "github"
+				} else if strings.Contains(strings.ToLower(host), "gitlab") {
+					repoType = "gitlab"
+				}
+				sourceKey := host + "/" + path
+				if repoType == "github" {
+					sourceKey = path
+				}
+				return ParsedRepoSource{
+					SourceKey: sourceKey,
+					URL:       raw,
+					RepoType:  repoType,
+				}
+			}
+		} else if strings.HasPrefix(raw, "ssh://") {
+			u, err := url.Parse(raw)
+			if err == nil {
+				host := u.Hostname()
+				if host == "" {
+					host = "git"
+				}
+				path := strings.TrimSuffix(strings.TrimPrefix(u.Path, "/"), ".git")
+				isGitHub := strings.Contains(strings.ToLower(host), "github")
+				repoType := "git"
+				if isGitHub {
+					repoType = "github"
+				} else if strings.Contains(strings.ToLower(host), "gitlab") {
+					repoType = "gitlab"
+				}
+				sourceKey := host + "/" + path
+				if repoType == "github" {
+					sourceKey = path
+				}
+				return ParsedRepoSource{
+					SourceKey: sourceKey,
+					URL:       raw,
+					RepoType:  repoType,
+				}
+			}
+		}
+	}
+
+	// 3. HTTP / HTTPS URLs
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		u, err := url.Parse(raw)
+		if err == nil {
+			host := strings.ToLower(u.Host)
+			path := strings.Trim(u.Path, "/")
+			repoType := "git"
+			if strings.Contains(host, "github") {
+				repoType = "github"
+			} else if strings.Contains(host, "gitlab") {
+				repoType = "gitlab"
+			}
+
+			if strings.Contains(host, "github.com") {
+				parts := strings.Split(path, "/")
+				if len(parts) >= 4 && (parts[2] == "tree" || parts[2] == "blob") {
+					owner := parts[0]
+					repo := parts[1]
+					branch := parts[3]
+					var subpath string
+					if len(parts) > 4 {
+						subpath = strings.Join(parts[4:], "/")
+					}
+					return ParsedRepoSource{
+						SourceKey: owner + "/" + repo,
+						URL:       "https://" + host + "/" + owner + "/" + repo + ".git",
+						RepoType:  repoType,
+						Branch:    branch,
+						Subpath:   subpath,
+					}
+				}
+				cleanPath := strings.TrimSuffix(path, ".git")
+				return ParsedRepoSource{
+					SourceKey: cleanPath,
+					URL:       "https://" + host + "/" + cleanPath + ".git",
+					RepoType:  repoType,
+				}
+			} else if strings.Contains(host, "gitlab") {
+				if strings.Contains(path, "/-/tree/") || strings.Contains(path, "/-/blob/") {
+					sep := "/-/tree/"
+					if strings.Contains(path, "/-/blob/") {
+						sep = "/-/blob/"
+					}
+					parts := strings.SplitN(path, sep, 2)
+					basePart := strings.TrimSuffix(parts[0], ".git")
+					restParts := strings.Split(parts[1], "/")
+					branch := restParts[0]
+					var subpath string
+					if len(restParts) > 1 {
+						subpath = strings.Join(restParts[1:], "/")
+					}
+					return ParsedRepoSource{
+						SourceKey: host + "/" + basePart,
+						URL:       "https://" + host + "/" + basePart + ".git",
+						RepoType:  repoType,
+						Branch:    branch,
+						Subpath:   subpath,
+					}
+				} else if strings.Contains(path, "/tree/") || strings.Contains(path, "/blob/") {
+					sep := "/tree/"
+					if strings.Contains(path, "/blob/") {
+						sep = "/blob/"
+					}
+					parts := strings.SplitN(path, sep, 2)
+					basePart := strings.TrimSuffix(parts[0], ".git")
+					restParts := strings.Split(parts[1], "/")
+					branch := restParts[0]
+					var subpath string
+					if len(restParts) > 1 {
+						subpath = strings.Join(restParts[1:], "/")
+					}
+					return ParsedRepoSource{
+						SourceKey: host + "/" + basePart,
+						URL:       "https://" + host + "/" + basePart + ".git",
+						RepoType:  repoType,
+						Branch:    branch,
+						Subpath:   subpath,
+					}
+				}
+				cleanPath := strings.TrimSuffix(path, ".git")
+				return ParsedRepoSource{
+					SourceKey: host + "/" + cleanPath,
+					URL:       "https://" + host + "/" + cleanPath + ".git",
+					RepoType:  repoType,
+				}
+			} else {
+				cleanPath := strings.TrimSuffix(path, ".git")
+				protocol := "https"
+				if strings.HasPrefix(raw, "http://") {
+					protocol = "http"
+				}
+				return ParsedRepoSource{
+					SourceKey: host + "/" + cleanPath,
+					URL:       protocol + "://" + host + "/" + cleanPath + ".git",
+					RepoType:  repoType,
+				}
+			}
+		}
+	}
+
+	// 4. Plain shorthand: e.g. "owner/repo" or "gitlab.com/group/project"
+	cleanRaw := strings.Trim(strings.TrimSuffix(raw, ".git"), "/")
+	if strings.HasPrefix(cleanRaw, "gitlab.com/") {
+		return ParsedRepoSource{
+			SourceKey: cleanRaw,
+			URL:       "https://" + cleanRaw + ".git",
+			RepoType:  "gitlab",
+		}
+	} else if strings.Contains(cleanRaw, "/") && !strings.HasPrefix(cleanRaw, "github.com/") {
+		parts := strings.Split(cleanRaw, "/")
+		if strings.Contains(parts[0], ".") {
+			host := parts[0]
+			repoType := "git"
+			if strings.Contains(strings.ToLower(host), "gitlab") {
+				repoType = "gitlab"
+			}
+			return ParsedRepoSource{
+				SourceKey: cleanRaw,
+				URL:       "https://" + cleanRaw + ".git",
+				RepoType:  repoType,
+			}
+		}
+		return ParsedRepoSource{
+			SourceKey: cleanRaw,
+			URL:       "https://github.com/" + cleanRaw + ".git",
+			RepoType:  "github",
+		}
+	}
+
+	cleanKey := strings.TrimPrefix(cleanRaw, "github.com/")
+	return ParsedRepoSource{
+		SourceKey: cleanKey,
+		URL:       "https://github.com/" + cleanKey + ".git",
+		RepoType:  "github",
+	}
+}
+
+type SkillItem struct {
+	Name          string   `json:"name"`
+	SourceType    string   `json:"sourceType"` // "github", "gitlab", "git", "local_symlink", "local_command", "symlink", "untracked"
+	Source        string   `json:"source"`
+	Subpath       string   `json:"subpath,omitempty"`
+	InstalledPath string   `json:"path,omitempty"`
+	IsInstalled   bool     `json:"installed"`
+	IsValidSkill  bool     `json:"valid"`
+	LinkedAgents  []string `json:"agents"`
+	Description   string   `json:"description,omitempty"`
+	Scope         string   `json:"scope,omitempty"`
+}

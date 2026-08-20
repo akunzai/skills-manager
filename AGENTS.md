@@ -1,26 +1,27 @@
 # Skills Manager Developer Guidelines
 
-Global skills manager CLI (`skills` / `skills-manager`) for AI coding agents.
+Skills manager CLI (`skills` / `skills-manager`) for AI coding agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).
 
-This project uses Python (>=3.10) with standard library only (no third-party dependencies).
+This project is written in Go (>=1.27) and compiled to standalone cross-platform binaries with zero language runtime dependencies (uses system `git` for remote repository operations).
 
 ## Commands
 
-- Run tests: `python3 -m unittest discover -s tests`
+- Run tests: `go test -v ./...`
 - Build / install standalone binary: `./install.sh`
-- Manual zipapp build: `python3 -m zipapp src -m "skills_manager.cli:main" -p "/usr/bin/env python3" -o ~/.local/bin/skills`
-- Run local CLI: `PYTHONPATH=src python3 -m skills_manager.cli <command>`
+- Local binary build: `go build -o skills ./cmd/skills`
+- Run local CLI: `go run ./cmd/skills <command>`
 
 ## Pointers
 
 - Schema definition: @skills.schema.json
-- CLI definition: @src/skills_manager/cli.py
-- Engine & Git caching: @src/skills_manager/engine.py
-- Terminal UI prompt: @src/skills_manager/ui.py
-- Updater module: @src/skills_manager/updater.py
-- Config manager: @src/skills_manager/config.py
-- Core models & paths: @src/skills_manager/models.py
-- Unit tests: @tests/test_manager.py
+- CLI entrypoint: @cmd/skills/main.go
+- CLI commands: @internal/cli/root.go
+- Engine & Git caching: @internal/engine/update.go
+- Terminal UI prompt: @internal/tui/prompt.go
+- Updater module: @internal/updater/updater.go
+- Config manager: @internal/config/config.go
+- Core models & paths: @internal/models/models.go
+- GoReleaser config: @.goreleaser.yaml
 - Issue tracker: @docs/agents/issue-tracker.md
 - Triage labels: @docs/agents/triage-labels.md
 - Domain docs: @docs/agents/domain.md

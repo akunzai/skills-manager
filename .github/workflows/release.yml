@@ -9,31 +9,26 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  goreleaser:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          fetch-depth: 0
 
-      - name: Run test suite
-        run: |
-          PYTHONPATH=src python3 -m unittest discover -s tests -v
-
-      - name: Build standalone zipapp binary
-        run: |
-          python3 -m zipapp src -m "skills_manager.cli:main" -p "/usr/bin/env python3" -o skills
-          chmod +x skills
-          ./skills --help
-
-      - name: Create GitHub Release and Upload Binary Asset
-        uses: softprops/action-gh-release@v3
+      - name: Set up Go
+        uses: actions/setup-go@v7
         with:
-          files: skills
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+          go-version-file: "go.mod"
+          check-latest: true
+          cache: true
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
