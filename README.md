@@ -33,10 +33,11 @@ skills ls -a claude
 skills ls -s akunzai
 skills ls --source local
 
-# Add remote git skill(s) (interactive selection or specific skills)
+# Add remote git skill(s) (GitHub, GitLab, or Git URLs)
 skills add akunzai/agent-skills
-skills add akunzai/agent-skills --skill tidy-commits
-skills add akunzai/agent-skills --all
+skills add gitlab:my-org/my-skills
+skills add https://gitlab.com/my-org/my-skills/-/tree/main/skills/tidy-commits
+skills add git@github.com:akunzai/agent-skills.git --all
 
 # Add local symlink skill
 skills add --symlink ~/.local/share/terminal-browser/app/skills/default/terminal-browser --skill terminal-browser

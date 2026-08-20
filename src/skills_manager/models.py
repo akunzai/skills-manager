@@ -1,6 +1,8 @@
 """Data structures and constants for agent-skills-manager."""
 
 import os
+import re
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -165,6 +167,156 @@ def is_universal_agent(name: str) -> bool:
     """Check if an agent natively uses ~/.agents/skills."""
     norm = normalize_agent_name(name)
     return norm in UNIVERSAL_AGENTS
+
+
+@dataclass
+class ParsedRepoSource:
+    """Parsed repository source with key, clone url, and optional branch/subpath."""
+    source_key: str
+    url: str
+    repo_type: str  # "github", "gitlab", "git"
+    branch: Optional[str] = None
+    subpath: Optional[str] = None
+
+
+def parse_repo_source(raw: str) -> ParsedRepoSource:
+    """
+    Parse repository source string into canonical source key, clone URL, repo type, branch, and subpath.
+    Supports:
+      - 'gitlab:group/project'
+      - 'github:owner/repo'
+      - 'https://gitlab.com/group/project'
+      - 'https://github.com/owner/repo/tree/main/skills/foo'
+      - 'https://gitlab.com/group/project/-/tree/main/skills/foo'
+      - 'git@gitlab.com:group/project.git'
+      - 'git@github.com:owner/repo.git'
+      - 'owner/repo' (defaults to GitHub)
+    """
+    raw = raw.strip()
+
+    # 1. Prefix: gitlab:group/project
+    if raw.lower().startswith("gitlab:"):
+        repo_path = raw[7:].strip().strip("/")
+        return ParsedRepoSource(
+            source_key=f"gitlab.com/{repo_path}",
+            url=f"https://gitlab.com/{repo_path}.git",
+            repo_type="gitlab"
+        )
+
+    # Prefix: github:owner/repo
+    if raw.lower().startswith("github:"):
+        repo_path = raw[7:].strip().strip("/")
+        return ParsedRepoSource(
+            source_key=repo_path,
+            url=f"https://github.com/{repo_path}.git",
+            repo_type="github"
+        )
+
+    # 2. SSH URLs: git@host:group/project.git or ssh://git@host/...
+    if raw.startswith("git@") or raw.startswith("ssh://"):
+        url = raw
+        if raw.startswith("git@"):
+            match = re.match(r"^git@([^:]+):(.+?)(?:\.git)?$", raw)
+            if match:
+                host, path = match.group(1), match.group(2).strip("/")
+                is_github = host.lower() in ("github.com", "github")
+                repo_type = "github" if is_github else ("gitlab" if "gitlab" in host.lower() else "git")
+                source_key = path if repo_type == "github" else f"{host}/{path}"
+                return ParsedRepoSource(source_key=source_key, url=url, repo_type=repo_type)
+        elif raw.startswith("ssh://"):
+            parsed = urllib.parse.urlparse(raw)
+            host = parsed.hostname or "git"
+            path = parsed.path.lstrip("/").removesuffix(".git")
+            is_github = "github" in host.lower()
+            repo_type = "github" if is_github else ("gitlab" if "gitlab" in host.lower() else "git")
+            source_key = path if repo_type == "github" else f"{host}/{path}"
+            return ParsedRepoSource(source_key=source_key, url=url, repo_type=repo_type)
+
+    # 3. HTTP / HTTPS URLs
+    if raw.startswith("http://") or raw.startswith("https://"):
+        parsed = urllib.parse.urlparse(raw)
+        host = parsed.netloc.lower()
+        path = parsed.path.strip("/")
+
+        repo_type = "github" if "github" in host else ("gitlab" if "gitlab" in host else "git")
+
+        if "github.com" in host:
+            parts = path.split("/")
+            if len(parts) >= 4 and parts[2] in ("tree", "blob"):
+                owner, repo = parts[0], parts[1]
+                branch = parts[3]
+                subpath = "/".join(parts[4:]) if len(parts) > 4 else None
+                source_key = f"{owner}/{repo}"
+                clean_url = f"https://{host}/{owner}/{repo}.git"
+                return ParsedRepoSource(source_key=source_key, url=clean_url, repo_type=repo_type, branch=branch, subpath=subpath)
+            else:
+                clean_path = path.removesuffix(".git")
+                source_key = clean_path
+                clean_url = f"https://{host}/{clean_path}.git"
+                return ParsedRepoSource(source_key=source_key, url=clean_url, repo_type=repo_type)
+
+        elif "gitlab" in host:
+            if "/-/tree/" in path or "/-/blob/" in path:
+                base_part, rest = re.split(r"/-(?:/tree|/blob)/", path, maxsplit=1)
+                rest_parts = rest.split("/")
+                branch = rest_parts[0] if rest_parts else None
+                subpath = "/".join(rest_parts[1:]) if len(rest_parts) > 1 else None
+                repo_path = base_part.removesuffix(".git")
+                source_key = f"{host}/{repo_path}"
+                clean_url = f"https://{host}/{repo_path}.git"
+                return ParsedRepoSource(source_key=source_key, url=clean_url, repo_type=repo_type, branch=branch, subpath=subpath)
+            elif "/tree/" in path or "/blob/" in path:
+                base_part, rest = re.split(r"/(?:tree|blob)/", path, maxsplit=1)
+                rest_parts = rest.split("/")
+                branch = rest_parts[0] if rest_parts else None
+                subpath = "/".join(rest_parts[1:]) if len(rest_parts) > 1 else None
+                repo_path = base_part.removesuffix(".git")
+                source_key = f"{host}/{repo_path}"
+                clean_url = f"https://{host}/{repo_path}.git"
+                return ParsedRepoSource(source_key=source_key, url=clean_url, repo_type=repo_type, branch=branch, subpath=subpath)
+            else:
+                clean_path = path.removesuffix(".git")
+                source_key = f"{host}/{clean_path}"
+                clean_url = f"https://{host}/{clean_path}.git"
+                return ParsedRepoSource(source_key=source_key, url=clean_url, repo_type=repo_type)
+        else:
+            clean_path = path.removesuffix(".git")
+            source_key = f"{host}/{clean_path}"
+            protocol = "https" if raw.startswith("https://") else "http"
+            clean_url = f"{protocol}://{host}/{clean_path}.git"
+            return ParsedRepoSource(source_key=source_key, url=clean_url, repo_type=repo_type)
+
+    # 4. Plain shorthand: e.g. "owner/repo" or "gitlab.com/group/project"
+    clean_raw = raw.removesuffix(".git").strip("/")
+    if clean_raw.startswith("gitlab.com/"):
+        return ParsedRepoSource(
+            source_key=clean_raw,
+            url=f"https://{clean_raw}.git",
+            repo_type="gitlab"
+        )
+    elif "/" in clean_raw and not clean_raw.startswith("github.com/"):
+        parts = clean_raw.split("/")
+        if "." in parts[0]:
+            host = parts[0]
+            repo_type = "gitlab" if "gitlab" in host.lower() else "git"
+            return ParsedRepoSource(
+                source_key=clean_raw,
+                url=f"https://{clean_raw}.git",
+                repo_type=repo_type
+            )
+        else:
+            return ParsedRepoSource(
+                source_key=clean_raw,
+                url=f"https://github.com/{clean_raw}.git",
+                repo_type="github"
+            )
+    else:
+        clean_key = clean_raw.removeprefix("github.com/")
+        return ParsedRepoSource(
+            source_key=clean_key,
+            url=f"https://github.com/{clean_key}.git",
+            repo_type="github"
+        )
 
 
 @dataclass

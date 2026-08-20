@@ -49,7 +49,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["github", "git"]
+            "enum": ["github", "gitlab", "git"]
           },
           "url": {
             "type": "string",

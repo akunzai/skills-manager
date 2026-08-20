@@ -39,6 +39,7 @@ from .models import (
     SkillItem,
     is_universal_agent,
     normalize_agent_name,
+    parse_repo_source,
 )
 from .ui import prompt_grouped_multi_select, prompt_multi_select
 from .updater import (
@@ -233,10 +234,16 @@ def cmd_add(args: argparse.Namespace) -> int:
         print(f"{RED}Error: Source repository or --symlink/--command required.{RESET}")
         return 1
 
-    source = args.source.strip()
-    print(f"{CYAN}📦 Fetching repository: {BOLD}{source}{RESET}...")
+    parsed = parse_repo_source(args.source)
+    source_key = parsed.source_key
+    clone_url = args.url or parsed.url
+    branch = args.branch or parsed.branch
+    subpath_override = args.path or parsed.subpath
+    repo_type = parsed.repo_type
+
+    print(f"{CYAN}📦 Fetching repository: {BOLD}{source_key}{RESET}...")
     try:
-        repo_dir = ensure_git_repo(source, url=args.url, branch=args.branch, force_update=True, cache_dir=cache_dir)
+        repo_dir = ensure_git_repo(source_key, url=clone_url, branch=branch, force_update=True, cache_dir=cache_dir)
     except Exception as e:
         print(f"{RED}Error cloning repository: {e}{RESET}")
         return 1
@@ -244,19 +251,32 @@ def cmd_add(args: argparse.Namespace) -> int:
     # Discover skills in repo
     discovered = discover_skills_in_repo(repo_dir)
     if not discovered:
-        print(f"{RED}Error: No SKILL.md found in {source}{RESET}")
+        print(f"{RED}Error: No SKILL.md found in {source_key}{RESET}")
         return 1
 
     # Determine which skills to install
     skills_to_install = {}
     if args.all:
         skills_to_install = discovered
+    elif subpath_override and not args.skill:
+        # Match by direct subpath from web tree URL or --path
+        matched_by_subpath = {k: v for k, v in discovered.items() if v == subpath_override or v.rstrip("/") == subpath_override.rstrip("/")}
+        if matched_by_subpath:
+            skills_to_install = matched_by_subpath
+        else:
+            subpath_dir = repo_dir / subpath_override
+            if subpath_dir.exists() and (subpath_dir / "SKILL.md").exists():
+                skill_name = subpath_dir.name
+                skills_to_install = {skill_name: subpath_override}
+            else:
+                print(f"{RED}Error: Specified path '{subpath_override}' does not contain SKILL.md{RESET}")
+                return 1
     elif args.skill:
         for sk in args.skill:
             if sk in discovered:
                 skills_to_install[sk] = discovered[sk]
-            elif args.path:
-                skills_to_install[sk] = args.path
+            elif subpath_override:
+                skills_to_install[sk] = subpath_override
             else:
                 # Fuzzy match
                 matched = [k for k in discovered.keys() if k.lower() == sk.lower()]
@@ -276,7 +296,7 @@ def cmd_add(args: argparse.Namespace) -> int:
                 items_list.append((sk_name, is_inst, None))
 
             chosen = prompt_multi_select(
-                f"📦 Select skills to install from {source}:",
+                f"📦 Select skills to install from {source_key}:",
                 items_list
             )
 
@@ -301,6 +321,9 @@ def cmd_add(args: argparse.Namespace) -> int:
     skills_dir.mkdir(parents=True, exist_ok=True)
     installed_names = []
 
+    # Decide whether url needs to be explicitly stored in skills.json
+    stored_url = clone_url if (args.url or repo_type != "github" or not clone_url.startswith("https://github.com/")) else None
+
     for name, subpath in skills_to_install.items():
         src_path = repo_dir / subpath
         target_path = skills_dir / name
@@ -308,12 +331,12 @@ def cmd_add(args: argparse.Namespace) -> int:
         copy_skill_folder(src_path, target_path)
 
         # Dispatch symlinks
-        target_agents = args.agent or get_target_agents_for_skill(name, source, config_data)
+        target_agents = args.agent or get_target_agents_for_skill(name, source_key, config_data)
         for agent in target_agents:
             ensure_agent_symlink(name, agent, skills_dir)
 
         # Add to config
-        add_remote_skill_entry(config_data, source, name, subpath, url=args.url)
+        add_remote_skill_entry(config_data, source_key, name, subpath, repo_type=repo_type, url=stored_url)
         installed_names.append(name)
 
     save_config(config_data, config_path)

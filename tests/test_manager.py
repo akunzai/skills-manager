@@ -46,6 +46,7 @@ from skills_manager.models import (
     UNIVERSAL_AGENTS,
     is_universal_agent,
     normalize_agent_name,
+    parse_repo_source,
 )
 
 
@@ -955,6 +956,133 @@ class TestHarnessSupport(unittest.TestCase):
             self.assertEqual(len(data), 0)
 
 
+class TestUrlAndProtocolParsing(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.skills_dir = self.temp_dir / ".agents" / "skills"
+        self.cache_dir = self.temp_dir / "cache"
+        self.config_path = self.temp_dir / "skills.json"
+        self.skills_dir.mkdir(parents=True)
+        self.cache_dir.mkdir(parents=True)
+        self.config = get_default_config()
+        save_config(self.config, self.config_path)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_parse_repo_source_formats(self):
+        """Verify URL, prefix, and shorthand parsing across GitHub, GitLab, and custom git hosts."""
+        # 1. Plain shorthand owner/repo
+        p1 = parse_repo_source("akunzai/agent-skills")
+        self.assertEqual(p1.source_key, "akunzai/agent-skills")
+        self.assertEqual(p1.url, "https://github.com/akunzai/agent-skills.git")
+        self.assertEqual(p1.repo_type, "github")
+        self.assertIsNone(p1.branch)
+        self.assertIsNone(p1.subpath)
+
+        # 2. github: prefix
+        p2 = parse_repo_source("github:akunzai/agent-skills")
+        self.assertEqual(p2.source_key, "akunzai/agent-skills")
+        self.assertEqual(p2.url, "https://github.com/akunzai/agent-skills.git")
+        self.assertEqual(p2.repo_type, "github")
+
+        # 3. gitlab: prefix
+        p3 = parse_repo_source("gitlab:my-group/my-skills")
+        self.assertEqual(p3.source_key, "gitlab.com/my-group/my-skills")
+        self.assertEqual(p3.url, "https://gitlab.com/my-group/my-skills.git")
+        self.assertEqual(p3.repo_type, "gitlab")
+
+        # 4. HTTPS GitHub URL
+        p4 = parse_repo_source("https://github.com/akunzai/agent-skills.git")
+        self.assertEqual(p4.source_key, "akunzai/agent-skills")
+        self.assertEqual(p4.url, "https://github.com/akunzai/agent-skills.git")
+        self.assertEqual(p4.repo_type, "github")
+
+        # 5. HTTPS GitHub tree URL with branch and subpath
+        p5 = parse_repo_source("https://github.com/akunzai/agent-skills/tree/feat-branch/skills/tidy-commits")
+        self.assertEqual(p5.source_key, "akunzai/agent-skills")
+        self.assertEqual(p5.url, "https://github.com/akunzai/agent-skills.git")
+        self.assertEqual(p5.repo_type, "github")
+        self.assertEqual(p5.branch, "feat-branch")
+        self.assertEqual(p5.subpath, "skills/tidy-commits")
+
+        # 6. HTTPS GitLab URL
+        p6 = parse_repo_source("https://gitlab.com/my-group/my-skills")
+        self.assertEqual(p6.source_key, "gitlab.com/my-group/my-skills")
+        self.assertEqual(p6.url, "https://gitlab.com/my-group/my-skills.git")
+        self.assertEqual(p6.repo_type, "gitlab")
+
+        # 7. HTTPS GitLab tree URL with /-/tree/
+        p7 = parse_repo_source("https://gitlab.com/my-group/my-skills/-/tree/main/skills/custom-tool")
+        self.assertEqual(p7.source_key, "gitlab.com/my-group/my-skills")
+        self.assertEqual(p7.url, "https://gitlab.com/my-group/my-skills.git")
+        self.assertEqual(p7.repo_type, "gitlab")
+        self.assertEqual(p7.branch, "main")
+        self.assertEqual(p7.subpath, "skills/custom-tool")
+
+        # 8. SSH GitHub URL
+        p8 = parse_repo_source("git@github.com:akunzai/agent-skills.git")
+        self.assertEqual(p8.source_key, "akunzai/agent-skills")
+        self.assertEqual(p8.url, "git@github.com:akunzai/agent-skills.git")
+        self.assertEqual(p8.repo_type, "github")
+
+        # 9. SSH GitLab URL
+        p9 = parse_repo_source("git@gitlab.com:my-group/my-skills.git")
+        self.assertEqual(p9.source_key, "gitlab.com/my-group/my-skills")
+        self.assertEqual(p9.url, "git@gitlab.com:my-group/my-skills.git")
+        self.assertEqual(p9.repo_type, "gitlab")
+
+        # 10. Self-hosted GitLab / Generic Git
+        p10 = parse_repo_source("https://gitlab.mycorp.com/team/project.git")
+        self.assertEqual(p10.source_key, "gitlab.mycorp.com/team/project")
+        self.assertEqual(p10.url, "https://gitlab.mycorp.com/team/project.git")
+        self.assertEqual(p10.repo_type, "gitlab")
+
+        p11 = parse_repo_source("https://git.example.org/team/project.git")
+        self.assertEqual(p11.source_key, "git.example.org/team/project")
+        self.assertEqual(p11.url, "https://git.example.org/team/project.git")
+        self.assertEqual(p11.repo_type, "git")
+
+    @patch("skills_manager.cli.ensure_agent_symlink")
+    @patch("skills_manager.cli.ensure_git_repo")
+    def test_cmd_add_with_gitlab_tree_url(self, mock_git, mock_link):
+        """Verify adding skill using a full GitLab tree URL parses branch, subpath, and registers properly."""
+        mock_repo = self.cache_dir / "gitlab_repo"
+        (mock_repo / "skills" / "gitlab-tool").mkdir(parents=True)
+        (mock_repo / "skills" / "gitlab-tool" / "SKILL.md").write_text("# GitLab Tool", encoding="utf-8")
+        mock_git.return_value = mock_repo
+
+        import argparse
+        args = argparse.Namespace(
+            source="https://gitlab.com/my-group/my-skills/-/tree/main/skills/gitlab-tool",
+            config=str(self.config_path),
+            skills_dir=str(self.skills_dir),
+            cache_dir=str(self.cache_dir),
+            skill=None,
+            all=False,
+            path=None,
+            url=None,
+            branch=None,
+            agent=None,
+            symlink=None,
+            command=None,
+            check=None,
+            description=None
+        )
+
+        ret = cmd_add(args)
+        self.assertEqual(ret, 0)
+        self.assertTrue((self.skills_dir / "gitlab-tool" / "SKILL.md").exists())
+
+        loaded_cfg = load_config(self.config_path)
+        self.assertIn("gitlab.com/my-group/my-skills", loaded_cfg["remote"])
+        entry = loaded_cfg["remote"]["gitlab.com/my-group/my-skills"]
+        self.assertEqual(entry["type"], "gitlab")
+        self.assertEqual(entry["url"], "https://gitlab.com/my-group/my-skills.git")
+        self.assertEqual(entry["skills"]["gitlab-tool"], "skills/gitlab-tool")
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

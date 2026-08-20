@@ -107,6 +107,7 @@ def add_remote_skill_entry(
         "type": repo_type,
         "skills": {}
     })
+    repo_entry["type"] = repo_type
     if url:
         repo_entry["url"] = url
     repo_entry.setdefault("skills", {})[skill_name] = subpath
