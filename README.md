@@ -33,7 +33,8 @@ skills ls -a claude
 skills ls -s akunzai
 skills ls --source local
 
-# Add remote git skill(s)
+# Add remote git skill(s) (interactive selection or specific skills)
+skills add akunzai/agent-skills
 skills add akunzai/agent-skills --skill tidy-commits
 skills add akunzai/agent-skills --all
 
@@ -108,21 +109,3 @@ skills self-update --dry-run
   }
 }
 ```
-
----
-
-## Development
-
-```bash
-# Run unit tests
-python3 -m unittest discover -s tests
-
-# Build zipapp executable manually
-python3 -m zipapp src -m "skills_manager.cli:main" -p "/usr/bin/env python3" -o ~/.local/bin/skills
-```
-
----
-
-## License
-
-[MIT License](LICENSE) © 2026 Charley Wu
