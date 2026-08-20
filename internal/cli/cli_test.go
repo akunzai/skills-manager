@@ -220,6 +220,120 @@ func TestCLILsFormatting(t *testing.T) {
 	}
 }
 
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("AGENTS_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("VIBE_HOME", "")
+	t.Setenv("HERMES_HOME", "")
+	t.Setenv("AUTOHAND_HOME", "")
+	t.Setenv("GROK_HOME", "")
+	return home
+}
+
+func resetRootCmdFlags() {
+	flagConfigFile = ""
+	flagSkillsDir = ""
+	flagCacheDir = ""
+	flagProject = false
+	flagGlobal = true
+	_ = RootCmd.PersistentFlags().Set("config", "")
+	_ = RootCmd.PersistentFlags().Set("skills-dir", "")
+	_ = RootCmd.PersistentFlags().Set("cache-dir", "")
+	_ = RootCmd.PersistentFlags().Set("global", "true")
+	_ = RootCmd.PersistentFlags().Set("project", "false")
+}
+
+func TestCLIDoctorIgnoresUnusedEmptyAgentDirs(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeDir := filepath.Join(home, ".claude", "skills")
+	crushDir := filepath.Join(home, ".config", "crush", "skills")
+	jazzDir := filepath.Join(home, ".jazz", "skills")
+	for _, dir := range []string{claudeDir, crushDir, jazzDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var buf bytes.Buffer
+	RootCmd.SetOut(&buf)
+	RootCmd.SetErr(&buf)
+	RootCmd.SetArgs([]string{"doctor", "--config", configFile, "--skills-dir", skillsDir})
+	err := RootCmd.Execute()
+	out := buf.String()
+
+	if !strings.Contains(out, "[claude-code]") {
+		t.Fatalf("expected configured claude-code in doctor output, got:\n%s", out)
+	}
+	if strings.Contains(out, "[crush]") {
+		t.Fatalf("did not expect unused crush as a healthy harness, got:\n%s", out)
+	}
+	if strings.Contains(out, "[jazz]") {
+		t.Fatalf("did not expect unused jazz as a healthy harness, got:\n%s", out)
+	}
+	if !strings.Contains(out, "leftover empty") {
+		t.Fatalf("expected leftover empty agent dirs warning, got:\n%s", out)
+	}
+	if err == nil {
+		t.Fatal("expected doctor to report leftover empty dirs as issues")
+	}
+}
+
+func TestCLIDoctorFixRemovesLeftoverEmptyAgentDirs(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeDir := filepath.Join(home, ".claude", "skills")
+	crushDir := filepath.Join(home, ".config", "crush", "skills")
+	jazzDir := filepath.Join(home, ".jazz", "skills")
+	for _, dir := range []string{claudeDir, crushDir, jazzDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var buf bytes.Buffer
+	RootCmd.SetOut(&buf)
+	RootCmd.SetErr(&buf)
+	RootCmd.SetArgs([]string{"doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir})
+	_ = RootCmd.Execute()
+
+	if _, err := os.Stat(filepath.Join(home, ".jazz")); !os.IsNotExist(err) {
+		t.Fatal("expected leftover ~/.jazz to be removed")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "crush")); !os.IsNotExist(err) {
+		t.Fatal("expected leftover ~/.config/crush to be removed")
+	}
+	if _, err := os.Stat(claudeDir); err != nil {
+		t.Fatal("configured claude skills dir must remain")
+	}
+}
+
 func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	flagConfigFile = ""
 	flagSkillsDir = ""
@@ -247,5 +361,3 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 		t.Fatalf("expected updated_repos in JSON output, got: %s", buf.String())
 	}
 }
-
-
