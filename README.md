@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python: >=3.10](https://img.shields.io/badge/Python->=3.10-blue.svg)](https://www.python.org/)
 
-Fast, zero-dependency global skills manager for AI coding agents (Claude Code, Codex, Cursor, Gemini CLI, Cline, Zed, OpenCode, etc.).
+Global skills manager for AI coding agents (Claude Code, Codex, Cursor, Gemini CLI, Cline, Zed, OpenCode, etc.).
 
 Replaces `npx skills` for global/user-level management with a deterministic `skills.json` configuration, fast Git shallow clone caching, local/CLI tool skill support, and multi-agent symlink synchronization.
 
@@ -43,7 +43,8 @@ skills add --symlink ~/.local/share/terminal-browser/app/skills/default/terminal
 # Add CLI command skill
 skills add --command "agentsview skills install --harness agents" --check "which agentsview" --skill agentsview-finding-history
 
-# Remove skill(s) and unlink from agents
+# Remove skill(s) (interactive selection or specific skills)
+skills rm
 skills rm ponytail-review
 skills rm tidy-commits --agent codex
 

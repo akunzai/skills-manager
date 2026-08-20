@@ -1,6 +1,6 @@
 # Skills Manager Developer Guidelines
 
-Fast, zero-dependency global skills manager CLI (`skills` / `skills-manager`) for AI coding agents.
+Global skills manager CLI (`skills` / `skills-manager`) for AI coding agents.
 
 This project uses Python (>=3.10) with standard library only (no third-party dependencies).
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # install.sh - Single-file installer for skills-manager
-# Packages a zero-dependency standalone executable directly to ~/.local/bin/skills
+# Packages a standalone executable directly to ~/.local/bin/skills
 # ==============================================================================
 set -euo pipefail
 
