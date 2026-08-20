@@ -42,7 +42,7 @@ def ensure_git_repo(
 ) -> Path:
     """Clone or update git repo in cache directory with shallow depth."""
     base_cache = cache_dir or DEFAULT_CACHE_DIR
-    clean_source = source.strip().rstrip(".git")
+    clean_source = source.strip().removesuffix(".git")
     repo_dest = base_cache / clean_source
     repo_url = url or f"https://github.com/{clean_source}.git"
 
@@ -347,7 +347,7 @@ def get_remote_repo_commit(
     branch: Optional[str] = None
 ) -> Optional[str]:
     """Query remote repo commit hash using git ls-remote without fetching objects."""
-    clean_source = source.strip().rstrip(".git")
+    clean_source = source.strip().removesuffix(".git")
     repo_url = url or f"https://github.com/{clean_source}.git"
     ref_target = branch or "HEAD"
     try:
@@ -371,7 +371,7 @@ def check_repo_update_status(
 ) -> Dict[str, Any]:
     """Check whether a remote repository in cache is up-to-date with remote HEAD."""
     base_cache = cache_dir or DEFAULT_CACHE_DIR
-    clean_source = source.strip().rstrip(".git")
+    clean_source = source.strip().removesuffix(".git")
     repo_dest = base_cache / clean_source
 
     url = repo_info.get("url")
@@ -429,12 +429,14 @@ def update_remote_skills(
     force: bool = False,
     dry_run: bool = False,
     skills_dir: Optional[Path] = None,
-    cache_dir: Optional[Path] = None
+    cache_dir: Optional[Path] = None,
+    on_progress: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Update remote repositories and sync skills to skills_dir and target agents.
     If targets is specified, only updates matching repos or skills.
-    If targets is omitted and force is False, only updates repos where an update is available or not installed.
+    If targets is omitted and force is False, rapidly checks all repos in parallel
+    and only updates repos where an update is available or not installed.
     """
     base_skills = skills_dir or DEFAULT_SKILLS_DIR
     base_cache = cache_dir or DEFAULT_CACHE_DIR
@@ -469,20 +471,28 @@ def update_remote_skills(
     skipped_repos = []
     errors = []
 
-    for source, repo_info in repos_to_process.items():
-        skills = repo_info.get("skills", {})
-        branch = repo_info.get("branch")
-        url = repo_info.get("url")
+    # 1. Fast parallel check when no targets specified and not force
+    repos_needing_update: Dict[str, Dict[str, Any]] = {}
 
-        if not force and target_set is None:
-            status_info = check_repo_update_status(source, repo_info, cache_dir=base_cache)
-            if status_info["status"] == "up_to_date":
+    if not force and target_set is None:
+        if on_progress:
+            on_progress("check_start", {"total": len(repos_to_process)})
+
+        status_results = check_all_remote_skills_outdated(config_data, cache_dir=base_cache)
+        status_map = {r["source"]: r for r in status_results}
+
+        for source, repo_info in repos_to_process.items():
+            skills = repo_info.get("skills", {})
+            status_info = status_map.get(source, {})
+            status = status_info.get("status")
+
+            if status == "up_to_date":
                 all_exist = all((base_skills / sk).exists() for sk in skills.keys())
                 if all_exist:
                     skipped_repos.append({
                         "source": source,
                         "reason": "up_to_date",
-                        "local_sha": status_info["local_sha"],
+                        "local_sha": status_info.get("localSha"),
                         "skills": list(skills.keys()),
                     })
                     if not dry_run:
@@ -491,11 +501,40 @@ def update_remote_skills(
                                 ensure_agent_symlink(name, agent, base_skills)
                     continue
 
+            repos_needing_update[source] = repo_info
+
+        if on_progress:
+            on_progress("check_done", {
+                "total": len(repos_to_process),
+                "up_to_date": len(skipped_repos),
+                "outdated": len(repos_needing_update),
+            })
+    else:
+        repos_needing_update = repos_to_process
+
+    # 2. Process updates for repos that need them
+    update_list = list(repos_needing_update.items())
+    total_to_update = len(update_list)
+
+    for i, (source, repo_info) in enumerate(update_list, 1):
+        skills = repo_info.get("skills", {})
+        branch = repo_info.get("branch")
+        url = repo_info.get("url")
+
+        if on_progress:
+            on_progress("update_start", {
+                "source": source,
+                "index": i,
+                "total": total_to_update,
+                "skills": list(skills.keys()),
+                "dry_run": dry_run,
+            })
+
         if dry_run:
             updated_repos.append({
                 "source": source,
                 "skills": list(skills.keys()),
-                "dry_run": True
+                "dry_run": True,
             })
             for sk in skills.keys():
                 updated_skills.append(sk)
@@ -507,10 +546,13 @@ def update_remote_skills(
                 url=url,
                 branch=branch,
                 force_update=True,
-                cache_dir=base_cache
+                cache_dir=base_cache,
             )
         except Exception as e:
-            errors.append({"source": source, "error": str(e)})
+            err_msg = str(e)
+            errors.append({"source": source, "error": err_msg})
+            if on_progress:
+                on_progress("repo_error", {"source": source, "error": err_msg})
             continue
 
         repo_updated_skills = []
@@ -519,7 +561,10 @@ def update_remote_skills(
             target_path = base_skills / name
 
             if not src_path.exists():
-                errors.append({"source": source, "skill": name, "error": f"Path missing in repository: {subpath}"})
+                err_msg = f"Path missing in repository: {subpath}"
+                errors.append({"source": source, "skill": name, "error": err_msg})
+                if on_progress:
+                    on_progress("repo_error", {"source": source, "skill": name, "error": err_msg})
                 continue
 
             copy_skill_folder(src_path, target_path)
@@ -529,18 +574,33 @@ def update_remote_skills(
             for agent in get_target_agents_for_skill(name, source, config_data):
                 ensure_agent_symlink(name, agent, base_skills)
 
+            if on_progress:
+                on_progress("skill_restored", {"source": source, "skill": name, "subpath": subpath})
+
         new_sha = get_local_repo_commit(repo_dir)
         updated_repos.append({
             "source": source,
             "skills": repo_updated_skills,
             "new_sha": new_sha,
         })
+        if on_progress:
+            on_progress("repo_done", {
+                "source": source,
+                "new_sha": new_sha,
+                "skills": repo_updated_skills,
+            })
 
+    # 3. Post hooks
     post_hook_results = []
     if updated_skills and not dry_run:
         post_hooks = config_data.get("postHooks", [])
         if post_hooks:
+            if on_progress:
+                on_progress("hooks_start", {})
             post_hook_results = execute_post_hooks(post_hooks, dry_run=False)
+            if on_progress:
+                for name, ok, msg in post_hook_results:
+                    on_progress("hook_done", {"name": name, "ok": ok, "msg": msg})
 
     return {
         "updated_repos": updated_repos,
