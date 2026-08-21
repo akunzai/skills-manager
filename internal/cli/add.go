@@ -72,7 +72,8 @@ func newAddCmd() *cobra.Command {
 					return err
 				}
 				destLink := filepath.Join(skillsDir, skillName)
-				if err := engine.CreateSymlink(absSourcePath, destLink, true); err != nil {
+				linkTarget := LocalSymlinkTarget(absSourcePath, skillsDir)
+				if err := engine.CreateSymlink(linkTarget, destLink, true); err != nil {
 					return err
 				}
 
@@ -84,7 +85,7 @@ func newAddCmd() *cobra.Command {
 					_, _ = engine.EnsureAgentSymlink(skillName, agent, skillsDir)
 				}
 
-				config.AddLocalSymlinkEntry(cfg, skillName, absSourcePath, flagDescription)
+				config.AddLocalSymlinkEntry(cfg, skillName, StoreLocalSourcePath(absSourcePath, skillsDir), flagDescription)
 				if err := config.SaveConfig(cfg, configPath); err != nil {
 					return err
 				}

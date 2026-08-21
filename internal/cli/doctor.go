@@ -87,12 +87,18 @@ func newDoctorCmd() *cobra.Command {
 
 				if len(brokenInAgent) > 0 {
 					fmt.Fprintf(out, "  %s✖ [%s] Broken symlinks:%s %s\n", colorRed, agentName, colorReset, strings.Join(brokenInAgent, ", "))
-					issuesFound += len(brokenInAgent)
 					if flagFix {
+						// Only what --fix could not repair still counts as an issue.
 						for _, b := range brokenInAgent {
-							_ = os.Remove(filepath.Join(agentDir, b))
+							if err := os.Remove(filepath.Join(agentDir, b)); err != nil {
+								issuesFound++
+								fmt.Fprintf(out, "    %s✖ Failed to remove broken symlink %s: %s%s\n", colorRed, b, err, colorReset)
+								continue
+							}
 							fmt.Fprintf(out, "    %s✔ Fixed: Removed broken symlink %s%s\n", colorGreen, b, colorReset)
 						}
+					} else {
+						issuesFound += len(brokenInAgent)
 					}
 				} else {
 					fmt.Fprintf(out, "  %s✔%s [%s] Symlinks healthy (%s)\n", colorGreen, colorReset, agentName, agentDir)
@@ -100,16 +106,25 @@ func newDoctorCmd() *cobra.Command {
 
 				if len(physicalInAgent) > 0 {
 					fmt.Fprintf(out, "  %s⚠️  [%s] Physical directories found instead of symlinks:%s %s\n", colorYellow, agentName, colorReset, strings.Join(physicalInAgent, ", "))
-					issuesFound += len(physicalInAgent)
 					if flagFix {
+						// Only what --fix could not repair still counts as an issue.
 						for _, pName := range physicalInAgent {
 							masterSkillPath := filepath.Join(skillsDir, pName)
-							if _, err := os.Stat(masterSkillPath); err == nil {
-								_ = os.RemoveAll(filepath.Join(agentDir, pName))
-								_, _ = engine.EnsureAgentSymlink(pName, agentName, skillsDir)
-								fmt.Fprintf(out, "    %s✔ Fixed: Converted %s in %s to symlink%s\n", colorGreen, pName, agentName, colorReset)
+							if _, err := os.Stat(masterSkillPath); err != nil {
+								issuesFound++
+								fmt.Fprintf(out, "    %s✖ Cannot convert %s: no master skill at %s%s\n", colorRed, pName, masterSkillPath, colorReset)
+								continue
 							}
+							_ = os.RemoveAll(filepath.Join(agentDir, pName))
+							if _, err := engine.EnsureAgentSymlink(pName, agentName, skillsDir); err != nil {
+								issuesFound++
+								fmt.Fprintf(out, "    %s✖ Failed to convert %s in %s: %s%s\n", colorRed, pName, agentName, err, colorReset)
+								continue
+							}
+							fmt.Fprintf(out, "    %s✔ Fixed: Converted %s in %s to symlink%s\n", colorGreen, pName, agentName, colorReset)
 						}
+					} else {
+						issuesFound += len(physicalInAgent)
 					}
 				}
 			}

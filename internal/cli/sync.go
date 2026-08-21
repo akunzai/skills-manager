@@ -182,7 +182,7 @@ func newSyncCmd() *cobra.Command {
 				configuredSkills[name] = struct{}{}
 
 				if localInfo.Type == "symlink" {
-					src := models.ExpandUser(localInfo.Source)
+					src := ResolveLocalSourcePath(localInfo.Source, skillsDir)
 					targetLink := filepath.Join(skillsDir, name)
 					if _, err := os.Stat(src); err != nil {
 						fmt.Printf("  %s⚠️  Local symlink source missing: %s (skill: %s)%s\n", colorYellow, src, name, colorReset)
@@ -192,7 +192,7 @@ func newSyncCmd() *cobra.Command {
 					if flagDryRun {
 						fmt.Printf("  [Dry-run] Would symlink %s -> %s\n", targetLink, src)
 					} else {
-						if err := engine.CreateSymlink(src, targetLink, true); err != nil {
+						if err := engine.CreateSymlink(LocalSymlinkTarget(src, skillsDir), targetLink, true); err != nil {
 							fmt.Printf("  %s✖ Failed to symlink %s: %s%s\n", colorRed, name, err, colorReset)
 							continue
 						}
