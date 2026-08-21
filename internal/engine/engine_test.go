@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -55,6 +56,27 @@ func TestDiscoverSkillsInRepo(t *testing.T) {
 	}
 	if discovered["skill-two"] != "plugins/sub/skill-two" {
 		t.Errorf("unexpected skill-two path: %s", discovered["skill-two"])
+	}
+}
+
+func TestDiscoverSkillsInRepoRejectsDuplicateSkillNames(t *testing.T) {
+	tmpRepo := t.TempDir()
+	for _, path := range []string{"skills/first/SKILL.md", "skills/second/SKILL.md"} {
+		fullPath := filepath.Join(tmpRepo, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte("---\nname: duplicate\n---\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := DiscoverSkillsInRepo(tmpRepo)
+	if err == nil {
+		t.Fatal("DiscoverSkillsInRepo succeeded; want duplicate-name error")
+	}
+	if !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), "skills/first") || !strings.Contains(err.Error(), "skills/second") {
+		t.Fatalf("duplicate-name error = %q; want both conflicting paths", err)
 	}
 }
 

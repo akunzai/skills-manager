@@ -14,6 +14,93 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const repositoryRootGroup = "Repository root"
+
+func shouldPromptForDiscoveredSkills(skillCount int, interactive, skipConfirmation bool) bool {
+	return skillCount > 0 && interactive && !skipConfirmation
+}
+
+func groupDiscoveredSkills(discovered map[string]string) (tui.GroupedItems, bool) {
+	byDirectory := make(map[string][]tui.SelectOption)
+	for name, skillPath := range discovered {
+		directory := filepath.ToSlash(filepath.Dir(skillPath))
+		byDirectory[directory] = append(byDirectory[directory], tui.SelectOption{Key: name, Title: name})
+	}
+	if len(byDirectory) <= 1 {
+		return nil, false
+	}
+
+	directories := make([]string, 0, len(byDirectory))
+	for directory := range byDirectory {
+		directories = append(directories, directory)
+	}
+	sort.Strings(directories)
+
+	labels := groupLabels(directories)
+	groups := make(tui.GroupedItems, len(directories))
+	for _, directory := range directories {
+		options := byDirectory[directory]
+		sort.Slice(options, func(i, j int) bool {
+			return options[i].Key < options[j].Key
+		})
+		groups[labels[directory]] = options
+	}
+
+	return groups, true
+}
+
+func groupLabels(directories []string) map[string]string {
+	depths := make(map[string]int, len(directories))
+	for _, directory := range directories {
+		depths[directory] = 1
+	}
+
+	for {
+		labels := make(map[string]string, len(directories))
+		duplicates := make(map[string][]string)
+		for _, directory := range directories {
+			label := repositoryRootGroup
+			if directory != "." {
+				parts := strings.Split(directory, "/")
+				depth := depths[directory]
+				if depth > len(parts) {
+					depth = len(parts)
+				}
+				label = strings.Join(parts[len(parts)-depth:], "/")
+				if label == repositoryRootGroup {
+					label = "./" + label
+				}
+			}
+			labels[directory] = label
+			duplicates[label] = append(duplicates[label], directory)
+		}
+
+		resolved := true
+		for _, directories := range duplicates {
+			if len(directories) < 2 {
+				continue
+			}
+			resolved = false
+			for _, directory := range directories {
+				depths[directory]++
+			}
+		}
+		if resolved {
+			return labels
+		}
+	}
+}
+
+func discoveryResult(discovered map[string]string, err error, sourceKey string) (map[string]string, error) {
+	if err != nil {
+		return nil, fmt.Errorf("discover skills in %s: %w", sourceKey, err)
+	}
+	if len(discovered) == 0 {
+		return nil, fmt.Errorf("no SKILL.md found in %s", sourceKey)
+	}
+	return discovered, nil
+}
+
 func newAddCmd() *cobra.Command {
 	var (
 		flagSkills      []string
@@ -168,8 +255,9 @@ func newAddCmd() *cobra.Command {
 			}
 
 			discovered, err := engine.DiscoverSkillsInRepo(repoDir)
-			if err != nil || len(discovered) == 0 {
-				return fmt.Errorf("no SKILL.md found in %s", sourceKey)
+			discovered, err = discoveryResult(discovered, err, sourceKey)
+			if err != nil {
+				return err
 			}
 
 			skillsToInstall := make(map[string]string)
@@ -218,29 +306,41 @@ func newAddCmd() *cobra.Command {
 					}
 				}
 			} else {
-				if len(discovered) == 1 {
-					skillsToInstall = discovered
-				} else if tui.IsTerminal() && !flagYes {
-					var options []tui.SelectOption
-					for skName := range discovered {
-						isInst := false
-						if _, err := os.Stat(filepath.Join(skillsDir, skName)); err == nil {
-							isInst = true
+				if shouldPromptForDiscoveredSkills(len(discovered), tui.IsTerminal(), flagYes) {
+					groups, shouldGroup := groupDiscoveredSkills(discovered)
+					if shouldGroup {
+						for _, options := range groups {
+							for i := range options {
+								if _, err := os.Stat(filepath.Join(skillsDir, options[i].Key)); err == nil {
+									options[i].Selected = true
+								}
+							}
 						}
-						options = append(options, tui.SelectOption{
-							Key:      skName,
-							Title:    skName,
-							Selected: isInst,
-						})
 					}
-					sort.Slice(options, func(i, j int) bool {
-						return options[i].Key < options[j].Key
-					})
 
-					chosen, err := tui.PromptMultiSelect(
-						fmt.Sprintf("Select skills to install from %s:", sourceKey),
-						options,
-					)
+					var chosen []string
+					if shouldGroup {
+						chosen, err = tui.PromptGroupedMultiSelect(
+							fmt.Sprintf("Select skills to install from %s:", sourceKey),
+							groups,
+						)
+					} else {
+						options := make([]tui.SelectOption, 0, len(discovered))
+						for skName := range discovered {
+							isInst := false
+							if _, err := os.Stat(filepath.Join(skillsDir, skName)); err == nil {
+								isInst = true
+							}
+							options = append(options, tui.SelectOption{Key: skName, Title: skName, Selected: isInst})
+						}
+						sort.Slice(options, func(i, j int) bool {
+							return options[i].Key < options[j].Key
+						})
+						chosen, err = tui.PromptMultiSelect(
+							fmt.Sprintf("Select skills to install from %s:", sourceKey),
+							options,
+						)
+					}
 					if err != nil {
 						return err
 					}
@@ -255,6 +355,8 @@ func newAddCmd() *cobra.Command {
 					for _, ch := range chosen {
 						skillsToInstall[ch] = discovered[ch]
 					}
+				} else if len(discovered) == 1 {
+					skillsToInstall = discovered
 				} else {
 					discNames := make([]string, 0, len(discovered))
 					for k := range discovered {
