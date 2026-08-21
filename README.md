@@ -24,7 +24,7 @@ irm https://raw.githubusercontent.com/akunzai/skills-manager/main/install.ps1 | 
 ## 🚀 Quick Start
 
 ```bash
-# Install skills from GitHub / GitLab
+# Install skills from GitHub
 skills add akunzai/agent-skills
 
 # List installed skills
@@ -84,6 +84,7 @@ skills ls
 skills ls --json
 skills ls -a claude
 skills ls -s akunzai
+skills ls -p # project scope
 
 # Interactive removal
 skills rm
@@ -102,12 +103,15 @@ skills sync -p          # restore project skills
 
 # Check outdated & update
 skills outdated
+skills outdated -p
 skills update
 skills update akunzai/agent-skills
+skills update -p
 
 # Health check & auto-repair
 skills doctor
 skills doctor --fix
+skills doctor -p
 
 # Self-update binary
 skills self-update
