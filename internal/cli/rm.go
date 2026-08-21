@@ -24,6 +24,9 @@ func newRmCmd() *cobra.Command {
 		Aliases: []string{"remove"},
 		Short:   "Remove one or more skills globally or from specific agents",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			configPath, skillsDir, _ := GetEffectivePaths()
 
 			cfg, err := config.LoadConfig(configPath)
@@ -66,6 +69,7 @@ func newRmCmd() *cobra.Command {
 					}
 					skillsToRemove = chosen
 				} else {
+					cmd.SilenceUsage = false
 					return fmt.Errorf("skill name(s) required")
 				}
 			}

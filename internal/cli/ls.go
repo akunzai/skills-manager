@@ -34,6 +34,9 @@ func newLsCmd() *cobra.Command {
 		Aliases: []string{"list"},
 		Short:   "List installed and configured skills",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			configPath, skillsDir, _ := GetEffectivePaths()
 
 			cfg, err := config.LoadConfig(configPath)

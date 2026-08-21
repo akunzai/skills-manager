@@ -19,6 +19,9 @@ func newOutdatedCmd() *cobra.Command {
 		Aliases: []string{"check", "check-update"},
 		Short:   "Check for new versions in remote skill repositories",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			configPath, _, cacheDir := GetEffectivePaths()
 
 			cfg, err := config.LoadConfig(configPath)

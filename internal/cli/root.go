@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
@@ -16,6 +17,69 @@ var (
 	flagGlobal     bool
 	flagProject    bool
 )
+
+// IsProjectScope reports whether skillsDir is project-scoped rather than the
+// global skills directory. It mirrors models.GetAgentsForSkillsDir's own test.
+func IsProjectScope(skillsDir string) bool {
+	if skillsDir == "" {
+		return false
+	}
+	absSkills, err := filepath.Abs(skillsDir)
+	if err != nil {
+		return false
+	}
+	absGlobal, err := filepath.Abs(models.DefaultSkillsDir())
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(absSkills) != filepath.Clean(absGlobal)
+}
+
+// StoreLocalSourcePath renders a local skill source for skills.json. Inside a
+// project it returns a path relative to the project root, so the committed
+// config resolves on a teammate's checkout instead of pointing at the author's
+// absolute path. Anything outside the project, and all of global scope, keeps
+// the absolute path.
+func StoreLocalSourcePath(absSource string, skillsDir string) string {
+	if !IsProjectScope(skillsDir) {
+		return absSource
+	}
+	projectRoot := models.GetProjectRootFromSkillsDir(skillsDir)
+	absRoot, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return absSource
+	}
+	rel, err := filepath.Rel(absRoot, absSource)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return absSource
+	}
+	return filepath.ToSlash(rel)
+}
+
+// LocalSymlinkTarget returns what the skills-dir symlink should point at. A
+// source inside the project is linked relatively (e.g. ../../my-skill) so the
+// checkout survives being cloned elsewhere; anything else stays absolute.
+func LocalSymlinkTarget(absSource string, skillsDir string) string {
+	if filepath.IsAbs(StoreLocalSourcePath(absSource, skillsDir)) {
+		return absSource
+	}
+	rel, err := filepath.Rel(skillsDir, absSource)
+	if err != nil {
+		return absSource
+	}
+	return rel
+}
+
+// ResolveLocalSourcePath turns a skills.json source back into a usable path,
+// interpreting a relative one against the project root.
+func ResolveLocalSourcePath(source string, skillsDir string) string {
+	expanded := models.ExpandUser(source)
+	if filepath.IsAbs(expanded) {
+		return expanded
+	}
+	base := models.GetProjectRootFromSkillsDir(skillsDir)
+	return filepath.Join(base, filepath.FromSlash(expanded))
+}
 
 func GetEffectivePaths() (configPath string, skillsDir string, cacheDir string) {
 	cacheDir = models.DefaultCacheDir()
@@ -65,9 +129,9 @@ func GetEffectivePaths() (configPath string, skillsDir string, cacheDir string) 
 }
 
 var RootCmd = &cobra.Command{
-	Use:   "skills",
-	Short: "Skills manager for AI coding agents",
-	Long:  `A fast, cross-platform standalone CLI to discover, install, update, and manage skills across AI coding agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).`,
+	Use:     "skills",
+	Short:   "Skills manager for AI coding agents",
+	Long:    `A fast, cross-platform standalone CLI to discover, install, update, and manage skills across AI coding agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).`,
 	Version: updater.Version,
 }
 

@@ -22,6 +22,9 @@ func newSelfUpdateCmd() *cobra.Command {
 		Aliases: []string{"self-upgrade"},
 		Short:   "Update skills CLI itself to latest release",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			if !flagJSON {
 				fmt.Printf("\n%s%s🔍 Checking for skills CLI updates from GitHub Releases...%s\n\n", colorBold, colorCyan, colorReset)
 			}
