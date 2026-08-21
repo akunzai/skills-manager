@@ -65,8 +65,9 @@ func LeftoverEmptyAgentDirs(known, configured map[string]string) []AgentDir {
 }
 
 // RemoveEmptyAgentDir deletes an empty agent skills directory and prunes
-// empty parents, stopping at $HOME, XDG_CONFIG_HOME, and ~/.local.
-func RemoveEmptyAgentDir(agentDir string) error {
+// empty parents. Pruning never escapes stopAt (when non-empty), and always
+// stops at $HOME, XDG_CONFIG_HOME, and ~/.local.
+func RemoveEmptyAgentDir(agentDir string, stopAt string) error {
 	if agentDir == "" {
 		return nil
 	}
@@ -90,9 +91,11 @@ func RemoveEmptyAgentDir(agentDir string) error {
 	if err := os.RemoveAll(agentDir); err != nil {
 		return err
 	}
-	return pruneEmptyParents(filepath.Dir(agentDir))
+	return pruneEmptyParents(filepath.Dir(agentDir), stopAt)
 }
 
+// isDirEffectivelyEmpty reports whether an agent skills directory holds no
+// skills. Dot entries (e.g. .DS_Store) do not count as skills.
 func isDirEffectivelyEmpty(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -106,23 +109,45 @@ func isDirEffectivelyEmpty(dir string) (bool, error) {
 	return true, nil
 }
 
-func pruneEmptyParents(dir string) error {
+// isDirCompletelyEmpty reports whether dir holds no entries at all. Parent
+// pruning uses this stricter test so that hidden entries such as .git,
+// .agents, or .claude keep a directory alive.
+func isDirCompletelyEmpty(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) == 0, nil
+}
+
+func pruneEmptyParents(dir string, stopAt string) error {
 	home := filepath.Clean(models.UserHomeDir())
 	xdgConfig := filepath.Clean(models.ResolveEnvPath("XDG_CONFIG_HOME", "~/.config"))
 	localHome := filepath.Clean(filepath.Join(home, ".local"))
 
+	boundary := ""
+	if stopAt != "" {
+		boundary = filepath.Clean(stopAt)
+	}
+
 	for dir != "" {
 		clean := filepath.Clean(dir)
-		if clean == home || clean == xdgConfig || clean == localHome {
+		if clean == home || clean == xdgConfig || clean == localHome || clean == boundary {
 			return nil
 		}
 		if clean == "/" || clean == "." || filepath.Dir(clean) == clean {
 			return nil
 		}
-		if !pathIsUnder(clean, home) && !pathIsUnder(clean, xdgConfig) {
+		// With an explicit boundary (project scope) it is the only thing that
+		// keeps pruning inside the project; without one, stay under $HOME.
+		inScope := pathIsUnder(clean, home) || pathIsUnder(clean, xdgConfig)
+		if boundary != "" {
+			inScope = pathIsUnder(clean, boundary)
+		}
+		if !inScope {
 			return nil
 		}
-		empty, err := isDirEffectivelyEmpty(clean)
+		empty, err := isDirCompletelyEmpty(clean)
 		if err != nil || !empty {
 			return err
 		}
