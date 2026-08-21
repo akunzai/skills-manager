@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/spf13/pflag"
 )
 
@@ -154,7 +156,7 @@ func TestCLILocalSymlinkAddAndRemove(t *testing.T) {
 	}
 }
 
-func TestCLISyncPruneOrphans(t *testing.T) {
+func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 	flagConfigFile = ""
 	flagSkillsDir = ""
 	flagCacheDir = ""
@@ -177,15 +179,172 @@ func TestCLISyncPruneOrphans(t *testing.T) {
 	_ = os.MkdirAll(orphanDir, 0755)
 	_ = os.WriteFile(filepath.Join(orphanDir, "SKILL.md"), []byte("# Orphan"), 0644)
 
-	// 3. Run sync --prune
-	RootCmd.SetArgs([]string{"sync", "--prune-only", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
+	// 3. Sync only restores declared skills; it must not delete unrelated files.
+	RootCmd.SetArgs([]string{"sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
 	if err := RootCmd.Execute(); err != nil {
-		t.Fatalf("sync --prune failed: %v", err)
+		t.Fatalf("sync failed: %v", err)
 	}
 
-	// Verify orphan was pruned
-	if _, err := os.Stat(orphanDir); err == nil {
-		t.Fatalf("expected orphaned skill to be pruned")
+	if _, err := os.Stat(orphanDir); err != nil {
+		t.Fatalf("sync must leave orphaned skill alone: %v", err)
+	}
+}
+
+func TestCLIDeprecatedPruneAliasPrintsOneMigrationWarning(t *testing.T) {
+	resetRootCmdFlags()
+	configFile := filepath.Join(t.TempDir(), "skills.json")
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "sync", "--prune-only", "--dry-run", "--config", configFile, "--skills-dir", t.TempDir())
+	if err != nil {
+		t.Fatalf("deprecated prune alias failed: %v\n%s", err, out)
+	}
+	if got := strings.Count(out, "use `skills prune` instead"); got != 1 {
+		t.Fatalf("migration warning count = %d; want 1\n%s", got, out)
+	}
+}
+
+func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "configured", filepath.Join(skillsDir, "configured"), "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"configured", "orphan"} {
+		if err := os.MkdirAll(filepath.Join(skillsDir, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skillsDir, name, "SKILL.md"), []byte("# "+name), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, agent := range []string{"claude", "augment"} {
+		if _, err := engine.EnsureAgentSymlink("configured", agent, skillsDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := engine.EnsureAgentSymlink("orphan", "augment", skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	independent := filepath.Join(home, ".continue", "skills", "configured")
+	if err := os.MkdirAll(independent, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(independent, "SKILL.md"), []byte("# independent"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "prune", "--yes", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("prune --yes failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Pruned 1 untracked master skill") || !strings.Contains(out, "2 unconfigured agent links") {
+		t.Fatalf("expected prune summary, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Removed master skill: orphan") || !strings.Contains(out, "Removed managed link:") {
+		t.Fatalf("expected per-path prune results, got:\n%s", out)
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "orphan")); !os.IsNotExist(err) {
+		t.Fatal("untracked master skill should be removed")
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "orphan")); !os.IsNotExist(err) {
+		t.Fatal("managed link for removed master skill should be removed")
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "configured")); !os.IsNotExist(err) {
+		t.Fatal("unconfigured managed link should be removed")
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "configured")); err != nil {
+		t.Fatal("configured managed link should remain")
+	}
+	if _, err := os.Stat(independent); err != nil {
+		t.Fatal("independent agent skill must remain")
+	}
+}
+
+func TestCLIPruneSkillsOnlyKeepsConfiguredSkillLinks(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "configured", filepath.Join(skillsDir, "configured"), "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"configured", "orphan"} {
+		if err := os.MkdirAll(filepath.Join(skillsDir, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := engine.EnsureAgentSymlink("configured", "augment", skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.EnsureAgentSymlink("orphan", "augment", skillsDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runCLI(t, "prune", "--skills-only", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "configured")); err != nil {
+		t.Fatal("--skills-only must keep links for configured skills")
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "orphan")); !os.IsNotExist(err) {
+		t.Fatal("--skills-only must remove links for a removed master skill")
+	}
+}
+
+func TestCLIPruneRequiresYesWithoutTerminal(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	orphan := filepath.Join(skillsDir, "orphan")
+	if err := os.MkdirAll(orphan, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "prune", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil {
+		t.Fatal("prune without --yes must fail without a terminal")
+	}
+	if !strings.Contains(out, "Prune plan:") {
+		t.Fatalf("expected plan before refusal, got:\n%s", out)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatal("refused prune must not delete files")
+	}
+}
+
+func TestSelectedPrunePlanExpandsMasterSkillsAndKeepsIndividualLinks(t *testing.T) {
+	plan := engine.PrunePlan{
+		UntrackedSkills: []string{"orphan"},
+		Unconfigured: []engine.PruneLink{
+			{Agent: "augment", Path: "/agents/augment/orphan"},
+			{Agent: "continue", Path: "/agents/continue/configured"},
+		},
+	}
+
+	selected := selectedPrunePlan(plan, []string{pruneMasterKey("orphan"), pruneLinkKey("/agents/continue/configured")})
+	if got, want := selected.UntrackedSkills, []string{"orphan"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected master skills = %v; want %v", got, want)
+	}
+	if got, want := selected.Unconfigured, []engine.PruneLink{
+		{Agent: "augment", Path: "/agents/augment/orphan"},
+		{Agent: "continue", Path: "/agents/continue/configured"},
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected links = %v; want %v", got, want)
 	}
 }
 

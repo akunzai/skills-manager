@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 
 	"golang.org/x/term"
@@ -22,6 +23,10 @@ const (
 	hideCursor = "\033[?25l"
 	showCursor = "\033[?25h"
 	clearLine  = "\033[2K"
+
+	enterAlternateScreen = "\033[?1049h"
+	leaveAlternateScreen = "\033[?1049l"
+	groupedPromptRedraw  = "\033[H\033[2J"
 )
 
 type SelectOption struct {
@@ -30,6 +35,7 @@ type SelectOption struct {
 	Extra     string
 	Installed bool
 	Selected  bool
+	DependsOn string
 }
 
 type GroupedItems map[string][]SelectOption
@@ -49,6 +55,10 @@ const (
 	keyEscape
 	keyToggleAll // 'a' or 'A'
 	keyInterrupt
+	keyPageDown // Ctrl+f
+	keyPageUp   // Ctrl+b
+	keyLeft
+	keyRight
 )
 
 func readKey(fd int) keyType {
@@ -58,12 +68,19 @@ func readKey(fd int) keyType {
 		return keyUnknown
 	}
 
-	b := buf[:n]
+	return parseKey(buf[:n])
+}
+
+func parseKey(b []byte) keyType {
 
 	if len(b) == 1 {
 		switch b[0] {
+		case 2: // Ctrl+B
+			return keyPageUp
 		case 3: // Ctrl+C
 			return keyInterrupt
+		case 6: // Ctrl+F
+			return keyPageDown
 		case 13, 10: // Enter
 			return keyEnter
 		case ' ', 'x', 'X':
@@ -87,6 +104,10 @@ func readKey(fd int) keyType {
 				return keyUp
 			case 'B':
 				return keyDown
+			case 'C':
+				return keyRight
+			case 'D':
+				return keyLeft
 			}
 		}
 	}
@@ -227,7 +248,7 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			}
 		}
 
-		instructions := fmt.Sprintf("%sUse ↑/↓ (or k/j) to navigate, Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.%s", colorDim, colorReset)
+		instructions := fmt.Sprintf("%sUse ↑/↓ (or k/j) to navigate, Ctrl+f/b to page, Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.%s", colorDim, colorReset)
 		fmt.Printf("\r\n%s%s\r\n", clearLine, instructions)
 	}
 
@@ -257,6 +278,18 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			render(false)
 		case keyDown:
 			cursorIdx = (cursorIdx + 1) % numItems
+			render(false)
+		case keyPageDown:
+			cursorIdx += visibleCount - 1
+			if cursorIdx >= numItems {
+				cursorIdx = numItems - 1
+			}
+			render(false)
+		case keyPageUp:
+			cursorIdx -= visibleCount - 1
+			if cursorIdx < 0 {
+				cursorIdx = 0
+			}
 			render(false)
 		case keySpace:
 			selected[cursorIdx] = !selected[cursorIdx]
@@ -291,13 +324,32 @@ type displayRow struct {
 	skillTitle  string
 	installed   bool
 	extra       string
+	dependsOn   string
 	groupSkills []string
+}
+
+func groupedTopIndicator(windowStart int, isScrollable bool) string {
+	if !isScrollable || windowStart == 0 {
+		return clearLine + "\r\n"
+	}
+
+	return fmt.Sprintf("%s  %s▲ (%d more above)%s\r\n", clearLine, colorDim, windowStart, colorReset)
 }
 
 // PromptGroupedMultiSelect displays grouped items with collapsible/batch-selectable group headers.
 // Pressing Space on a group header batch toggles all skills in that group.
 // Returns (selectedSkillKeys, nil) or (nil, nil) on Esc/q cancel.
 func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string, error) {
+	return promptGroupedMultiSelect(title, groupedItems, nil)
+}
+
+// PromptOrderedGroupedMultiSelect displays groups in groupOrder first, then
+// any remaining groups alphabetically.
+func PromptOrderedGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrder []string) ([]string, error) {
+	return promptGroupedMultiSelect(title, groupedItems, groupOrder)
+}
+
+func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrder []string) ([]string, error) {
 	if !IsTerminal() {
 		return nil, fmt.Errorf("interactive prompt requires a terminal")
 	}
@@ -305,8 +357,28 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 	var rows []displayRow
 	var allSkillKeys []string
 	selectedMap := make(map[string]bool)
+	groupHeaders := make(map[string]displayRow, len(groupedItems))
+	groupRows := make(map[string][]displayRow, len(groupedItems))
 
-	for source, skills := range groupedItems {
+	sources := make([]string, 0, len(groupedItems))
+	seenSources := make(map[string]struct{}, len(groupedItems))
+	for _, source := range groupOrder {
+		if len(groupedItems[source]) == 0 {
+			continue
+		}
+		sources = append(sources, source)
+		seenSources[source] = struct{}{}
+	}
+	var remainingSources []string
+	for source := range groupedItems {
+		if _, seen := seenSources[source]; !seen {
+			remainingSources = append(remainingSources, source)
+		}
+	}
+	sort.Strings(remainingSources)
+	sources = append(sources, remainingSources...)
+	for _, source := range sources {
+		skills := groupedItems[source]
 		if len(skills) == 0 {
 			continue
 		}
@@ -319,27 +391,49 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 			}
 		}
 
-		rows = append(rows, displayRow{
+		groupHeaders[source] = displayRow{
 			rType:       rowGroup,
 			groupSource: source,
 			groupSkills: groupSkillKeys,
-		})
+		}
 
 		for _, sk := range skills {
-			rows = append(rows, displayRow{
+			groupRows[source] = append(groupRows[source], displayRow{
 				rType:       rowSkill,
 				groupSource: source,
 				skillKey:    sk.Key,
 				skillTitle:  sk.Title,
 				installed:   sk.Installed,
 				extra:       sk.Extra,
+				dependsOn:   sk.DependsOn,
 			})
 		}
 	}
 
-	totalRows := len(rows)
+	collapsed := make(map[string]bool, len(sources))
+	for _, source := range sources {
+		collapsed[source] = true
+	}
+	totalRows := 0
+	rebuildRows := func() {
+		rows = rows[:0]
+		for _, source := range sources {
+			rows = append(rows, groupHeaders[source])
+			if !collapsed[source] {
+				rows = append(rows, groupRows[source]...)
+			}
+		}
+		totalRows = len(rows)
+	}
+	rebuildRows()
 	if totalRows == 0 {
 		return []string{}, nil
+	}
+	rowByKey := make(map[string]displayRow, len(allSkillKeys))
+	for _, group := range groupRows {
+		for _, row := range group {
+			rowByKey[row.skillKey] = row
+		}
 	}
 
 	fd := int(os.Stdin.Fd())
@@ -349,7 +443,7 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 	}
 	defer func() {
 		_ = term.Restore(fd, oldState)
-		fmt.Print(showCursor)
+		fmt.Print(leaveAlternateScreen, showCursor)
 	}()
 
 	cursorIdx := 0
@@ -363,23 +457,22 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 	if maxVisible > 20 {
 		maxVisible = 20
 	}
-	visibleCount := totalRows
-	if visibleCount > maxVisible {
-		visibleCount = maxVisible
+	visibleCount := 0
+	isScrollable := false
+	isCovered := func(row displayRow) bool {
+		return row.dependsOn != "" && selectedMap[row.dependsOn]
 	}
-	isScrollable := totalRows > maxVisible
-
-	scrollLines := 0
-	if isScrollable {
-		scrollLines = 2
+	isSelected := func(row displayRow) bool {
+		return selectedMap[row.skillKey] || isCovered(row)
 	}
-	frameLines := 2 + visibleCount + scrollLines + 2
 
-	render := func(first bool) {
-		if !first {
-			fmt.Printf("\033[%dA\r", frameLines)
+	render := func() {
+		fmt.Print(groupedPromptRedraw)
+		visibleCount = totalRows
+		if visibleCount > maxVisible {
+			visibleCount = maxVisible
 		}
-
+		isScrollable = totalRows > maxVisible
 		if isScrollable {
 			if cursorIdx < windowStart {
 				windowStart = cursorIdx
@@ -387,20 +480,18 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 				windowStart = cursorIdx - visibleCount + 1
 			}
 		}
+		if windowStart >= totalRows {
+			windowStart = totalRows - visibleCount
+		}
 		windowEnd := windowStart + visibleCount
 		if windowEnd > totalRows {
 			windowEnd = totalRows
 		}
 
-		fmt.Printf("%s%s%s%s\r\n\r\n", colorBold, colorCyan, title, colorReset)
-
-		if isScrollable {
-			if windowStart > 0 {
-				fmt.Printf("%s  %s▲ (%d more above)%s\r\n", clearLine, colorDim, windowStart, colorReset)
-			} else {
-				fmt.Printf("%s\r\n", clearLine)
-			}
-		}
+		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, title, colorReset)
+		fmt.Printf("%s%sUse ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups, Ctrl+f/b to page.%s\r\n", clearLine, colorDim, colorReset)
+		fmt.Printf("%s%sSpace to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.%s\r\n", clearLine, colorDim, colorReset)
+		fmt.Print(groupedTopIndicator(windowStart, isScrollable))
 
 		for i := windowStart; i < windowEnd; i++ {
 			row := rows[i]
@@ -412,10 +503,10 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 
 			if row.rType == rowGroup {
 				allSel := true
-				anySel := false
+				selectedCount := 0
 				for _, skKey := range row.groupSkills {
-					if selectedMap[skKey] {
-						anySel = true
+					if selectedMap[skKey] || (rowByKey[skKey].dependsOn != "" && selectedMap[rowByKey[skKey].dependsOn]) {
+						selectedCount++
 					} else {
 						allSel = false
 					}
@@ -424,19 +515,23 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 				box := fmt.Sprintf("%s[ ]%s", colorDim, colorReset)
 				if len(row.groupSkills) > 0 && allSel {
 					box = fmt.Sprintf("%s[✔]%s", colorGreen, colorReset)
-				} else if anySel {
+				} else if selectedCount > 0 {
 					box = fmt.Sprintf("%s[-]%s", colorYellow, colorReset)
 				}
 
-				countStr := fmt.Sprintf("%d skills", len(row.groupSkills))
+				countStr := fmt.Sprintf("%d/%d selected", selectedCount, len(row.groupSkills))
 				if len(row.groupSkills) == 1 {
-					countStr = "1 skill"
+					countStr = fmt.Sprintf("%d/1 selected", selectedCount)
 				}
 
-				line := fmt.Sprintf("%s %s %s📦 %s%s %s(%s)%s", cursorStr, box, colorBold, row.groupSource, colorReset, colorDim, countStr, colorReset)
+				disclosure := "▾"
+				if collapsed[row.groupSource] {
+					disclosure = "▸"
+				}
+				line := fmt.Sprintf("%s %s %s%s %s%s %s(%s)%s", cursorStr, box, colorBold, disclosure, row.groupSource, colorReset, colorDim, countStr, colorReset)
 				fmt.Printf("%s%s\r\n", clearLine, line)
 			} else {
-				isChecked := selectedMap[row.skillKey]
+				isChecked := isSelected(row)
 				box := fmt.Sprintf("%s[ ]%s", colorDim, colorReset)
 				if isChecked {
 					box = fmt.Sprintf("%s[✔]%s", colorGreen, colorReset)
@@ -448,6 +543,9 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 				}
 				if row.extra != "" {
 					badge += fmt.Sprintf(" %s%s%s", colorDim, row.extra, colorReset)
+				}
+				if isCovered(row) {
+					badge += fmt.Sprintf(" %s(covered by selected master)%s", colorDim, colorReset)
 				}
 
 				display := row.skillTitle
@@ -472,12 +570,10 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 			}
 		}
 
-		instructions := fmt.Sprintf("%sUse ↑/↓ (or k/j) to navigate, Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.%s", colorDim, colorReset)
-		fmt.Printf("\r\n%s%s\r\n", clearLine, instructions)
 	}
 
-	fmt.Print(hideCursor)
-	render(true)
+	fmt.Print(enterAlternateScreen, hideCursor)
+	render()
 
 	for {
 		k := readKey(fd)
@@ -499,14 +595,47 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 			return chosen, nil
 		case keyUp:
 			cursorIdx = (cursorIdx - 1 + totalRows) % totalRows
-			render(false)
+			render()
 		case keyDown:
 			cursorIdx = (cursorIdx + 1) % totalRows
-			render(false)
+			render()
+		case keyPageDown:
+			cursorIdx += visibleCount - 1
+			if cursorIdx >= totalRows {
+				cursorIdx = totalRows - 1
+			}
+			render()
+		case keyPageUp:
+			cursorIdx -= visibleCount - 1
+			if cursorIdx < 0 {
+				cursorIdx = 0
+			}
+			render()
+		case keyLeft:
+			row := rows[cursorIdx]
+			if !collapsed[row.groupSource] {
+				collapsed[row.groupSource] = true
+				rebuildRows()
+				for i, candidate := range rows {
+					if candidate.rType == rowGroup && candidate.groupSource == row.groupSource {
+						cursorIdx = i
+						break
+					}
+				}
+				render()
+			}
+		case keyRight:
+			row := rows[cursorIdx]
+			if row.rType == rowGroup && collapsed[row.groupSource] {
+				collapsed[row.groupSource] = false
+				rebuildRows()
+				render()
+			}
 		case keyToggleAll:
 			allSel := true
 			for _, skKey := range allSkillKeys {
-				if !selectedMap[skKey] {
+				row := rowByKey[skKey]
+				if !isSelected(row) {
 					allSel = false
 					break
 				}
@@ -514,13 +643,13 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 			for _, skKey := range allSkillKeys {
 				selectedMap[skKey] = !allSel
 			}
-			render(false)
+			render()
 		case keySpace:
 			row := rows[cursorIdx]
 			if row.rType == rowGroup {
 				allSel := true
 				for _, skKey := range row.groupSkills {
-					if !selectedMap[skKey] {
+					if !isSelected(rowByKey[skKey]) {
 						allSel = false
 						break
 					}
@@ -528,10 +657,10 @@ func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string
 				for _, skKey := range row.groupSkills {
 					selectedMap[skKey] = !allSel
 				}
-			} else {
+			} else if !isCovered(row) {
 				selectedMap[row.skillKey] = !selectedMap[row.skillKey]
 			}
-			render(false)
+			render()
 		}
 	}
 }
