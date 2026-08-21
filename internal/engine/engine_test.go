@@ -178,6 +178,36 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 	}
 }
 
+func TestApplyPrunePlanLeavesLinkReplacedAfterPlanning(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	master := filepath.Join(skillsDir, "alpha")
+	if err := os.MkdirAll(master, 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(project, ".claude", "skills", "alpha")
+	if err := os.MkdirAll(filepath.Dir(link), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "alpha"), link); err != nil {
+		t.Fatal(err)
+	}
+	plan := PrunePlan{Unconfigured: []PruneLink{{Agent: "claude-code", Path: link}}}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(link, []byte("user-owned"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ApplyPrunePlan(plan, skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(link); err != nil {
+		t.Fatal("a link replaced after planning must not be removed")
+	}
+}
+
 func TestCheckRepoUpdateStatusSourceParsing(t *testing.T) {
 	tmpCache := t.TempDir()
 
@@ -267,4 +297,3 @@ func TestUpdateRemoteSkillsDryRun(t *testing.T) {
 		t.Fatalf("expected 2 updated skills in dry run, got %d", len(result.UpdatedSkills))
 	}
 }
-

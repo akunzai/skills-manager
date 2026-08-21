@@ -8,7 +8,6 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
-	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +17,7 @@ func newSyncCmd() *cobra.Command {
 		flagPrune     bool
 		flagPruneOnly bool
 		flagDryRun    bool
+		flagYes       bool
 	)
 
 	cmd := &cobra.Command{
@@ -34,6 +34,9 @@ func newSyncCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if flagPrune || flagPruneOnly {
+				return runPrune(cmd, pruneOptions{yes: flagYes, dryRun: flagDryRun})
+			}
 
 			fmt.Printf("\n%s%s🚀 Syncing skills from %s...%s\n\n", colorBold, colorCyan, configPath, colorReset)
 
@@ -43,77 +46,7 @@ func newSyncCmd() *cobra.Command {
 
 			configuredSkills := make(map[string]struct{})
 
-			// 1. Prune step
-			if flagPrune || flagPruneOnly {
-				validSet := make(map[string]struct{})
-				for _, repoInfo := range cfg.Remote {
-					for sk := range repoInfo.Skills {
-						validSet[sk] = struct{}{}
-					}
-				}
-				for sk := range cfg.Local {
-					validSet[sk] = struct{}{}
-				}
-
-				var orphans []string
-				if entries, err := os.ReadDir(skillsDir); err == nil {
-					for _, entry := range entries {
-						name := entry.Name()
-						if strings.HasPrefix(name, ".") {
-							continue
-						}
-						if _, valid := validSet[name]; !valid {
-							orphans = append(orphans, name)
-						}
-					}
-				}
-
-				if len(orphans) > 0 {
-					fmt.Printf("%sFound %d untracked skill(s): %s%s\n", colorYellow, len(orphans), strings.Join(orphans, ", "), colorReset)
-					if flagDryRun {
-						fmt.Printf("  [Dry-run] Would remove untracked skills: %s\n", strings.Join(orphans, ", "))
-					} else {
-						for _, orp := range orphans {
-							engine.RemoveAgentSymlinks(orp, skillsDir)
-							_ = os.RemoveAll(filepath.Join(skillsDir, orp))
-							fmt.Printf("  %s✔%s Pruned %s\n", colorGreen, colorReset, orp)
-						}
-					}
-				} else {
-					fmt.Printf("%sNo untracked skills to prune.%s\n", colorGreen, colorReset)
-				}
-
-				// Prune inactive agent symlinks for configured skills
-				knownAgents := models.GetAgentsForSkillsDir(skillsDir)
-				for source, repoInfo := range cfg.Remote {
-					for sk := range repoInfo.Skills {
-						targetAgents := engine.GetTargetAgentsForSkill(sk, source, cfg, skillsDir)
-						targetSet := make(map[string]bool)
-						for _, a := range targetAgents {
-							targetSet[a] = true
-						}
-						for agentName, agentDir := range knownAgents {
-							if !targetSet[agentName] {
-								linkPath := filepath.Join(agentDir, sk)
-								if _, err := os.Lstat(linkPath); err == nil {
-									if flagDryRun {
-										fmt.Printf("  [Dry-run] Would prune unconfigured link for %s from %s\n", sk, agentName)
-									} else {
-										_ = os.RemoveAll(linkPath)
-									}
-								}
-							}
-						}
-					}
-				}
-
-				if flagPruneOnly {
-					fmt.Printf("\n%s✨ Prune complete!%s\n\n", colorGreen, colorReset)
-					return nil
-				}
-			}
-
-			// 2. Sync Remote Skills
+			// 1. Sync Remote Skills
 			for source, repoInfo := range cfg.Remote {
 				for sk := range repoInfo.Skills {
 					configuredSkills[sk] = struct{}{}
@@ -177,7 +110,7 @@ func newSyncCmd() *cobra.Command {
 				}
 			}
 
-			// 3. Sync Local Skills
+			// 2. Sync Local Skills
 			for name, localInfo := range cfg.Local {
 				configuredSkills[name] = struct{}{}
 
@@ -227,7 +160,7 @@ func newSyncCmd() *cobra.Command {
 				}
 			}
 
-			// 4. Post-hooks
+			// 3. Post-hooks
 			if len(cfg.PostHooks) > 0 {
 				fmt.Printf("\n%s⚡ Running post-sync hooks...%s\n", colorCyan, colorReset)
 				hookResults := engine.ExecutePostHooks(cfg.PostHooks, flagDryRun)
@@ -248,6 +181,9 @@ func newSyncCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flagForce, "force", false, "Force re-clone and re-link all skills")
 	cmd.Flags().BoolVar(&flagPrune, "prune", false, "Remove untracked skills and broken symlinks")
 	cmd.Flags().BoolVar(&flagPruneOnly, "prune-only", false, "Remove untracked skills without restoring")
+	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompt when using deprecated prune flags")
+	_ = cmd.Flags().MarkDeprecated("prune", "use `skills prune` instead")
+	_ = cmd.Flags().MarkDeprecated("prune-only", "use `skills prune` instead")
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview actions without making changes")
 
 	return cmd

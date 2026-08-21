@@ -59,6 +59,7 @@ skills -p add akunzai/agent-skills -s agents-md  # install into ./.agents/skills
 skills -p ls                                     # list this project's skills
 skills -p outdated                               # check remote repos for updates
 skills -p sync                                   # restore declared skills after a clone
+skills -p prune                                  # clean items no longer declared in configuration
 skills -p doctor --fix                           # verify & repair project symlinks
 skills -p rm agents-md                           # remove from this project
 ```
@@ -108,8 +109,17 @@ skills rm tidy-commits
 # Sync / restore declared skills
 skills sync
 skills sync --force     # force re-fetch & re-link
-skills sync --prune     # remove untracked skills & unconfigured links
 skills sync --dry-run
+
+# Remove untracked master skills and unconfigured managed links
+skills prune             # interactively select items to remove (none preselected)
+skills prune --dry-run   # show the plan without changing files
+skills prune --yes       # run non-interactively
+skills prune --links-only
+skills prune --skills-only
+
+# Deprecated: use `skills prune` instead
+skills sync --prune --yes
 
 # Check outdated & update
 skills outdated
