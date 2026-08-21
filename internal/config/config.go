@@ -161,6 +161,9 @@ func AddRemoteSkillEntry(
 	repoType string,
 	url string,
 ) {
+	// Clean up any existing registration for this skill name across local and other remotes
+	RemoveSkillEntry(cfg, skillName)
+
 	if cfg.Remote == nil {
 		cfg.Remote = make(map[string]RemoteRepo)
 	}
@@ -193,6 +196,7 @@ func AddLocalSymlinkEntry(
 	sourcePath string,
 	description string,
 ) {
+	RemoveSkillEntry(cfg, skillName)
 	if cfg.Local == nil {
 		cfg.Local = make(map[string]LocalEntry)
 	}
@@ -210,6 +214,7 @@ func AddLocalCommandEntry(
 	checkCmd string,
 	description string,
 ) {
+	RemoveSkillEntry(cfg, skillName)
 	if cfg.Local == nil {
 		cfg.Local = make(map[string]LocalEntry)
 	}

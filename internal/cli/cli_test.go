@@ -630,7 +630,7 @@ func TestCLIProjectSymlinkSourceIsRelativeToProject(t *testing.T) {
 }
 
 // A source outside the project cannot be expressed relative to it, so it keeps
-// its absolute path.
+// its ~/ or absolute path rather than a project-relative path.
 func TestCLIProjectSymlinkSourceOutsideProjectStaysAbsolute(t *testing.T) {
 	project := projectScope(t)
 
@@ -653,8 +653,12 @@ func TestCLIProjectSymlinkSourceOutsideProjectStaysAbsolute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Local["external"].Source; !filepath.IsAbs(got) {
-		t.Fatalf("stored source = %q; a source outside the project must stay absolute", got)
+	got := cfg.Local["external"].Source
+	if strings.HasPrefix(got, ".") {
+		t.Fatalf("stored source = %q; a source outside the project must not be project-relative", got)
+	}
+	if got != "~/external-skill" && !filepath.IsAbs(got) {
+		t.Fatalf("stored source = %q; want ~/external-skill or absolute path", got)
 	}
 }
 
@@ -882,3 +886,172 @@ func TestCLIDoctorDetectsAndFixesStaleUniversalAgentLinks(t *testing.T) {
 		t.Fatalf("a healthy link must be left alone: %v", err)
 	}
 }
+
+func TestCLILocalDirectoryScanMultipleSkills(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+
+	if _, err := runCLI(t, "init", "--config", configFile); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	// Create a local repo with multiple skills
+	localRepo := filepath.Join(home, "code", "agent-skills")
+	skill1Dir := filepath.Join(localRepo, "skills", "skill-one")
+	skill2Dir := filepath.Join(localRepo, "skills", "skill-two")
+	_ = os.MkdirAll(skill1Dir, 0755)
+	_ = os.MkdirAll(skill2Dir, 0755)
+	_ = os.WriteFile(filepath.Join(skill1Dir, "SKILL.md"), []byte("---\nname: skill-one\n---\n# Skill One"), 0644)
+	_ = os.WriteFile(filepath.Join(skill2Dir, "SKILL.md"), []byte("---\nname: skill-two\n---\n# Skill Two"), 0644)
+
+	// Test add --all with --symlink
+	out, err := runCLI(t, "add", "--symlink", localRepo, "--all", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("add --symlink --all failed: %v\n%s", err, out)
+	}
+
+	if !strings.Contains(out, "Successfully linked 2 local skill(s)") {
+		t.Fatalf("expected 2 skills linked, got:\n%s", out)
+	}
+
+	// Check master links exist
+	if _, err := os.Stat(filepath.Join(skillsDir, "skill-one", "SKILL.md")); err != nil {
+		t.Fatalf("expected skill-one in skillsDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "skill-two", "SKILL.md")); err != nil {
+		t.Fatalf("expected skill-two in skillsDir: %v", err)
+	}
+
+	// Check config has tilde paths
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src := cfg.Local["skill-one"].Source; !strings.HasPrefix(src, "~/code/agent-skills/skills/skill-one") {
+		t.Fatalf("expected tilde path in config, got: %s", src)
+	}
+
+	// Test ls output contains Nerd Font icon and tilde path
+	lsOut, err := runCLI(t, "ls", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls failed: %v", err)
+	}
+	if !strings.Contains(lsOut, "󰌷 ~/code/agent-skills") {
+		t.Fatalf("expected tilde path in ls output, got:\n%s", lsOut)
+	}
+}
+
+func TestCLILocalPositionalPathAutoDetection(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+
+	if _, err := runCLI(t, "init", "--config", configFile); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	localDir := filepath.Join(home, "my-standalone-skill")
+	_ = os.MkdirAll(localDir, 0755)
+	_ = os.WriteFile(filepath.Join(localDir, "SKILL.md"), []byte("# Standalone"), 0644)
+
+	// Add via positional argument "~/my-standalone-skill" without --symlink flag
+	out, err := runCLI(t, "add", "~/my-standalone-skill", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("add positional local path failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Successfully linked 1 local skill(s)") {
+		t.Fatalf("expected 1 skill linked, got:\n%s", out)
+	}
+
+	if _, err := os.Stat(filepath.Join(skillsDir, "my-standalone-skill", "SKILL.md")); err != nil {
+		t.Fatalf("expected master symlink for my-standalone-skill: %v", err)
+	}
+}
+
+func TestCLISyncReplacesLocalSymlinkWithRemotePhysicalSkill(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+
+	if _, err := runCLI(t, "init", "--config", configFile); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	// 1. Add local symlink skill
+	localDir := filepath.Join(home, "override-skill")
+	_ = os.MkdirAll(localDir, 0755)
+	_ = os.WriteFile(filepath.Join(localDir, "SKILL.md"), []byte("# Local Version"), 0644)
+	if _, err := runCLI(t, "add", "--symlink", localDir, "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("add --symlink failed: %v", err)
+	}
+
+	// 2. Add remote skill entry with same name
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "override-skill", "override-skill", "github", "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify cfg.Local no longer has override-skill
+	if _, ok := cfg.Local["override-skill"]; ok {
+		t.Fatal("expected local entry for override-skill to be removed when remote was added")
+	}
+
+	// Verify ls shows remote source
+	lsOut, err := runCLI(t, "ls", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls failed: %v", err)
+	}
+	if !strings.Contains(lsOut, "󰊤 owner/repo") {
+		t.Fatalf("expected ls to display remote repo source, got:\n%s", lsOut)
+	}
+}
+
+func TestCLILocalAddOverwriteRequiresConfirmationOrYes(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+
+	if _, err := runCLI(t, "init", "--config", configFile); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	// 1. First install version 1
+	v1Dir := filepath.Join(home, "v1", "my-skill")
+	_ = os.MkdirAll(v1Dir, 0755)
+	_ = os.WriteFile(filepath.Join(v1Dir, "SKILL.md"), []byte("# V1"), 0644)
+	if _, err := runCLI(t, "add", "--symlink", v1Dir, "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("first add failed: %v", err)
+	}
+
+	// 2. Prepare version 2 at a different path
+	v2Dir := filepath.Join(home, "v2", "my-skill")
+	_ = os.MkdirAll(v2Dir, 0755)
+	_ = os.WriteFile(filepath.Join(v2Dir, "SKILL.md"), []byte("# V2"), 0644)
+
+	// In non-terminal test environment without --yes, attempting to overwrite should return error
+	out, err := runCLI(t, "add", "--symlink", v2Dir, "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil {
+		t.Fatalf("expected error when overwriting without terminal and without --yes, got output:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "refusing to overwrite") {
+		t.Fatalf("expected refusing to overwrite error, got: %v", err)
+	}
+
+	// With --yes (-y), overwriting succeeds
+	out, err = runCLI(t, "add", "--symlink", v2Dir, "-y", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("expected success with -y, got: %v\n%s", err, out)
+	}
+}
+
+
+
