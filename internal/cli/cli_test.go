@@ -654,3 +654,66 @@ func TestCLIMisuseStillPrintsUsage(t *testing.T) {
 		t.Fatalf("missing required argument should still print usage:\n%s", out)
 	}
 }
+
+// Stale links in universal agent directories were invisible to doctor, so once
+// accumulated they could never be cleaned up.
+func TestCLIDoctorDetectsAndFixesStaleUniversalAgentLinks(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "alpha"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "alpha", "SKILL.md"), []byte("# Alpha"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	claude := filepath.Join(home, ".claude", "skills")
+	codex := filepath.Join(home, ".codex", "skills")
+	for _, dir := range []string{claude, codex} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "alpha"), filepath.Join(claude, "alpha")); err != nil {
+		t.Fatal(err)
+	}
+	// Left over from a skill that no longer exists.
+	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "gone"), filepath.Join(codex, "gone")); err != nil {
+		t.Fatal(err)
+	}
+	// The user's own content in the same directory must survive.
+	ownDir := filepath.Join(codex, ".system")
+	if err := os.MkdirAll(ownDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil {
+		t.Fatalf("doctor should report the stale link:\n%s", out)
+	}
+	if !strings.Contains(out, "Stale links") || !strings.Contains(out, "gone") {
+		t.Fatalf("expected the stale link to be reported:\n%s", out)
+	}
+
+	out, err = runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("doctor --fix should succeed after repairing:\n%s", out)
+	}
+	if _, err := os.Lstat(filepath.Join(codex, "gone")); !os.IsNotExist(err) {
+		t.Fatal("stale link should have been removed")
+	}
+	if _, err := os.Stat(ownDir); err != nil {
+		t.Fatalf("the agent's own directory must be left alone: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(claude, "alpha")); err != nil {
+		t.Fatalf("a healthy link must be left alone: %v", err)
+	}
+}

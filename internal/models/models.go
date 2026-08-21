@@ -81,18 +81,59 @@ func GetProjectKnownAgents(projectRoot string) map[string]string {
 	}
 }
 
+// IsGlobalSkillsDir reports whether skillsDir is the global skills directory.
+func IsGlobalSkillsDir(skillsDir string) bool {
+	if skillsDir == "" {
+		return true
+	}
+	absSkills, _ := filepath.Abs(skillsDir)
+	absGlobal, _ := filepath.Abs(DefaultSkillsDir())
+	return filepath.Clean(absSkills) == filepath.Clean(absGlobal)
+}
+
 // GetAgentsForSkillsDir returns the appropriate agent mapping (global or project-scoped).
 func GetAgentsForSkillsDir(skillsDir string) map[string]string {
 	if skillsDir == "" {
 		skillsDir = DefaultSkillsDir()
 	}
-	absSkills, _ := filepath.Abs(skillsDir)
-	absGlobal, _ := filepath.Abs(DefaultSkillsDir())
-	if filepath.Clean(absSkills) == filepath.Clean(absGlobal) {
+	if IsGlobalSkillsDir(skillsDir) {
 		return GetKnownAgents()
 	}
 	projectRoot := GetProjectRootFromSkillsDir(skillsDir)
 	return GetProjectKnownAgents(projectRoot)
+}
+
+// GetUniversalAgentSkillDirs returns skills directories that universal agents
+// may have had materialized for them. skills-manager never creates these —
+// universal agents read the master skills directory directly — but earlier
+// versions and external setup scripts did, and links left behind there still
+// have to be cleaned up when a skill goes away.
+//
+// These paths are conventions, not guarantees. Callers must only ever act on a
+// symlink that resolves into the master skills directory, so a path that turns
+// out to be wrong simply matches nothing.
+func GetUniversalAgentSkillDirs(skillsDir string) map[string]string {
+	if skillsDir == "" {
+		skillsDir = DefaultSkillsDir()
+	}
+	if !IsGlobalSkillsDir(skillsDir) {
+		root := GetProjectRootFromSkillsDir(skillsDir)
+		return map[string]string{
+			"codex": filepath.Join(root, ".codex", "skills"),
+		}
+	}
+	xdgConfig := ResolveEnvPath("XDG_CONFIG_HOME", "~/.config")
+	return map[string]string{
+		"amp":             ExpandUser("~/.amp/skills"),
+		"antigravity-cli": ExpandUser("~/.antigravity/skills"),
+		"cline":           ExpandUser("~/.cline/skills"),
+		"codex":           ExpandUser("~/.codex/skills"),
+		"cursor":          ExpandUser("~/.cursor/skills"),
+		"gemini-cli":      ExpandUser("~/.gemini/skills"),
+		"github-copilot":  ExpandUser("~/.copilot/skills"),
+		"opencode":        filepath.Join(xdgConfig, "opencode", "skills"),
+		"zed":             filepath.Join(xdgConfig, "zed", "skills"),
+	}
 }
 
 // GetKnownAgents returns mapping of non-universal agent names to their global skills directory.

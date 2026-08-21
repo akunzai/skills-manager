@@ -238,3 +238,133 @@ func TestRemoveEmptyAgentDirPrunesOutsideHomeWithBoundary(t *testing.T) {
 		t.Fatalf("project root must remain: %v", err)
 	}
 }
+
+// globalSkillsHome sets up an isolated home whose global skills directory holds
+// one skill, and returns (home, skillsDir).
+func globalSkillsHome(t *testing.T, skillName string) (string, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AGENTS_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, skillName), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return home, skillsDir
+}
+
+// Universal agents read the skills directory directly, but older versions and
+// setup scripts materialized their directories; links there must not dangle
+// after the skill is removed.
+func TestRemoveAgentSymlinksClearsUniversalAgentLinks(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "alpha")
+
+	codex := filepath.Join(home, ".codex", "skills")
+	cursor := filepath.Join(home, ".cursor", "skills")
+	for _, dir := range []string{codex, cursor} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "alpha"), filepath.Join(dir, "alpha")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	removed := RemoveAgentSymlinks("alpha", skillsDir)
+
+	for _, dir := range []string{codex, cursor} {
+		if _, err := os.Lstat(filepath.Join(dir, "alpha")); !os.IsNotExist(err) {
+			t.Fatalf("stale link left behind in %s", dir)
+		}
+	}
+	var sawCodex, sawCursor bool
+	for _, name := range removed {
+		switch name {
+		case "codex":
+			sawCodex = true
+		case "cursor":
+			sawCursor = true
+		}
+	}
+	if !sawCodex || !sawCursor {
+		t.Fatalf("removed = %v; want codex and cursor reported", removed)
+	}
+}
+
+// The agent paths are conventions, so removal must be restricted to links this
+// tool would have created. Everything else in those directories is the user's.
+func TestRemoveAgentSymlinksLeavesUnmanagedEntriesAlone(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "alpha")
+
+	codex := filepath.Join(home, ".codex", "skills")
+	if err := os.MkdirAll(filepath.Join(codex, "alpha"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A real directory the user owns, sharing the skill's name.
+	keep := filepath.Join(codex, "alpha", "SKILL.md")
+	if err := os.WriteFile(keep, []byte("mine"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A symlink of the same name pointing somewhere unrelated.
+	elsewhere := filepath.Join(home, "elsewhere")
+	if err := os.MkdirAll(elsewhere, 0755); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := filepath.Join(codex, "beta")
+	if err := os.Symlink(elsewhere, unrelated); err != nil {
+		t.Fatal(err)
+	}
+
+	RemoveAgentSymlinks("alpha", skillsDir)
+	RemoveAgentSymlinks("beta", skillsDir)
+
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("a real directory must never be removed: %v", err)
+	}
+	if _, err := os.Lstat(unrelated); err != nil {
+		t.Fatalf("a link pointing outside the skills dir must be left alone: %v", err)
+	}
+}
+
+func TestIsManagedSkillLinkAcceptsDanglingAndAbsoluteForms(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "alpha")
+	codex := filepath.Join(home, ".codex", "skills")
+	if err := os.MkdirAll(codex, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rel := filepath.Join(codex, "rel")
+	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "alpha"), rel); err != nil {
+		t.Fatal(err)
+	}
+	abs := filepath.Join(codex, "abs")
+	if err := os.Symlink(filepath.Join(skillsDir, "alpha"), abs); err != nil {
+		t.Fatal(err)
+	}
+	// Dangling: the master skill is gone but the link still names it.
+	dangling := filepath.Join(codex, "dangling")
+	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "removed"), dangling); err != nil {
+		t.Fatal(err)
+	}
+
+	if !IsManagedSkillLink(rel, "alpha", skillsDir) {
+		t.Error("relative link to the master skill should be managed")
+	}
+	if !IsManagedSkillLink(abs, "alpha", skillsDir) {
+		t.Error("absolute link to the master skill should be managed")
+	}
+	if !IsManagedSkillLink(dangling, "removed", skillsDir) {
+		t.Error("dangling link to a removed master skill should be managed")
+	}
+	if IsManagedSkillLink(rel, "beta", skillsDir) {
+		t.Error("a link naming a different skill must not be managed")
+	}
+	if IsManagedSkillLink(filepath.Join(skillsDir, "alpha"), "alpha", skillsDir) {
+		t.Error("a real directory must never be reported as a managed link")
+	}
+}
