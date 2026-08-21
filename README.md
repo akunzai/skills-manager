@@ -73,19 +73,19 @@ Commit `.agents/skills.json` to your repository so teammates get the same skills
 
 ### Adding Skills
 ```bash
-# Interactive selection
+# Interactive selection from GitHub / GitLab / Git URLs
 skills add akunzai/agent-skills
-
-# Specific skill(s) or all skills
-skills add akunzai/agent-skills -s agents-md -s tidy-commits
-skills add akunzai/agent-skills --all
-
-# GitLab or Git URLs
 skills add gitlab:my-org/my-skills
 skills add https://github.com/owner/repo/tree/main/skills/foo
 
-# Local folder symlink
+# Local directory or monorepo auto-scan (interactive multi-select)
+skills add ~/code/agent-skills
+skills add ./local-skills --all
 skills add --symlink ~/code/my-skill --skill my-skill
+
+# Specific skill(s) or all skills (with -y / --yes to bypass prompts)
+skills add akunzai/agent-skills -s agents-md -s tidy-commits
+skills add akunzai/agent-skills --all -y
 
 # Custom CLI installer command
 skills add --command "agentsview skills install" --check "which agentsview" --skill finding-history
