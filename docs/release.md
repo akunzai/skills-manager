@@ -11,15 +11,53 @@ The release pipeline is automated via GitHub Actions (`.github/workflows/release
 
 ## Release Notes Categorization
 
-Release notes are automatically categorized from merged PR labels:
+Release notes list **merged pull requests, grouped by label**. Three pieces cooperate:
 
-- `feat: ...` -> 🚀 **Features & Enhancements** (`enhancement`)
-- `fix: ...` -> 🐛 **Bug Fixes** (`bug`)
-- `docs: ...` -> 📚 **Documentation** (`documentation`)
-- `ci: ...` -> ⚙️ **CI/CD & Build** (`ci`)
-- `chore: ...` / `refactor: ...` -> 🧹 **Refactoring & Chores** (`chore`, `refactor`)
-- `dependencies` -> 📦 **Dependency Updates** (`dependencies`)
-- `test: ...` -> 🧪 **Tests** (`tests`)
+1. `.github/workflows/pr-labeler.yml` reads the **PR title** prefix and applies a label
+   (`feat:` -> `enhancement`, `fix:` -> `bug`, `docs:` -> `documentation`, `ci:` /
+   `build:` -> `ci`, `chore:` -> `chore`, `refactor:` -> `refactor`, `test:` -> `tests`,
+   `perf:` -> `enhancement`).
+2. `.github/release.yml` maps those labels to release-note sections, and drops PRs
+   labelled `wontfix`, `duplicate`, or `invalid`.
+3. `.goreleaser.yaml` sets `changelog.use: github-native`, handing note generation to
+   GitHub so the two files above are what actually decide the output.
+
+| Label | Section |
+| :--- | :--- |
+| `enhancement`, `feature`, `feat` | 🚀 Features & Enhancements |
+| `bug`, `fix` | 🐛 Bug Fixes |
+| `dependencies` | 📦 Dependency Updates |
+| `documentation`, `docs` | 📚 Documentation |
+| `ci`, `build`, `github-actions` | ⚙️ CI/CD & Build |
+| `refactor`, `chore`, `maintenance` | 🧹 Refactoring & Chores |
+| `tests`, `test` | 🧪 Tests |
+| anything else (`*`) | 💬 Other Changes |
+
+Because `github-native` is in use, GoReleaser's own `groups`, `sort`, `filters`, and
+`abbrev` settings are ignored — don't add them back expecting an effect.
+
+### What this means in practice
+
+- **Commit messages no longer affect categorization.** A PR carrying a mix of `fix:` and
+  `docs:` commits is filed once, under its own label.
+- **Give the PR a Conventional Commits title.** That title is the only input the labeler
+  has, and it becomes the release-note entry.
+- **Commits pushed straight to `main` never appear.** They belong to no PR, so a fix
+  landed outside the PR flow is silently missing from the notes. Either route it through
+  a PR, or patch the published release afterwards:
+
+  ```bash
+  gh api repos/akunzai/skills-manager/releases/tags/vX.Y.Z --jq .id
+  gh api repos/akunzai/skills-manager/releases/<id> --method PATCH -f body="..."
+  ```
+
+- **Preview before tagging** to see exactly what will be published:
+
+  ```bash
+  gh api repos/akunzai/skills-manager/releases/generate-notes \
+    -f tag_name=vX.Y.Z -f target_commitish=main -f previous_tag_name=vX.Y.(Z-1) \
+    --jq .body
+  ```
 
 ## Step-by-Step Release Checklist
 

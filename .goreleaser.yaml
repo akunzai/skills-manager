@@ -38,32 +38,6 @@ snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^Merge "
-      - "^merge "
-  groups:
-    - title: "🚀 Features & Enhancements"
-      regexp: '^.*?feat(\([^\)]+\))?:.*$'
-      order: 0
-    - title: "🐛 Bug Fixes"
-      regexp: '^.*?fix(\([^\)]+\))?:.*$'
-      order: 1
-    - title: "📦 Dependency Updates"
-      regexp: '^.*?(deps|dependencies)(\([^\)]+\))?:.*$'
-      order: 2
-    - title: "📚 Documentation"
-      regexp: '^.*?docs?(\([^\)]+\))?:.*$'
-      order: 3
-    - title: "⚙️ CI/CD & Build"
-      regexp: '^.*?(ci|build|workflow)(\([^\)]+\))?:.*$'
-      order: 4
-    - title: "🧹 Refactoring & Chores"
-      regexp: '^.*?(refactor|chore|maintenance|perf)(\([^\)]+\))?:.*$'
-      order: 5
-    - title: "🧪 Tests"
-      regexp: '^.*?tests?(\([^\)]+\))?:.*$'
-      order: 6
-    - title: "💬 Other Changes"
-      order: 99
+  # Categorize by merged PR label via .github/release.yml, not by commit message.
+  # github-native does not support groups, sort, filters, or abbrev.
+  use: github-native
