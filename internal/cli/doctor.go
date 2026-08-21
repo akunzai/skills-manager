@@ -111,6 +111,10 @@ func newDoctorCmd() *cobra.Command {
 				}
 			}
 
+			// Parent pruning must never escape the scope root: in project scope
+			// that is the project directory, in global scope the home directory.
+			pruneBoundary := models.GetProjectRootFromSkillsDir(skillsDir)
+
 			leftoverEmpty := engine.LeftoverEmptyAgentDirs(knownAgents, configuredAgents)
 			if len(leftoverEmpty) > 0 {
 				names := make([]string, 0, len(leftoverEmpty))
@@ -120,7 +124,7 @@ func newDoctorCmd() *cobra.Command {
 				if flagFix {
 					removed := 0
 					for _, leftover := range leftoverEmpty {
-						if err := engine.RemoveEmptyAgentDir(leftover.Dir); err != nil {
+						if err := engine.RemoveEmptyAgentDir(leftover.Dir, pruneBoundary); err != nil {
 							issuesFound++
 							fmt.Fprintf(out, "  %s✖ Failed to remove leftover %s dir %s: %s%s\n", colorRed, leftover.Name, leftover.Dir, err, colorReset)
 							continue

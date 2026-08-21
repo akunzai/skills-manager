@@ -82,7 +82,7 @@ func TestRemoveEmptyAgentDirPrunesEmptyParentsAndStopsAtHome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(jazzSkills); err != nil {
+	if err := RemoveEmptyAgentDir(jazzSkills, ""); err != nil {
 		t.Fatalf("RemoveEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".jazz")); !os.IsNotExist(err) {
@@ -105,7 +105,7 @@ func TestRemoveEmptyAgentDirStopsAtXDGConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(crushSkills); err != nil {
+	if err := RemoveEmptyAgentDir(crushSkills, ""); err != nil {
 		t.Fatalf("RemoveEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(xdg, "crush")); !os.IsNotExist(err) {
@@ -129,7 +129,7 @@ func TestRemoveEmptyAgentDirLeavesNonEmptyParents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(grokSkills); err != nil {
+	if err := RemoveEmptyAgentDir(grokSkills, ""); err != nil {
 		t.Fatalf("RemoveEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(grokSkills); !os.IsNotExist(err) {
@@ -153,10 +153,88 @@ func TestRemoveEmptyAgentDirDoesNotDeleteNonEmptySkillsDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(skills); err != nil {
+	if err := RemoveEmptyAgentDir(skills, ""); err != nil {
 		t.Fatalf("RemoveEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(skills, "keep")); err != nil {
 		t.Fatal("non-empty skills dir must not be removed")
+	}
+}
+
+func TestRemoveEmptyAgentDirStopsAtProjectRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	projectRoot := filepath.Join(home, "code", "demo")
+	cursorSkills := filepath.Join(projectRoot, ".cursor", "skills")
+	if err := os.MkdirAll(cursorSkills, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// The project root holds nothing but dot entries; it must still survive.
+	if err := os.MkdirAll(filepath.Join(projectRoot, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveEmptyAgentDir(cursorSkills, projectRoot); err != nil {
+		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor")); !os.IsNotExist(err) {
+		t.Fatal("expected leftover .cursor to be removed")
+	}
+	if _, err := os.Stat(projectRoot); err != nil {
+		t.Fatalf("project root must remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".git")); err != nil {
+		t.Fatalf(".git must remain: %v", err)
+	}
+}
+
+func TestRemoveEmptyAgentDirKeepsParentsHoldingHiddenEntries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	projectRoot := filepath.Join(home, "code", "demo")
+	cursorSkills := filepath.Join(projectRoot, ".cursor", "skills")
+	if err := os.MkdirAll(cursorSkills, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A hidden sibling inside .cursor keeps that parent alive.
+	if err := os.WriteFile(filepath.Join(projectRoot, ".cursor", ".keep"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveEmptyAgentDir(cursorSkills, projectRoot); err != nil {
+		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	}
+	if _, err := os.Stat(cursorSkills); !os.IsNotExist(err) {
+		t.Fatal("expected empty skills dir to be removed")
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", ".keep")); err != nil {
+		t.Fatalf("hidden sibling must keep its parent alive: %v", err)
+	}
+}
+
+func TestRemoveEmptyAgentDirPrunesOutsideHomeWithBoundary(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	// Project living outside $HOME: pruning is governed by the boundary alone.
+	projectRoot := t.TempDir()
+	windsurfSkills := filepath.Join(projectRoot, ".codeium", "windsurf", "skills")
+	if err := os.MkdirAll(windsurfSkills, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveEmptyAgentDir(windsurfSkills, projectRoot); err != nil {
+		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".codeium")); !os.IsNotExist(err) {
+		t.Fatal("expected .codeium to be pruned")
+	}
+	if _, err := os.Stat(projectRoot); err != nil {
+		t.Fatalf("project root must remain: %v", err)
 	}
 }
