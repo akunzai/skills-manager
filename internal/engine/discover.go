@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -30,6 +32,7 @@ func ParseSkillNameFromMD(skillMdPath string) string {
 
 func DiscoverSkillsInRepo(repoDir string) (map[string]string, error) {
 	found := make(map[string]string)
+	foundPaths := make(map[string][]string)
 
 	err := filepath.Walk(repoDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -54,10 +57,28 @@ func DiscoverSkillsInRepo(repoDir string) (map[string]string, error) {
 					name = filepath.Base(skillDir)
 				}
 			}
-			found[name] = relPathStr
+			foundPaths[name] = append(foundPaths[name], relPathStr)
 		}
 		return nil
 	})
 
-	return found, err
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(foundPaths))
+	for name := range foundPaths {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		paths := foundPaths[name]
+		if len(paths) > 1 {
+			sort.Strings(paths)
+			return nil, fmt.Errorf("duplicate skill name %q found in %s", name, strings.Join(paths, ", "))
+		}
+		found[name] = paths[0]
+	}
+
+	return found, nil
 }

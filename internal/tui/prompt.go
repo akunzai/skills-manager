@@ -26,7 +26,7 @@ const (
 
 	enterAlternateScreen = "\033[?1049h"
 	leaveAlternateScreen = "\033[?1049l"
-	groupedPromptRedraw  = "\033[H\033[2J"
+	promptRedraw         = "\033[H\033[2J"
 )
 
 type SelectOption struct {
@@ -123,6 +123,13 @@ func getTermHeight() int {
 	return height
 }
 
+func multiSelectInstructions() [2]string {
+	return [2]string{
+		"Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page.",
+		"Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.",
+	}
+}
+
 // PromptMultiSelect displays interactive list with Esc/q to cancel, 'a' to toggle all, Space to toggle.
 // Returns (selectedKeys, nil) or (nil, nil) on cancel.
 func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
@@ -147,7 +154,7 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 	}
 	defer func() {
 		_ = term.Restore(fd, oldState)
-		fmt.Print(showCursor)
+		fmt.Print(leaveAlternateScreen, showCursor)
 	}()
 
 	// Handle SIGINT cleanly
@@ -172,17 +179,8 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 	}
 	isScrollable := numItems > maxVisible
 
-	// title (2 lines) + visible items + (2 scroll indicator lines if scrollable) + instructions (2 lines)
-	scrollLines := 0
-	if isScrollable {
-		scrollLines = 2
-	}
-	frameLines := 2 + visibleCount + scrollLines + 2
-
-	render := func(first bool) {
-		if !first {
-			fmt.Printf("\033[%dA\r", frameLines)
-		}
+	render := func() {
+		fmt.Print(promptRedraw)
 
 		if isScrollable {
 			if cursorIdx < windowStart {
@@ -196,7 +194,10 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			windowEnd = numItems
 		}
 
-		fmt.Printf("%s%s%s%s\r\n\r\n", colorBold, colorCyan, title, colorReset)
+		instructions := multiSelectInstructions()
+		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, title, colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, instructions[0], colorReset)
+		fmt.Printf("%s%s%s%s\r\n\r\n", clearLine, colorDim, instructions[1], colorReset)
 
 		if isScrollable {
 			if windowStart > 0 {
@@ -248,12 +249,10 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			}
 		}
 
-		instructions := fmt.Sprintf("%sUse ↑/↓ (or k/j) to navigate, Ctrl+f/b to page, Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.%s", colorDim, colorReset)
-		fmt.Printf("\r\n%s%s\r\n", clearLine, instructions)
 	}
 
-	fmt.Print(hideCursor)
-	render(true)
+	fmt.Print(enterAlternateScreen, hideCursor)
+	render()
 
 	for {
 		k := readKey(fd)
@@ -275,25 +274,25 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			return chosen, nil
 		case keyUp:
 			cursorIdx = (cursorIdx - 1 + numItems) % numItems
-			render(false)
+			render()
 		case keyDown:
 			cursorIdx = (cursorIdx + 1) % numItems
-			render(false)
+			render()
 		case keyPageDown:
 			cursorIdx += visibleCount - 1
 			if cursorIdx >= numItems {
 				cursorIdx = numItems - 1
 			}
-			render(false)
+			render()
 		case keyPageUp:
 			cursorIdx -= visibleCount - 1
 			if cursorIdx < 0 {
 				cursorIdx = 0
 			}
-			render(false)
+			render()
 		case keySpace:
 			selected[cursorIdx] = !selected[cursorIdx]
-			render(false)
+			render()
 		case keyToggleAll:
 			allChecked := true
 			for _, sel := range selected {
@@ -305,7 +304,7 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			for i := range selected {
 				selected[i] = !allChecked
 			}
-			render(false)
+			render()
 		}
 	}
 }
@@ -467,7 +466,7 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 	}
 
 	render := func() {
-		fmt.Print(groupedPromptRedraw)
+		fmt.Print(promptRedraw)
 		visibleCount = totalRows
 		if visibleCount > maxVisible {
 			visibleCount = maxVisible
