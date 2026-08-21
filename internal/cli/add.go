@@ -33,6 +33,9 @@ func newAddCmd() *cobra.Command {
 		Use:   "add [source] [skills...]",
 		Short: "Add a new skill (remote git, local symlink, or CLI command)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			configPath, skillsDir, cacheDir := GetEffectivePaths()
 
 			cfg, err := config.LoadConfig(configPath)
@@ -93,6 +96,7 @@ func newAddCmd() *cobra.Command {
 			// 2. Command Skill Mode
 			if flagCommand != "" {
 				if len(flagSkills) == 0 && len(args) == 0 {
+					cmd.SilenceUsage = false
 					return fmt.Errorf("--skill <name> or skill name argument is required when adding a command skill")
 				}
 				skillName := ""
@@ -134,6 +138,7 @@ func newAddCmd() *cobra.Command {
 
 			// 3. Remote Git Repository Mode
 			if len(args) == 0 {
+				cmd.SilenceUsage = false
 				return fmt.Errorf("source repository or --symlink/--command required")
 			}
 			rawSource := args[0]

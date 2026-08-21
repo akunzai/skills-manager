@@ -23,6 +23,9 @@ func newUpdateCmd() *cobra.Command {
 		Aliases: []string{"upgrade"},
 		Short:   "Update remote skills to latest versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			configPath, skillsDir, cacheDir := GetEffectivePaths()
 
 			cfg, err := config.LoadConfig(configPath)

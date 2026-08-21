@@ -25,6 +25,9 @@ func newSyncCmd() *cobra.Command {
 		Aliases: []string{"restore"},
 		Short:   "Sync and restore all skills declared in skills.json",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			configPath, skillsDir, cacheDir := GetEffectivePaths()
 
 			cfg, err := config.LoadConfig(configPath)

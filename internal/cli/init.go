@@ -15,6 +15,9 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize a new skills.json configuration file",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			configPath, _, _ := GetEffectivePaths()
 
 			if _, err := os.Stat(configPath); err == nil && !flagForce {

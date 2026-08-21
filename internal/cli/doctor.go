@@ -20,6 +20,9 @@ func newDoctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Diagnose and repair skills health",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Past flag parsing, every failure below is a runtime problem rather
+			// than misuse, so reporting it with a usage dump would mislead.
+			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
 			configPath, skillsDir, _ := GetEffectivePaths()
 
