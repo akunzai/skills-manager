@@ -47,9 +47,13 @@ type Config struct {
 	PostHooks []PostHook             `json:"postHooks"`
 }
 
+// DefaultSchemaURL points at this project's config schema so editors can
+// validate and complete skills.json. It is not the JSON Schema meta-schema.
+const DefaultSchemaURL = "https://raw.githubusercontent.com/akunzai/skills-manager/main/skills.schema.json"
+
 func DefaultConfig() *Config {
 	return &Config{
-		Schema:  "https://json-schema.org/draft/2020-12/schema",
+		Schema:  DefaultSchemaURL,
 		Version: 1,
 		Settings: SettingsConfig{
 			DefaultAgents:   []string{"claude"},

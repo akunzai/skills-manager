@@ -49,6 +49,22 @@ skills sync
 
 > **Note**: Git caches are centralized in `~/.local/state/skills-manager/repo-cache`, keeping project workspaces 100% clean.
 
+### Working in Project Scope
+
+Every command accepts `-p` / `--project` to act on the current project instead of your global setup:
+
+```bash
+skills -p init                                   # create ./.agents/skills.json
+skills -p add akunzai/agent-skills -s agents-md  # install into ./.agents/skills/
+skills -p ls                                     # list this project's skills
+skills -p outdated                               # check remote repos for updates
+skills -p sync                                   # restore declared skills after a clone
+skills -p doctor --fix                           # verify & repair project symlinks
+skills -p rm agents-md                           # remove from this project
+```
+
+Commit `.agents/skills.json` to your repository so teammates get the same skills with a single `skills -p sync`.
+
 ---
 
 <details>
@@ -72,9 +88,6 @@ skills add --symlink ~/code/my-skill --skill my-skill
 
 # Custom CLI installer command
 skills add --command "agentsview skills install" --check "which agentsview" --skill finding-history
-
-# Project-scoped installation
-skills add -p akunzai/agent-skills -s agents-md
 ```
 
 ### Managing & Inspecting Skills
@@ -84,12 +97,10 @@ skills ls
 skills ls --json
 skills ls -a claude
 skills ls -s akunzai
-skills ls -p # project scope
 
 # Interactive removal
 skills rm
 skills rm tidy-commits
-skills rm -p agents-md  # project scope
 ```
 
 ### Sync & Maintenance
@@ -99,19 +110,15 @@ skills sync
 skills sync --force     # force re-fetch & re-link
 skills sync --prune     # remove untracked skills & unconfigured links
 skills sync --dry-run
-skills sync -p          # restore project skills
 
 # Check outdated & update
 skills outdated
-skills outdated -p
 skills update
 skills update akunzai/agent-skills
-skills update -p
 
 # Health check & auto-repair
 skills doctor
 skills doctor --fix
-skills doctor -p
 
 # Self-update binary
 skills self-update
@@ -121,11 +128,13 @@ skills self-update --check
 </details>
 
 <details>
-<summary>⚙️ <strong>Configuration (<code>skills.json</code>)</strong></summary>
+<summary>⚙️ <strong>Sample Configuration (<code>skills.json</code>)</strong></summary>
+
+Full field reference: [`skills.schema.json`](skills.schema.json).
 
 ```json
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "https://raw.githubusercontent.com/akunzai/skills-manager/main/skills.schema.json",
   "version": 1,
   "settings": {
     "defaultAgents": ["claude"]
