@@ -44,7 +44,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print skills manager version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("skills %s\n", RootCmd.Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "skills-manager %s\n", RootCmd.Version)
 		},
 	}
 }

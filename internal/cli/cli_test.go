@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/pflag"
 )
 
@@ -20,6 +22,10 @@ func TestCLIVersion(t *testing.T) {
 
 	if err := RootCmd.Execute(); err != nil {
 		t.Fatalf("version command failed: %v", err)
+	}
+	want := fmt.Sprintf("skills-manager %s\n", updater.Version)
+	if got := buf.String(); got != want {
+		t.Fatalf("version output = %q; want %q", got, want)
 	}
 }
 
