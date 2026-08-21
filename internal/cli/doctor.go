@@ -45,6 +45,7 @@ func newDoctorCmd() *cobra.Command {
 			// 2. Check broken symlinks in configured agent directories
 			fmt.Fprintf(out, "\n%sChecking Agent Directories & Symlinks:%s\n", colorBold, colorReset)
 			knownAgents := models.GetAgentsForSkillsDir(skillsDir)
+			universalDirs := models.GetUniversalAgentSkillDirs(skillsDir)
 			configuredAgents := engine.ConfiguredKnownAgents(cfg, skillsDir)
 
 			configuredNames := make([]string, 0, len(configuredAgents))
@@ -132,6 +133,53 @@ func newDoctorCmd() *cobra.Command {
 			// Parent pruning must never escape the scope root: in project scope
 			// that is the project directory, in global scope the home directory.
 			pruneBoundary := models.GetProjectRootFromSkillsDir(skillsDir)
+
+			// Universal agents read the skills directory directly, so we never link
+			// into their directories — but earlier versions and setup scripts did,
+			// and those links dangle once a skill is removed. Nothing else in
+			// doctor looks at these paths, so the stale links would be invisible.
+			universalNames := make([]string, 0, len(universalDirs))
+			for agentName := range universalDirs {
+				universalNames = append(universalNames, agentName)
+			}
+			sort.Strings(universalNames)
+
+			for _, agentName := range universalNames {
+				agentDir := universalDirs[agentName]
+				if _, ok := configuredAgents[agentName]; ok {
+					continue
+				}
+				entries, err := os.ReadDir(agentDir)
+				if err != nil {
+					continue
+				}
+				var stale []string
+				for _, entry := range entries {
+					linkPath := filepath.Join(agentDir, entry.Name())
+					if !engine.IsManagedSkillLink(linkPath, entry.Name(), skillsDir) {
+						continue
+					}
+					if _, err := os.Stat(linkPath); err != nil {
+						stale = append(stale, entry.Name())
+					}
+				}
+				if len(stale) == 0 {
+					continue
+				}
+				fmt.Fprintf(out, "  %s✖ [%s] Stale links to removed skills:%s %s\n", colorRed, agentName, colorReset, strings.Join(stale, ", "))
+				if flagFix {
+					for _, name := range stale {
+						if !engine.RemoveManagedSkillLink(filepath.Join(agentDir, name), name, skillsDir) {
+							issuesFound++
+							fmt.Fprintf(out, "    %s✖ Failed to remove stale link %s%s\n", colorRed, name, colorReset)
+							continue
+						}
+						fmt.Fprintf(out, "    %s✔ Fixed: Removed stale link %s%s\n", colorGreen, name, colorReset)
+					}
+				} else {
+					issuesFound += len(stale)
+				}
+			}
 
 			leftoverEmpty := engine.LeftoverEmptyAgentDirs(knownAgents, configuredAgents)
 			if len(leftoverEmpty) > 0 {

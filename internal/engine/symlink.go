@@ -173,5 +173,56 @@ func RemoveAgentSymlinks(skillName string, skillsDir ...string) []string {
 			removed = append(removed, agentName)
 		}
 	}
+
+	// Universal agents read the master skills directory directly, so nothing
+	// here is created by us — but older versions and setup scripts did populate
+	// these directories, and a link left pointing at a removed skill dangles
+	// forever otherwise.
+	for agentName, agentDir := range models.GetUniversalAgentSkillDirs(dir) {
+		if _, taken := knownAgents[agentName]; taken {
+			continue
+		}
+		if RemoveManagedSkillLink(filepath.Join(agentDir, skillName), skillName, dir) {
+			removed = append(removed, agentName)
+		}
+	}
 	return removed
+}
+
+// RemoveManagedSkillLink deletes linkPath only when it is a symlink that points
+// at skillName inside the master skills directory. Anything else — a real
+// directory, a link somewhere else entirely — is left untouched, so an
+// imprecise agent path can never cost the user unrelated files.
+func RemoveManagedSkillLink(linkPath string, skillName string, skillsDir string) bool {
+	if !IsManagedSkillLink(linkPath, skillName, skillsDir) {
+		return false
+	}
+	return os.Remove(linkPath) == nil
+}
+
+// IsManagedSkillLink reports whether linkPath is a symlink this tool would have
+// created for skillName, resolved or dangling.
+func IsManagedSkillLink(linkPath string, skillName string, skillsDir string) bool {
+	fi, err := os.Lstat(linkPath)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		return false
+	}
+	base := skillsDir
+	if base == "" {
+		base = models.DefaultSkillsDir()
+	}
+	master := filepath.Join(base, skillName)
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(linkPath), target)
+	}
+	absTarget, err1 := filepath.Abs(filepath.Clean(target))
+	absMaster, err2 := filepath.Abs(filepath.Clean(master))
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return absTarget == absMaster
 }
