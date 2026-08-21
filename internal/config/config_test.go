@@ -80,3 +80,32 @@ func TestGetConfiguredSkillNames(t *testing.T) {
 		}
 	}
 }
+
+func TestAddSkillEntryReplacesConflictingSource(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// 1. Add local symlink skill
+	AddLocalSymlinkEntry(cfg, "my-skill", "/path/to/my-skill", "local")
+	if _, ok := cfg.Local["my-skill"]; !ok {
+		t.Fatal("expected my-skill in local")
+	}
+
+	// 2. Add remote skill with same name -> should replace local
+	AddRemoteSkillEntry(cfg, "owner/repo", "my-skill", "skills/my-skill", "github", "")
+	if _, ok := cfg.Local["my-skill"]; ok {
+		t.Fatal("expected local entry for my-skill to be removed")
+	}
+	if cfg.Remote["owner/repo"].Skills["my-skill"] != "skills/my-skill" {
+		t.Fatal("expected remote entry for my-skill")
+	}
+
+	// 3. Add local command skill with same name -> should replace remote
+	AddLocalCommandEntry(cfg, "my-skill", "echo hi", "", "command")
+	if _, ok := cfg.Remote["owner/repo"]; ok {
+		t.Fatal("expected empty remote repo to be removed")
+	}
+	if cfg.Local["my-skill"].Command != "echo hi" {
+		t.Fatal("expected local command entry for my-skill")
+	}
+}
+

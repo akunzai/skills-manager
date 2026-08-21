@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 
 	"golang.org/x/term"
@@ -663,3 +664,24 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 		}
 	}
 }
+
+// PromptConfirm prompts the user for a yes/no confirmation.
+func PromptConfirm(prompt string, defaultYes bool) (bool, error) {
+	if !IsTerminal() {
+		return false, fmt.Errorf("interactive prompt requires a terminal")
+	}
+	suffix := " [y/N]: "
+	if defaultYes {
+		suffix = " [Y/n]: "
+	}
+	fmt.Printf("%s%s%s%s", colorBold, colorYellow, prompt, colorReset)
+	fmt.Print(suffix)
+	var response string
+	_, _ = fmt.Scanln(&response)
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response == "" {
+		return defaultYes, nil
+	}
+	return response == "y" || response == "yes", nil
+}
+

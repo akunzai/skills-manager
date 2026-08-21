@@ -38,20 +38,20 @@ func IsProjectScope(skillsDir string) bool {
 // StoreLocalSourcePath renders a local skill source for skills.json. Inside a
 // project it returns a path relative to the project root, so the committed
 // config resolves on a teammate's checkout instead of pointing at the author's
-// absolute path. Anything outside the project, and all of global scope, keeps
-// the absolute path.
+// absolute path. Anything outside the project, and all of global scope, uses
+// ~/ prefix if inside the user's home directory, or the absolute path.
 func StoreLocalSourcePath(absSource string, skillsDir string) string {
 	if !IsProjectScope(skillsDir) {
-		return absSource
+		return models.ToTildePath(absSource)
 	}
 	projectRoot := models.GetProjectRootFromSkillsDir(skillsDir)
 	absRoot, err := filepath.Abs(projectRoot)
 	if err != nil {
-		return absSource
+		return models.ToTildePath(absSource)
 	}
 	rel, err := filepath.Rel(absRoot, absSource)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return absSource
+		return models.ToTildePath(absSource)
 	}
 	return filepath.ToSlash(rel)
 }
@@ -60,7 +60,8 @@ func StoreLocalSourcePath(absSource string, skillsDir string) string {
 // source inside the project is linked relatively (e.g. ../../my-skill) so the
 // checkout survives being cloned elsewhere; anything else stays absolute.
 func LocalSymlinkTarget(absSource string, skillsDir string) string {
-	if filepath.IsAbs(StoreLocalSourcePath(absSource, skillsDir)) {
+	stored := StoreLocalSourcePath(absSource, skillsDir)
+	if strings.HasPrefix(stored, "~") || filepath.IsAbs(stored) {
 		return absSource
 	}
 	rel, err := filepath.Rel(skillsDir, absSource)

@@ -3,13 +3,16 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
+	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 const (
@@ -21,6 +24,54 @@ const (
 	colorDim    = "\033[2m"
 	colorReset  = "\033[0m"
 )
+
+func getSourceIcon(sourceType string) string {
+	if os.Getenv("NO_NERD_FONT") == "1" || os.Getenv("TERM") == "dumb" {
+		switch {
+		case sourceType == "symlink" || sourceType == "local_symlink":
+			return "🔗"
+		case sourceType == "local_command" || sourceType == "command":
+			return "⚙️"
+		case sourceType == "untracked":
+			return "📂"
+		default:
+			return "📦"
+		}
+	}
+	switch {
+	case sourceType == "symlink" || sourceType == "local_symlink":
+		return "\U000f0337" // 󰌷
+	case sourceType == "local_command" || sourceType == "command":
+		return "\U000f018d" // 󰆍
+	case sourceType == "untracked":
+		return "\U000f024b" // 󰉋
+	default:
+		return "\U000f02a4" // 󰊤
+	}
+}
+
+func stringRuneLen(s string) int {
+	return len([]rune(s))
+}
+
+func truncateWithEllipsis(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
+
+func padRight(s string, width int) string {
+	rLen := stringRuneLen(s)
+	if rLen >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-rLen)
+}
 
 func newLsCmd() *cobra.Command {
 	var (
@@ -58,7 +109,6 @@ func newLsCmd() *cobra.Command {
 						for _, a := range s.LinkedAgents {
 							if models.NormalizeAgentName(a) == filterAgent {
 								filtered = append(filtered, s)
-								break
 							}
 						}
 					}
@@ -114,46 +164,104 @@ func newLsCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Printf("\n%s%sSkills (%d total):%s\n\n", colorBold, colorCyan, len(skills), colorReset)
-			fmt.Printf("%s%-32s %-38s %-12s %s%s\n", colorBold, "NAME", "SOURCE", "AGENTS", "STATUS", colorReset)
-			fmt.Println(strings.Repeat("─", 94))
+			// Terminal width detection
+			termWidth := 94
+			if tui.IsTerminal() {
+				if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+					termWidth = w
+				}
+			}
+			if termWidth < 80 {
+				termWidth = 80
+			}
+
+			// Calculate dynamic column widths
+			nameWidth := 20
+			for _, s := range skills {
+				if len(s.Name)+2 > nameWidth {
+					nameWidth = len(s.Name) + 2
+				}
+			}
+			if nameWidth > 34 {
+				nameWidth = 34
+			}
+
+			statusWidth := 24
+
+			agentsWidth := 12
+			if termWidth >= 120 {
+				maxAgentsLen := 12
+				for _, s := range skills {
+					var targetList []string
+					for _, a := range s.LinkedAgents {
+						if a == "claude-code" || a == "claude" {
+							targetList = append(targetList, "claude")
+						}
+					}
+					for _, a := range s.LinkedAgents {
+						cleanA := strings.TrimSuffix(a, "-code")
+						if a != "claude-code" && a != "claude" && a != "agents" {
+							found := false
+							for _, t := range targetList {
+								if t == cleanA {
+									found = true
+									break
+								}
+							}
+							if !found {
+								targetList = append(targetList, cleanA)
+							}
+						}
+					}
+					joined := strings.Join(targetList, ", ")
+					if len(joined) > maxAgentsLen {
+						maxAgentsLen = len(joined)
+					}
+				}
+				if maxAgentsLen > 28 {
+					maxAgentsLen = 28
+				}
+				agentsWidth = maxAgentsLen
+			}
+
+			sourceWidth := termWidth - nameWidth - agentsWidth - statusWidth - 3
+			if sourceWidth < 25 {
+				sourceWidth = 25
+			}
+			totalLineWidth := nameWidth + sourceWidth + agentsWidth + statusWidth + 3
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "\n%s%sSkills (%d total):%s\n\n", colorBold, colorCyan, len(skills), colorReset)
+			fmt.Fprintf(out, "%s%s %s %s %s%s\n", colorBold, padRight("NAME", nameWidth), padRight("SOURCE", sourceWidth), padRight("AGENTS", agentsWidth), padRight("STATUS", statusWidth), colorReset)
+			fmt.Fprintln(out, strings.Repeat("─", totalLineWidth))
 
 			for _, s := range skills {
-				var statusBadges []string
+				var statusDisplay string
 				if s.IsInstalled {
 					if s.IsValidSkill {
-						statusBadges = append(statusBadges, fmt.Sprintf("%sInstalled%s", colorGreen, colorReset))
+						statusDisplay = fmt.Sprintf("%s%s%s", colorGreen, padRight("Installed", statusWidth), colorReset)
 					} else {
-						statusBadges = append(statusBadges, fmt.Sprintf("%sInvalid (No SKILL.md)%s", colorRed, colorReset))
+						statusDisplay = fmt.Sprintf("%s%s%s", colorRed, padRight("Invalid (No SKILL.md)", statusWidth), colorReset)
 					}
 				} else {
-					statusBadges = append(statusBadges, fmt.Sprintf("%sMissing%s", colorYellow, colorReset))
+					statusDisplay = fmt.Sprintf("%s%s%s", colorYellow, padRight("Missing", statusWidth), colorReset)
 				}
 
-				var sourceDisplay string
-				if strings.HasPrefix(s.SourceType, "local_") {
-					rawSrc := fmt.Sprintf("[local] %s", s.Source)
-					if len(rawSrc) > 38 {
-						rawSrc = rawSrc[:35] + "..."
-					}
-					cleanRest := rawSrc[8:]
-					sourceDisplay = fmt.Sprintf("%s[local]%s %-30s", colorDim, colorReset, cleanRest)
-				} else if s.SourceType == "symlink" {
-					rawSrc := fmt.Sprintf("[symlink] %s", s.Source)
-					if len(rawSrc) > 38 {
-						rawSrc = rawSrc[:35] + "..."
-					}
-					cleanRest := rawSrc[10:]
-					sourceDisplay = fmt.Sprintf("%s[symlink]%s %-28s", colorDim, colorReset, cleanRest)
-				} else if s.SourceType == "untracked" {
-					sourceDisplay = fmt.Sprintf("%s%-38s%s", colorYellow, "[untracked]", colorReset)
+				icon := getSourceIcon(s.SourceType)
+				var rawSource string
+				if s.SourceType == "untracked" {
+					rawSource = fmt.Sprintf("%s [untracked]", icon)
+				} else if strings.HasPrefix(s.SourceType, "local_symlink") || s.SourceType == "symlink" {
+					rawSource = fmt.Sprintf("%s %s", icon, models.ToTildePath(s.Source))
+				} else if s.SourceType == "local_command" || s.SourceType == "command" {
+					rawSource = fmt.Sprintf("%s %s", icon, s.Source)
+				} else if strings.HasPrefix(s.SourceType, "local_") {
+					rawSource = fmt.Sprintf("%s %s", icon, models.ToTildePath(s.Source))
 				} else {
-					rawSrc := s.Source
-					if len(rawSrc) > 38 {
-						rawSrc = rawSrc[:35] + "..."
-					}
-					sourceDisplay = fmt.Sprintf("%-38s", rawSrc)
+					rawSource = fmt.Sprintf("%s %s", icon, s.Source)
 				}
+
+				sourceCol := padRight(truncateWithEllipsis(rawSource, sourceWidth), sourceWidth)
 
 				var targetList []string
 				for _, a := range s.LinkedAgents {
@@ -179,27 +287,36 @@ func newLsCmd() *cobra.Command {
 
 				rawTargets := "-"
 				if len(targetList) > 0 {
-					if len(targetList) == 1 {
-						rawTargets = targetList[0]
-					} else if len(targetList) == 2 && len(targetList[0])+len(targetList[1])+2 <= 12 {
-						rawTargets = strings.Join(targetList, ", ")
+					allAgents := strings.Join(targetList, ", ")
+					if len(allAgents) <= agentsWidth {
+						rawTargets = allAgents
+					} else if len(targetList) == 1 {
+						rawTargets = truncateWithEllipsis(targetList[0], agentsWidth)
 					} else {
-						rawTargets = fmt.Sprintf("%s (+%d)", targetList[0], len(targetList)-1)
+						summary := fmt.Sprintf("%s (+%d)", targetList[0], len(targetList)-1)
+						if len(summary) <= agentsWidth {
+							rawTargets = summary
+						} else {
+							rawTargets = truncateWithEllipsis(summary, agentsWidth)
+						}
 					}
 				}
+
+				agentsCol := padRight(rawTargets, agentsWidth)
 				var agentsDisplay string
 				if len(targetList) > 0 {
-					agentsDisplay = fmt.Sprintf("%-12s", rawTargets)
+					agentsDisplay = agentsCol
 				} else {
-					agentsDisplay = fmt.Sprintf("%s%-12s%s", colorDim, rawTargets, colorReset)
+					agentsDisplay = fmt.Sprintf("%s%s%s", colorDim, agentsCol, colorReset)
 				}
 
-				nameDisplay := fmt.Sprintf("%s%-32s%s", colorBold, s.Name, colorReset)
-				statusStr := strings.Join(statusBadges, " ")
-				fmt.Printf("%s %s %s %s\n", nameDisplay, sourceDisplay, agentsDisplay, statusStr)
+				nameCol := padRight(truncateWithEllipsis(s.Name, nameWidth), nameWidth)
+				nameDisplay := fmt.Sprintf("%s%s%s", colorBold, nameCol, colorReset)
+
+				fmt.Fprintf(out, "%s %s %s %s\n", nameDisplay, sourceCol, agentsDisplay, statusDisplay)
 			}
 
-			fmt.Println(strings.Repeat("─", 94) + "\n")
+			fmt.Fprintln(out, strings.Repeat("─", totalLineWidth)+"\n")
 			return nil
 		},
 	}

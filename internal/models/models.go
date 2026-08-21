@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -32,6 +33,67 @@ func ExpandUser(path string) string {
 			return home
 		}
 		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
+func hasPrefixPath(path, prefix string) bool {
+	if strings.HasPrefix(path, prefix) {
+		return true
+	}
+	if runtime.GOOS == "windows" && len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix) {
+		return true
+	}
+	return false
+}
+
+func equalPath(p1, p2 string) bool {
+	if p1 == p2 {
+		return true
+	}
+	if runtime.GOOS == "windows" && strings.EqualFold(p1, p2) {
+		return true
+	}
+	return false
+}
+
+// ToTildePath replaces the user's home directory prefix with ~ if applicable.
+func ToTildePath(path string) string {
+	if path == "" {
+		return ""
+	}
+	home := UserHomeDir()
+	if home == "" || home == "." {
+		return path
+	}
+	cleanPath := filepath.Clean(path)
+	cleanHome := filepath.Clean(home)
+
+	if equalPath(cleanPath, cleanHome) {
+		return "~"
+	}
+	sep := string(filepath.Separator)
+	if hasPrefixPath(cleanPath, cleanHome+sep) {
+		rel := cleanPath[len(cleanHome):]
+		return "~" + filepath.ToSlash(rel)
+	}
+	if evalHome, err := filepath.EvalSymlinks(cleanHome); err == nil && evalHome != cleanHome {
+		if equalPath(cleanPath, evalHome) {
+			return "~"
+		}
+		if hasPrefixPath(cleanPath, evalHome+sep) {
+			rel := cleanPath[len(evalHome):]
+			return "~" + filepath.ToSlash(rel)
+		}
+	}
+	if evalPath, err := filepath.EvalSymlinks(cleanPath); err == nil && evalPath != cleanPath {
+		if equalPath(evalPath, cleanHome) {
+			return "~"
+		}
+		if hasPrefixPath(evalPath, cleanHome+sep) {
+			rel := evalPath[len(cleanHome):]
+			return "~" + filepath.ToSlash(rel)
+		}
 	}
 	return path
 }

@@ -140,3 +140,38 @@ func TestGetProjectRootAndAgents(t *testing.T) {
 	}
 }
 
+func TestExpandUser(t *testing.T) {
+	home := UserHomeDir()
+	if got := ExpandUser("~"); got != home {
+		t.Errorf("ExpandUser(~) = %q; want %q", got, home)
+	}
+	if got := ExpandUser("~/skills"); got != filepath.Join(home, "skills") {
+		t.Errorf("ExpandUser(~/skills) = %q; want %q", got, filepath.Join(home, "skills"))
+	}
+	if got := ExpandUser(`~\skills`); got != filepath.Join(home, "skills") {
+		t.Errorf(`ExpandUser(~\skills) = %q; want %q`, got, filepath.Join(home, "skills"))
+	}
+}
+
+func TestToTildePath(t *testing.T) {
+	home := UserHomeDir()
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"", ""},
+		{home, "~"},
+		{filepath.Join(home, "code", "agent-skills"), "~/code/agent-skills"},
+		{"/nonexistent/path/outside/home", "/nonexistent/path/outside/home"},
+	}
+
+	for _, tt := range tests {
+		got := ToTildePath(tt.input)
+		if got != tt.expected {
+			t.Errorf("ToTildePath(%q) = %q; want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+
+

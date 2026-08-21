@@ -43,19 +43,35 @@ func TestDiscoverSkillsInRepo(t *testing.T) {
 	_ = os.MkdirAll(skill2Dir, 0755)
 	_ = os.WriteFile(filepath.Join(skill2Dir, "SKILL.md"), []byte("---\nname: skill-two\n---\n"), 0644)
 
+	// Create skill in node_modules (should be ignored)
+	nodeModulesDir := filepath.Join(tmpRepo, "node_modules", "ignored-skill")
+	_ = os.MkdirAll(nodeModulesDir, 0755)
+	_ = os.WriteFile(filepath.Join(nodeModulesDir, "SKILL.md"), []byte("---\nname: ignored-skill\n---\n"), 0644)
+
+	// Create skill exceeding MaxScanDepth (depth 7, should be ignored)
+	deepDir := filepath.Join(tmpRepo, "d1", "d2", "d3", "d4", "d5", "d6", "deep-skill")
+	_ = os.MkdirAll(deepDir, 0755)
+	_ = os.WriteFile(filepath.Join(deepDir, "SKILL.md"), []byte("---\nname: deep-skill\n---\n"), 0644)
+
 	discovered, err := DiscoverSkillsInRepo(tmpRepo)
 	if err != nil {
 		t.Fatalf("DiscoverSkillsInRepo failed: %v", err)
 	}
 
 	if len(discovered) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(discovered))
+		t.Fatalf("expected 2 skills, got %d (discovered: %+v)", len(discovered), discovered)
 	}
 	if discovered["skill-one"] != "skills/skill-one" {
 		t.Errorf("unexpected skill-one path: %s", discovered["skill-one"])
 	}
 	if discovered["skill-two"] != "plugins/sub/skill-two" {
 		t.Errorf("unexpected skill-two path: %s", discovered["skill-two"])
+	}
+	if _, ok := discovered["ignored-skill"]; ok {
+		t.Errorf("expected node_modules skill to be ignored")
+	}
+	if _, ok := discovered["deep-skill"]; ok {
+		t.Errorf("expected too deep skill to be ignored")
 	}
 }
 

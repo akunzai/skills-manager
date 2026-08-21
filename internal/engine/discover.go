@@ -30,6 +30,26 @@ func ParseSkillNameFromMD(skillMdPath string) string {
 	return ""
 }
 
+const MaxScanDepth = 5
+
+var IgnoredScanDirs = map[string]bool{
+	".git":         true,
+	".hg":          true,
+	".svn":         true,
+	"node_modules": true,
+	"vendor":       true,
+	".venv":        true,
+	"venv":         true,
+	"__pycache__":  true,
+	"dist":         true,
+	"build":        true,
+	"target":       true,
+	".cache":       true,
+	".next":        true,
+	".nuxt":        true,
+	".turbo":       true,
+}
+
 func DiscoverSkillsInRepo(repoDir string) (map[string]string, error) {
 	found := make(map[string]string)
 	foundPaths := make(map[string][]string)
@@ -38,8 +58,17 @@ func DiscoverSkillsInRepo(repoDir string) (map[string]string, error) {
 		if err != nil {
 			return nil
 		}
-		if info.IsDir() && info.Name() == ".git" {
-			return filepath.SkipDir
+		if info.IsDir() {
+			if IgnoredScanDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			rel, err := filepath.Rel(repoDir, path)
+			if err == nil && rel != "." {
+				depth := len(strings.Split(filepath.ToSlash(rel), "/"))
+				if depth > MaxScanDepth {
+					return filepath.SkipDir
+				}
+			}
 		}
 		if !info.IsDir() && strings.EqualFold(info.Name(), "SKILL.md") {
 			skillDir := filepath.Dir(path)
