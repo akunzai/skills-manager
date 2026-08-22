@@ -331,6 +331,85 @@ func TestRemoveAgentSymlinksLeavesUnmanagedEntriesAlone(t *testing.T) {
 	}
 }
 
+func TestDiagnoseAgentDirHealthClassifiesEntries(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "healthy")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "healthy"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	agentDir := filepath.Join(home, ".codex", "skills")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A healthy managed link: its target still exists.
+	if err := os.Symlink(filepath.Join(skillsDir, "healthy"), filepath.Join(agentDir, "healthy")); err != nil {
+		t.Fatal(err)
+	}
+	// A managed link whose target has been removed: broken.
+	if err := os.Symlink(filepath.Join(skillsDir, "removed"), filepath.Join(agentDir, "removed")); err != nil {
+		t.Fatal(err)
+	}
+	// A dangling link this tool never created: unmanagedBroken.
+	if err := os.Symlink(filepath.Join(home, "elsewhere-gone"), filepath.Join(agentDir, "foreign")); err != nil {
+		t.Fatal(err)
+	}
+	// A real directory where a managed link is expected: physical.
+	if err := os.MkdirAll(filepath.Join(agentDir, "manual"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	broken, unmanagedBroken, physical := DiagnoseAgentDirHealth(agentDir, skillsDir)
+
+	if len(broken) != 1 || broken[0] != "removed" {
+		t.Fatalf("broken = %v; want [removed]", broken)
+	}
+	if len(unmanagedBroken) != 1 || unmanagedBroken[0] != "foreign" {
+		t.Fatalf("unmanagedBroken = %v; want [foreign]", unmanagedBroken)
+	}
+	if len(physical) != 1 || physical[0] != "manual" {
+		t.Fatalf("physical = %v; want [manual]", physical)
+	}
+}
+
+func TestDiagnoseAgentDirHealthOnMissingDirReportsNothing(t *testing.T) {
+	_, skillsDir := globalSkillsHome(t, "alpha")
+	broken, unmanagedBroken, physical := DiagnoseAgentDirHealth(filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
+	if broken != nil || unmanagedBroken != nil || physical != nil {
+		t.Fatalf("got (%v, %v, %v); want all nil for a missing agent dir", broken, unmanagedBroken, physical)
+	}
+}
+
+func TestFindStaleManagedLinksReportsOnlyDanglingManagedLinks(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "healthy")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "healthy"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	agentDir := filepath.Join(home, ".gemini", "skills")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(filepath.Join(skillsDir, "healthy"), filepath.Join(agentDir, "healthy")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(skillsDir, "removed"), filepath.Join(agentDir, "removed")); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := FindStaleManagedLinks(agentDir, skillsDir)
+	if len(stale) != 1 || stale[0] != "removed" {
+		t.Fatalf("stale = %v; want [removed]", stale)
+	}
+}
+
+func TestFindStaleManagedLinksOnMissingDirReportsNothing(t *testing.T) {
+	_, skillsDir := globalSkillsHome(t, "alpha")
+	stale := FindStaleManagedLinks(filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
+	if stale != nil {
+		t.Fatalf("stale = %v; want nil for a missing agent dir", stale)
+	}
+}
+
 func TestIsManagedSkillLinkAcceptsDanglingAndAbsoluteForms(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
 	codex := filepath.Join(home, ".codex", "skills")

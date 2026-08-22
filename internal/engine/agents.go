@@ -54,6 +54,68 @@ func ConfiguredKnownAgents(cfg *config.Config, skillsDir string) map[string]stri
 	return out
 }
 
+// DiagnoseAgentDirHealth classifies every entry in a configured agent's
+// skills directory: broken is a managed symlink whose target has gone
+// missing, unmanagedBroken is a dangling symlink this tool never created,
+// and physical is a real directory sitting where a managed symlink is
+// expected (and isn't a copy this tool made, e.g. the Windows fallback).
+// A missing agentDir is not itself unhealthy: it reports no findings.
+func DiagnoseAgentDirHealth(agentDir, skillsDir string) (broken, unmanagedBroken, physical []string) {
+	entries, err := os.ReadDir(agentDir)
+	if err != nil {
+		return nil, nil, nil
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		fullPath := filepath.Join(agentDir, name)
+
+		fi, err := os.Lstat(fullPath)
+		if err != nil {
+			continue
+		}
+
+		if fi.Mode()&os.ModeSymlink != 0 {
+			if _, err := os.Stat(fullPath); err != nil {
+				if IsManagedSkillLink(fullPath, name, skillsDir) {
+					broken = append(broken, name)
+				} else {
+					unmanagedBroken = append(unmanagedBroken, name)
+				}
+			}
+		} else if fi.IsDir() && !strings.HasPrefix(name, ".") && !IsManagedSkillCopy(fullPath, name, skillsDir) {
+			physical = append(physical, name)
+		}
+	}
+
+	return broken, unmanagedBroken, physical
+}
+
+// FindStaleManagedLinks returns managed symlinks in a universal agent's
+// skills directory whose target skill no longer exists. Universal agents
+// read the master skills directory directly, so skills-manager never
+// creates these paths, but earlier versions and setup scripts did, and a
+// link left behind after a skill is removed dangles forever otherwise. A
+// missing agentDir reports no findings.
+func FindStaleManagedLinks(agentDir, skillsDir string) []string {
+	entries, err := os.ReadDir(agentDir)
+	if err != nil {
+		return nil
+	}
+
+	var stale []string
+	for _, entry := range entries {
+		linkPath := filepath.Join(agentDir, entry.Name())
+		if !IsManagedSkillLink(linkPath, entry.Name(), skillsDir) {
+			continue
+		}
+		if _, err := os.Stat(linkPath); err != nil {
+			stale = append(stale, entry.Name())
+		}
+	}
+	return stale
+}
+
 // LeftoverEmptyAgentDirs returns known agent skills dirs that exist, are
 // effectively empty, and are not in the configured set.
 func LeftoverEmptyAgentDirs(known, configured map[string]string) []AgentDir {
