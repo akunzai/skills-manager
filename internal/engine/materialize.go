@@ -25,3 +25,20 @@ func MaterializeRemoteSkill(name, subpath, repoDir, skillsDir string) error {
 func MaterializeLocalSymlink(name, linkTarget, skillsDir string) error {
 	return CreateSymlink(linkTarget, filepath.Join(skillsDir, name), true)
 }
+
+// MaterializeCommand runs the installer for a command Source. A failed check
+// is the caller's decision to skip; this only runs the installer command.
+func MaterializeCommand(command string) error {
+	stdout, stderr, err := RunCmd(command, "")
+	if err == nil {
+		return nil
+	}
+	msg := stderr
+	if msg == "" {
+		msg = stdout
+	}
+	if msg == "" {
+		msg = err.Error()
+	}
+	return fmt.Errorf("%s", msg)
+}

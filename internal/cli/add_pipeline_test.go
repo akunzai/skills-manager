@@ -24,8 +24,8 @@ func (f *fakeInstallSource) labels() sourceLabels {
 	return sourceLabels{displayName: "fake", resourceNoun: "Fake source", promptVerb: "fake-install", failVerb: "fake-install", pastVerb: "Fake-installed", unitNoun: "skill(s)"}
 }
 func (f *fakeInstallSource) configSourceKey() string { return "fake" }
-func (f *fakeInstallSource) confirmReplacementArgs() (string, bool, string) {
-	return "fake", false, ""
+func (f *fakeInstallSource) confirmReplacementArgs() replacementSource {
+	return replacementSource{kind: "remote", key: "fake"}
 }
 func (f *fakeInstallSource) install(_, _, _ string) error                  { return nil }
 func (f *fakeInstallSource) recordConfig(_ *config.Config, _, _, _ string) {}

@@ -11,11 +11,19 @@ import (
 )
 
 // LocalSyncSkill is a local symlink Source already resolved by the CLI for the
-// active Scope. Command Skills are not part of this list.
+// active Scope.
 type LocalSyncSkill struct {
 	Name       string
 	AbsSource  string
 	LinkTarget string
+}
+
+// CommandSyncSkill is a command Source: an installer to run, with an optional
+// check that skips the Skill when it fails.
+type CommandSyncSkill struct {
+	Name    string
+	Command string
+	Check   string
 }
 
 const (
@@ -30,6 +38,10 @@ const (
 	SyncWouldSymlink  = "would_symlink"
 	SyncSymlinkFailed = "symlink_failed"
 	SyncSymlinked     = "symlinked"
+	SyncCheckFailed   = "check_failed"
+	SyncWouldCommand  = "would_command"
+	SyncCommandStart  = "command_start"
+	SyncCommandFailed = "command_failed"
 )
 
 // SyncEvent is one step of SyncDeclared for the CLI to print.
@@ -63,10 +75,11 @@ func (r *SyncReport) driftEvent(name, source string, cfg *config.Config, skillsD
 	r.add(SyncEvent{Kind: SyncWouldDrift, Source: source, Skill: name, Missing: missing, Unexpected: unexpected})
 }
 
-// SyncDeclared materializes declared remote and local-symlink Skills and
-// applies Availability. Command Skills stay with the caller. Reconcile
-// failures fail closed; fetch/copy/symlink failures are events and continue.
-func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, locals []LocalSyncSkill, force, dryRun bool) (*SyncReport, error) {
+// SyncDeclared materializes declared remote, local-symlink, and command Skills
+// and applies Availability. Reconcile failures fail closed; fetch/copy/symlink
+// failures are events and continue. A failed command installer is an event;
+// Availability is still applied.
+func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, locals []LocalSyncSkill, commands []CommandSyncSkill, force, dryRun bool) (*SyncReport, error) {
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create skills dir: %w", err)
 	}
@@ -166,6 +179,29 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, locals []Local
 		report.add(SyncEvent{Kind: SyncSymlinked, Skill: local.Name, Target: local.AbsSource})
 		if err := ReconcileAgentSymlinks(local.Name, "local", cfg, skillsDir); err != nil {
 			return report, fmt.Errorf("failed to reconcile availability for %s: %w", local.Name, err)
+		}
+	}
+
+	sort.Slice(commands, func(i, j int) bool { return commands[i].Name < commands[j].Name })
+	for _, cmdSkill := range commands {
+		configured[cmdSkill.Name] = struct{}{}
+		if cmdSkill.Check != "" {
+			if _, _, err := RunCmd(cmdSkill.Check, ""); err != nil {
+				report.add(SyncEvent{Kind: SyncCheckFailed, Skill: cmdSkill.Name, Path: cmdSkill.Check})
+				continue
+			}
+		}
+		if dryRun {
+			report.add(SyncEvent{Kind: SyncWouldCommand, Skill: cmdSkill.Name, Target: cmdSkill.Command})
+			report.driftEvent(cmdSkill.Name, "local", cfg, skillsDir)
+			continue
+		}
+		report.add(SyncEvent{Kind: SyncCommandStart, Skill: cmdSkill.Name})
+		if err := MaterializeCommand(cmdSkill.Command); err != nil {
+			report.add(SyncEvent{Kind: SyncCommandFailed, Skill: cmdSkill.Name, Err: err.Error()})
+		}
+		if err := ReconcileAgentSymlinks(cmdSkill.Name, "local", cfg, skillsDir); err != nil {
+			return report, fmt.Errorf("failed to reconcile availability for %s: %w", cmdSkill.Name, err)
 		}
 	}
 

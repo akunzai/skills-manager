@@ -185,34 +185,48 @@ type conflictItem struct {
 	newSrc     string
 }
 
+type replacementSource struct {
+	kind string // "symlink", "remote", "command"
+	key  string
+	path string
+}
+
+func (s replacementSource) display(subpath string) string {
+	switch s.kind {
+	case "command":
+		return fmt.Sprintf("[command] %s", s.key)
+	case "symlink":
+		p := s.path
+		if subpath != "" && subpath != "." {
+			p = filepath.Join(s.path, filepath.FromSlash(subpath))
+		}
+		return fmt.Sprintf("[symlink] %s", models.ToTildePath(p))
+	default:
+		return fmt.Sprintf("[remote] %s (%s)", s.key, subpath)
+	}
+}
+
 func confirmSkillReplacements(
 	cfg *config.Config,
 	skillsDir string,
 	skillsToInstall map[string]string,
-	newSourceKey string,
-	isLocal bool,
-	absSourcePath string,
+	src replacementSource,
 	flagYes bool,
 	out io.Writer,
 ) error {
 	var conflicts []conflictItem
 	for name, subpath := range skillsToInstall {
-		var newSrcDisplay string
-		var localSkillSource string
-		if isLocal {
-			localSkillSource = absSourcePath
-			if subpath != "" && subpath != "." {
-				localSkillSource = filepath.Join(absSourcePath, filepath.FromSlash(subpath))
-			}
-			newSrcDisplay = fmt.Sprintf("[symlink] %s", models.ToTildePath(localSkillSource))
-		} else {
-			newSrcDisplay = fmt.Sprintf("[remote] %s (%s)", newSourceKey, subpath)
+		newSrcDisplay := src.display(subpath)
+		localSkillSource := src.path
+		if src.kind == "symlink" && subpath != "" && subpath != "." {
+			localSkillSource = filepath.Join(src.path, filepath.FromSlash(subpath))
 		}
+		isLocal := src.kind == "symlink"
 
 		cat, srcKey, found := config.FindSkillSource(cfg, name)
 		if found {
 			if cat == "remote" {
-				if isLocal || srcKey != newSourceKey {
+				if src.kind != "remote" || srcKey != src.key {
 					conflicts = append(conflicts, conflictItem{
 						name:       name,
 						currentSrc: fmt.Sprintf("[remote] %s", srcKey),
@@ -222,11 +236,13 @@ func confirmSkillReplacements(
 			} else if cat == "local" {
 				if entry, ok := cfg.Local[name]; ok {
 					if entry.Type == "command" {
-						conflicts = append(conflicts, conflictItem{
-							name:       name,
-							currentSrc: fmt.Sprintf("[command] %s", entry.Command),
-							newSrc:     newSrcDisplay,
-						})
+						if src.kind != "command" || entry.Command != src.key {
+							conflicts = append(conflicts, conflictItem{
+								name:       name,
+								currentSrc: fmt.Sprintf("[command] %s", entry.Command),
+								newSrc:     newSrcDisplay,
+							})
+						}
 					} else {
 						if !isLocal || (entry.Source != StoreLocalSourcePath(localSkillSource, skillsDir) && models.ToTildePath(entry.Source) != models.ToTildePath(localSkillSource)) {
 							conflicts = append(conflicts, conflictItem{
@@ -372,44 +388,13 @@ func newAddCmd() *cobra.Command {
 				} else {
 					skillName = args[0]
 				}
-				configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, flagYes, flagAgents)
-				if err != nil {
-					return err
+				src := &commandInstallSource{
+					command:     flagCommand,
+					check:       flagCheck,
+					description: flagDescription,
+					out:         cmd.OutOrStdout(),
 				}
-				flagAgents = agents
-				if err := promptAddAvailability(cfg, map[string]string{skillName: "."}, "local", skillsDir, flagYes, flagAgents); err != nil {
-					return err
-				}
-
-				out := cmd.OutOrStdout()
-				fmt.Fprintf(out, "%sConfiguring command skill: %s%s%s\n", colorCyan, colorBold, skillName, colorReset)
-				fmt.Fprintf(out, "   Command: %s\n", flagCommand)
-				fmt.Fprintln(out, "   Executing installer command...")
-
-				stdout, stderr, err := engine.RunCmd(flagCommand, "")
-				if err != nil {
-					errMsg := stderr
-					if errMsg == "" {
-						errMsg = stdout
-					}
-					fmt.Fprintf(out, "%sWarning: Install command returned error: %s%s\n", colorYellow, errMsg, colorReset)
-				}
-
-				config.AddLocalCommandEntry(cfg, skillName, flagCommand, flagCheck, flagDescription)
-				if len(flagAgents) > 0 {
-					if err := config.IncludeSkillAgents(cfg, skillName, flagAgents...); err != nil {
-						return err
-					}
-				}
-				if err := config.SaveConfig(cfg, configPath); err != nil {
-					return err
-				}
-				if err := engine.ReconcileAgentSymlinks(skillName, "local", cfg, skillsDir); err != nil {
-					return fmt.Errorf("saved config but failed to reconcile availability for %s: %w", skillName, err)
-				}
-
-				fmt.Fprintf(out, "%sRegistered command skill %s and updated %s.%s\n", colorGreen, skillName, filepath.Base(configPath), colorReset)
-				return nil
+				return runAddPipeline(cmd, map[string]string{skillName: "."}, src, false, "", []string{skillName}, flagYes, flagAgents)
 			}
 
 			// 3. Remote Git Repository Mode

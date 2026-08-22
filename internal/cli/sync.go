@@ -47,19 +47,26 @@ func newSyncCmd() *cobra.Command {
 
 			configuredSkills := make(map[string]struct{})
 			var locals []engine.LocalSyncSkill
+			var commands []engine.CommandSyncSkill
 			for name, localInfo := range cfg.Local {
-				if localInfo.Type != "symlink" {
-					continue
+				switch localInfo.Type {
+				case "symlink":
+					src := ResolveLocalSourcePath(localInfo.Source, skillsDir)
+					locals = append(locals, engine.LocalSyncSkill{
+						Name:       name,
+						AbsSource:  src,
+						LinkTarget: LocalSymlinkTarget(src, skillsDir),
+					})
+				case "command":
+					commands = append(commands, engine.CommandSyncSkill{
+						Name:    name,
+						Command: localInfo.Command,
+						Check:   localInfo.Check,
+					})
 				}
-				src := ResolveLocalSourcePath(localInfo.Source, skillsDir)
-				locals = append(locals, engine.LocalSyncSkill{
-					Name:       name,
-					AbsSource:  src,
-					LinkTarget: LocalSymlinkTarget(src, skillsDir),
-				})
 			}
 
-			report, err := engine.SyncDeclared(cfg, skillsDir, cacheDir, locals, flagForce, flagDryRun)
+			report, err := engine.SyncDeclared(cfg, skillsDir, cacheDir, locals, commands, flagForce, flagDryRun)
 			if err != nil {
 				printSyncEvents(out, report)
 				return err
@@ -67,29 +74,6 @@ func newSyncCmd() *cobra.Command {
 			printSyncEvents(out, report)
 			for _, name := range report.Configured {
 				configuredSkills[name] = struct{}{}
-			}
-
-			for name, localInfo := range cfg.Local {
-				if localInfo.Type != "command" {
-					continue
-				}
-				configuredSkills[name] = struct{}{}
-				if localInfo.Check != "" {
-					if _, _, err := engine.RunCmd(localInfo.Check, ""); err != nil {
-						fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, localInfo.Check, name, colorReset)
-						continue
-					}
-				}
-				if flagDryRun {
-					fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", localInfo.Command)
-					printDriftPreview(out, name, "local", cfg, skillsDir)
-					continue
-				}
-				fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, name, colorReset)
-				_, _, _ = engine.RunCmd(localInfo.Command, "")
-				if err := engine.ReconcileAgentSymlinks(name, "local", cfg, skillsDir); err != nil {
-					return fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
-				}
 			}
 
 			// 3. Post-hooks
@@ -119,16 +103,6 @@ func newSyncCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview actions without making changes")
 
 	return cmd
-}
-
-func printDriftPreview(out io.Writer, name, source string, cfg *config.Config, skillsDir string) {
-	missing, unexpected := engine.AgentLinkDrift(name, source, cfg, skillsDir)
-	if len(missing) > 0 {
-		fmt.Fprintf(out, "  [Dry-run] Would link %s to %s.\n", name, strings.Join(missing, ", "))
-	}
-	if len(unexpected) > 0 {
-		fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", name, strings.Join(unexpected, ", "))
-	}
 }
 
 func printSyncEvents(out io.Writer, report *engine.SyncReport) {
@@ -164,6 +138,12 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 			fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		case engine.SyncSymlinked:
 			fmt.Fprintf(out, "  %sLinked local skill %s%s%s -> %s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, models.ToTildePath(ev.Target), colorReset)
+		case engine.SyncCheckFailed:
+			fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
+		case engine.SyncWouldCommand:
+			fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", ev.Target)
+		case engine.SyncCommandStart:
+			fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
 		}
 	}
 }
