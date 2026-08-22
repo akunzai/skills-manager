@@ -356,171 +356,8 @@ func newAddCmd() *cobra.Command {
 					}
 				}
 
-				skillsToInstall := make(map[string]string)
-
-				if flagAll {
-					skillsToInstall = discovered
-				} else if flagPath != "" && len(flagSkills) == 0 {
-					cleanSub := filepath.ToSlash(strings.Trim(flagPath, "/"))
-					for k, v := range discovered {
-						if filepath.ToSlash(strings.Trim(v, "/")) == cleanSub {
-							skillsToInstall[k] = v
-						}
-					}
-					if len(skillsToInstall) == 0 {
-						subDir := filepath.Join(absSourcePath, filepath.FromSlash(flagPath))
-						if _, err := os.Stat(filepath.Join(subDir, "SKILL.md")); err == nil {
-							skillsToInstall[filepath.Base(subDir)] = flagPath
-						} else {
-							return fmt.Errorf("specified path '%s' does not contain SKILL.md", flagPath)
-						}
-					}
-				} else if len(flagSkills) > 0 {
-					if len(discovered) == 1 && len(flagSkills) == 1 {
-						for _, sub := range discovered {
-							skillsToInstall[flagSkills[0]] = sub
-						}
-					} else {
-						for _, sk := range flagSkills {
-							if sub, ok := discovered[sk]; ok {
-								skillsToInstall[sk] = sub
-							} else if flagPath != "" {
-								skillsToInstall[sk] = flagPath
-							} else {
-								matched := false
-								for k, v := range discovered {
-									if strings.EqualFold(k, sk) {
-										skillsToInstall[k] = v
-										matched = true
-										break
-									}
-								}
-								if !matched {
-									discNames := make([]string, 0, len(discovered))
-									for k := range discovered {
-										discNames = append(discNames, k)
-									}
-									sort.Strings(discNames)
-									fmt.Fprintf(out, "%sWarning: Skill '%s' not found in discovered list (%s)%s\n", colorYellow, sk, strings.Join(discNames, ", "), colorReset)
-								}
-							}
-						}
-					}
-				} else {
-					if shouldPromptForDiscoveredSkills(len(discovered), tui.IsTerminal(), flagYes) {
-						groups, shouldGroup := groupDiscoveredSkills(discovered)
-						selectionDirs := selectionSkillsDirs(cmd)
-
-						var chosen []string
-						if shouldGroup {
-							for _, options := range groups {
-								markInstalledSkills(options, selectionDirs)
-							}
-							chosen, err = tui.PromptGroupedMultiSelect(
-								fmt.Sprintf("Select skills to link from %s:", models.ToTildePath(absSourcePath)),
-								groups,
-							)
-						} else {
-							options := make([]tui.SelectOption, 0, len(discovered))
-							for skName := range discovered {
-								options = append(options, tui.SelectOption{Key: skName, Title: skName})
-							}
-							markInstalledSkills(options, selectionDirs)
-							sort.Slice(options, func(i, j int) bool {
-								return options[i].Key < options[j].Key
-							})
-							chosen, err = tui.PromptMultiSelect(
-								fmt.Sprintf("Select skills to link from %s:", models.ToTildePath(absSourcePath)),
-								options,
-							)
-						}
-						if err != nil {
-							return err
-						}
-						if chosen == nil {
-							fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
-							return nil
-						}
-						if len(chosen) == 0 {
-							fmt.Fprintf(out, "%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
-							return nil
-						}
-						for _, ch := range chosen {
-							skillsToInstall[ch] = discovered[ch]
-						}
-					} else if len(discovered) == 1 {
-						skillsToInstall = discovered
-					} else {
-						discNames := make([]string, 0, len(discovered))
-						for k := range discovered {
-							discNames = append(discNames, k)
-						}
-						sort.Strings(discNames)
-						fmt.Fprintf(out, "%sLocal directory contains multiple skills:%s %s\n", colorYellow, colorReset, strings.Join(discNames, ", "))
-						fmt.Fprintf(out, "Please specify --skill <name> or --all\n")
-						return fmt.Errorf("multiple skills found without selection")
-					}
-				}
-
-				if len(skillsToInstall) == 0 {
-					return fmt.Errorf("no matching skills to install")
-				}
-				configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, flagYes, flagAgents)
-				if err != nil {
-					return err
-				}
-				flagAgents = agents
-				if err := promptAddAvailability(cfg, skillsToInstall, "local", skillsDir, flagYes, flagAgents); err != nil {
-					return err
-				}
-
-				if err := confirmSkillReplacements(cfg, skillsDir, skillsToInstall, "", true, absSourcePath, flagYes, out); err != nil {
-					if err.Error() == "operation cancelled by user" {
-						fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
-						return nil
-					}
-					return err
-				}
-
-				if err := os.MkdirAll(skillsDir, 0755); err != nil {
-					return err
-				}
-
-				var installedNames []string
-				for name, subpath := range skillsToInstall {
-					skillSource := absSourcePath
-					if subpath != "" && subpath != "." {
-						skillSource = filepath.Join(absSourcePath, filepath.FromSlash(subpath))
-					}
-					destLink := filepath.Join(skillsDir, name)
-					linkTarget := LocalSymlinkTarget(skillSource, skillsDir)
-
-					fmt.Fprintf(out, "  Linking local skill: %s%s%s -> %s\n", colorBold, name, colorReset, models.ToTildePath(skillSource))
-					if err := engine.CreateSymlink(linkTarget, destLink, true); err != nil {
-						return fmt.Errorf("failed to symlink skill %s: %w", name, err)
-					}
-
-					config.AddLocalSymlinkEntry(cfg, name, StoreLocalSourcePath(skillSource, skillsDir), flagDescription)
-					if len(flagAgents) > 0 {
-						if err := config.IncludeSkillAgents(cfg, name, flagAgents...); err != nil {
-							return err
-						}
-					}
-					installedNames = append(installedNames, name)
-				}
-
-				if err := config.SaveConfig(cfg, configPath); err != nil {
-					return err
-				}
-				for _, name := range installedNames {
-					if err := engine.ReconcileAgentSymlinks(name, "local", cfg, skillsDir); err != nil {
-						return fmt.Errorf("saved config but failed to reconcile availability for %s: %w", name, err)
-					}
-				}
-
-				sort.Strings(installedNames)
-				fmt.Fprintf(out, "\n%sLinked %d local skill(s) [%s] and updated %s.%s\n\n", colorGreen, len(installedNames), strings.Join(installedNames, ", "), filepath.Base(configPath), colorReset)
-				return nil
+				src := &localInstallSource{absSourcePath: absSourcePath, description: flagDescription}
+				return runAddPipeline(cmd, discovered, src, flagAll, flagPath, flagSkills, flagYes, flagAgents)
 			}
 
 			// 2. Command Skill Mode
@@ -544,9 +381,10 @@ func newAddCmd() *cobra.Command {
 					return err
 				}
 
-				fmt.Printf("%sConfiguring command skill: %s%s%s\n", colorCyan, colorBold, skillName, colorReset)
-				fmt.Printf("   Command: %s\n", flagCommand)
-				fmt.Println("   Executing installer command...")
+				out := cmd.OutOrStdout()
+				fmt.Fprintf(out, "%sConfiguring command skill: %s%s%s\n", colorCyan, colorBold, skillName, colorReset)
+				fmt.Fprintf(out, "   Command: %s\n", flagCommand)
+				fmt.Fprintln(out, "   Executing installer command...")
 
 				stdout, stderr, err := engine.RunCmd(flagCommand, "")
 				if err != nil {
@@ -554,7 +392,7 @@ func newAddCmd() *cobra.Command {
 					if errMsg == "" {
 						errMsg = stdout
 					}
-					fmt.Printf("%sWarning: Install command returned error: %s%s\n", colorYellow, errMsg, colorReset)
+					fmt.Fprintf(out, "%sWarning: Install command returned error: %s%s\n", colorYellow, errMsg, colorReset)
 				}
 
 				config.AddLocalCommandEntry(cfg, skillName, flagCommand, flagCheck, flagDescription)
@@ -570,7 +408,7 @@ func newAddCmd() *cobra.Command {
 					return fmt.Errorf("saved config but failed to reconcile availability for %s: %w", skillName, err)
 				}
 
-				fmt.Printf("%sRegistered command skill %s and updated %s.%s\n", colorGreen, skillName, filepath.Base(configPath), colorReset)
+				fmt.Fprintf(out, "%sRegistered command skill %s and updated %s.%s\n", colorGreen, skillName, filepath.Base(configPath), colorReset)
 				return nil
 			}
 
@@ -597,7 +435,8 @@ func newAddCmd() *cobra.Command {
 			}
 			repoType := parsed.RepoType
 
-			fmt.Printf("%sFetching repository: %s%s%s...\n", colorCyan, colorBold, sourceKey, colorReset)
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "%sFetching repository: %s%s%s...\n", colorCyan, colorBold, sourceKey, colorReset)
 
 			repoDir, err := engine.EnsureGitRepo(sourceKey, cloneURL, branch, true, cacheDir)
 			if err != nil {
@@ -610,167 +449,13 @@ func newAddCmd() *cobra.Command {
 				return err
 			}
 
-			skillsToInstall := make(map[string]string)
-
-			if flagAll {
-				skillsToInstall = discovered
-			} else if subpathOverride != "" && len(flagSkills) == 0 {
-				cleanSub := filepath.ToSlash(strings.Trim(subpathOverride, "/"))
-				for k, v := range discovered {
-					if filepath.ToSlash(strings.Trim(v, "/")) == cleanSub {
-						skillsToInstall[k] = v
-					}
-				}
-				if len(skillsToInstall) == 0 {
-					subDir := filepath.Join(repoDir, filepath.FromSlash(subpathOverride))
-					if _, err := os.Stat(filepath.Join(subDir, "SKILL.md")); err == nil {
-						skillsToInstall[filepath.Base(subDir)] = subpathOverride
-					} else {
-						return fmt.Errorf("specified path '%s' does not contain SKILL.md", subpathOverride)
-					}
-				}
-			} else if len(flagSkills) > 0 {
-				for _, sk := range flagSkills {
-					if sub, ok := discovered[sk]; ok {
-						skillsToInstall[sk] = sub
-					} else if subpathOverride != "" {
-						skillsToInstall[sk] = subpathOverride
-					} else {
-						// Case-insensitive match
-						matched := false
-						for k, v := range discovered {
-							if strings.EqualFold(k, sk) {
-								skillsToInstall[k] = v
-								matched = true
-								break
-							}
-						}
-						if !matched {
-							discNames := make([]string, 0, len(discovered))
-							for k := range discovered {
-								discNames = append(discNames, k)
-							}
-							sort.Strings(discNames)
-							fmt.Printf("%sWarning: Skill '%s' not found in discovered list (%s)%s\n", colorYellow, sk, strings.Join(discNames, ", "), colorReset)
-						}
-					}
-				}
-			} else {
-				if shouldPromptForDiscoveredSkills(len(discovered), tui.IsTerminal(), flagYes) {
-					groups, shouldGroup := groupDiscoveredSkills(discovered)
-					selectionDirs := selectionSkillsDirs(cmd)
-
-					var chosen []string
-					if shouldGroup {
-						for _, options := range groups {
-							markInstalledSkills(options, selectionDirs)
-						}
-						chosen, err = tui.PromptGroupedMultiSelect(
-							fmt.Sprintf("Select skills to install from %s:", sourceKey),
-							groups,
-						)
-					} else {
-						options := make([]tui.SelectOption, 0, len(discovered))
-						for skName := range discovered {
-							options = append(options, tui.SelectOption{Key: skName, Title: skName})
-						}
-						markInstalledSkills(options, selectionDirs)
-						sort.Slice(options, func(i, j int) bool {
-							return options[i].Key < options[j].Key
-						})
-						chosen, err = tui.PromptMultiSelect(
-							fmt.Sprintf("Select skills to install from %s:", sourceKey),
-							options,
-						)
-					}
-					if err != nil {
-						return err
-					}
-					if chosen == nil {
-						fmt.Printf("%sOperation cancelled.%s\n", colorYellow, colorReset)
-						return nil
-					}
-					if len(chosen) == 0 {
-						fmt.Printf("%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
-						return nil
-					}
-					for _, ch := range chosen {
-						skillsToInstall[ch] = discovered[ch]
-					}
-				} else if len(discovered) == 1 {
-					skillsToInstall = discovered
-				} else {
-					discNames := make([]string, 0, len(discovered))
-					for k := range discovered {
-						discNames = append(discNames, k)
-					}
-					sort.Strings(discNames)
-					fmt.Printf("%sRepository contains multiple skills:%s %s\n", colorYellow, colorReset, strings.Join(discNames, ", "))
-					fmt.Printf("Please specify --skill <name> or --all\n")
-					return fmt.Errorf("multiple skills found without selection")
-				}
-			}
-
-			if len(skillsToInstall) == 0 {
-				return fmt.Errorf("no matching skills to install")
-			}
-			configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, flagYes, flagAgents)
-			if err != nil {
-				return err
-			}
-			flagAgents = agents
-			if err := promptAddAvailability(cfg, skillsToInstall, sourceKey, skillsDir, flagYes, flagAgents); err != nil {
-				return err
-			}
-
-			if err := confirmSkillReplacements(cfg, skillsDir, skillsToInstall, sourceKey, false, "", flagYes, cmd.OutOrStdout()); err != nil {
-				if err.Error() == "operation cancelled by user" {
-					fmt.Fprintf(cmd.OutOrStdout(), "%sOperation cancelled.%s\n", colorYellow, colorReset)
-					return nil
-				}
-				return err
-			}
-
-			if err := os.MkdirAll(skillsDir, 0755); err != nil {
-				return err
-			}
-
 			var storedURL string
 			if flagURL != "" || repoType != "github" || !strings.HasPrefix(cloneURL, "https://github.com/") {
 				storedURL = cloneURL
 			}
 
-			var installedNames []string
-			for name, subpath := range skillsToInstall {
-				srcPath := filepath.Join(repoDir, filepath.FromSlash(subpath))
-				targetPath := filepath.Join(skillsDir, name)
-
-				fmt.Printf("  Installing %s%s%s (from %s)...\n", colorBold, name, colorReset, subpath)
-				if err := engine.CopySkillFolder(srcPath, targetPath); err != nil {
-					return fmt.Errorf("failed to install skill %s: %w", name, err)
-				}
-
-				config.AddRemoteSkillEntry(cfg, sourceKey, name, subpath, repoType, storedURL)
-				if len(flagAgents) > 0 {
-					if err := config.IncludeSkillAgents(cfg, name, flagAgents...); err != nil {
-						return err
-					}
-				}
-				installedNames = append(installedNames, name)
-			}
-
-			if err := config.SaveConfig(cfg, configPath); err != nil {
-				return err
-			}
-			for _, name := range installedNames {
-				if err := engine.ReconcileAgentSymlinks(name, sourceKey, cfg, skillsDir); err != nil {
-					return fmt.Errorf("saved config but failed to reconcile availability for %s: %w", name, err)
-				}
-			}
-
-			sort.Strings(installedNames)
-			fmt.Printf("\n%sInstalled %d skill(s) [%s] and updated %s.%s\n\n", colorGreen, len(installedNames), strings.Join(installedNames, ", "), filepath.Base(configPath), colorReset)
-			return nil
+			src := &remoteInstallSource{repoDir: repoDir, sourceKey: sourceKey, repoType: repoType, storedURL: storedURL}
+			return runAddPipeline(cmd, discovered, src, flagAll, subpathOverride, flagSkills, flagYes, flagAgents)
 		},
 	}
 
