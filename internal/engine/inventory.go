@@ -10,7 +10,10 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-func ScanAllSkills(cfg *config.Config, skillsDir string) []models.SkillItem {
+// Inventory is declared Skills for one Scope plus what is on its skills
+// directory, classified as missing, untracked, or invalid. Configured entries
+// carry declared Availability; untracked entries have none.
+func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error) {
 	baseSkills := skillsDir
 	if baseSkills == "" {
 		baseSkills = models.DefaultSkillsDir()
@@ -18,7 +21,6 @@ func ScanAllSkills(cfg *config.Config, skillsDir string) []models.SkillItem {
 
 	items := make(map[string]*models.SkillItem)
 
-	// 1. Configured Remote Skills
 	for sourceKey, repoInfo := range cfg.Remote {
 		for name, subpath := range repoInfo.Skills {
 			repoType := repoInfo.Type
@@ -26,16 +28,15 @@ func ScanAllSkills(cfg *config.Config, skillsDir string) []models.SkillItem {
 				repoType = "github"
 			}
 			items[name] = &models.SkillItem{
-				Name:         name,
-				SourceType:   repoType,
-				Source:       sourceKey,
-				Subpath:      subpath,
-				LinkedAgents: make([]string, 0),
+				Name:       name,
+				SourceType: repoType,
+				Source:     sourceKey,
+				Subpath:    subpath,
+				Agents:     DesiredAgents(name, cfg, baseSkills),
 			}
 		}
 	}
 
-	// 2. Configured Local Skills
 	for name, localInfo := range cfg.Local {
 		src := localInfo.Source
 		if src == "" {
@@ -45,16 +46,19 @@ func ScanAllSkills(cfg *config.Config, skillsDir string) []models.SkillItem {
 			src = "local"
 		}
 		items[name] = &models.SkillItem{
-			Name:         name,
-			SourceType:   "local_" + localInfo.Type,
-			Source:       src,
-			Description:  localInfo.Description,
-			LinkedAgents: make([]string, 0),
+			Name:        name,
+			SourceType:  "local_" + localInfo.Type,
+			Source:      src,
+			Description: localInfo.Description,
+			Agents:      DesiredAgents(name, cfg, baseSkills),
 		}
 	}
 
-	// 3. Physical Directory State in skillsDir
-	if entries, err := os.ReadDir(baseSkills); err == nil {
+	entries, err := os.ReadDir(baseSkills)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err == nil {
 		for _, entry := range entries {
 			name := entry.Name()
 			if strings.HasPrefix(name, ".") {
@@ -73,10 +77,9 @@ func ScanAllSkills(cfg *config.Config, skillsDir string) []models.SkillItem {
 					}
 				}
 				item = &models.SkillItem{
-					Name:         name,
-					SourceType:   sourceType,
-					Source:       source,
-					LinkedAgents: make([]string, 0),
+					Name:       name,
+					SourceType: sourceType,
+					Source:     source,
 				}
 				items[name] = item
 			}
@@ -90,23 +93,11 @@ func ScanAllSkills(cfg *config.Config, skillsDir string) []models.SkillItem {
 		}
 	}
 
-	// 4. Check Agent Link States
-	knownAgents := models.GetAgentsForSkillsDir(baseSkills)
-	for name, item := range items {
-		linked := make([]string, 0)
-		for agentName, agentDir := range knownAgents {
-			linkPath := filepath.Join(agentDir, name)
-			if _, err := os.Lstat(linkPath); err == nil {
-				linked = append(linked, agentName)
-			}
-		}
-		sort.Strings(linked)
-		item.LinkedAgents = linked
-	}
-
-	// Convert map to slice and sort
 	result := make([]models.SkillItem, 0, len(items))
 	for _, item := range items {
+		if item.Agents == nil {
+			item.Agents = []string{}
+		}
 		result = append(result, *item)
 	}
 
@@ -117,5 +108,9 @@ func ScanAllSkills(cfg *config.Config, skillsDir string) []models.SkillItem {
 		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
 	})
 
-	return result
+	return result, nil
+}
+
+func isUntracked(item models.SkillItem) bool {
+	return item.SourceType == "untracked" || item.SourceType == "symlink"
 }

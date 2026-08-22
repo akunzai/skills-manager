@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 func TestParseSkillNameFromMD(t *testing.T) {
@@ -118,44 +119,101 @@ func TestCopySkillFolder(t *testing.T) {
 	}
 }
 
-func TestScanAllSkills(t *testing.T) {
-	tmpSkillsDir := t.TempDir()
+func TestInventoryClassifiesConfigVsSkillsDir(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
 	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "skill-a", "skills/skill-a", "github", "")
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "missing-skill", ".", "github", "")
 
-	// Create physical skill-a
-	skillAPath := filepath.Join(tmpSkillsDir, "skill-a")
-	_ = os.MkdirAll(skillAPath, 0755)
-	_ = os.WriteFile(filepath.Join(skillAPath, "SKILL.md"), []byte("# Skill A"), 0644)
+	skillAPath := filepath.Join(skillsDir, "skill-a")
+	if err := os.MkdirAll(skillAPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillAPath, "SKILL.md"), []byte("# Skill A"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	invalidPath := filepath.Join(skillsDir, "invalid-skill")
+	if err := os.MkdirAll(invalidPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	config.AddLocalSymlinkEntry(cfg, "invalid-skill", invalidPath, "")
 
-	// Create untracked skill-b
-	skillBPath := filepath.Join(tmpSkillsDir, "skill-b")
-	_ = os.MkdirAll(skillBPath, 0755)
-	_ = os.WriteFile(filepath.Join(skillBPath, "SKILL.md"), []byte("# Skill B"), 0644)
-
-	items := ScanAllSkills(cfg, tmpSkillsDir)
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
+	skillBPath := filepath.Join(skillsDir, "skill-b")
+	if err := os.MkdirAll(skillBPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillBPath, "SKILL.md"), []byte("# Skill B"), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	foundA, foundB := false, false
+	items, err := Inventory(cfg, skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := make(map[string]models.SkillItem, len(items))
 	for _, item := range items {
-		if item.Name == "skill-a" {
-			foundA = true
-			if !item.IsInstalled || !item.IsValidSkill {
-				t.Errorf("skill-a installed/valid state incorrect: %+v", item)
-			}
-		}
-		if item.Name == "skill-b" {
-			foundB = true
-			if item.SourceType != "untracked" {
-				t.Errorf("skill-b should be untracked, got %s", item.SourceType)
-			}
-		}
+		byName[item.Name] = item
 	}
 
-	if !foundA || !foundB {
-		t.Errorf("missing scanned items (foundA: %v, foundB: %v)", foundA, foundB)
+	gotA, ok := byName["skill-a"]
+	if !ok || !gotA.IsInstalled || !gotA.IsValidSkill {
+		t.Fatalf("skill-a = %+v", gotA)
+	}
+	if !reflect.DeepEqual(gotA.Agents, []string{"claude-code", "continue"}) {
+		t.Fatalf("skill-a agents = %#v", gotA.Agents)
+	}
+
+	gotMissing, ok := byName["missing-skill"]
+	if !ok || gotMissing.IsInstalled {
+		t.Fatalf("missing-skill = %+v", gotMissing)
+	}
+
+	gotInvalid, ok := byName["invalid-skill"]
+	if !ok || !gotInvalid.IsInstalled || gotInvalid.IsValidSkill {
+		t.Fatalf("invalid-skill = %+v", gotInvalid)
+	}
+
+	gotB, ok := byName["skill-b"]
+	if !ok || gotB.SourceType != "untracked" {
+		t.Fatalf("skill-b = %+v", gotB)
+	}
+	if len(gotB.Agents) != 0 {
+		t.Fatalf("untracked agents = %#v", gotB.Agents)
+	}
+}
+
+func TestInventoryIgnoresAgentDirEntries(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, ".continue", "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(master, filepath.Join(project, ".continue", "skills", "sample")); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "github", "")
+
+	items, err := Inventory(cfg, skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Name != "sample" {
+		t.Fatalf("items = %#v", items)
+	}
+	if !reflect.DeepEqual(items[0].Agents, []string{"claude-code"}) {
+		t.Fatalf("agents = %#v; disk continue link must not appear", items[0].Agents)
 	}
 }
 

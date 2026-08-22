@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -48,34 +47,19 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		skillsDir = models.DefaultSkillsDir()
 	}
 
-	configured := make(map[string]string)
-	for source, repo := range cfg.Remote {
-		for skill := range repo.Skills {
-			configured[skill] = source
-		}
+	inv, err := Inventory(cfg, skillsDir)
+	if err != nil {
+		return PrunePlan{}, err
 	}
-	for skill := range cfg.Local {
-		configured[skill] = "local"
-	}
-
 	plan := PrunePlan{}
 	orphans := make(map[string]struct{})
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil && !os.IsNotExist(err) {
-		return plan, err
-	}
-	if err == nil {
-		for _, entry := range entries {
-			name := entry.Name()
-			if strings.HasPrefix(name, ".") {
-				continue
-			}
-			if _, ok := configured[name]; !ok {
-				orphans[name] = struct{}{}
-				if includeSkills {
-					plan.UntrackedSkills = append(plan.UntrackedSkills, name)
-				}
-			}
+	for _, item := range inv {
+		if !isUntracked(item) {
+			continue
+		}
+		orphans[item.Name] = struct{}{}
+		if includeSkills {
+			plan.UntrackedSkills = append(plan.UntrackedSkills, item.Name)
 		}
 	}
 
@@ -93,12 +77,15 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 			}
 		}
 		if includeConfiguredLinks {
-			for skill := range configured {
+			for _, item := range inv {
+				if isUntracked(item) {
+					continue
+				}
 				targets := make(map[string]bool)
-				for _, agent := range DesiredAgents(skill, cfg, skillsDir) {
+				for _, agent := range item.Agents {
 					targets[agent] = true
 				}
-				addManagedLinks(skill, func(agent string) bool { return !targets[agent] })
+				addManagedLinks(item.Name, func(agent string) bool { return !targets[agent] })
 			}
 		}
 		for skill := range orphans {

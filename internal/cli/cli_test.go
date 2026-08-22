@@ -490,6 +490,79 @@ func TestSelectedPrunePlanExpandsMasterSkillsAndKeepsIndividualLinks(t *testing.
 	}
 }
 
+func TestCLILsJSONAgentsAreDeclaredAvailability(t *testing.T) {
+	resetRootCmdFlags()
+	project := t.TempDir()
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	source := filepath.Join(project, "sample-source")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(skillsDir, "sample")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, ".continue", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(skillsDir, "sample"), filepath.Join(project, ".continue", "skills", "sample")); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddLocalSymlinkEntry(cfg, "sample", source, "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "ls", "--json", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls --json: %v\n%s", err, out)
+	}
+	var listed []map[string]any
+	if err := json.Unmarshal([]byte(out), &listed); err != nil {
+		t.Fatalf("ls --json: %v\n%s", err, out)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("ls --json items = %d\n%s", len(listed), out)
+	}
+	agents, _ := listed[0]["agents"].([]any)
+	if len(agents) != 1 || agents[0] != "claude-code" {
+		t.Fatalf("ls --json agents = %#v; want [claude-code] not disk Lstat", listed[0]["agents"])
+	}
+
+	agentOut, err := runCLI(t, "ls", "--agent", "continue", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls --agent continue: %v\n%s", err, agentOut)
+	}
+	if strings.Contains(agentOut, "sample") {
+		t.Fatalf("ls --agent continue should not list a skill only linked on disk:\n%s", agentOut)
+	}
+
+	claudeOut, err := runCLI(t, "ls", "--agent", "claude", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls --agent claude: %v\n%s", err, claudeOut)
+	}
+	if !strings.Contains(claudeOut, "sample") {
+		t.Fatalf("ls --agent claude missing sample:\n%s", claudeOut)
+	}
+
+	autoOut, err := runCLI(t, "ls", "--agent", "gemini", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls --agent gemini: %v\n%s", err, autoOut)
+	}
+	if !strings.Contains(autoOut, "sample") {
+		t.Fatalf("ls --agent gemini should list installed Skills:\n%s", autoOut)
+	}
+}
+
 func TestCLILsFormatting(t *testing.T) {
 	flagConfigFile = ""
 	flagSkillsDir = ""

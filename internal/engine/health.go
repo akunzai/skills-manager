@@ -134,12 +134,16 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 
 	plan.LeftoverEmpty = LeftoverEmptyAgentDirs(knownAgents, configuredAgents)
 
-	for _, s := range ScanAllSkills(cfg, skillsDir) {
+	inv, err := Inventory(cfg, skillsDir)
+	if err != nil {
+		return plan
+	}
+	for _, s := range inv {
 		if !s.IsInstalled {
 			plan.Missing = append(plan.Missing, s.Name)
 			continue
 		}
-		if s.SourceType == "untracked" {
+		if isUntracked(s) {
 			plan.Untracked = append(plan.Untracked, s.Name)
 			continue
 		}

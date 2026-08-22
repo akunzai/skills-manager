@@ -38,7 +38,10 @@ func newRmCmd() *cobra.Command {
 
 			if len(skillsToRemove) == 0 {
 				if tui.IsTerminal() && !flagYes {
-					allSkills := engine.ScanAllSkills(cfg, skillsDir)
+					allSkills, err := engine.Inventory(cfg, skillsDir)
+					if err != nil {
+						return err
+					}
 					if len(allSkills) == 0 {
 						fmt.Fprintf(out, "%sNo skills installed or configured to remove.%s\n", colorYellow, colorReset)
 						return nil
