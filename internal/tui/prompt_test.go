@@ -26,15 +26,23 @@ func TestDumbTerminalDisablesInteractivePrompt(t *testing.T) {
 }
 
 func TestSingleSelectInstructionsUseTwoTopLines(t *testing.T) {
-	got := singleSelectInstructions()
-	if len(got) != 2 {
-		t.Fatalf("instruction line count = %d; want 2", len(got))
-	}
-	if got[0] != "Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page." {
-		t.Fatalf("first instruction = %q", got[0])
-	}
-	if got[1] != "Enter to confirm, Esc/q to cancel." {
-		t.Fatalf("second instruction = %q", got[1])
+	for _, isScrollable := range []bool{false, true} {
+		got := singleSelectInstructions(isScrollable)
+		if len(got) != 2 {
+			t.Fatalf("instruction line count = %d; want 2", len(got))
+		}
+		if isScrollable {
+			if got[0] != "Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page." {
+				t.Fatalf("scrollable first instruction = %q", got[0])
+			}
+		} else {
+			if got[0] != "Use ↑/↓ (or k/j) to navigate." {
+				t.Fatalf("non-scrollable first instruction = %q", got[0])
+			}
+		}
+		if got[1] != "Enter to confirm, Esc/q to cancel." {
+			t.Fatalf("second instruction = %q", got[1])
+		}
 	}
 }
 
@@ -137,14 +145,43 @@ func TestGroupedTopIndicatorUsesOneRowWhenGroupExpandsAtTop(t *testing.T) {
 }
 
 func TestMultiSelectInstructionsUseTwoTopLines(t *testing.T) {
-	got := multiSelectInstructions()
-	if len(got) != 2 {
-		t.Fatalf("instruction line count = %d; want 2", len(got))
+	for _, isScrollable := range []bool{false, true} {
+		got := multiSelectInstructions(isScrollable)
+		if len(got) != 2 {
+			t.Fatalf("instruction line count = %d; want 2", len(got))
+		}
+		if isScrollable {
+			if got[0] != "Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page." {
+				t.Fatalf("scrollable first instruction = %q", got[0])
+			}
+		} else {
+			if got[0] != "Use ↑/↓ (or k/j) to navigate." {
+				t.Fatalf("non-scrollable first instruction = %q", got[0])
+			}
+		}
+		if got[1] != "Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel." {
+			t.Fatalf("second instruction = %q", got[1])
+		}
 	}
-	if got[0] != "Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page." {
-		t.Fatalf("first instruction = %q", got[0])
-	}
-	if got[1] != "Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel." {
-		t.Fatalf("second instruction = %q", got[1])
+}
+
+func TestGroupedMultiSelectInstructionsUseTwoTopLines(t *testing.T) {
+	for _, isScrollable := range []bool{false, true} {
+		got := groupedMultiSelectInstructions(isScrollable)
+		if len(got) != 2 {
+			t.Fatalf("instruction line count = %d; want 2", len(got))
+		}
+		if isScrollable {
+			if got[0] != "Use ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups, Ctrl+f/b to page." {
+				t.Fatalf("scrollable first instruction = %q", got[0])
+			}
+		} else {
+			if got[0] != "Use ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups." {
+				t.Fatalf("non-scrollable first instruction = %q", got[0])
+			}
+		}
+		if got[1] != "Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel." {
+			t.Fatalf("second instruction = %q", got[1])
+		}
 	}
 }
