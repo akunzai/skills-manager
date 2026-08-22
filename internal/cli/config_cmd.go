@@ -27,7 +27,7 @@ func newConfigCmd() *cobra.Command {
 				return err
 			}
 			scope := "Global"
-			if IsProjectScope(skillsDir) {
+			if models.IsProjectScope(skillsDir) {
 				scope = "Project"
 			}
 			out := cmd.OutOrStdout()

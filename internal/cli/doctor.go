@@ -100,7 +100,7 @@ func newDoctorCmd() *cobra.Command {
 
 			// Parent pruning must never escape the scope root: in project scope
 			// that is the project directory, in global scope the home directory.
-			pruneBoundary := models.GetProjectRootFromSkillsDir(skillsDir)
+			pruneBoundary := models.ScopeRoot(skillsDir)
 
 			// Universal agents read the skills directory directly, so we never link
 			// into their directories — but earlier versions and setup scripts did,

@@ -1,4 +1,4 @@
-package cli
+package models
 
 import (
 	"path/filepath"
@@ -34,7 +34,7 @@ func TestStoreLocalSourcePathProjectScopeInsideProjectIsRelative(t *testing.T) {
 	}
 }
 
-func TestStoreLocalSourcePathProjectScopeOutsideProjectStaysAbsolute(t *testing.T) {
+func TestStoreLocalSourcePathProjectScopeOutsideProjectUsesTildePath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -105,5 +105,24 @@ func TestResolveLocalSourcePathTildeSourceExpandsToHome(t *testing.T) {
 	want := filepath.Join(home, "elsewhere", "my-skill")
 	if got != want {
 		t.Errorf("ResolveLocalSourcePath(tilde) = %q; want %q", got, want)
+	}
+}
+
+func TestScopeRootProjectIsCheckout(t *testing.T) {
+	project := filepath.FromSlash("/path/to/my-project")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if got := ScopeRoot(skillsDir); got != project {
+		t.Errorf("ScopeRoot(project) = %q; want %q", got, project)
+	}
+}
+
+func TestScopeRootGlobalIsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AGENTS_HOME", filepath.Join(home, ".agents"))
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if got := ScopeRoot(skillsDir); got != home {
+		t.Errorf("ScopeRoot(global) = %q; want %q", got, home)
 	}
 }

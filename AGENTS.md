@@ -21,6 +21,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Updater module: @internal/updater/updater.go
 - Config manager: @internal/config/config.go
 - Core models & paths: @internal/models/models.go
+- Scope paths: @internal/models/scope.go
 - GoReleaser config: @.goreleaser.yaml
 - Issue tracker: @docs/agents/issue-tracker.md
 - Triage labels: @docs/agents/triage-labels.md

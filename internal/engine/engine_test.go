@@ -571,9 +571,7 @@ func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "sample", src, "")
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), []LocalSyncSkill{
-		{Name: "sample", AbsSource: src, LinkTarget: src},
-	}, nil, false, false)
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,9 +597,7 @@ func TestSyncDeclaredCommandCheckSkipsMaterialize(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddLocalCommandEntry(cfg, "sample", "echo install", "exit 1", "")
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), nil, []CommandSyncSkill{
-		{Name: "sample", Command: "echo install", Check: "exit 1"},
-	}, false, false)
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,9 +629,7 @@ func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
 		}
 	}
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), nil, []CommandSyncSkill{
-		{Name: "sample", Command: "exit 1"},
-	}, false, false)
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
