@@ -105,14 +105,19 @@ git push origin vX.Y.Z
    ```
 
 ### 7. Milestone Management
-1. **Close the released milestone**:
+1. **Summarize the released milestone** with one concise sentence describing its main user-facing outcomes:
+   ```bash
+   gh api repos/akunzai/skills-manager/milestones/<number> --method PATCH \
+     -f description="<release highlights>."
+   ```
+2. **Close the released milestone**:
    ```bash
    # Find milestone number
    gh api repos/akunzai/skills-manager/milestones
    # Close it
    gh api repos/akunzai/skills-manager/milestones/<number> --method PATCH -f state="closed"
    ```
-2. **Create the next milestone** (if not already created):
+3. **Create the next milestone** (if not already created):
    ```bash
    gh api repos/akunzai/skills-manager/milestones --method POST -f title="X.Y+1.0" -f description="Next feature release."
    ```
