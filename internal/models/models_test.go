@@ -140,6 +140,24 @@ func TestGetProjectRootAndAgents(t *testing.T) {
 	}
 }
 
+func TestIsGlobalSkillsDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(home, ".agents"))
+	globalSkills := filepath.Join(home, ".agents", "skills")
+
+	if !IsGlobalSkillsDir("") {
+		t.Error(`IsGlobalSkillsDir("") = false; want true`)
+	}
+	if !IsGlobalSkillsDir(globalSkills) {
+		t.Errorf("IsGlobalSkillsDir(%q) = false; want true", globalSkills)
+	}
+
+	projectSkills := filepath.Join(home, "my-project", ".agents", "skills")
+	if IsGlobalSkillsDir(projectSkills) {
+		t.Errorf("IsGlobalSkillsDir(%q) = true; want false", projectSkills)
+	}
+}
+
 func TestExpandUser(t *testing.T) {
 	home := UserHomeDir()
 	if got := ExpandUser("~"); got != home {
