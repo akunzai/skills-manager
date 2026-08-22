@@ -50,12 +50,15 @@ func markInstalledSkills(options []tui.SelectOption, skillsDirs []string) {
 
 func prepareAddTarget(cmd *cobra.Command, skip bool, agents []string) (string, string, *config.Config, []string, error) {
 	if tui.IsTerminal() && !skip && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
-		scope, err := tui.PromptChoice("Choose a scope:", []tui.SelectOption{
+		scope, err := tui.PromptSelect("Choose a scope:", []tui.SelectOption{
 			{Key: "global", Title: "Global"},
 			{Key: "project", Title: "Project"},
 		}, 0)
 		if err != nil {
 			return "", "", nil, nil, err
+		}
+		if scope == "" {
+			return "", "", nil, nil, fmt.Errorf("add cancelled")
 		}
 		flagProject = scope == "project"
 		flagGlobal = !flagProject
@@ -790,12 +793,15 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, source,
 	if skip || len(explicitAgents) > 0 || !tui.IsTerminal() {
 		return nil
 	}
-	choice, err := tui.PromptChoice("Agent availability:", []tui.SelectOption{
+	choice, err := tui.PromptSelect("Agent availability:", []tui.SelectOption{
 		{Key: "defaults", Title: "Follow defaults (recommended)"},
 		{Key: "custom", Title: "Customize"},
 	}, 0)
 	if err != nil {
 		return err
+	}
+	if choice == "" {
+		return fmt.Errorf("add cancelled")
 	}
 	if choice == "defaults" {
 		for skill := range skills {
