@@ -20,6 +20,10 @@ _Avoid_: mode, environment, workspace
 The declared set of Skills, Sources, and Availability for one Scope (`skills.json`).
 _Avoid_: settings file, manifest (except the JSON Schema)
 
+**Inventory**:
+The declared Skills for one Scope plus what is on its skills directory, classified as missing, untracked, or invalid.
+_Avoid_: scan, catalog, listing
+
 **Availability**:
 Where a Skill can be used. Declared by defaults, include, and exclude. Symlinks are not the concept.
 _Avoid_: linked agents, dispatch, install targets

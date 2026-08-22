@@ -596,7 +596,7 @@ type SkillItem struct {
 	InstalledPath string   `json:"path,omitempty"`
 	IsInstalled   bool     `json:"installed"`
 	IsValidSkill  bool     `json:"valid"`
-	LinkedAgents  []string `json:"agents"`
+	Agents        []string `json:"agents"`
 	Description   string   `json:"description,omitempty"`
 	Scope         string   `json:"scope,omitempty"`
 }

@@ -41,6 +41,30 @@ func TestBuildHealthPlanCountsLeftoverButNotUntracked(t *testing.T) {
 	}
 }
 
+func TestBuildHealthPlanReadsInventoryMissingAndInvalid(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	invalid := filepath.Join(skillsDir, "broken")
+	if err := os.MkdirAll(invalid, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "missing", ".", "github", "")
+	config.AddLocalSymlinkEntry(cfg, "broken", invalid, "")
+
+	plan := BuildHealthPlan(cfg, skillsDir)
+	if len(plan.Missing) != 1 || plan.Missing[0] != "missing" {
+		t.Fatalf("missing = %#v", plan.Missing)
+	}
+	if len(plan.Invalid) != 1 || plan.Invalid[0] != "broken" {
+		t.Fatalf("invalid = %#v", plan.Invalid)
+	}
+}
+
 func TestApplyHealthPlanRemovesLeftoverEmptyDirs(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")

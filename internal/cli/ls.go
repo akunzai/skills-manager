@@ -63,7 +63,10 @@ func newLsCmd() *cobra.Command {
 				return err
 			}
 
-			skills := engine.ScanAllSkills(cfg, skillsDir)
+			skills, err := engine.Inventory(cfg, skillsDir)
+			if err != nil {
+				return err
+			}
 
 			if flagAgent != "" {
 				filterAgent := models.NormalizeAgentName(flagAgent)
@@ -74,7 +77,7 @@ func newLsCmd() *cobra.Command {
 							filtered = append(filtered, s)
 						}
 					} else {
-						for _, a := range s.LinkedAgents {
+						for _, a := range s.Agents {
 							if models.NormalizeAgentName(a) == filterAgent {
 								filtered = append(filtered, s)
 							}
@@ -110,7 +113,7 @@ func newLsCmd() *cobra.Command {
 						"name":       s.Name,
 						"path":       models.ToTildePath(installedP),
 						"scope":      scope,
-						"agents":     s.LinkedAgents,
+						"agents":     s.Agents,
 						"source":     models.ToTildePath(s.Source),
 						"sourceType": s.SourceType,
 						"subpath":    s.Subpath,
@@ -161,12 +164,12 @@ func newLsCmd() *cobra.Command {
 				maxAgentsLen := 12
 				for _, s := range skills {
 					var targetList []string
-					for _, a := range s.LinkedAgents {
+					for _, a := range s.Agents {
 						if a == "claude-code" || a == "claude" {
 							targetList = append(targetList, "claude")
 						}
 					}
-					for _, a := range s.LinkedAgents {
+					for _, a := range s.Agents {
 						cleanA := strings.TrimSuffix(a, "-code")
 						if a != "claude-code" && a != "claude" && a != "agents" {
 							found := false
@@ -231,12 +234,12 @@ func newLsCmd() *cobra.Command {
 				sourceCol := padRight(truncateWithEllipsis(rawSource, sourceWidth), sourceWidth)
 
 				var targetList []string
-				for _, a := range s.LinkedAgents {
+				for _, a := range s.Agents {
 					if a == "claude-code" || a == "claude" {
 						targetList = append(targetList, "claude")
 					}
 				}
-				for _, a := range s.LinkedAgents {
+				for _, a := range s.Agents {
 					cleanA := strings.TrimSuffix(a, "-code")
 					if a != "claude-code" && a != "claude" && a != "agents" {
 						found := false
