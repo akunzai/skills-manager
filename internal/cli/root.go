@@ -19,20 +19,9 @@ var (
 )
 
 // IsProjectScope reports whether skillsDir is project-scoped rather than the
-// global skills directory. It mirrors models.GetAgentsForSkillsDir's own test.
+// global skills directory.
 func IsProjectScope(skillsDir string) bool {
-	if skillsDir == "" {
-		return false
-	}
-	absSkills, err := filepath.Abs(skillsDir)
-	if err != nil {
-		return false
-	}
-	absGlobal, err := filepath.Abs(models.DefaultSkillsDir())
-	if err != nil {
-		return false
-	}
-	return filepath.Clean(absSkills) != filepath.Clean(absGlobal)
+	return !models.IsGlobalSkillsDir(skillsDir)
 }
 
 // StoreLocalSourcePath renders a local skill source for skills.json. Inside a
