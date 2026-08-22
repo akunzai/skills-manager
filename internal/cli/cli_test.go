@@ -163,6 +163,52 @@ func TestCLILocalSymlinkAddAndRemove(t *testing.T) {
 	}
 }
 
+// rm previously wrote its progress/summary text with raw fmt.Printf, bypassing
+// whatever the command's writer was set to. Assert it's now capturable.
+func TestCLIRmPrintsRemovalSummaryThroughCapturedOutput(t *testing.T) {
+	resetRootCmdFlags()
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "skills.json")
+	skillsDir := filepath.Join(tmpDir, "skills")
+	cacheDir := filepath.Join(tmpDir, ".cache")
+
+	localSkillDir := filepath.Join(tmpDir, "my-local-skill")
+	_ = os.MkdirAll(localSkillDir, 0755)
+	_ = os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte("# My Skill"), 0644)
+
+	if _, err := runCLI(t, "add", "--symlink", localSkillDir, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatalf("add --symlink failed: %v", err)
+	}
+
+	out, err := runCLI(t, "rm", "my-local-skill", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
+		t.Fatalf("rm failed: %v", err)
+	}
+	if !strings.Contains(out, "Removing skill: my-local-skill") || !strings.Contains(out, "Skill removal complete") {
+		t.Fatalf("rm output not captured through cmd.OutOrStdout():\n%s", out)
+	}
+}
+
+// outdated previously wrote with raw fmt.Printf/Println. Assert its no-remote
+// early exit is now capturable without requiring network access.
+func TestCLIOutdatedNoRemoteReposPrintsThroughCapturedOutput(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+
+	if _, err := runCLI(t, "init", "--config", configFile); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	out, err := runCLI(t, "outdated", "--config", configFile)
+	if err != nil {
+		t.Fatalf("outdated failed: %v", err)
+	}
+	if !strings.Contains(out, "No remote repositories configured") {
+		t.Fatalf("outdated output not captured through cmd.OutOrStdout():\n%s", out)
+	}
+}
+
 func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 	flagConfigFile = ""
 	flagSkillsDir = ""
