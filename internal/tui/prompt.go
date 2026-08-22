@@ -92,12 +92,8 @@ func PromptSelect(title string, options []SelectOption, defaultIndex int) (strin
 	rendered := false
 	render := func() {
 		fmt.Print(redrawPrefix(rendered, frameLines))
-		if cursorIdx < windowStart {
-			windowStart = cursorIdx
-		} else if cursorIdx >= windowStart+visibleCount {
-			windowStart = cursorIdx - visibleCount + 1
-		}
-		windowEnd := min(windowStart+visibleCount, numItems)
+		newWindowStart, _, windowEnd, _ := viewportWindow(cursorIdx, windowStart, numItems, maxVisible)
+		windowStart = newWindowStart
 		instructions := singleSelectInstructions()
 		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
 		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
@@ -151,16 +147,16 @@ func PromptSelect(title string, options []SelectOption, defaultIndex int) (strin
 			fmt.Print("\r\n")
 			return options[cursorIdx].Key, nil
 		case keyUp:
-			cursorIdx = (cursorIdx - 1 + numItems) % numItems
+			cursorIdx = viewportMoveUp(cursorIdx, numItems)
 			render()
 		case keyDown:
-			cursorIdx = (cursorIdx + 1) % numItems
+			cursorIdx = viewportMoveDown(cursorIdx, numItems)
 			render()
 		case keyPageDown:
-			cursorIdx = min(cursorIdx+visibleCount-1, numItems-1)
+			cursorIdx = viewportPageDown(cursorIdx, visibleCount, numItems)
 			render()
 		case keyPageUp:
-			cursorIdx = max(cursorIdx-visibleCount+1, 0)
+			cursorIdx = viewportPageUp(cursorIdx, visibleCount)
 			render()
 		}
 	}
@@ -320,12 +316,8 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 	rendered := false
 	render := func() {
 		fmt.Print(redrawPrefix(rendered, frameLines))
-		if cursorIdx < windowStart {
-			windowStart = cursorIdx
-		} else if cursorIdx >= windowStart+visibleCount {
-			windowStart = cursorIdx - visibleCount + 1
-		}
-		windowEnd := min(windowStart+visibleCount, numItems)
+		newWindowStart, _, windowEnd, _ := viewportWindow(cursorIdx, windowStart, numItems, maxVisible)
+		windowStart = newWindowStart
 		instructions := multiSelectInstructions()
 		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
 		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
@@ -388,16 +380,16 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			}
 			return chosen, nil
 		case keyUp:
-			cursorIdx = (cursorIdx - 1 + numItems) % numItems
+			cursorIdx = viewportMoveUp(cursorIdx, numItems)
 			render()
 		case keyDown:
-			cursorIdx = (cursorIdx + 1) % numItems
+			cursorIdx = viewportMoveDown(cursorIdx, numItems)
 			render()
 		case keyPageDown:
-			cursorIdx = min(cursorIdx+visibleCount-1, numItems-1)
+			cursorIdx = viewportPageDown(cursorIdx, visibleCount, numItems)
 			render()
 		case keyPageUp:
-			cursorIdx = max(cursorIdx-visibleCount+1, 0)
+			cursorIdx = viewportPageUp(cursorIdx, visibleCount)
 			render()
 		case keyToggleAll:
 			allSelected := true
@@ -581,25 +573,9 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 
 	render := func() {
 		fmt.Print(redrawPrefix(rendered, frameLines))
-		visibleCount = totalRows
-		if visibleCount > maxVisible {
-			visibleCount = maxVisible
-		}
-		isScrollable = totalRows > maxVisible
-		if isScrollable {
-			if cursorIdx < windowStart {
-				windowStart = cursorIdx
-			} else if cursorIdx >= windowStart+visibleCount {
-				windowStart = cursorIdx - visibleCount + 1
-			}
-		}
-		if windowStart >= totalRows {
-			windowStart = totalRows - visibleCount
-		}
-		windowEnd := windowStart + visibleCount
-		if windowEnd > totalRows {
-			windowEnd = totalRows
-		}
+		var newWindowStart, windowEnd int
+		newWindowStart, visibleCount, windowEnd, isScrollable = viewportWindow(cursorIdx, windowStart, totalRows, maxVisible)
+		windowStart = newWindowStart
 
 		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
 		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine("Use ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups, Ctrl+f/b to page.", contentWidth), colorReset)
@@ -708,22 +684,16 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 			}
 			return chosen, nil
 		case keyUp:
-			cursorIdx = (cursorIdx - 1 + totalRows) % totalRows
+			cursorIdx = viewportMoveUp(cursorIdx, totalRows)
 			render()
 		case keyDown:
-			cursorIdx = (cursorIdx + 1) % totalRows
+			cursorIdx = viewportMoveDown(cursorIdx, totalRows)
 			render()
 		case keyPageDown:
-			cursorIdx += visibleCount - 1
-			if cursorIdx >= totalRows {
-				cursorIdx = totalRows - 1
-			}
+			cursorIdx = viewportPageDown(cursorIdx, visibleCount, totalRows)
 			render()
 		case keyPageUp:
-			cursorIdx -= visibleCount - 1
-			if cursorIdx < 0 {
-				cursorIdx = 0
-			}
+			cursorIdx = viewportPageUp(cursorIdx, visibleCount)
 			render()
 		case keyLeft:
 			row := rows[cursorIdx]
