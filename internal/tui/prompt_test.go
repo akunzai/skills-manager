@@ -25,17 +25,39 @@ func TestDumbTerminalDisablesInteractivePrompt(t *testing.T) {
 	}
 }
 
-func TestChoiceIndex(t *testing.T) {
-	if got, ok := choiceIndex("", 2, 0); !ok || got != 0 {
-		t.Fatalf("default choice = %d, %v", got, ok)
+func TestSingleSelectInstructionsUseTwoTopLines(t *testing.T) {
+	got := singleSelectInstructions()
+	if len(got) != 2 {
+		t.Fatalf("instruction line count = %d; want 2", len(got))
 	}
-	if got, ok := choiceIndex("2", 2, 0); !ok || got != 1 {
-		t.Fatalf("explicit choice = %d, %v", got, ok)
+	if got[0] != "Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page." {
+		t.Fatalf("first instruction = %q", got[0])
 	}
-	for _, input := range []string{"0", "3", "no"} {
-		if _, ok := choiceIndex(input, 2, 0); ok {
-			t.Fatalf("invalid choice %q accepted", input)
+	if got[1] != "Enter to confirm, Esc/q to cancel." {
+		t.Fatalf("second instruction = %q", got[1])
+	}
+}
+
+func TestParseKeyRecognizesEnterEscapeAndArrows(t *testing.T) {
+	cases := map[byte]keyType{
+		13:  keyEnter,
+		10:  keyEnter,
+		27:  keyEscape,
+		'q': keyEscape,
+		'k': keyUp,
+		'j': keyDown,
+		3:   keyInterrupt,
+	}
+	for input, want := range cases {
+		if got := parseKey([]byte{input}); got != want {
+			t.Fatalf("parseKey(%v) = %v; want %v", input, got, want)
 		}
+	}
+	if got := parseKey([]byte{27, '[', 'A'}); got != keyUp {
+		t.Fatalf("up arrow key = %v; want key up", got)
+	}
+	if got := parseKey([]byte{27, '[', 'B'}); got != keyDown {
+		t.Fatalf("down arrow key = %v; want key down", got)
 	}
 }
 

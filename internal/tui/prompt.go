@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/presentation"
@@ -50,34 +49,120 @@ type SelectOption struct {
 
 type GroupedItems map[string][]SelectOption
 
-func PromptChoice(prompt string, options []SelectOption, defaultIndex int) (string, error) {
+func singleSelectInstructions() [2]string {
+	return [2]string{
+		"Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page.",
+		"Enter to confirm, Esc/q to cancel.",
+	}
+}
+
+// PromptSelect displays a locally redrawn single-select list navigated with
+// arrow keys. The cursor starts at defaultIndex.
+// Returns (selectedKey, nil) or ("", nil) on Esc/q cancel.
+func PromptSelect(title string, options []SelectOption, defaultIndex int) (string, error) {
 	if !IsTerminal() {
 		return "", fmt.Errorf("interactive prompt requires a terminal")
 	}
-	if len(options) == 0 || defaultIndex < 0 || defaultIndex >= len(options) {
-		return "", fmt.Errorf("invalid choice prompt")
+	numItems := len(options)
+	if numItems == 0 {
+		return "", fmt.Errorf("no options to select")
 	}
 	applyPromptStyle()
-	fmt.Printf("%s%s%s%s\n", colorBold, colorCyan, prompt, colorReset)
-	for i, option := range options {
-		marker := " "
-		if i == defaultIndex {
-			marker = "*"
-		}
-		fmt.Printf("  %s %d. %s\n", marker, i+1, option.Title)
+
+	fd := int(os.Stdin.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return "", err
 	}
-	reader := bufio.NewReader(os.Stdin)
+	defer func() {
+		_ = term.Restore(fd, oldState)
+		fmt.Print(showCursor)
+	}()
+
+	cursorIdx := defaultIndex
+	if cursorIdx < 0 || cursorIdx >= numItems {
+		cursorIdx = 0
+	}
+	windowStart := 0
+	contentWidth, maxVisible, frameLines, ok := terminalPromptViewport()
+	if !ok {
+		return "", fmt.Errorf("terminal is too small for interactive selection")
+	}
+	visibleCount := min(numItems, maxVisible)
+	rendered := false
+	render := func() {
+		fmt.Print(redrawPrefix(rendered, frameLines))
+		if cursorIdx < windowStart {
+			windowStart = cursorIdx
+		} else if cursorIdx >= windowStart+visibleCount {
+			windowStart = cursorIdx - visibleCount + 1
+		}
+		windowEnd := min(windowStart+visibleCount, numItems)
+		instructions := singleSelectInstructions()
+		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[1], contentWidth), colorReset)
+		fmt.Printf("%s\r\n", clearLine)
+		for i := windowStart; i < windowEnd; i++ {
+			option := options[i]
+			cursor := " "
+			if i == cursorIdx {
+				cursor = "❯"
+			}
+			name := option.Title
+			if name == "" {
+				name = option.Key
+			}
+			badge := ""
+			if i == defaultIndex {
+				// Marks the option Enter would pick before any navigation, replacing PromptChoice's "*" marker.
+				badge = " (default)"
+			}
+			if option.Extra != "" {
+				badge += " " + option.Extra
+			}
+			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("%s %s%s", cursor, name, badge), contentWidth))
+		}
+		for i := visibleCount; i < maxVisible; i++ {
+			fmt.Printf("%s\r\n", clearLine)
+		}
+		remaining := numItems - windowEnd
+		if remaining > 0 {
+			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▼ (%d more below)", remaining), contentWidth))
+		} else if windowStart > 0 {
+			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▲ (%d more above)", windowStart), contentWidth))
+		} else {
+			fmt.Printf("%s\r\n", clearLine)
+		}
+		rendered = true
+	}
+
+	fmt.Print(hideCursor)
+	render()
 	for {
-		fmt.Printf("Choice [%d]: ", defaultIndex+1)
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return "", err
+		switch readKey(fd) {
+		case keyInterrupt:
+			fmt.Print("\r\n")
+			return "", fmt.Errorf("interrupted")
+		case keyEscape:
+			fmt.Print("\r\n")
+			return "", nil
+		case keyEnter:
+			fmt.Print("\r\n")
+			return options[cursorIdx].Key, nil
+		case keyUp:
+			cursorIdx = (cursorIdx - 1 + numItems) % numItems
+			render()
+		case keyDown:
+			cursorIdx = (cursorIdx + 1) % numItems
+			render()
+		case keyPageDown:
+			cursorIdx = min(cursorIdx+visibleCount-1, numItems-1)
+			render()
+		case keyPageUp:
+			cursorIdx = max(cursorIdx-visibleCount+1, 0)
+			render()
 		}
-		index, ok := choiceIndex(line, len(options), defaultIndex)
-		if ok {
-			return options[index].Key, nil
-		}
-		fmt.Printf("Enter a number from 1 to %d.\n", len(options))
 	}
 }
 
@@ -92,15 +177,6 @@ func PromptInput(prompt string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(line), nil
-}
-
-func choiceIndex(input string, optionCount, defaultIndex int) (int, bool) {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return defaultIndex, true
-	}
-	choice, err := strconv.Atoi(input)
-	return choice - 1, err == nil && choice >= 1 && choice <= optionCount
 }
 
 func IsTerminal() bool {
