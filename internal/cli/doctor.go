@@ -60,36 +60,7 @@ func newDoctorCmd() *cobra.Command {
 					continue
 				}
 
-				var brokenInAgent []string
-				var unmanagedBrokenInAgent []string
-				var physicalInAgent []string
-
-				entries, err := os.ReadDir(agentDir)
-				if err != nil {
-					continue
-				}
-
-				for _, entry := range entries {
-					name := entry.Name()
-					fullP := filepath.Join(agentDir, name)
-
-					fi, err := os.Lstat(fullP)
-					if err != nil {
-						continue
-					}
-
-					if fi.Mode()&os.ModeSymlink != 0 {
-						if _, err := os.Stat(fullP); err != nil {
-							if engine.IsManagedSkillLink(fullP, name, skillsDir) {
-								brokenInAgent = append(brokenInAgent, name)
-							} else {
-								unmanagedBrokenInAgent = append(unmanagedBrokenInAgent, name)
-							}
-						}
-					} else if fi.IsDir() && !strings.HasPrefix(name, ".") && !engine.IsManagedSkillCopy(fullP, name, skillsDir) {
-						physicalInAgent = append(physicalInAgent, name)
-					}
-				}
+				brokenInAgent, unmanagedBrokenInAgent, physicalInAgent := engine.DiagnoseAgentDirHealth(agentDir, skillsDir)
 
 				if len(brokenInAgent) > 0 {
 					fmt.Fprintf(out, "  %s[%s] Broken symlinks:%s %s\n", colorRed, agentName, colorReset, strings.Join(brokenInAgent, ", "))
@@ -146,20 +117,7 @@ func newDoctorCmd() *cobra.Command {
 				if _, ok := configuredAgents[agentName]; ok {
 					continue
 				}
-				entries, err := os.ReadDir(agentDir)
-				if err != nil {
-					continue
-				}
-				var stale []string
-				for _, entry := range entries {
-					linkPath := filepath.Join(agentDir, entry.Name())
-					if !engine.IsManagedSkillLink(linkPath, entry.Name(), skillsDir) {
-						continue
-					}
-					if _, err := os.Stat(linkPath); err != nil {
-						stale = append(stale, entry.Name())
-					}
-				}
+				stale := engine.FindStaleManagedLinks(agentDir, skillsDir)
 				if len(stale) == 0 {
 					continue
 				}
