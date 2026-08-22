@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -260,9 +261,10 @@ func UpdateRemoteSkills(
 					})
 
 					if !dryRun {
-						for sk := range repoInfo.Skills {
-							for _, agent := range GetTargetAgentsForSkill(sk, source, cfg, baseSkills) {
-								_, _ = EnsureAgentSymlink(sk, agent, baseSkills)
+						for _, e := range reconcileRemoteSkills(cfg, source, repoInfo.Skills, baseSkills) {
+							result.Errors = append(result.Errors, e)
+							if onProgress != nil {
+								onProgress("repo_error", map[string]interface{}{"source": e.Source, "skill": e.Skill, "error": e.Error})
 							}
 						}
 					}
@@ -330,23 +332,20 @@ func UpdateRemoteSkills(
 
 				repoUpdatedSkills := make([]string, 0)
 				for name, subpath := range repoInfo.Skills {
-					srcPath := filepath.Join(repoDir, filepath.FromSlash(subpath))
-					targetPath := filepath.Join(baseSkills, name)
-					if _, err := os.Stat(srcPath); err != nil {
-						errMsg := fmt.Sprintf("Path missing in repository: %s", subpath)
+					if err := MaterializeRemoteSkill(name, subpath, repoDir, baseSkills); err != nil {
+						errMsg := fmt.Sprintf("Failed to copy skill: %s", err)
+						if errors.Is(err, errRepoPathMissing) {
+							errMsg = fmt.Sprintf("Path missing in repository: %s", subpath)
+						}
 						results[i].errors = append(results[i].errors, UpdateErrorInfo{Source: source, Skill: name, Error: errMsg})
 						if onProgress != nil {
 							onProgress("repo_error", map[string]interface{}{"source": source, "skill": name, "error": errMsg})
 						}
 						continue
 					}
-					if err := CopySkillFolder(srcPath, targetPath); err != nil {
-						results[i].errors = append(results[i].errors, UpdateErrorInfo{Source: source, Skill: name, Error: fmt.Sprintf("Failed to copy skill: %s", err)})
-						continue
-					}
 					repoUpdatedSkills = append(repoUpdatedSkills, name)
-					for _, agent := range GetTargetAgentsForSkill(name, source, cfg, baseSkills) {
-						_, _ = EnsureAgentSymlink(name, agent, baseSkills)
+					if err := ReconcileAgentSymlinks(name, source, cfg, baseSkills); err != nil {
+						results[i].errors = append(results[i].errors, UpdateErrorInfo{Source: source, Skill: name, Error: err.Error()})
 					}
 					if onProgress != nil {
 						onProgress("skill_restored", map[string]interface{}{"source": source, "skill": name, "subpath": subpath})
@@ -393,4 +392,14 @@ func UpdateRemoteSkills(
 	}
 
 	return result, nil
+}
+
+func reconcileRemoteSkills(cfg *config.Config, source string, skills map[string]string, skillsDir string) []UpdateErrorInfo {
+	var errs []UpdateErrorInfo
+	for _, name := range sortedSkillKeys(skills) {
+		if err := ReconcileAgentSymlinks(name, source, cfg, skillsDir); err != nil {
+			errs = append(errs, UpdateErrorInfo{Source: source, Skill: name, Error: err.Error()})
+		}
+	}
+	return errs
 }

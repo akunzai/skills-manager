@@ -164,52 +164,39 @@ func agentSet(agents []string) map[string]struct{} {
 	return set
 }
 
-func ReconcileAgentSymlinks(skillName, source string, cfg *config.Config, skillsDir string) error {
-	desired := agentSet(GetTargetAgentsForSkill(skillName, source, cfg, skillsDir))
-	knownAgents := models.GetAgentsForSkillsDir(skillsDir)
-	for agent := range desired {
-		agentDir, ok := knownAgents[agent]
-		if !ok {
-			continue
-		}
-		linkPath := filepath.Join(agentDir, skillName)
-		_, err := os.Lstat(linkPath)
-		if err == nil && !IsManagedSkillLink(linkPath, skillName, skillsDir) && !IsManagedSkillCopy(linkPath, skillName, skillsDir) {
-			return fmt.Errorf("agent path already exists and is not managed by skills: %s", linkPath)
-		}
-	}
-	for agent, agentDir := range knownAgents {
-		if _, shouldLink := desired[agent]; shouldLink {
-			linkPath := filepath.Join(agentDir, skillName)
-			if IsManagedSkillCopy(linkPath, skillName, skillsDir) {
-				if err := replaceManagedCopy(filepath.Join(skillsDir, skillName), linkPath); err != nil {
-					return err
-				}
-				continue
-			}
-			if _, err := EnsureAgentSymlink(skillName, agent, skillsDir); err != nil {
-				return err
-			}
-			continue
-		}
-		RemoveManagedSkillPath(filepath.Join(agentDir, skillName), skillName, skillsDir)
-	}
-	return nil
+func isManagedAvailabilityPath(path, skillName, skillsDir string) bool {
+	return IsManagedSkillLink(path, skillName, skillsDir) || IsManagedSkillCopy(path, skillName, skillsDir)
 }
 
-func AgentLinkDrift(skillName, source string, cfg *config.Config, skillsDir string) (missing, unexpected []string) {
-	desired := agentSet(GetTargetAgentsForSkill(skillName, source, cfg, skillsDir))
-	for agent, agentDir := range models.GetAgentsForSkillsDir(skillsDir) {
-		linkPath := filepath.Join(agentDir, skillName)
-		_, exists := desired[agent]
-		if exists {
+// availabilityState is desired Availability vs disk for one Skill.
+type availabilityState struct {
+	skillName string
+	skillsDir string
+	desired   map[string]struct{}
+	known     map[string]string
+}
+
+func availabilityFor(skillName, source string, cfg *config.Config, skillsDir string) availabilityState {
+	return availabilityState{
+		skillName: skillName,
+		skillsDir: skillsDir,
+		desired:   agentSet(GetTargetAgentsForSkill(skillName, source, cfg, skillsDir)),
+		known:     models.GetAgentsForSkillsDir(skillsDir),
+	}
+}
+
+func (s availabilityState) drift() (missing, unexpected []string) {
+	for agent, agentDir := range s.known {
+		linkPath := filepath.Join(agentDir, s.skillName)
+		_, want := s.desired[agent]
+		if want {
 			_, err := os.Lstat(linkPath)
-			if os.IsNotExist(err) || (err == nil && !IsManagedSkillLink(linkPath, skillName, skillsDir) && !IsManagedSkillCopy(linkPath, skillName, skillsDir)) {
+			if os.IsNotExist(err) || (err == nil && !isManagedAvailabilityPath(linkPath, s.skillName, s.skillsDir)) {
 				missing = append(missing, agent)
 			}
 			continue
 		}
-		if IsManagedSkillLink(linkPath, skillName, skillsDir) || IsManagedSkillCopy(linkPath, skillName, skillsDir) {
+		if isManagedAvailabilityPath(linkPath, s.skillName, s.skillsDir) {
 			unexpected = append(unexpected, agent)
 		}
 	}
@@ -218,23 +205,45 @@ func AgentLinkDrift(skillName, source string, cfg *config.Config, skillsDir stri
 	return missing, unexpected
 }
 
-func LinkSkillToTargetAgents(
-	skillName string,
-	source string,
-	cfg *config.Config,
-	skillsDir string,
-) ([]string, error) {
-	linked := make([]string, 0)
-	for _, agent := range GetTargetAgentsForSkill(skillName, source, cfg, skillsDir) {
-		created, err := EnsureAgentSymlink(skillName, agent, skillsDir)
-		if err != nil {
-			return linked, err
+func (s availabilityState) apply() error {
+	for agent := range s.desired {
+		agentDir, ok := s.known[agent]
+		if !ok {
+			continue
 		}
-		if created {
-			linked = append(linked, agent)
+		linkPath := filepath.Join(agentDir, s.skillName)
+		_, err := os.Lstat(linkPath)
+		if err == nil && !isManagedAvailabilityPath(linkPath, s.skillName, s.skillsDir) {
+			return fmt.Errorf("agent path already exists and is not managed by skills: %s", linkPath)
 		}
 	}
-	return linked, nil
+	for agent, agentDir := range s.known {
+		linkPath := filepath.Join(agentDir, s.skillName)
+		if _, shouldLink := s.desired[agent]; shouldLink {
+			if IsManagedSkillCopy(linkPath, s.skillName, s.skillsDir) {
+				if err := replaceManagedCopy(filepath.Join(s.skillsDir, s.skillName), linkPath); err != nil {
+					return err
+				}
+				continue
+			}
+			if _, err := EnsureAgentSymlink(s.skillName, agent, s.skillsDir); err != nil {
+				return err
+			}
+			continue
+		}
+		if isManagedAvailabilityPath(linkPath, s.skillName, s.skillsDir) && !RemoveManagedSkillPath(linkPath, s.skillName, s.skillsDir) {
+			return fmt.Errorf("failed to remove managed availability path: %s", linkPath)
+		}
+	}
+	return nil
+}
+
+func ReconcileAgentSymlinks(skillName, source string, cfg *config.Config, skillsDir string) error {
+	return availabilityFor(skillName, source, cfg, skillsDir).apply()
+}
+
+func AgentLinkDrift(skillName, source string, cfg *config.Config, skillsDir string) (missing, unexpected []string) {
+	return availabilityFor(skillName, source, cfg, skillsDir).drift()
 }
 
 func EnsureAgentSymlink(

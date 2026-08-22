@@ -24,7 +24,9 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - GoReleaser config: @.goreleaser.yaml
 - Issue tracker: @docs/agents/issue-tracker.md
 - Triage labels: @docs/agents/triage-labels.md
+- Domain glossary: @CONTEXT.md
 - Domain docs: @docs/agents/domain.md
+- Engine Sync: @internal/engine/sync.go
 - Product UI, CLI output, and README design: @docs/design.md
 - Release SOP: @docs/release.md
 - Lessons learned: @docs/lessons-learned.md

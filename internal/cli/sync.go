@@ -2,8 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -39,16 +39,6 @@ func newSyncCmd() *cobra.Command {
 			if flagPrune || flagPruneOnly {
 				return runPrune(cmd, pruneOptions{yes: flagYes, dryRun: flagDryRun})
 			}
-			previewAvailability := func(name, source string) {
-				missing, unexpected := engine.AgentLinkDrift(name, source, cfg, skillsDir)
-				if len(missing) > 0 {
-					fmt.Fprintf(out, "  [Dry-run] Would link %s to %s.\n", name, strings.Join(missing, ", "))
-				}
-				if len(unexpected) > 0 {
-					fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", name, strings.Join(unexpected, ", "))
-				}
-			}
-
 			fmt.Fprintf(out, "\n%s%sSyncing skills from %s...%s\n\n", colorBold, colorCyan, models.ToTildePath(configPath), colorReset)
 
 			if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -56,129 +46,49 @@ func newSyncCmd() *cobra.Command {
 			}
 
 			configuredSkills := make(map[string]struct{})
-
-			// 1. Sync Remote Skills
-			for source, repoInfo := range cfg.Remote {
-				for sk := range repoInfo.Skills {
-					configuredSkills[sk] = struct{}{}
-				}
-
-				missingSkills := make(map[string]string)
-				for name, subpath := range repoInfo.Skills {
-					targetPath := filepath.Join(skillsDir, name)
-					if flagForce {
-						missingSkills[name] = subpath
-					} else if _, err := os.Stat(targetPath); err != nil {
-						missingSkills[name] = subpath
-					}
-				}
-
-				if len(missingSkills) == 0 && !flagForce {
-					if flagDryRun {
-						for name := range repoInfo.Skills {
-							previewAvailability(name, source)
-						}
-						continue
-					}
-					for name := range repoInfo.Skills {
-						if err := engine.ReconcileAgentSymlinks(name, source, cfg, skillsDir); err != nil {
-							return fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
-						}
-					}
+			var locals []engine.LocalSyncSkill
+			for name, localInfo := range cfg.Local {
+				if localInfo.Type != "symlink" {
 					continue
 				}
-
-				fmt.Fprintf(out, "Syncing repo: %s%s%s (%d skills)...\n", colorBold, source, colorReset, len(repoInfo.Skills))
-				if flagDryRun {
-					missingNames := make([]string, 0, len(missingSkills))
-					for k := range missingSkills {
-						missingNames = append(missingNames, k)
-					}
-					fmt.Fprintf(out, "  [Dry-run] Would sync %s from %s\n", strings.Join(missingNames, ", "), source)
-					for name := range repoInfo.Skills {
-						previewAvailability(name, source)
-					}
-					continue
-				}
-
-				repoDir, err := engine.EnsureGitRepo(source, repoInfo.URL, repoInfo.Branch, flagForce, cacheDir)
-				if err != nil {
-					fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, source, err, colorReset)
-					continue
-				}
-
-				for name, subpath := range repoInfo.Skills {
-					srcPath := filepath.Join(repoDir, filepath.FromSlash(subpath))
-					targetPath := filepath.Join(skillsDir, name)
-
-					if _, err := os.Stat(srcPath); err != nil {
-						fmt.Fprintf(out, "  %sSkill path missing in repo: %s for %s%s\n", colorRed, subpath, name, colorReset)
-						continue
-					}
-
-					if flagForce || !func() bool { _, err := os.Stat(targetPath); return err == nil }() {
-						if err := engine.CopySkillFolder(srcPath, targetPath); err != nil {
-							fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, name, err, colorReset)
-							continue
-						}
-						fmt.Fprintf(out, "  %sRestored %s%s%s.%s\n", colorGreen, colorBold, name, colorReset, colorReset)
-					}
-
-					if err := engine.ReconcileAgentSymlinks(name, source, cfg, skillsDir); err != nil {
-						return fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
-					}
-				}
+				src := ResolveLocalSourcePath(localInfo.Source, skillsDir)
+				locals = append(locals, engine.LocalSyncSkill{
+					Name:       name,
+					AbsSource:  src,
+					LinkTarget: LocalSymlinkTarget(src, skillsDir),
+				})
 			}
 
-			// 2. Sync Local Skills
-			for name, localInfo := range cfg.Local {
+			report, err := engine.SyncDeclared(cfg, skillsDir, cacheDir, locals, flagForce, flagDryRun)
+			if err != nil {
+				printSyncEvents(out, report)
+				return err
+			}
+			printSyncEvents(out, report)
+			for _, name := range report.Configured {
 				configuredSkills[name] = struct{}{}
+			}
 
-				if localInfo.Type == "symlink" {
-					src := ResolveLocalSourcePath(localInfo.Source, skillsDir)
-					targetLink := filepath.Join(skillsDir, name)
-					if _, err := os.Stat(src); err != nil {
-						fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(src), name, colorReset)
+			for name, localInfo := range cfg.Local {
+				if localInfo.Type != "command" {
+					continue
+				}
+				configuredSkills[name] = struct{}{}
+				if localInfo.Check != "" {
+					if _, _, err := engine.RunCmd(localInfo.Check, ""); err != nil {
+						fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, localInfo.Check, name, colorReset)
 						continue
 					}
-
-					if flagDryRun {
-						fmt.Fprintf(out, "  [Dry-run] Would symlink %s -> %s\n", models.ToTildePath(targetLink), models.ToTildePath(src))
-						previewAvailability(name, "local")
-					} else {
-						if err := engine.CreateSymlink(LocalSymlinkTarget(src, skillsDir), targetLink, true); err != nil {
-							fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, name, err, colorReset)
-							continue
-						}
-						fmt.Fprintf(out, "  %sLinked local skill %s%s%s -> %s.%s\n", colorGreen, colorBold, name, colorReset, models.ToTildePath(src), colorReset)
-
-						if err := engine.ReconcileAgentSymlinks(name, "local", cfg, skillsDir); err != nil {
-							return fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
-						}
-					}
-				} else if localInfo.Type == "command" {
-					cmdStr := localInfo.Command
-					checkStr := localInfo.Check
-
-					if checkStr != "" {
-						_, _, err := engine.RunCmd(checkStr, "")
-						if err != nil {
-							fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, checkStr, name, colorReset)
-							continue
-						}
-					}
-
-					if flagDryRun {
-						fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", cmdStr)
-						previewAvailability(name, "local")
-					} else {
-						fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, name, colorReset)
-						_, _, _ = engine.RunCmd(cmdStr, "")
-
-						if err := engine.ReconcileAgentSymlinks(name, "local", cfg, skillsDir); err != nil {
-							return fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
-						}
-					}
+				}
+				if flagDryRun {
+					fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", localInfo.Command)
+					printDriftPreview(out, name, "local", cfg, skillsDir)
+					continue
+				}
+				fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, name, colorReset)
+				_, _, _ = engine.RunCmd(localInfo.Command, "")
+				if err := engine.ReconcileAgentSymlinks(name, "local", cfg, skillsDir); err != nil {
+					return fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
 				}
 			}
 
@@ -209,4 +119,51 @@ func newSyncCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview actions without making changes")
 
 	return cmd
+}
+
+func printDriftPreview(out io.Writer, name, source string, cfg *config.Config, skillsDir string) {
+	missing, unexpected := engine.AgentLinkDrift(name, source, cfg, skillsDir)
+	if len(missing) > 0 {
+		fmt.Fprintf(out, "  [Dry-run] Would link %s to %s.\n", name, strings.Join(missing, ", "))
+	}
+	if len(unexpected) > 0 {
+		fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", name, strings.Join(unexpected, ", "))
+	}
+}
+
+func printSyncEvents(out io.Writer, report *engine.SyncReport) {
+	if report == nil {
+		return
+	}
+	for _, ev := range report.Events {
+		switch ev.Kind {
+		case engine.SyncRepoStart:
+			fmt.Fprintf(out, "Syncing repo: %s%s%s (%d skills)...\n", colorBold, ev.Source, colorReset, len(ev.Skills))
+		case engine.SyncWouldSync:
+			fmt.Fprintf(out, "  [Dry-run] Would sync %s from %s\n", strings.Join(ev.Skills, ", "), ev.Source)
+		case engine.SyncWouldDrift:
+			if len(ev.Missing) > 0 {
+				fmt.Fprintf(out, "  [Dry-run] Would link %s to %s.\n", ev.Skill, strings.Join(ev.Missing, ", "))
+			}
+			if len(ev.Unexpected) > 0 {
+				fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", ev.Skill, strings.Join(ev.Unexpected, ", "))
+			}
+		case engine.SyncFetchFailed:
+			fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
+		case engine.SyncPathMissing:
+			fmt.Fprintf(out, "  %sSkill path missing in repo: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
+		case engine.SyncCopyFailed:
+			fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		case engine.SyncMaterialized:
+			fmt.Fprintf(out, "  %sRestored %s%s%s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, colorReset)
+		case engine.SyncSourceMissing:
+			fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
+		case engine.SyncWouldSymlink:
+			fmt.Fprintf(out, "  [Dry-run] Would symlink %s -> %s\n", models.ToTildePath(ev.Path), models.ToTildePath(ev.Target))
+		case engine.SyncSymlinkFailed:
+			fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		case engine.SyncSymlinked:
+			fmt.Fprintf(out, "  %sLinked local skill %s%s%s -> %s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, models.ToTildePath(ev.Target), colorReset)
+		}
+	}
 }

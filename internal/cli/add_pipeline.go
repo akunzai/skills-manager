@@ -87,9 +87,7 @@ func (s *localInstallSource) confirmReplacementArgs() (string, bool, string) {
 
 func (s *localInstallSource) install(name, subpath, skillsDir string) error {
 	skillSource := s.resolvedPath(subpath)
-	destLink := filepath.Join(skillsDir, name)
-	linkTarget := LocalSymlinkTarget(skillSource, skillsDir)
-	return engine.CreateSymlink(linkTarget, destLink, true)
+	return engine.MaterializeLocalSymlink(name, LocalSymlinkTarget(skillSource, skillsDir), skillsDir)
 }
 
 func (s *localInstallSource) recordConfig(cfg *config.Config, name, subpath, skillsDir string) {
@@ -129,9 +127,7 @@ func (s *remoteInstallSource) confirmReplacementArgs() (string, bool, string) {
 }
 
 func (s *remoteInstallSource) install(name, subpath, skillsDir string) error {
-	srcPath := filepath.Join(s.repoDir, filepath.FromSlash(subpath))
-	targetPath := filepath.Join(skillsDir, name)
-	return engine.CopySkillFolder(srcPath, targetPath)
+	return engine.MaterializeRemoteSkill(name, subpath, s.repoDir, skillsDir)
 }
 
 func (s *remoteInstallSource) recordConfig(cfg *config.Config, name, subpath, _ string) {
