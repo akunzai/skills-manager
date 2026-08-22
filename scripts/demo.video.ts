@@ -54,10 +54,10 @@ export default defineVideo(
     await t.sleep("1s");
     await t.type(" ");
     await t.enter();
-    await t.wait(/Choice \[1\]:/);
+    await t.wait(/Choose a scope:/, { scope: "screen" });
     await t.sleep("1s");
     await t.enter();
-    await t.wait(/Choice \[1\]:/);
+    await t.wait(/Agent availability:/, { scope: "screen" });
     await t.sleep("1s");
     await t.enter();
     await t.wait(/Installed 1 skill/, { scope: "screen" });
