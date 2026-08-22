@@ -44,11 +44,11 @@ func TestIsUniversalAgent(t *testing.T) {
 
 func TestParseRepoSource(t *testing.T) {
 	tests := []struct {
-		raw      string
-		wantKey  string
-		wantURL  string
-		wantType string
-		wantBranch string
+		raw         string
+		wantKey     string
+		wantURL     string
+		wantType    string
+		wantBranch  string
 		wantSubpath string
 	}{
 		{
@@ -70,19 +70,19 @@ func TestParseRepoSource(t *testing.T) {
 			wantType: "gitlab",
 		},
 		{
-			raw:      "https://github.com/owner/repo/tree/main/skills/foo",
-			wantKey:  "owner/repo",
-			wantURL:  "https://github.com/owner/repo.git",
-			wantType: "github",
-			wantBranch: "main",
+			raw:         "https://github.com/owner/repo/tree/main/skills/foo",
+			wantKey:     "owner/repo",
+			wantURL:     "https://github.com/owner/repo.git",
+			wantType:    "github",
+			wantBranch:  "main",
 			wantSubpath: "skills/foo",
 		},
 		{
-			raw:      "https://gitlab.com/group/project/-/tree/v1.0/skills/bar",
-			wantKey:  "gitlab.com/group/project",
-			wantURL:  "https://gitlab.com/group/project.git",
-			wantType: "gitlab",
-			wantBranch: "v1.0",
+			raw:         "https://gitlab.com/group/project/-/tree/v1.0/skills/bar",
+			wantKey:     "gitlab.com/group/project",
+			wantURL:     "https://gitlab.com/group/project.git",
+			wantType:    "gitlab",
+			wantBranch:  "v1.0",
 			wantSubpath: "skills/bar",
 		},
 		{
@@ -175,6 +175,3 @@ func TestToTildePath(t *testing.T) {
 		}
 	}
 }
-
-
-
