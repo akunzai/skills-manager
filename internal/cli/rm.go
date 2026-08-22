@@ -26,6 +26,7 @@ func newRmCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
+			out := cmd.OutOrStdout()
 			configPath, skillsDir, _ := GetEffectivePaths()
 
 			cfg, err := config.LoadConfig(configPath)
@@ -39,7 +40,7 @@ func newRmCmd() *cobra.Command {
 				if tui.IsTerminal() && !flagYes {
 					allSkills := engine.ScanAllSkills(cfg, skillsDir)
 					if len(allSkills) == 0 {
-						fmt.Printf("%sNo skills installed or configured to remove.%s\n", colorYellow, colorReset)
+						fmt.Fprintf(out, "%sNo skills installed or configured to remove.%s\n", colorYellow, colorReset)
 						return nil
 					}
 
@@ -59,11 +60,11 @@ func newRmCmd() *cobra.Command {
 						return err
 					}
 					if chosen == nil {
-						fmt.Printf("%sOperation cancelled.%s\n", colorYellow, colorReset)
+						fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
 						return nil
 					}
 					if len(chosen) == 0 {
-						fmt.Printf("%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
+						fmt.Fprintf(out, "%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
 						return nil
 					}
 					skillsToRemove = chosen
@@ -74,22 +75,22 @@ func newRmCmd() *cobra.Command {
 			}
 
 			for _, skillName := range skillsToRemove {
-				fmt.Printf("\n%sRemoving skill: %s%s%s...\n", colorCyan, colorBold, skillName, colorReset)
+				fmt.Fprintf(out, "\n%sRemoving skill: %s%s%s...\n", colorCyan, colorBold, skillName, colorReset)
 
 				// Full removal
 				unlinked := engine.RemoveAgentSymlinks(skillName, skillsDir)
 				if len(unlinked) > 0 {
-					fmt.Printf("  %sUnlinked from: %s.%s\n", colorGreen, strings.Join(unlinked, ", "), colorReset)
+					fmt.Fprintf(out, "  %sUnlinked from: %s.%s\n", colorGreen, strings.Join(unlinked, ", "), colorReset)
 				}
 
 				masterPath := filepath.Join(skillsDir, skillName)
 				if _, err := os.Lstat(masterPath); err == nil {
 					_ = os.RemoveAll(masterPath)
-					fmt.Printf("  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(masterPath), colorReset)
+					fmt.Fprintf(out, "  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(masterPath), colorReset)
 				}
 
 				if config.RemoveSkillEntry(cfg, skillName) {
-					fmt.Printf("  %sRemoved from configuration.%s\n", colorGreen, colorReset)
+					fmt.Fprintf(out, "  %sRemoved from configuration.%s\n", colorGreen, colorReset)
 				}
 			}
 
@@ -97,7 +98,7 @@ func newRmCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("\n%sSkill removal complete.%s\n\n", colorGreen, colorReset)
+			fmt.Fprintf(out, "\n%sSkill removal complete.%s\n\n", colorGreen, colorReset)
 			return nil
 		},
 	}

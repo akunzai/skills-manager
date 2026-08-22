@@ -26,24 +26,29 @@ func newSelfUpdateCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
+			out := cmd.OutOrStdout()
 			if !flagJSON {
-				fmt.Printf("\n%s%sChecking for skills CLI updates from GitHub Releases...%s\n\n", colorBold, colorCyan, colorReset)
+				fmt.Fprintf(out, "\n%s%sChecking for skills CLI updates from GitHub Releases...%s\n\n", colorBold, colorCyan, colorReset)
 			}
 
 			info, err := updater.CheckSelfUpdate(flagVersion)
 			if err != nil {
+				// This branch already reports the failure itself (as JSON or as a
+				// colored message), so silence cobra's own error line to avoid
+				// printing the same failure twice.
+				cmd.SilenceErrors = true
 				if flagJSON {
 					data, _ := json.MarshalIndent(map[string]string{"status": "error", "error": err.Error()}, "", "  ")
-					fmt.Println(string(data))
+					fmt.Fprintln(out, string(data))
 				} else {
-					fmt.Printf("%sFailed to check for updates: %s%s\n\n", colorRed, err, colorReset)
+					fmt.Fprintf(cmd.ErrOrStderr(), "%sFailed to check for updates: %s%s\n\n", errStyle.Red, err, errStyle.Reset)
 				}
 				return err
 			}
 
 			if flagJSON {
 				data, _ := json.MarshalIndent(info, "", "  ")
-				fmt.Println(string(data))
+				fmt.Fprintln(out, string(data))
 				if flagCheck || (!info.UpdateAvailable && !flagForce) {
 					return nil
 				}
@@ -52,26 +57,26 @@ func newSelfUpdateCmd() *cobra.Command {
 			cmp := updater.CompareSemver(info.CurrentVersion, info.LatestVersion)
 
 			if flagCheck {
-				fmt.Printf("Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
-				fmt.Printf("Latest release:  %s%s%s\n", colorBold, info.LatestTag, colorReset)
+				fmt.Fprintf(out, "Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
+				fmt.Fprintf(out, "Latest release:  %s%s%s\n", colorBold, info.LatestTag, colorReset)
 				if info.UpdateAvailable {
-					fmt.Printf("\n%s%sUpdate available: %s -> %s%s\n", colorYellow, colorBold, info.CurrentVersion, info.LatestTag, colorReset)
-					fmt.Printf("Run '%s%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset, colorReset)
+					fmt.Fprintf(out, "\n%s%sUpdate available: %s -> %s%s\n", colorYellow, colorBold, info.CurrentVersion, info.LatestTag, colorReset)
+					fmt.Fprintf(out, "Run '%s%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset, colorReset)
 				} else if cmp > 0 {
-					fmt.Printf("\n%sskills is running a development/pre-release version (%s) ahead of latest release (%s).%s\n\n", colorGreen, info.CurrentVersion, info.LatestTag, colorReset)
+					fmt.Fprintf(out, "\n%sskills is running a development/pre-release version (%s) ahead of latest release (%s).%s\n\n", colorGreen, info.CurrentVersion, info.LatestTag, colorReset)
 				} else {
-					fmt.Printf("\n%sskills is already on the latest version (%s).%s\n\n", colorGreen, info.LatestTag, colorReset)
+					fmt.Fprintf(out, "\n%sskills is already on the latest version (%s).%s\n\n", colorGreen, info.LatestTag, colorReset)
 				}
 				return nil
 			}
 
 			if !info.UpdateAvailable && !flagForce {
-				fmt.Printf("Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
-				fmt.Printf("Latest release:  %s%s%s\n", colorBold, info.LatestTag, colorReset)
+				fmt.Fprintf(out, "Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
+				fmt.Fprintf(out, "Latest release:  %s%s%s\n", colorBold, info.LatestTag, colorReset)
 				if cmp > 0 {
-					fmt.Printf("\n%sskills is running a development/pre-release version (%s) ahead of latest release (%s).%s\n\n", colorGreen, info.CurrentVersion, info.LatestTag, colorReset)
+					fmt.Fprintf(out, "\n%sskills is running a development/pre-release version (%s) ahead of latest release (%s).%s\n\n", colorGreen, info.CurrentVersion, info.LatestTag, colorReset)
 				} else {
-					fmt.Printf("\n%sskills is already on the latest version (%s).%s\n\n", colorGreen, info.LatestTag, colorReset)
+					fmt.Fprintf(out, "\n%sskills is already on the latest version (%s).%s\n\n", colorGreen, info.LatestTag, colorReset)
 				}
 				return nil
 			}
@@ -81,23 +86,23 @@ func newSelfUpdateCmd() *cobra.Command {
 			}
 
 			targetPath := updater.GetCurrentExecutablePath()
-			fmt.Printf("Upgrading skills CLI:\n")
-			fmt.Printf("  Version:   %s%s%s -> %s%s%s\n", colorYellow, info.CurrentVersion, colorReset, colorGreen, info.LatestTag, colorReset)
-			fmt.Printf("  Target:    %s\n", models.ToTildePath(targetPath))
-			fmt.Printf("  Download:  %s\n", info.AssetURL)
+			fmt.Fprintf(out, "Upgrading skills CLI:\n")
+			fmt.Fprintf(out, "  Version:   %s%s%s -> %s%s%s\n", colorYellow, info.CurrentVersion, colorReset, colorGreen, info.LatestTag, colorReset)
+			fmt.Fprintf(out, "  Target:    %s\n", models.ToTildePath(targetPath))
+			fmt.Fprintf(out, "  Download:  %s\n", info.AssetURL)
 
 			if flagDryRun {
-				fmt.Printf("\n%s[Dry-run]%s Would download and replace %s with %s\n\n", colorCyan, colorReset, models.ToTildePath(targetPath), info.LatestTag)
+				fmt.Fprintf(out, "\n%s[Dry-run]%s Would download and replace %s with %s\n\n", colorCyan, colorReset, models.ToTildePath(targetPath), info.LatestTag)
 				return nil
 			}
 
-			fmt.Printf("\nDownloading and installing %s...\n", info.LatestTag)
+			fmt.Fprintf(out, "\nDownloading and installing %s...\n", info.LatestTag)
 			installedDest, err := updater.DownloadAndInstallBinary(info.AssetURL, targetPath, 30)
 			if err != nil {
 				return fmt.Errorf("update failed: %w", err)
 			}
 
-			fmt.Printf("%sUpdated skills to %s%s%s. (%s)%s\n\n", colorGreen, colorBold, info.LatestTag, colorReset, models.ToTildePath(installedDest), colorReset)
+			fmt.Fprintf(out, "%sUpdated skills to %s%s%s. (%s)%s\n\n", colorGreen, colorBold, info.LatestTag, colorReset, models.ToTildePath(installedDest), colorReset)
 			return nil
 		},
 	}

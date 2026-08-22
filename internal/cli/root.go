@@ -135,6 +135,7 @@ var RootCmd = &cobra.Command{
 	Version: updater.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		applyOutputStyle(cmd.OutOrStdout())
+		applyErrorOutputStyle(cmd.ErrOrStderr())
 		return nil
 	},
 }

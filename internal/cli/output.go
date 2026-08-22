@@ -17,6 +17,13 @@ var (
 	tableRule      string
 	treeBranch     string
 	treeLastBranch string
+
+	// errStyle mirrors the vars above but is keyed to the command's error
+	// writer rather than its output writer. Stdout and stderr can have
+	// different TTY status (e.g. output redirected to a file with an
+	// interactive stderr), so a message written to cmd.ErrOrStderr() must not
+	// borrow color decisions made for cmd.OutOrStdout().
+	errStyle presentation.Style
 )
 
 func applyOutputStyle(out io.Writer) {
@@ -31,4 +38,8 @@ func applyOutputStyle(out io.Writer) {
 	tableRule = style.Rule
 	treeBranch = style.Branch
 	treeLastBranch = style.LastBranch
+}
+
+func applyErrorOutputStyle(errOut io.Writer) {
+	errStyle = presentation.For(errOut)
 }

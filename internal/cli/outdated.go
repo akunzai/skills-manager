@@ -22,6 +22,7 @@ func newOutdatedCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
+			out := cmd.OutOrStdout()
 			configPath, _, cacheDir := GetEffectivePaths()
 
 			cfg, err := config.LoadConfig(configPath)
@@ -31,27 +32,27 @@ func newOutdatedCmd() *cobra.Command {
 
 			if len(cfg.Remote) == 0 {
 				if flagJSON {
-					fmt.Println("[]")
+					fmt.Fprintln(out, "[]")
 				} else {
-					fmt.Printf("%sNo remote repositories configured in %s.%s\n", colorYellow, filepath.Base(configPath), colorReset)
+					fmt.Fprintf(out, "%sNo remote repositories configured in %s.%s\n", colorYellow, filepath.Base(configPath), colorReset)
 				}
 				return nil
 			}
 
 			if !flagJSON {
-				fmt.Printf("\n%s%sChecking remote repositories for updates...%s\n\n", colorBold, colorCyan, colorReset)
+				fmt.Fprintf(out, "\n%s%sChecking remote repositories for updates...%s\n\n", colorBold, colorCyan, colorReset)
 			}
 
 			results := engine.CheckAllRemoteSkillsOutdated(cfg, cacheDir, 8)
 
 			if flagJSON {
 				data, _ := json.MarshalIndent(results, "", "  ")
-				fmt.Println(string(data))
+				fmt.Fprintln(out, string(data))
 				return nil
 			}
 
-			fmt.Printf("%s%-40s %-12s %-12s %s%s\n", colorBold, "REPOSITORY / SKILL", "CURRENT", "LATEST", "STATUS", colorReset)
-			fmt.Println(strings.Repeat(tableRule, 80))
+			fmt.Fprintf(out, "%s%-40s %-12s %-12s %s%s\n", colorBold, "REPOSITORY / SKILL", "CURRENT", "LATEST", "STATUS", colorReset)
+			fmt.Fprintln(out, strings.Repeat(tableRule, 80))
 
 			outdatedCount := 0
 			upToDateCount := 0
@@ -92,18 +93,18 @@ func newOutdatedCmd() *cobra.Command {
 					statusDisplay = fmt.Sprintf("%sCheck failed%s", colorRed, colorReset)
 				}
 
-				fmt.Printf("%s%-40s%s %s %s %s\n", colorBold, r.Source, colorReset, localDisplay, remoteDisplay, statusDisplay)
+				fmt.Fprintf(out, "%s%-40s%s %s %s %s\n", colorBold, r.Source, colorReset, localDisplay, remoteDisplay, statusDisplay)
 
 				for i, sk := range r.Skills {
 					prefix := "  " + treeBranch + " "
 					if i == len(r.Skills)-1 {
 						prefix = "  " + treeLastBranch + " "
 					}
-					fmt.Printf("%s%s%s%s\n", colorDim, prefix, sk, colorReset)
+					fmt.Fprintf(out, "%s%s%s%s\n", colorDim, prefix, sk, colorReset)
 				}
 			}
 
-			fmt.Println(strings.Repeat(tableRule, 80))
+			fmt.Fprintln(out, strings.Repeat(tableRule, 80))
 
 			var summaryParts []string
 			if outdatedCount > 0 {
@@ -116,11 +117,11 @@ func newOutdatedCmd() *cobra.Command {
 				summaryParts = append(summaryParts, fmt.Sprintf("%s%d error(s)%s", colorRed, errorCount, colorReset))
 			}
 
-			fmt.Printf("Summary: %s\n", strings.Join(summaryParts, ", "))
+			fmt.Fprintf(out, "Summary: %s\n", strings.Join(summaryParts, ", "))
 			if outdatedCount > 0 {
-				fmt.Printf("\nRun '%s%sskills update%s' to upgrade outdated skills.\n\n", colorBold, colorReset, colorReset)
+				fmt.Fprintf(out, "\nRun '%s%sskills update%s' to upgrade outdated skills.\n\n", colorBold, colorReset, colorReset)
 			} else {
-				fmt.Printf("\n%sAll skills are up to date.%s\n\n", colorGreen, colorReset)
+				fmt.Fprintf(out, "\n%sAll skills are up to date.%s\n\n", colorGreen, colorReset)
 			}
 
 			return nil
