@@ -100,7 +100,7 @@ func newRmCmd() *cobra.Command {
 				masterPath := filepath.Join(skillsDir, skillName)
 				if _, err := os.Lstat(masterPath); err == nil {
 					_ = os.RemoveAll(masterPath)
-					fmt.Printf("  %s✔%s Removed master directory: %s\n", colorGreen, colorReset, masterPath)
+					fmt.Printf("  %s✔%s Removed master directory: %s\n", colorGreen, colorReset, models.ToTildePath(masterPath))
 				}
 
 				if config.RemoveSkillEntry(cfg, skillName) {

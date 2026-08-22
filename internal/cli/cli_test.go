@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1050,6 +1051,80 @@ func TestCLILocalAddOverwriteRequiresConfirmationOrYes(t *testing.T) {
 	out, err = runCLI(t, "add", "--symlink", v2Dir, "-y", "--config", configFile, "--skills-dir", skillsDir)
 	if err != nil {
 		t.Fatalf("expected success with -y, got: %v\n%s", err, out)
+	}
+}
+
+func TestCLIDoctorTildePathFormatting(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeDir := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("doctor failed: %v\n%s", err, out)
+	}
+
+	// Should contain tilde paths
+	if !strings.Contains(out, "Master skills directory: ~/.agents/skills") {
+		t.Fatalf("expected tilde path for master skills directory in doctor output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Symlinks healthy (~/.claude/skills)") {
+		t.Fatalf("expected tilde path for agent directory in doctor output, got:\n%s", out)
+	}
+	// Must not contain raw absolute home directory
+	if strings.Contains(out, home) {
+		t.Fatalf("expected doctor output not to contain raw absolute home path %q, got:\n%s", home, out)
+	}
+}
+
+func TestCLILsJSONTildePath(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	skillDir := filepath.Join(skillsDir, "sample-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Sample"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "ls", "--json", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls --json failed: %v\n%s", err, out)
+	}
+
+	var items []map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &items); err != nil {
+		t.Fatalf("failed to parse JSON: %v\noutput: %s", err, out)
+	}
+	if len(items) == 0 {
+		t.Fatal("expected at least 1 item in JSON output")
+	}
+	if items[0]["path"] != "~/.agents/skills/sample-skill" {
+		t.Fatalf("expected path ~/.agents/skills/sample-skill, got: %v", items[0]["path"])
 	}
 }
 

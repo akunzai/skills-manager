@@ -36,10 +36,10 @@ func newDoctorCmd() *cobra.Command {
 
 			// 1. Check master skills dir
 			if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
-				fmt.Fprintf(out, "%s✖ Master skills directory does not exist: %s%s\n", colorRed, skillsDir, colorReset)
+				fmt.Fprintf(out, "%s✖ Master skills directory does not exist: %s%s\n", colorRed, models.ToTildePath(skillsDir), colorReset)
 				issuesFound++
 			} else {
-				fmt.Fprintf(out, "%s✔%s Master skills directory: %s\n", colorGreen, colorReset, skillsDir)
+				fmt.Fprintf(out, "%s✔%s Master skills directory: %s\n", colorGreen, colorReset, models.ToTildePath(skillsDir))
 			}
 
 			// 2. Check broken symlinks in configured agent directories
@@ -102,7 +102,7 @@ func newDoctorCmd() *cobra.Command {
 						issuesFound += len(brokenInAgent)
 					}
 				} else {
-					fmt.Fprintf(out, "  %s✔%s [%s] Symlinks healthy (%s)\n", colorGreen, colorReset, agentName, agentDir)
+					fmt.Fprintf(out, "  %s✔%s [%s] Symlinks healthy (%s)\n", colorGreen, colorReset, agentName, models.ToTildePath(agentDir))
 				}
 
 				if len(physicalInAgent) > 0 {
@@ -113,7 +113,7 @@ func newDoctorCmd() *cobra.Command {
 							masterSkillPath := filepath.Join(skillsDir, pName)
 							if _, err := os.Stat(masterSkillPath); err != nil {
 								issuesFound++
-								fmt.Fprintf(out, "    %s✖ Cannot convert %s: no master skill at %s%s\n", colorRed, pName, masterSkillPath, colorReset)
+								fmt.Fprintf(out, "    %s✖ Cannot convert %s: no master skill at %s%s\n", colorRed, pName, models.ToTildePath(masterSkillPath), colorReset)
 								continue
 							}
 							_ = os.RemoveAll(filepath.Join(agentDir, pName))
@@ -192,7 +192,7 @@ func newDoctorCmd() *cobra.Command {
 					for _, leftover := range leftoverEmpty {
 						if err := engine.RemoveEmptyAgentDir(leftover.Dir, pruneBoundary); err != nil {
 							issuesFound++
-							fmt.Fprintf(out, "  %s✖ Failed to remove leftover %s dir %s: %s%s\n", colorRed, leftover.Name, leftover.Dir, err, colorReset)
+							fmt.Fprintf(out, "  %s✖ Failed to remove leftover %s dir %s: %s%s\n", colorRed, leftover.Name, models.ToTildePath(leftover.Dir), err, colorReset)
 							continue
 						}
 						removed++
@@ -227,7 +227,7 @@ func newDoctorCmd() *cobra.Command {
 				issuesFound += len(missing)
 			}
 			if len(untracked) > 0 {
-				fmt.Fprintf(out, "\n%s⚠️  Untracked skills in %s:%s %s\n", colorYellow, skillsDir, colorReset, strings.Join(untracked, ", "))
+				fmt.Fprintf(out, "\n%s⚠️  Untracked skills in %s:%s %s\n", colorYellow, models.ToTildePath(skillsDir), colorReset, strings.Join(untracked, ", "))
 			}
 			if len(invalid) > 0 {
 				fmt.Fprintf(out, "\n%s✖ Installed folders missing SKILL.md:%s %s\n", colorRed, colorReset, strings.Join(invalid, ", "))

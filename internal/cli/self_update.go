@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/cobra"
 )
@@ -82,11 +83,11 @@ func newSelfUpdateCmd() *cobra.Command {
 			targetPath := updater.GetCurrentExecutablePath()
 			fmt.Printf("Upgrading skills CLI:\n")
 			fmt.Printf("  Version:   %s%s%s -> %s%s%s\n", colorYellow, info.CurrentVersion, colorReset, colorGreen, info.LatestTag, colorReset)
-			fmt.Printf("  Target:    %s\n", targetPath)
+			fmt.Printf("  Target:    %s\n", models.ToTildePath(targetPath))
 			fmt.Printf("  Download:  %s\n", info.AssetURL)
 
 			if flagDryRun {
-				fmt.Printf("\n%sℹ [Dry-run]%s Would download and replace %s with %s\n\n", colorCyan, colorReset, targetPath, info.LatestTag)
+				fmt.Printf("\n%sℹ [Dry-run]%s Would download and replace %s with %s\n\n", colorCyan, colorReset, models.ToTildePath(targetPath), info.LatestTag)
 				return nil
 			}
 
@@ -96,7 +97,7 @@ func newSelfUpdateCmd() *cobra.Command {
 				return fmt.Errorf("update failed: %w", err)
 			}
 
-			fmt.Printf("%s✔ Successfully updated skills to %s%s%s! (%s)\n\n", colorGreen, colorBold, info.LatestTag, colorReset, installedDest)
+			fmt.Printf("%s✔ Successfully updated skills to %s%s%s! (%s)\n\n", colorGreen, colorBold, info.LatestTag, colorReset, models.ToTildePath(installedDest))
 			return nil
 		},
 	}

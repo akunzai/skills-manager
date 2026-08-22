@@ -160,6 +160,9 @@ func TestToTildePath(t *testing.T) {
 		expected string
 	}{
 		{"", ""},
+		{"~", "~"},
+		{"~/already/tilde", "~/already/tilde"},
+		{`~\windows\slash\tilde`, "~/windows/slash/tilde"},
 		{home, "~"},
 		{filepath.Join(home, "code", "agent-skills"), "~/code/agent-skills"},
 		{"/nonexistent/path/outside/home", "/nonexistent/path/outside/home"},

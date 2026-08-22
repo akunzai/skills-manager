@@ -140,10 +140,10 @@ func newLsCmd() *cobra.Command {
 					}
 					outList = append(outList, map[string]interface{}{
 						"name":       s.Name,
-						"path":       installedP,
+						"path":       models.ToTildePath(installedP),
 						"scope":      scope,
 						"agents":     s.LinkedAgents,
-						"source":     s.Source,
+						"source":     models.ToTildePath(s.Source),
 						"sourceType": s.SourceType,
 						"subpath":    s.Subpath,
 						"installed":  s.IsInstalled,
