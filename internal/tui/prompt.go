@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -12,25 +13,6 @@ import (
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
-
-var (
-	colorCyan   string
-	colorGreen  string
-	colorYellow string
-	colorBold   string
-	colorDim    string
-	colorReset  string
-)
-
-func applyPromptStyle() {
-	style := presentation.For(os.Stdout)
-	colorCyan = style.Cyan
-	colorGreen = style.Green
-	colorYellow = style.Yellow
-	colorBold = style.Bold
-	colorDim = style.Dim
-	colorReset = style.Reset
-}
 
 const (
 	hideCursor = "\033[?25l"
@@ -69,116 +51,108 @@ func PromptSelect(title string, options []SelectOption, defaultIndex int) (strin
 	if !IsTerminal() {
 		return "", fmt.Errorf("interactive prompt requires a terminal")
 	}
+	var selected string
+	err := rawListSession(func() error {
+		choice, err := runSelect(title, options, defaultIndex, presentation.For(os.Stdout), os.Stdout, func() keyType {
+			return readKey(int(os.Stdin.Fd()))
+		}, sizeFromViewport(terminalPromptViewport()))
+		selected = choice
+		return err
+	})
+	return selected, err
+}
+
+func runSelect(
+	title string,
+	options []SelectOption,
+	defaultIndex int,
+	style presentation.Style,
+	out io.Writer,
+	readKeyFn func() keyType,
+	size promptSize,
+) (string, error) {
 	numItems := len(options)
 	if numItems == 0 {
 		return "", fmt.Errorf("no options to select")
 	}
-	applyPromptStyle()
-
-	fd := int(os.Stdin.Fd())
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return "", err
+	if !size.ok {
+		return "", fmt.Errorf("terminal is too small for interactive selection")
 	}
-	defer func() {
-		_ = term.Restore(fd, oldState)
-		fmt.Print(showCursor)
-	}()
-
 	cursorIdx := defaultIndex
 	if cursorIdx < 0 || cursorIdx >= numItems {
 		cursorIdx = 0
 	}
-	windowStart := 0
-	contentWidth, maxVisible, frameLines, ok := terminalPromptViewport()
-	if !ok {
-		return "", fmt.Errorf("terminal is too small for interactive selection")
-	}
-	visibleCount := min(numItems, maxVisible)
-	isScrollable := numItems > maxVisible
-	rendered := false
-	render := func() {
-		fmt.Print(redrawPrefix(rendered, frameLines))
-		newWindowStart, _, windowEnd, _ := viewportWindow(cursorIdx, windowStart, numItems, maxVisible)
-		windowStart = newWindowStart
-		instructions := singleSelectInstructions(isScrollable)
-		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[1], contentWidth), colorReset)
-		fmt.Printf("%s\r\n", clearLine)
-		for i := windowStart; i < windowEnd; i++ {
+	var chosen string
+	err := listLoop{
+		title:        title,
+		style:        style,
+		out:          out,
+		readKey:      readKeyFn,
+		contentWidth: size.width,
+		maxVisible:   size.maxVisible,
+		frameLines:   size.frame,
+		cursorIdx:    cursorIdx,
+		total:        func() int { return numItems },
+		instructions: singleSelectInstructions,
+		extraHeader:  blankHeader,
+		rowLine: func(i, cursor, width int) string {
 			option := options[i]
-			cursor := " "
-			if i == cursorIdx {
-				cursor = "❯"
-			}
 			name := option.Title
 			if name == "" {
 				name = option.Key
 			}
 			badge := ""
 			if i == defaultIndex {
-				// Marks the option Enter would pick before any navigation, replacing PromptChoice's "*" marker.
 				badge = " (default)"
 			}
 			if option.Extra != "" {
 				badge += " " + option.Extra
 			}
-			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("%s %s%s", cursor, name, badge), contentWidth))
-		}
-		for i := visibleCount; i < maxVisible; i++ {
-			fmt.Printf("%s\r\n", clearLine)
-		}
-		remaining := numItems - windowEnd
-		if remaining > 0 {
-			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▼ (%d more below)", remaining), contentWidth))
-		} else if windowStart > 0 {
-			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▲ (%d more above)", windowStart), contentWidth))
-		} else {
-			fmt.Printf("%s\r\n", clearLine)
-		}
-		rendered = true
-	}
+			return fmt.Sprintf("%s %s%s", cursorMark(i, cursor), name, badge)
+		},
+		footer: selectFooter,
+		handle: func(k keyType, cursor, visible int, scrollable bool) (int, loopResult, error) {
+			switch k {
+			case keyInterrupt:
+				return cursor, loopDone, fmt.Errorf("interrupted")
+			case keyEscape:
+				chosen = ""
+				return cursor, loopDone, nil
+			case keyEnter:
+				chosen = options[cursor].Key
+				return cursor, loopDone, nil
+			case keyUp:
+				return viewportMoveUp(cursor, numItems), loopRedraw, nil
+			case keyDown:
+				return viewportMoveDown(cursor, numItems), loopRedraw, nil
+			case keyPageDown:
+				if scrollable {
+					return viewportPageDown(cursor, visible, numItems), loopRedraw, nil
+				}
+			case keyPageUp:
+				if scrollable {
+					return viewportPageUp(cursor, visible), loopRedraw, nil
+				}
+			}
+			return cursor, loopContinue, nil
+		},
+	}.run()
+	return chosen, err
+}
 
-	fmt.Print(hideCursor)
-	render()
-	for {
-		switch readKey(fd) {
-		case keyInterrupt:
-			fmt.Print("\r\n")
-			return "", fmt.Errorf("interrupted")
-		case keyEscape:
-			fmt.Print("\r\n")
-			return "", nil
-		case keyEnter:
-			fmt.Print("\r\n")
-			return options[cursorIdx].Key, nil
-		case keyUp:
-			cursorIdx = viewportMoveUp(cursorIdx, numItems)
-			render()
-		case keyDown:
-			cursorIdx = viewportMoveDown(cursorIdx, numItems)
-			render()
-		case keyPageDown:
-			if isScrollable {
-				cursorIdx = viewportPageDown(cursorIdx, visibleCount, numItems)
-				render()
-			}
-		case keyPageUp:
-			if isScrollable {
-				cursorIdx = viewportPageUp(cursorIdx, visibleCount)
-				render()
-			}
-		}
+func cursorMark(i, cursor int) string {
+	if i == cursor {
+		return "❯"
 	}
+	return " "
 }
 
 func PromptInput(prompt string) (string, error) {
 	if !IsTerminal() {
 		return "", fmt.Errorf("interactive prompt requires a terminal")
 	}
-	applyPromptStyle()
-	fmt.Printf("%s%s%s%s: ", colorBold, colorCyan, prompt, colorReset)
+	style := presentation.For(os.Stdout)
+	fmt.Printf("%s%s%s%s: ", style.Bold, style.Cyan, prompt, style.Reset)
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
 		return "", err
@@ -301,54 +275,54 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 	if !IsTerminal() {
 		return nil, fmt.Errorf("interactive prompt requires a terminal")
 	}
-	applyPromptStyle()
+	var selected []string
+	err := rawListSession(func() error {
+		choice, err := runMultiSelect(title, items, presentation.For(os.Stdout), os.Stdout, func() keyType {
+			return readKey(int(os.Stdin.Fd()))
+		}, sizeFromViewport(terminalPromptViewport()))
+		selected = choice
+		return err
+	})
+	return selected, err
+}
 
+func runMultiSelect(
+	title string,
+	items []SelectOption,
+	style presentation.Style,
+	out io.Writer,
+	readKeyFn func() keyType,
+	size promptSize,
+) ([]string, error) {
 	numItems := len(items)
 	if numItems == 0 {
 		return []string{}, nil
 	}
-
-	selected := make([]bool, numItems)
-	for i, item := range items {
-		selected[i] = item.Selected
-	}
-
-	fd := int(os.Stdin.Fd())
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = term.Restore(fd, oldState)
-		fmt.Print(showCursor)
-	}()
-
-	cursorIdx := 0
-	windowStart := 0
-	contentWidth, maxVisible, frameLines, ok := terminalPromptViewport()
-	if !ok {
+	if !size.ok {
 		return nil, fmt.Errorf("terminal is too small for interactive selection")
 	}
-	visibleCount := min(numItems, maxVisible)
-	isScrollable := numItems > maxVisible
-	rendered := false
-	render := func() {
-		fmt.Print(redrawPrefix(rendered, frameLines))
-		newWindowStart, _, windowEnd, _ := viewportWindow(cursorIdx, windowStart, numItems, maxVisible)
-		windowStart = newWindowStart
-		instructions := multiSelectInstructions(isScrollable)
-		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[1], contentWidth), colorReset)
-		fmt.Printf("%s\r\n", clearLine)
-		for i := windowStart; i < windowEnd; i++ {
+	checked := make([]bool, numItems)
+	for i, item := range items {
+		checked[i] = item.Selected
+	}
+	var chosen []string
+	cancelled := false
+	err := listLoop{
+		title:        title,
+		style:        style,
+		out:          out,
+		readKey:      readKeyFn,
+		contentWidth: size.width,
+		maxVisible:   size.maxVisible,
+		frameLines:   size.frame,
+		cursorIdx:    0,
+		total:        func() int { return numItems },
+		instructions: multiSelectInstructions,
+		extraHeader:  blankHeader,
+		rowLine: func(i, cursor, width int) string {
 			item := items[i]
-			cursor := " "
-			if i == cursorIdx {
-				cursor = "❯"
-			}
 			box := "[ ]"
-			if selected[i] {
+			if checked[i] {
 				box = "[✓]"
 			}
 			name := item.Title
@@ -362,74 +336,59 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			if item.Extra != "" {
 				badge += " " + item.Extra
 			}
-			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("%s %s %s%s", cursor, box, name, badge), contentWidth))
-		}
-		for i := visibleCount; i < maxVisible; i++ {
-			fmt.Printf("%s\r\n", clearLine)
-		}
-		remaining := numItems - windowEnd
-		if remaining > 0 {
-			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▼ (%d more below)", remaining), contentWidth))
-		} else if windowStart > 0 {
-			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▲ (%d more above)", windowStart), contentWidth))
-		} else {
-			fmt.Printf("%s\r\n", clearLine)
-		}
-		rendered = true
-	}
-
-	fmt.Print(hideCursor)
-	render()
-	for {
-		switch readKey(fd) {
-		case keyInterrupt:
-			fmt.Print("\r\n")
-			return nil, fmt.Errorf("interrupted")
-		case keyEscape:
-			fmt.Print("\r\n")
-			return nil, nil
-		case keyEnter:
-			fmt.Print("\r\n")
-			chosen := make([]string, 0, numItems)
-			for i, isSelected := range selected {
-				if isSelected {
-					chosen = append(chosen, items[i].Key)
+			return fmt.Sprintf("%s %s %s%s", cursorMark(i, cursor), box, name, badge)
+		},
+		footer: selectFooter,
+		handle: func(k keyType, cursor, visible int, scrollable bool) (int, loopResult, error) {
+			switch k {
+			case keyInterrupt:
+				return cursor, loopDone, fmt.Errorf("interrupted")
+			case keyEscape:
+				cancelled = true
+				return cursor, loopDone, nil
+			case keyEnter:
+				chosen = make([]string, 0, numItems)
+				for i, on := range checked {
+					if on {
+						chosen = append(chosen, items[i].Key)
+					}
 				}
-			}
-			return chosen, nil
-		case keyUp:
-			cursorIdx = viewportMoveUp(cursorIdx, numItems)
-			render()
-		case keyDown:
-			cursorIdx = viewportMoveDown(cursorIdx, numItems)
-			render()
-		case keyPageDown:
-			if isScrollable {
-				cursorIdx = viewportPageDown(cursorIdx, visibleCount, numItems)
-				render()
-			}
-		case keyPageUp:
-			if isScrollable {
-				cursorIdx = viewportPageUp(cursorIdx, visibleCount)
-				render()
-			}
-		case keyToggleAll:
-			allSelected := true
-			for _, isSelected := range selected {
-				if !isSelected {
-					allSelected = false
-					break
+				return cursor, loopDone, nil
+			case keyUp:
+				return viewportMoveUp(cursor, numItems), loopRedraw, nil
+			case keyDown:
+				return viewportMoveDown(cursor, numItems), loopRedraw, nil
+			case keyPageDown:
+				if scrollable {
+					return viewportPageDown(cursor, visible, numItems), loopRedraw, nil
 				}
+			case keyPageUp:
+				if scrollable {
+					return viewportPageUp(cursor, visible), loopRedraw, nil
+				}
+			case keyToggleAll:
+				allSelected := true
+				for _, on := range checked {
+					if !on {
+						allSelected = false
+						break
+					}
+				}
+				for i := range checked {
+					checked[i] = !allSelected
+				}
+				return cursor, loopRedraw, nil
+			case keySpace:
+				checked[cursor] = !checked[cursor]
+				return cursor, loopRedraw, nil
 			}
-			for i := range selected {
-				selected[i] = !allSelected
-			}
-			render()
-		case keySpace:
-			selected[cursorIdx] = !selected[cursorIdx]
-			render()
-		}
+			return cursor, loopContinue, nil
+		},
+	}.run()
+	if cancelled {
+		return nil, err
 	}
+	return chosen, err
 }
 
 type rowType int
@@ -495,7 +454,29 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 	if !IsTerminal() {
 		return nil, fmt.Errorf("interactive prompt requires a terminal")
 	}
-	applyPromptStyle()
+	var selected []string
+	err := rawListSession(func() error {
+		choice, err := runGroupedMultiSelect(title, groupedItems, groupOrder, presentation.For(os.Stdout), os.Stdout, func() keyType {
+			return readKey(int(os.Stdin.Fd()))
+		}, sizeFromViewport(terminalPromptViewport()))
+		selected = choice
+		return err
+	})
+	return selected, err
+}
+
+func runGroupedMultiSelect(
+	title string,
+	groupedItems GroupedItems,
+	groupOrder []string,
+	style presentation.Style,
+	out io.Writer,
+	readKeyFn func() keyType,
+	size promptSize,
+) ([]string, error) {
+	if !size.ok {
+		return nil, fmt.Errorf("terminal is too small for interactive selection")
+	}
 
 	var rows []displayRow
 	var allSkillKeys []string
@@ -579,26 +560,6 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 		}
 	}
 
-	fd := int(os.Stdin.Fd())
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = term.Restore(fd, oldState)
-		fmt.Print(showCursor)
-	}()
-
-	cursorIdx := 0
-	windowStart := 0
-
-	contentWidth, maxVisible, frameLines, ok := terminalPromptViewport()
-	if !ok {
-		return nil, fmt.Errorf("terminal is too small for interactive selection")
-	}
-	visibleCount := 0
-	isScrollable := false
-	rendered := false
 	isCovered := func(row displayRow) bool {
 		return row.dependsOn != "" && selectedMap[row.dependsOn]
 	}
@@ -606,26 +567,22 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 		return selectedMap[row.skillKey] || isCovered(row)
 	}
 
-	render := func() {
-		fmt.Print(redrawPrefix(rendered, frameLines))
-		var newWindowStart, windowEnd int
-		newWindowStart, visibleCount, windowEnd, isScrollable = viewportWindow(cursorIdx, windowStart, totalRows, maxVisible)
-		windowStart = newWindowStart
-
-		instructions := groupedMultiSelectInstructions(isScrollable)
-		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[1], contentWidth), colorReset)
-		fmt.Printf("%s%s\r\n", clearLine, clipLine(groupedTopIndicator(windowStart, isScrollable), contentWidth))
-
-		for i := windowStart; i < windowEnd; i++ {
+	var chosen []string
+	cancelled := false
+	err := listLoop{
+		title:        title,
+		style:        style,
+		out:          out,
+		readKey:      readKeyFn,
+		contentWidth: size.width,
+		maxVisible:   size.maxVisible,
+		frameLines:   size.frame,
+		cursorIdx:    0,
+		total:        func() int { return totalRows },
+		instructions: groupedMultiSelectInstructions,
+		extraHeader:  groupedTopIndicator,
+		rowLine: func(i, cursor, width int) string {
 			row := rows[i]
-			isCursor := (i == cursorIdx)
-			cursorStr := " "
-			if isCursor {
-				cursorStr = "❯"
-			}
-
 			if row.rType == rowGroup {
 				allSel := true
 				selectedCount := 0
@@ -636,157 +593,125 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 						allSel = false
 					}
 				}
-
 				box := "[ ]"
 				if len(row.groupSkills) > 0 && allSel {
 					box = "[✓]"
 				} else if selectedCount > 0 {
 					box = "[-]"
 				}
-
 				countStr := fmt.Sprintf("%d/%d selected", selectedCount, len(row.groupSkills))
 				if len(row.groupSkills) == 1 {
 					countStr = fmt.Sprintf("%d/1 selected", selectedCount)
 				}
-
 				disclosure := "▾"
 				if collapsed[row.groupSource] {
 					disclosure = "▸"
 				}
-				line := fmt.Sprintf("%s %s %s %s (%s)", cursorStr, box, disclosure, row.groupSource, countStr)
-				fmt.Printf("%s%s\r\n", clearLine, clipLine(line, contentWidth))
-			} else {
-				isChecked := isSelected(row)
-				box := "[ ]"
-				if isChecked {
-					box = "[✓]"
-				}
-
-				badge := ""
-				if row.installed {
-					badge = " (installed)"
-				}
-				if row.extra != "" {
-					badge += " " + row.extra
-				}
-				if isCovered(row) {
-					badge += " (covered by selected master)"
-				}
-
-				display := row.skillTitle
-				if display == "" {
-					display = row.skillKey
-				}
-				line := fmt.Sprintf("%s    %s %s%s", cursorStr, box, display, badge)
-				fmt.Printf("%s%s\r\n", clearLine, clipLine(line, contentWidth))
+				return fmt.Sprintf("%s %s %s %s (%s)", cursorMark(i, cursor), box, disclosure, row.groupSource, countStr)
 			}
-		}
-		for i := visibleCount; i < maxVisible; i++ {
-			fmt.Printf("%s\r\n", clearLine)
-		}
-
-		if isScrollable {
-			remaining := totalRows - windowEnd
-			if remaining > 0 {
-				fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▼ (%d more below)", remaining), contentWidth))
-			} else {
-				fmt.Printf("%s\r\n", clearLine)
+			box := "[ ]"
+			if isSelected(row) {
+				box = "[✓]"
 			}
-		} else {
-			fmt.Printf("%s\r\n", clearLine)
-		}
-		rendered = true
-	}
-
-	fmt.Print(hideCursor)
-	render()
-
-	for {
-		k := readKey(fd)
-		switch k {
-		case keyInterrupt:
-			fmt.Print("\r\n")
-			return nil, fmt.Errorf("interrupted")
-		case keyEscape:
-			fmt.Print("\r\n")
-			return nil, nil
-		case keyEnter:
-			fmt.Print("\r\n")
-			var chosen []string
-			for _, skKey := range allSkillKeys {
-				if selectedMap[skKey] {
-					chosen = append(chosen, skKey)
-				}
+			badge := ""
+			if row.installed {
+				badge = " (installed)"
 			}
-			return chosen, nil
-		case keyUp:
-			cursorIdx = viewportMoveUp(cursorIdx, totalRows)
-			render()
-		case keyDown:
-			cursorIdx = viewportMoveDown(cursorIdx, totalRows)
-			render()
-		case keyPageDown:
-			if isScrollable {
-				cursorIdx = viewportPageDown(cursorIdx, visibleCount, totalRows)
-				render()
+			if row.extra != "" {
+				badge += " " + row.extra
 			}
-		case keyPageUp:
-			if isScrollable {
-				cursorIdx = viewportPageUp(cursorIdx, visibleCount)
-				render()
+			if isCovered(row) {
+				badge += " (covered by selected master)"
 			}
-		case keyLeft:
-			row := rows[cursorIdx]
-			if !collapsed[row.groupSource] {
-				collapsed[row.groupSource] = true
-				rebuildRows()
-				for i, candidate := range rows {
-					if candidate.rType == rowGroup && candidate.groupSource == row.groupSource {
-						cursorIdx = i
-						break
+			display := row.skillTitle
+			if display == "" {
+				display = row.skillKey
+			}
+			return fmt.Sprintf("%s    %s %s%s", cursorMark(i, cursor), box, display, badge)
+		},
+		footer: groupedFooter,
+		handle: func(k keyType, cursor, visible int, scrollable bool) (int, loopResult, error) {
+			switch k {
+			case keyInterrupt:
+				return cursor, loopDone, fmt.Errorf("interrupted")
+			case keyEscape:
+				cancelled = true
+				return cursor, loopDone, nil
+			case keyEnter:
+				for _, skKey := range allSkillKeys {
+					if selectedMap[skKey] {
+						chosen = append(chosen, skKey)
 					}
 				}
-				render()
-			}
-		case keyRight:
-			row := rows[cursorIdx]
-			if row.rType == rowGroup && collapsed[row.groupSource] {
-				collapsed[row.groupSource] = false
-				rebuildRows()
-				render()
-			}
-		case keyToggleAll:
-			allSel := true
-			for _, skKey := range allSkillKeys {
-				row := rowByKey[skKey]
-				if !isSelected(row) {
-					allSel = false
-					break
+				return cursor, loopDone, nil
+			case keyUp:
+				return viewportMoveUp(cursor, totalRows), loopRedraw, nil
+			case keyDown:
+				return viewportMoveDown(cursor, totalRows), loopRedraw, nil
+			case keyPageDown:
+				if scrollable {
+					return viewportPageDown(cursor, visible, totalRows), loopRedraw, nil
 				}
-			}
-			for _, skKey := range allSkillKeys {
-				selectedMap[skKey] = !allSel
-			}
-			render()
-		case keySpace:
-			row := rows[cursorIdx]
-			if row.rType == rowGroup {
+			case keyPageUp:
+				if scrollable {
+					return viewportPageUp(cursor, visible), loopRedraw, nil
+				}
+			case keyLeft:
+				row := rows[cursor]
+				if !collapsed[row.groupSource] {
+					collapsed[row.groupSource] = true
+					rebuildRows()
+					for i, candidate := range rows {
+						if candidate.rType == rowGroup && candidate.groupSource == row.groupSource {
+							return i, loopRedraw, nil
+						}
+					}
+					return cursor, loopRedraw, nil
+				}
+			case keyRight:
+				row := rows[cursor]
+				if row.rType == rowGroup && collapsed[row.groupSource] {
+					collapsed[row.groupSource] = false
+					rebuildRows()
+					return cursor, loopRedraw, nil
+				}
+			case keyToggleAll:
 				allSel := true
-				for _, skKey := range row.groupSkills {
+				for _, skKey := range allSkillKeys {
 					if !isSelected(rowByKey[skKey]) {
 						allSel = false
 						break
 					}
 				}
-				for _, skKey := range row.groupSkills {
+				for _, skKey := range allSkillKeys {
 					selectedMap[skKey] = !allSel
 				}
-			} else if !isCovered(row) {
-				selectedMap[row.skillKey] = !selectedMap[row.skillKey]
+				return cursor, loopRedraw, nil
+			case keySpace:
+				row := rows[cursor]
+				if row.rType == rowGroup {
+					allSel := true
+					for _, skKey := range row.groupSkills {
+						if !isSelected(rowByKey[skKey]) {
+							allSel = false
+							break
+						}
+					}
+					for _, skKey := range row.groupSkills {
+						selectedMap[skKey] = !allSel
+					}
+				} else if !isCovered(row) {
+					selectedMap[row.skillKey] = !selectedMap[row.skillKey]
+				}
+				return cursor, loopRedraw, nil
 			}
-			render()
-		}
+			return cursor, loopContinue, nil
+		},
+	}.run()
+	if cancelled {
+		return nil, err
 	}
+	return chosen, err
 }
 
 // PromptConfirm prompts the user for a yes/no confirmation.
@@ -794,12 +719,12 @@ func PromptConfirm(prompt string, defaultYes bool) (bool, error) {
 	if !IsTerminal() {
 		return false, fmt.Errorf("interactive prompt requires a terminal")
 	}
-	applyPromptStyle()
+	style := presentation.For(os.Stdout)
 	suffix := " [y/N]: "
 	if defaultYes {
 		suffix = " [Y/n]: "
 	}
-	fmt.Printf("%s%s%s%s", colorBold, colorYellow, prompt, colorReset)
+	fmt.Printf("%s%s%s%s", style.Bold, style.Yellow, prompt, style.Reset)
 	fmt.Print(suffix)
 	var response string
 	_, _ = fmt.Scanln(&response)
