@@ -244,7 +244,7 @@ func confirmSkillReplacements(
 							})
 						}
 					} else {
-						if !isLocal || (entry.Source != StoreLocalSourcePath(localSkillSource, skillsDir) && models.ToTildePath(entry.Source) != models.ToTildePath(localSkillSource)) {
+						if !isLocal || (entry.Source != models.StoreLocalSourcePath(localSkillSource, skillsDir) && models.ToTildePath(entry.Source) != models.ToTildePath(localSkillSource)) {
 							conflicts = append(conflicts, conflictItem{
 								name:       name,
 								currentSrc: fmt.Sprintf("[symlink] %s", models.ToTildePath(entry.Source)),

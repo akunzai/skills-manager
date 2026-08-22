@@ -88,11 +88,11 @@ func (s *localInstallSource) confirmReplacementArgs() replacementSource {
 
 func (s *localInstallSource) install(name, subpath, skillsDir string) error {
 	skillSource := s.resolvedPath(subpath)
-	return engine.MaterializeLocalSymlink(name, LocalSymlinkTarget(skillSource, skillsDir), skillsDir)
+	return engine.MaterializeLocalSymlink(name, models.LocalSymlinkTarget(skillSource, skillsDir), skillsDir)
 }
 
 func (s *localInstallSource) recordConfig(cfg *config.Config, name, subpath, skillsDir string) {
-	config.AddLocalSymlinkEntry(cfg, name, StoreLocalSourcePath(s.resolvedPath(subpath), skillsDir), s.description)
+	config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(s.resolvedPath(subpath), skillsDir), s.description)
 }
 
 func (s *localInstallSource) progressLine(name, subpath string) string {

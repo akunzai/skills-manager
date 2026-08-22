@@ -46,27 +46,7 @@ func newSyncCmd() *cobra.Command {
 			}
 
 			configuredSkills := make(map[string]struct{})
-			var locals []engine.LocalSyncSkill
-			var commands []engine.CommandSyncSkill
-			for name, localInfo := range cfg.Local {
-				switch localInfo.Type {
-				case "symlink":
-					src := ResolveLocalSourcePath(localInfo.Source, skillsDir)
-					locals = append(locals, engine.LocalSyncSkill{
-						Name:       name,
-						AbsSource:  src,
-						LinkTarget: LocalSymlinkTarget(src, skillsDir),
-					})
-				case "command":
-					commands = append(commands, engine.CommandSyncSkill{
-						Name:    name,
-						Command: localInfo.Command,
-						Check:   localInfo.Check,
-					})
-				}
-			}
-
-			report, err := engine.SyncDeclared(cfg, skillsDir, cacheDir, locals, commands, flagForce, flagDryRun)
+			report, err := engine.SyncDeclared(cfg, skillsDir, cacheDir, flagForce, flagDryRun)
 			if err != nil {
 				printSyncEvents(out, report)
 				return err
