@@ -21,6 +21,60 @@ func shouldPromptForDiscoveredSkills(skillCount int, interactive, skipConfirmati
 	return skillCount > 0 && interactive && !skipConfirmation
 }
 
+func selectionSkillsDirs(cmd *cobra.Command) []string {
+	if cmd.Flags().Changed("global") || cmd.Flags().Changed("project") || cmd.Flags().Changed("skills-dir") {
+		_, skillsDir, _ := GetEffectivePaths()
+		return []string{skillsDir}
+	}
+
+	dirs := []string{models.DefaultSkillsDir()}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return dirs
+	}
+	_, projectDir := getProjectPaths(cwd)
+	return append(dirs, projectDir)
+}
+
+func markInstalledSkills(options []tui.SelectOption, skillsDirs []string) {
+	for i := range options {
+		for _, skillsDir := range skillsDirs {
+			if _, err := os.Stat(filepath.Join(skillsDir, options[i].Key)); err == nil {
+				options[i].Installed = true
+				options[i].Selected = true
+				break
+			}
+		}
+	}
+}
+
+func prepareAddTarget(cmd *cobra.Command, skip bool, agents []string) (string, string, *config.Config, []string, error) {
+	if tui.IsTerminal() && !skip && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
+		scope, err := tui.PromptChoice("Choose a scope:", []tui.SelectOption{
+			{Key: "global", Title: "Global"},
+			{Key: "project", Title: "Project"},
+		}, 0)
+		if err != nil {
+			return "", "", nil, nil, err
+		}
+		flagProject = scope == "project"
+		flagGlobal = !flagProject
+	}
+
+	configPath, skillsDir, _ := GetEffectivePaths()
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	if len(agents) > 0 {
+		agents, err = validateAgentNames(agents, skillsDir)
+		if err != nil {
+			return "", "", nil, nil, err
+		}
+	}
+	return configPath, skillsDir, cfg, agents, nil
+}
+
 func groupDiscoveredSkills(discovered map[string]string) (tui.GroupedItems, bool) {
 	byDirectory := make(map[string][]tui.SelectOption)
 	for name, skillPath := range discovered {
@@ -208,7 +262,7 @@ func confirmSkillReplacements(
 		sort.Slice(conflicts, func(i, j int) bool {
 			return conflicts[i].name < conflicts[j].name
 		})
-		fmt.Fprintf(out, "\n%s⚠️  The following %d skill(s) already exist and will be overwritten:%s\n", colorYellow, len(conflicts), colorReset)
+		fmt.Fprintf(out, "\n%sWarning: The following %d skill(s) already exist and will be overwritten:%s\n", colorYellow, len(conflicts), colorReset)
 		for _, c := range conflicts {
 			fmt.Fprintf(out, "  • %s%s%s: %s -> %s\n", colorBold, c.name, colorReset, c.currentSrc, c.newSrc)
 		}
@@ -246,12 +300,17 @@ func newAddCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
-			configPath, skillsDir, cacheDir := GetEffectivePaths()
-
-			cfg, err := config.LoadConfig(configPath)
-			if err != nil {
-				return err
+			if len(args) == 0 && flagSymlink == "" && flagCommand == "" && tui.IsTerminal() && !flagYes {
+				source, err := tui.PromptInput("Source repository or local path")
+				if err != nil {
+					return err
+				}
+				if source == "" {
+					return fmt.Errorf("source is required")
+				}
+				args = []string{source}
 			}
+			_, _, cacheDir := GetEffectivePaths()
 
 			// Positional skills arguments override or append to --skill
 			if len(args) > 1 {
@@ -276,7 +335,7 @@ func newAddCmd() *cobra.Command {
 				}
 
 				out := cmd.OutOrStdout()
-				fmt.Fprintf(out, "%s🔍 Scanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
+				fmt.Fprintf(out, "%sScanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
 
 				discovered, err := engine.DiscoverSkillsInRepo(absSourcePath)
 				if err != nil {
@@ -347,18 +406,13 @@ func newAddCmd() *cobra.Command {
 				} else {
 					if shouldPromptForDiscoveredSkills(len(discovered), tui.IsTerminal(), flagYes) {
 						groups, shouldGroup := groupDiscoveredSkills(discovered)
-						if shouldGroup {
-							for _, options := range groups {
-								for i := range options {
-									if _, err := os.Stat(filepath.Join(skillsDir, options[i].Key)); err == nil {
-										options[i].Selected = true
-									}
-								}
-							}
-						}
+						selectionDirs := selectionSkillsDirs(cmd)
 
 						var chosen []string
 						if shouldGroup {
+							for _, options := range groups {
+								markInstalledSkills(options, selectionDirs)
+							}
 							chosen, err = tui.PromptGroupedMultiSelect(
 								fmt.Sprintf("Select skills to link from %s:", models.ToTildePath(absSourcePath)),
 								groups,
@@ -366,12 +420,9 @@ func newAddCmd() *cobra.Command {
 						} else {
 							options := make([]tui.SelectOption, 0, len(discovered))
 							for skName := range discovered {
-								isInst := false
-								if _, err := os.Stat(filepath.Join(skillsDir, skName)); err == nil {
-									isInst = true
-								}
-								options = append(options, tui.SelectOption{Key: skName, Title: skName, Selected: isInst})
+								options = append(options, tui.SelectOption{Key: skName, Title: skName})
 							}
+							markInstalledSkills(options, selectionDirs)
 							sort.Slice(options, func(i, j int) bool {
 								return options[i].Key < options[j].Key
 							})
@@ -411,6 +462,14 @@ func newAddCmd() *cobra.Command {
 				if len(skillsToInstall) == 0 {
 					return fmt.Errorf("no matching skills to install")
 				}
+				configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, flagYes, flagAgents)
+				if err != nil {
+					return err
+				}
+				flagAgents = agents
+				if err := promptAddAvailability(cfg, skillsToInstall, "local", skillsDir, flagYes, flagAgents); err != nil {
+					return err
+				}
 
 				if err := confirmSkillReplacements(cfg, skillsDir, skillsToInstall, "", true, absSourcePath, flagYes, out); err != nil {
 					if err.Error() == "operation cancelled by user" {
@@ -433,29 +492,31 @@ func newAddCmd() *cobra.Command {
 					destLink := filepath.Join(skillsDir, name)
 					linkTarget := LocalSymlinkTarget(skillSource, skillsDir)
 
-					fmt.Fprintf(out, "  🔗 Linking local skill: %s%s%s -> %s\n", colorBold, name, colorReset, models.ToTildePath(skillSource))
+					fmt.Fprintf(out, "  Linking local skill: %s%s%s -> %s\n", colorBold, name, colorReset, models.ToTildePath(skillSource))
 					if err := engine.CreateSymlink(linkTarget, destLink, true); err != nil {
 						return fmt.Errorf("failed to symlink skill %s: %w", name, err)
 					}
 
-					targetAgents := flagAgents
-					if len(targetAgents) == 0 {
-						targetAgents = engine.GetTargetAgentsForSkill(name, "local", cfg, skillsDir)
-					}
-					for _, agent := range targetAgents {
-						_, _ = engine.EnsureAgentSymlink(name, agent, skillsDir)
-					}
-
 					config.AddLocalSymlinkEntry(cfg, name, StoreLocalSourcePath(skillSource, skillsDir), flagDescription)
+					if len(flagAgents) > 0 {
+						if err := config.IncludeSkillAgents(cfg, name, flagAgents...); err != nil {
+							return err
+						}
+					}
 					installedNames = append(installedNames, name)
 				}
 
 				if err := config.SaveConfig(cfg, configPath); err != nil {
 					return err
 				}
+				for _, name := range installedNames {
+					if err := engine.ReconcileAgentSymlinks(name, "local", cfg, skillsDir); err != nil {
+						return fmt.Errorf("saved config but failed to reconcile availability for %s: %w", name, err)
+					}
+				}
 
 				sort.Strings(installedNames)
-				fmt.Fprintf(out, "\n%s✔ Successfully linked %d local skill(s) [%s] and updated %s%s\n\n", colorGreen, len(installedNames), strings.Join(installedNames, ", "), filepath.Base(configPath), colorReset)
+				fmt.Fprintf(out, "\n%sLinked %d local skill(s) [%s] and updated %s.%s\n\n", colorGreen, len(installedNames), strings.Join(installedNames, ", "), filepath.Base(configPath), colorReset)
 				return nil
 			}
 
@@ -471,8 +532,16 @@ func newAddCmd() *cobra.Command {
 				} else {
 					skillName = args[0]
 				}
+				configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, flagYes, flagAgents)
+				if err != nil {
+					return err
+				}
+				flagAgents = agents
+				if err := promptAddAvailability(cfg, map[string]string{skillName: "."}, "local", skillsDir, flagYes, flagAgents); err != nil {
+					return err
+				}
 
-				fmt.Printf("%s⚙️  Configuring command skill: %s%s%s\n", colorCyan, colorBold, skillName, colorReset)
+				fmt.Printf("%sConfiguring command skill: %s%s%s\n", colorCyan, colorBold, skillName, colorReset)
 				fmt.Printf("   Command: %s\n", flagCommand)
 				fmt.Println("   Executing installer command...")
 
@@ -485,20 +554,20 @@ func newAddCmd() *cobra.Command {
 					fmt.Printf("%sWarning: Install command returned error: %s%s\n", colorYellow, errMsg, colorReset)
 				}
 
-				targetAgents := flagAgents
-				if len(targetAgents) == 0 {
-					targetAgents = engine.GetTargetAgentsForSkill(skillName, "local", cfg, skillsDir)
-				}
-				for _, agent := range targetAgents {
-					_, _ = engine.EnsureAgentSymlink(skillName, agent, skillsDir)
-				}
-
 				config.AddLocalCommandEntry(cfg, skillName, flagCommand, flagCheck, flagDescription)
+				if len(flagAgents) > 0 {
+					if err := config.IncludeSkillAgents(cfg, skillName, flagAgents...); err != nil {
+						return err
+					}
+				}
 				if err := config.SaveConfig(cfg, configPath); err != nil {
 					return err
 				}
+				if err := engine.ReconcileAgentSymlinks(skillName, "local", cfg, skillsDir); err != nil {
+					return fmt.Errorf("saved config but failed to reconcile availability for %s: %w", skillName, err)
+				}
 
-				fmt.Printf("%s✔ Successfully registered command skill %s and updated %s%s\n", colorGreen, skillName, filepath.Base(configPath), colorReset)
+				fmt.Printf("%sRegistered command skill %s and updated %s.%s\n", colorGreen, skillName, filepath.Base(configPath), colorReset)
 				return nil
 			}
 
@@ -525,7 +594,7 @@ func newAddCmd() *cobra.Command {
 			}
 			repoType := parsed.RepoType
 
-			fmt.Printf("%s📦 Fetching repository: %s%s%s...\n", colorCyan, colorBold, sourceKey, colorReset)
+			fmt.Printf("%sFetching repository: %s%s%s...\n", colorCyan, colorBold, sourceKey, colorReset)
 
 			repoDir, err := engine.EnsureGitRepo(sourceKey, cloneURL, branch, true, cacheDir)
 			if err != nil {
@@ -586,18 +655,13 @@ func newAddCmd() *cobra.Command {
 			} else {
 				if shouldPromptForDiscoveredSkills(len(discovered), tui.IsTerminal(), flagYes) {
 					groups, shouldGroup := groupDiscoveredSkills(discovered)
-					if shouldGroup {
-						for _, options := range groups {
-							for i := range options {
-								if _, err := os.Stat(filepath.Join(skillsDir, options[i].Key)); err == nil {
-									options[i].Selected = true
-								}
-							}
-						}
-					}
+					selectionDirs := selectionSkillsDirs(cmd)
 
 					var chosen []string
 					if shouldGroup {
+						for _, options := range groups {
+							markInstalledSkills(options, selectionDirs)
+						}
 						chosen, err = tui.PromptGroupedMultiSelect(
 							fmt.Sprintf("Select skills to install from %s:", sourceKey),
 							groups,
@@ -605,12 +669,9 @@ func newAddCmd() *cobra.Command {
 					} else {
 						options := make([]tui.SelectOption, 0, len(discovered))
 						for skName := range discovered {
-							isInst := false
-							if _, err := os.Stat(filepath.Join(skillsDir, skName)); err == nil {
-								isInst = true
-							}
-							options = append(options, tui.SelectOption{Key: skName, Title: skName, Selected: isInst})
+							options = append(options, tui.SelectOption{Key: skName, Title: skName})
 						}
+						markInstalledSkills(options, selectionDirs)
 						sort.Slice(options, func(i, j int) bool {
 							return options[i].Key < options[j].Key
 						})
@@ -650,6 +711,14 @@ func newAddCmd() *cobra.Command {
 			if len(skillsToInstall) == 0 {
 				return fmt.Errorf("no matching skills to install")
 			}
+			configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, flagYes, flagAgents)
+			if err != nil {
+				return err
+			}
+			flagAgents = agents
+			if err := promptAddAvailability(cfg, skillsToInstall, sourceKey, skillsDir, flagYes, flagAgents); err != nil {
+				return err
+			}
 
 			if err := confirmSkillReplacements(cfg, skillsDir, skillsToInstall, sourceKey, false, "", flagYes, cmd.OutOrStdout()); err != nil {
 				if err.Error() == "operation cancelled by user" {
@@ -673,29 +742,31 @@ func newAddCmd() *cobra.Command {
 				srcPath := filepath.Join(repoDir, filepath.FromSlash(subpath))
 				targetPath := filepath.Join(skillsDir, name)
 
-				fmt.Printf("  📥 Installing %s%s%s (from %s)...\n", colorBold, name, colorReset, subpath)
+				fmt.Printf("  Installing %s%s%s (from %s)...\n", colorBold, name, colorReset, subpath)
 				if err := engine.CopySkillFolder(srcPath, targetPath); err != nil {
 					return fmt.Errorf("failed to install skill %s: %w", name, err)
 				}
 
-				targetAgents := flagAgents
-				if len(targetAgents) == 0 {
-					targetAgents = engine.GetTargetAgentsForSkill(name, sourceKey, cfg, skillsDir)
-				}
-				for _, agent := range targetAgents {
-					_, _ = engine.EnsureAgentSymlink(name, agent, skillsDir)
-				}
-
 				config.AddRemoteSkillEntry(cfg, sourceKey, name, subpath, repoType, storedURL)
+				if len(flagAgents) > 0 {
+					if err := config.IncludeSkillAgents(cfg, name, flagAgents...); err != nil {
+						return err
+					}
+				}
 				installedNames = append(installedNames, name)
 			}
 
 			if err := config.SaveConfig(cfg, configPath); err != nil {
 				return err
 			}
+			for _, name := range installedNames {
+				if err := engine.ReconcileAgentSymlinks(name, sourceKey, cfg, skillsDir); err != nil {
+					return fmt.Errorf("saved config but failed to reconcile availability for %s: %w", name, err)
+				}
+			}
 
 			sort.Strings(installedNames)
-			fmt.Printf("\n%s✔ Installed %d skill(s) [%s] and updated %s%s\n\n", colorGreen, len(installedNames), strings.Join(installedNames, ", "), filepath.Base(configPath), colorReset)
+			fmt.Printf("\n%sInstalled %d skill(s) [%s] and updated %s.%s\n\n", colorGreen, len(installedNames), strings.Join(installedNames, ", "), filepath.Base(configPath), colorReset)
 			return nil
 		},
 	}
@@ -705,7 +776,7 @@ func newAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagPath, "path", "", "Relative path within repo")
 	cmd.Flags().StringVar(&flagURL, "url", "", "Custom Git clone URL")
 	cmd.Flags().StringVar(&flagBranch, "branch", "", "Git branch or tag")
-	cmd.Flags().StringSliceVarP(&flagAgents, "agent", "a", nil, "Target agents to link skill to")
+	cmd.Flags().StringSliceVarP(&flagAgents, "agent", "a", nil, "Persistently include agents for added skills")
 	cmd.Flags().StringVar(&flagSymlink, "symlink", "", "Path to local skill directory for symlink install")
 	cmd.Flags().StringVar(&flagCommand, "command", "", "Command to install the skill")
 	cmd.Flags().StringVar(&flagCheck, "check", "", "Command to check before installing command skill")
@@ -713,4 +784,99 @@ func newAddCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompts")
 
 	return cmd
+}
+
+func promptAddAvailability(cfg *config.Config, skills map[string]string, source, skillsDir string, skip bool, explicitAgents []string) error {
+	if skip || len(explicitAgents) > 0 || !tui.IsTerminal() {
+		return nil
+	}
+	choice, err := tui.PromptChoice("Agent availability:", []tui.SelectOption{
+		{Key: "defaults", Title: "Follow defaults (recommended)"},
+		{Key: "custom", Title: "Customize"},
+	}, 0)
+	if err != nil {
+		return err
+	}
+	if choice == "defaults" {
+		for skill := range skills {
+			config.FollowDefaults(cfg, skill)
+		}
+		return nil
+	}
+
+	known := models.GetAgentsForSkillsDir(skillsDir)
+	agents := make([]string, 0, len(known))
+	for agent := range known {
+		agents = append(agents, agent)
+	}
+	sort.Strings(agents)
+	skillNames := make([]string, 0, len(skills))
+	for skill := range skills {
+		skillNames = append(skillNames, skill)
+	}
+	sort.Strings(skillNames)
+	firstSkill := skillNames[0]
+	baseline := make(map[string]struct{})
+	for _, agent := range engine.GetTargetAgentsForSkill(firstSkill, source, cfg, skillsDir) {
+		baseline[agent] = struct{}{}
+	}
+	for _, skill := range skillNames[1:] {
+		other := engine.GetTargetAgentsForSkill(skill, source, cfg, skillsDir)
+		if !sameAgentSelection(baseline, other) {
+			return fmt.Errorf("selected skills have different availability; configure them individually with skills agents")
+		}
+	}
+	options := make([]tui.SelectOption, 0, len(agents))
+	for _, agent := range agents {
+		_, selected := baseline[agent]
+		options = append(options, tui.SelectOption{Key: agent, Title: agent, Selected: selected})
+	}
+	selected, err := tui.PromptMultiSelect("Select agents where these skills should be available:", options)
+	if err != nil {
+		return err
+	}
+	if selected == nil {
+		return fmt.Errorf("operation cancelled by user")
+	}
+	selectedSet := make(map[string]struct{}, len(selected))
+	for _, agent := range selected {
+		selectedSet[agent] = struct{}{}
+	}
+	for skill := range skills {
+		config.FollowDefaults(cfg, skill)
+		skillBaseline := make(map[string]struct{})
+		for _, agent := range engine.GetTargetAgentsForSkill(skill, source, cfg, skillsDir) {
+			skillBaseline[agent] = struct{}{}
+		}
+		var include, exclude []string
+		for _, agent := range agents {
+			_, chosen := selectedSet[agent]
+			_, defaulted := skillBaseline[agent]
+			if chosen && !defaulted {
+				include = append(include, agent)
+			}
+			if !chosen && defaulted {
+				exclude = append(exclude, agent)
+			}
+		}
+		if err := config.IncludeSkillAgents(cfg, skill, include...); err != nil {
+			return err
+		}
+		if err := config.ExcludeSkillAgents(cfg, skill, exclude...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sameAgentSelection(want map[string]struct{}, got []string) bool {
+	if len(want) != len(got) {
+		return false
+	}
+	for _, agent := range got {
+		if _, ok := want[agent]; !ok {
+			return false
+		}
+	}
+	return true
 }

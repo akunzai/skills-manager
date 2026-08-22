@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -213,6 +214,163 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 	}
 	if _, err := os.Lstat(claudeLink); err == nil {
 		t.Errorf("expected symlink %s to be removed", claudeLink)
+	}
+}
+
+func TestTargetAgentsApplyPerSkillAvailability(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	cfg.Settings.ExcludeAgents = []string{"continue"}
+	cfg.Settings.AgentExclusions = map[string][]string{"continue": {"sample"}}
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{
+		Include: []string{"continue"},
+		Exclude: []string{"claude"},
+	}
+
+	got := GetTargetAgentsForSkill("sample", "owner/repo", cfg, skillsDir)
+	if !reflect.DeepEqual(got, []string{"continue"}) {
+		t.Fatalf("target agents = %#v, want continue", got)
+	}
+}
+
+func TestReconcileAgentSymlinksMatchesDeclaredAvailability(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	if err := ReconcileAgentSymlinks("sample", "owner/repo", cfg, skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
+	continueLink := filepath.Join(project, ".continue", "skills", "sample")
+	for _, link := range []string{claudeLink, continueLink} {
+		if !IsManagedSkillLink(link, "sample", skillsDir) {
+			t.Fatalf("missing managed link %s", link)
+		}
+	}
+
+	unmanaged := filepath.Join(project, ".roo", "skills", "sample")
+	if err := os.MkdirAll(unmanaged, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
+	missing, unexpected := AgentLinkDrift("sample", "owner/repo", cfg, skillsDir)
+	if len(missing) != 0 || !reflect.DeepEqual(unexpected, []string{"claude-code"}) {
+		t.Fatalf("drift = missing %#v, unexpected %#v", missing, unexpected)
+	}
+	if err := ReconcileAgentSymlinks("sample", "owner/repo", cfg, skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
+		t.Fatalf("excluded Claude link still exists: %v", err)
+	}
+	if !IsManagedSkillLink(continueLink, "sample", skillsDir) {
+		t.Fatal("declared Continue link was removed")
+	}
+	if fi, err := os.Stat(unmanaged); err != nil || !fi.IsDir() {
+		t.Fatalf("unmanaged directory was removed: %v", err)
+	}
+}
+
+func TestReconcileAgentSymlinksPreservesUnmanagedTarget(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unmanagedTarget := filepath.Join(project, "user-owned")
+	if err := os.MkdirAll(unmanagedTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(unmanagedTarget, "keep")
+	if err := os.WriteFile(marker, []byte("user-owned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unmanaged := filepath.Join(project, ".claude", "skills", "sample")
+	if err := os.MkdirAll(filepath.Dir(unmanaged), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(unmanagedTarget, unmanaged); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileAgentSymlinks("sample", "owner/repo", config.DefaultConfig(), skillsDir); err == nil {
+		t.Fatal("expected unmanaged target conflict")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("unmanaged target was modified: %v", err)
+	}
+}
+
+func TestReconcileAgentSymlinksRemovesManagedCopy(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	copyPath := filepath.Join(project, ".claude", "skills", "sample")
+	if err := os.MkdirAll(copyPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copyPath, "SKILL.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	absMaster, err := filepath.Abs(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copyPath, managedCopyMarker), []byte(absMaster+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !IsManagedSkillCopy(copyPath, "sample", skillsDir) {
+		t.Fatal("copy marker was not recognized")
+	}
+	cfg := config.DefaultConfig()
+	if err := ReconcileAgentSymlinks("sample", "owner/repo", cfg, skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(copyPath, "SKILL.md"))
+	if err != nil || string(content) != "new" {
+		t.Fatalf("managed copy was not refreshed: content=%q err=%v", content, err)
+	}
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
+	if err := ReconcileAgentSymlinks("sample", "owner/repo", cfg, skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
+		t.Fatalf("excluded managed copy still exists: %v", err)
+	}
+}
+
+func TestReplaceManagedCopyFailurePreservesExistingCopy(t *testing.T) {
+	root := t.TempDir()
+	dst := filepath.Join(root, "agent", "sample")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(dst, "SKILL.md")
+	if err := os.WriteFile(keep, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceManagedCopy(filepath.Join(root, "missing"), dst); err == nil {
+		t.Fatal("expected copy failure")
+	}
+	content, err := os.ReadFile(keep)
+	if err != nil || string(content) != "old" {
+		t.Fatalf("existing copy was not preserved: content=%q err=%v", content, err)
 	}
 }
 

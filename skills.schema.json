@@ -37,7 +37,27 @@
             }
           },
           "description": "Per-agent exclusions mapping agent names to lists of excluded skill names or sources"
-        }
+		},
+		"availability": {
+		  "type": "object",
+		  "description": "Persistent per-skill agent availability overrides",
+		  "additionalProperties": {
+			"type": "object",
+			"properties": {
+			  "include": {
+				"type": "array",
+				"items": { "type": "string" },
+				"uniqueItems": true
+			  },
+			  "exclude": {
+				"type": "array",
+				"items": { "type": "string" },
+				"uniqueItems": true
+			  }
+			},
+			"additionalProperties": false
+		  }
+		}
       },
       "additionalProperties": false
     },

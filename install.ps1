@@ -4,12 +4,12 @@
 # ==============================================================================
 $ErrorActionPreference = "Stop"
 
-function Write-Header ($text) { Write-Host "🚀 $text" -ForegroundColor Cyan }
-function Write-Success ($text) { Write-Host "✨ $text" -ForegroundColor Green }
-function Write-Warn ($text) { Write-Host "⚠️  $text" -ForegroundColor Yellow }
-function Write-Err ($text) { Write-Host "❌ $text" -ForegroundColor Red }
+function Write-Header ($text) { Write-Host $text -ForegroundColor Cyan }
+function Write-Success ($text) { Write-Host $text -ForegroundColor Green }
+function Write-Warn ($text) { Write-Host "Note: $text" -ForegroundColor Yellow }
+function Write-Err ($text) { Write-Host "Error: $text" -ForegroundColor Red }
 
-Write-Header "Installing Skills Manager (skills) on Windows..."
+Write-Header "Installing Skills Manager..."
 Write-Host ""
 
 $targetDir = [System.IO.Path]::Combine($HOME, ".local", "bin")
@@ -23,12 +23,12 @@ $githubRepo = "akunzai/skills-manager"
 # 1. Check if building from local clone
 if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "cmd\skills\main.go"))) {
     if (Get-Command "go" -ErrorAction SilentlyContinue) {
-        Write-Host "⚙️  Building from local source with Go..."
+        Write-Host "Building from local source with Go..."
         Push-Location $PSScriptRoot
         try {
             & go build -ldflags="-s -w" -o $targetBin .\cmd\skills
             Write-Host ""
-            Write-Success "Installation successful!"
+            Write-Success "Installed Skills Manager."
             Write-Host "   Installed at: $targetBin"
             exit 0
         } finally {
@@ -44,11 +44,11 @@ $arch = if ([System.Environment]::Is64BitOperatingSystem) {
     "386"
 }
 
-Write-Host "🔍 Detected architecture: windows_$arch"
+Write-Host "Platform: windows_$arch"
 
 # 3. Fetch latest release from GitHub API
 $apiUrl = "https://api.github.com/repos/$githubRepo/releases/latest"
-Write-Host "📦 Fetching latest release information..."
+Write-Host "Fetching latest release information..."
 
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("skills_inst_" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
@@ -81,7 +81,7 @@ try {
         exit 1
     }
 
-    Write-Host "📥 Downloading: $assetUrl"
+    Write-Host "Downloading: $assetUrl"
     $archiveFile = Join-Path $tempDir "downloaded.zip"
     Invoke-WebRequest -Uri $assetUrl -OutFile $archiveFile -Headers $headers -UseBasicParsing
 
@@ -97,7 +97,7 @@ try {
     }
 
     Write-Host ""
-    Write-Success "Installation successful!"
+    Write-Success "Installed Skills Manager."
     Write-Host "   Installed at: $targetBin"
 
     # Check PATH

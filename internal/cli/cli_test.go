@@ -197,6 +197,68 @@ func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 	}
 }
 
+func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
+	resetRootCmdFlags()
+	project := t.TempDir()
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "github", "")
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range []string{"claude", "continue"} {
+		if _, err := engine.EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
+	continueLink := filepath.Join(project, ".continue", "skills", "sample")
+
+	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
+		t.Fatalf("excluded Claude link still exists: %v", err)
+	}
+	if !engine.IsManagedSkillLink(continueLink, "sample", skillsDir) {
+		t.Fatal("Continue link should remain")
+	}
+
+	if _, err := engine.EnsureAgentSymlink("sample", "claude", skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	dryRunOut, err := runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dryRunOut, "Would unlink sample from claude-code") {
+		t.Fatalf("dry-run did not preview availability drift:\n%s", dryRunOut)
+	}
+	if !engine.IsManagedSkillLink(claudeLink, "sample", skillsDir) {
+		t.Fatal("dry-run removed an excluded link")
+	}
+	doctorOut, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil || !strings.Contains(doctorOut, "unexpected links: claude-code") {
+		t.Fatalf("doctor did not report availability drift: err=%v\n%s", err, doctorOut)
+	}
+	if _, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("doctor --fix: %v", err)
+	}
+	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
+		t.Fatalf("doctor --fix left excluded link: %v", err)
+	}
+}
+
 func TestCLIDeprecatedPruneAliasPrintsOneMigrationWarning(t *testing.T) {
 	resetRootCmdFlags()
 	configFile := filepath.Join(t.TempDir(), "skills.json")
@@ -588,6 +650,135 @@ func runCLI(t *testing.T, args ...string) (string, error) {
 	return buf.String(), err
 }
 
+func TestCLIConfigSetGetAndClear(t *testing.T) {
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+
+	if _, err := runCLI(t, "config", "set", "defaultAgents", "claude,continue", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("config set defaultAgents: %v", err)
+	}
+	out, err := runCLI(t, "config", "get", "defaultAgents", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("config get defaultAgents: %v", err)
+	}
+	if strings.TrimSpace(out) != `["claude-code","continue"]` {
+		t.Fatalf("config get output = %q", out)
+	}
+
+	if _, err := runCLI(t, "config", "set", "excludeAgents", "continue", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("config set excludeAgents: %v", err)
+	}
+	if _, err := runCLI(t, "config", "set", "excludeAgents", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("config clear excludeAgents: %v", err)
+	}
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Settings.ExcludeAgents) != 0 {
+		t.Fatalf("excludeAgents = %v, want empty", cfg.Settings.ExcludeAgents)
+	}
+}
+
+func TestCLIConfigAgentDefaultsReconcileInstalledSkills(t *testing.T) {
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	source := filepath.Join(home, "sample-source")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCLI(t, "add", "--symlink", source, "--skill", "sample", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := runCLI(t, "config", "set", "defaultAgents", "continue", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("config set defaultAgents: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".continue", "skills", "sample")); err != nil {
+		t.Fatalf("continue link missing: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "sample")); !os.IsNotExist(err) {
+		t.Fatalf("stale claude link remains; err = %v", err)
+	}
+}
+
+func TestCLIAgentsMutationsPersistAndReconcile(t *testing.T) {
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	source := filepath.Join(home, "sample-source")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCLI(t, "add", "--symlink", source, "--skill", "sample", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := runCLI(t, "agents", "sample", "include", "continue", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("agents include: %v", err)
+	}
+	continueLink := filepath.Join(home, ".continue", "skills", "sample")
+	if _, err := os.Lstat(continueLink); err != nil {
+		t.Fatalf("continue link missing: %v", err)
+	}
+	if _, err := runCLI(t, "agents", "sample", "exclude", "claude", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("agents exclude: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "sample")); !os.IsNotExist(err) {
+		t.Fatalf("claude link should be removed; err = %v", err)
+	}
+	if _, err := runCLI(t, "agents", "sample", "follow-defaults", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("agents follow-defaults: %v", err)
+	}
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Settings.Availability["sample"]; ok {
+		t.Fatalf("follow-defaults left an override: %#v", cfg.Settings.Availability["sample"])
+	}
+}
+
+func TestCLIAddAgentPersistsAndRmAgentIsRemoved(t *testing.T) {
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	source := filepath.Join(home, "sample-source")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCLI(t, "add", "--symlink", source, "--skill", "sample", "--agent", "continue", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("add --agent: %v", err)
+	}
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Settings.Availability["sample"].Include; !reflect.DeepEqual(got, []string{"continue"}) {
+		t.Fatalf("availability include = %v", got)
+	}
+	if _, err := runCLI(t, "rm", "sample", "--agent", "continue", "--config", configFile, "--skills-dir", skillsDir); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("rm --agent error = %v", err)
+	}
+}
+
 // A source inside the project must be stored relative to the project root, so
 // that a committed skills.json still resolves on a teammate's checkout.
 func TestCLIProjectSymlinkSourceIsRelativeToProject(t *testing.T) {
@@ -725,14 +916,15 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	}
 
 	claudeSkills := filepath.Join(project, ".claude", "skills")
-	if err := os.MkdirAll(filepath.Join(claudeSkills, "alpha"), 0755); err != nil {
+	if _, err := engine.EnsureAgentSymlink("alpha", "claude", skillsDir); err != nil {
 		t.Fatal(err)
 	}
-	// A physical directory where a symlink belongs, and a dangling symlink.
-	if err := os.WriteFile(filepath.Join(claudeSkills, "alpha", "SKILL.md"), []byte("# Alpha"), 0644); err != nil {
+	// A healthy managed link and a dangling symlink.
+	brokenTarget, err := filepath.Rel(claudeSkills, filepath.Join(skillsDir, "broken"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(project, "gone"), filepath.Join(claudeSkills, "broken")); err != nil {
+	if err := os.Symlink(brokenTarget, filepath.Join(claudeSkills, "broken")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -746,12 +938,8 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(claudeSkills, "broken")); !os.IsNotExist(err) {
 		t.Fatal("broken symlink should have been removed")
 	}
-	target, err := os.Readlink(filepath.Join(claudeSkills, "alpha"))
-	if err != nil {
-		t.Fatalf("physical dir should have become a symlink: %v", err)
-	}
-	if target == "" {
-		t.Fatal("empty symlink target")
+	if !engine.IsManagedSkillLink(filepath.Join(claudeSkills, "alpha"), "alpha", skillsDir) {
+		t.Fatal("healthy managed link should remain")
 	}
 }
 
@@ -774,13 +962,23 @@ func TestCLIDoctorFixStillReportsUnrepairableIssues(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(orphan, "SKILL.md"), []byte("# Orphan"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	unmanagedBroken := filepath.Join(project, ".claude", "skills", "custom-broken")
+	if err := os.Symlink(filepath.Join(project, "gone"), unmanagedBroken); err != nil {
+		t.Fatal(err)
+	}
 
 	out, err := runCLI(t, "doctor", "--fix", "-p")
 	if err == nil {
 		t.Fatalf("doctor --fix should fail while an issue remains unrepaired:\n%s", out)
 	}
-	if !strings.Contains(out, "Cannot convert") {
+	if !strings.Contains(out, "Cannot replace unmanaged directory") {
 		t.Fatalf("expected an explanation of what could not be repaired:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(orphan, "SKILL.md")); err != nil {
+		t.Fatalf("doctor --fix modified unmanaged data: %v", err)
+	}
+	if _, err := os.Lstat(unmanagedBroken); err != nil {
+		t.Fatalf("doctor --fix removed unmanaged broken symlink: %v", err)
 	}
 }
 
@@ -913,7 +1111,7 @@ func TestCLILocalDirectoryScanMultipleSkills(t *testing.T) {
 		t.Fatalf("add --symlink --all failed: %v\n%s", err, out)
 	}
 
-	if !strings.Contains(out, "Successfully linked 2 local skill(s)") {
+	if !strings.Contains(out, "Linked 2 local skill(s)") {
 		t.Fatalf("expected 2 skills linked, got:\n%s", out)
 	}
 
@@ -934,12 +1132,12 @@ func TestCLILocalDirectoryScanMultipleSkills(t *testing.T) {
 		t.Fatalf("expected tilde path in config, got: %s", src)
 	}
 
-	// Test ls output contains Nerd Font icon and tilde path
+	// Buffered output uses a text label and keeps the tilde path.
 	lsOut, err := runCLI(t, "ls", "--config", configFile, "--skills-dir", skillsDir)
 	if err != nil {
 		t.Fatalf("ls failed: %v", err)
 	}
-	if !strings.Contains(lsOut, "󰌷 ~/code/agent-skills") {
+	if !strings.Contains(lsOut, "[link] ~/code/agent-skills") {
 		t.Fatalf("expected tilde path in ls output, got:\n%s", lsOut)
 	}
 }
@@ -963,7 +1161,7 @@ func TestCLILocalPositionalPathAutoDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add positional local path failed: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Successfully linked 1 local skill(s)") {
+	if !strings.Contains(out, "Linked 1 local skill(s)") {
 		t.Fatalf("expected 1 skill linked, got:\n%s", out)
 	}
 
@@ -1010,7 +1208,7 @@ func TestCLISyncReplacesLocalSymlinkWithRemotePhysicalSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ls failed: %v", err)
 	}
-	if !strings.Contains(lsOut, "󰊤 owner/repo") {
+	if !strings.Contains(lsOut, "[remote] owner/repo") {
 		t.Fatalf("expected ls to display remote repo source, got:\n%s", lsOut)
 	}
 }
@@ -1127,6 +1325,3 @@ func TestCLILsJSONTildePath(t *testing.T) {
 		t.Fatalf("expected path ~/.agents/skills/sample-skill, got: %v", items[0]["path"])
 	}
 }
-
-
-

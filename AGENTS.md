@@ -25,6 +25,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Issue tracker: @docs/agents/issue-tracker.md
 - Triage labels: @docs/agents/triage-labels.md
 - Domain docs: @docs/agents/domain.md
+- Product UI, CLI output, and README design: @docs/design.md
 - Release SOP: @docs/release.md
 - Lessons learned: @docs/lessons-learned.md
 

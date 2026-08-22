@@ -16,8 +16,8 @@ type AgentDir struct {
 	Dir  string
 }
 
-// ConfiguredKnownAgents returns non-universal agent dirs selected by
-// settings.defaultAgents after applying excludeAgents.
+// ConfiguredKnownAgents returns non-universal agent dirs used by the global
+// policy or an explicit per-skill include.
 func ConfiguredKnownAgents(cfg *config.Config, skillsDir string) map[string]string {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -41,6 +41,14 @@ func ConfiguredKnownAgents(cfg *config.Config, skillsDir string) map[string]stri
 		}
 		if dir, ok := known[norm]; ok {
 			out[norm] = dir
+		}
+	}
+	for _, override := range cfg.Settings.Availability {
+		for _, a := range override.Include {
+			norm := models.NormalizeAgentName(a)
+			if dir, ok := known[norm]; ok {
+				out[norm] = dir
+			}
 		}
 	}
 	return out

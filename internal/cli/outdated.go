@@ -39,7 +39,7 @@ func newOutdatedCmd() *cobra.Command {
 			}
 
 			if !flagJSON {
-				fmt.Printf("\n%s%s🔍 Checking remote repositories for updates...%s\n\n", colorBold, colorCyan, colorReset)
+				fmt.Printf("\n%s%sChecking remote repositories for updates...%s\n\n", colorBold, colorCyan, colorReset)
 			}
 
 			results := engine.CheckAllRemoteSkillsOutdated(cfg, cacheDir, 8)
@@ -51,7 +51,7 @@ func newOutdatedCmd() *cobra.Command {
 			}
 
 			fmt.Printf("%s%-40s %-12s %-12s %s%s\n", colorBold, "REPOSITORY / SKILL", "CURRENT", "LATEST", "STATUS", colorReset)
-			fmt.Println(strings.Repeat("─", 80))
+			fmt.Println(strings.Repeat(tableRule, 80))
 
 			outdatedCount := 0
 			upToDateCount := 0
@@ -95,15 +95,15 @@ func newOutdatedCmd() *cobra.Command {
 				fmt.Printf("%s%-40s%s %s %s %s\n", colorBold, r.Source, colorReset, localDisplay, remoteDisplay, statusDisplay)
 
 				for i, sk := range r.Skills {
-					prefix := "  ├─ "
+					prefix := "  " + treeBranch + " "
 					if i == len(r.Skills)-1 {
-						prefix = "  └─ "
+						prefix = "  " + treeLastBranch + " "
 					}
 					fmt.Printf("%s%s%s%s\n", colorDim, prefix, sk, colorReset)
 				}
 			}
 
-			fmt.Println(strings.Repeat("─", 80))
+			fmt.Println(strings.Repeat(tableRule, 80))
 
 			var summaryParts []string
 			if outdatedCount > 0 {
@@ -118,9 +118,9 @@ func newOutdatedCmd() *cobra.Command {
 
 			fmt.Printf("Summary: %s\n", strings.Join(summaryParts, ", "))
 			if outdatedCount > 0 {
-				fmt.Printf("\n💡 Run '%s%sskills update%s' to upgrade outdated skills.\n\n", colorBold, colorReset, colorReset)
+				fmt.Printf("\nRun '%s%sskills update%s' to upgrade outdated skills.\n\n", colorBold, colorReset, colorReset)
 			} else {
-				fmt.Printf("\n%s✨ All skills are up to date!%s\n\n", colorGreen, colorReset)
+				fmt.Printf("\n%sAll skills are up to date.%s\n\n", colorGreen, colorReset)
 			}
 
 			return nil

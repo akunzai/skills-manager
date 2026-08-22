@@ -82,6 +82,18 @@ func ResolveLocalSourcePath(source string, skillsDir string) string {
 	return filepath.Join(base, filepath.FromSlash(expanded))
 }
 
+func getProjectPaths(cwd string) (configPath, skillsDir string) {
+	agentsConfigFile := filepath.Join(cwd, ".agents", "skills.json")
+	rootConfigFile := filepath.Join(cwd, "skills.json")
+	if _, err := os.Stat(agentsConfigFile); err == nil {
+		return agentsConfigFile, filepath.Join(cwd, ".agents", "skills")
+	}
+	if _, err := os.Stat(rootConfigFile); err == nil {
+		return rootConfigFile, filepath.Join(cwd, "skills")
+	}
+	return agentsConfigFile, filepath.Join(cwd, ".agents", "skills")
+}
+
 func GetEffectivePaths() (configPath string, skillsDir string, cacheDir string) {
 	cacheDir = models.DefaultCacheDir()
 
@@ -96,20 +108,7 @@ func GetEffectivePaths() (configPath string, skillsDir string, cacheDir string) 
 		if err != nil {
 			cwd = "."
 		}
-		agentsConfigFile := filepath.Join(cwd, ".agents", "skills.json")
-		rootConfigFile := filepath.Join(cwd, "skills.json")
-
-		if _, err := os.Stat(agentsConfigFile); err == nil {
-			configPath = agentsConfigFile
-			skillsDir = filepath.Join(cwd, ".agents", "skills")
-		} else if _, err := os.Stat(rootConfigFile); err == nil {
-			configPath = rootConfigFile
-			skillsDir = filepath.Join(cwd, "skills")
-		} else {
-			// Default for project mode is .agents/skills.json and .agents/skills
-			configPath = agentsConfigFile
-			skillsDir = filepath.Join(cwd, ".agents", "skills")
-		}
+		configPath, skillsDir = getProjectPaths(cwd)
 	} else {
 		// Global mode (default)
 		configPath = models.DefaultConfigFile()
@@ -134,15 +133,18 @@ var RootCmd = &cobra.Command{
 	Short:   "Skills manager for AI coding agents",
 	Long:    `A fast, cross-platform standalone CLI to discover, install, update, and manage skills across AI coding agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).`,
 	Version: updater.Version,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		applyOutputStyle(cmd.OutOrStdout())
+		return nil
+	},
 }
 
 func init() {
 	RootCmd.PersistentFlags().StringVar(&flagConfigFile, "config", "", "Path to skills.json")
 	RootCmd.PersistentFlags().StringVar(&flagSkillsDir, "skills-dir", "", "Path to skills directory")
 	RootCmd.PersistentFlags().StringVar(&flagCacheDir, "cache-dir", "", "Path to cache directory")
-	RootCmd.PersistentFlags().BoolVarP(&flagGlobal, "global", "g", true, "Manage global skills (default)")
+	RootCmd.PersistentFlags().BoolVarP(&flagGlobal, "global", "g", true, "Manage global skills")
 	RootCmd.PersistentFlags().BoolVarP(&flagProject, "project", "p", false, "Manage current project skills")
-
 	RootCmd.AddCommand(newLsCmd())
 	RootCmd.AddCommand(newAddCmd())
 	RootCmd.AddCommand(newRmCmd())
@@ -154,6 +156,8 @@ func init() {
 	RootCmd.AddCommand(newSelfUpdateCmd())
 	RootCmd.AddCommand(newInitCmd())
 	RootCmd.AddCommand(newVersionCmd())
+	RootCmd.AddCommand(newConfigCmd())
+	RootCmd.AddCommand(newAgentsCmd())
 }
 
 func Execute() error {
