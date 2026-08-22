@@ -493,3 +493,124 @@ func TestUpdateRemoteSkillsDryRun(t *testing.T) {
 		t.Fatalf("expected 2 updated skills in dry run, got %d", len(result.UpdatedSkills))
 	}
 }
+
+func TestMaterializeRemoteSkillCopiesAndReportsMissingPath(t *testing.T) {
+	repo := t.TempDir()
+	src := filepath.Join(repo, "sample")
+	if err := os.MkdirAll(src, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	skillsDir := t.TempDir()
+	if err := MaterializeRemoteSkill("sample", "sample", repo, skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := MaterializeRemoteSkill("missing", "nope", repo, skillsDir); err == nil {
+		t.Fatal("expected missing path")
+	}
+}
+
+func TestUpdateRemoteSkillsReconcilesAvailabilityWhenUpToDate(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
+
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := MaterializeRemoteSkill("sample", "sample", filepath.Join(cacheDir, "owner", "repo"), skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range []string{"claude", "continue"} {
+		if _, err := EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := UpdateRemoteSkills(cfg, nil, false, false, skillsDir, cacheDir, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("update errors: %#v", result.Errors)
+	}
+	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
+	continueLink := filepath.Join(project, ".continue", "skills", "sample")
+	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
+		t.Fatalf("excluded Claude link still exists: %v", err)
+	}
+	if !IsManagedSkillLink(continueLink, "sample", skillsDir) {
+		t.Fatal("declared Continue link was removed")
+	}
+}
+
+func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	src := filepath.Join(project, "skill-src")
+	if err := os.MkdirAll(src, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	config.AddLocalSymlinkEntry(cfg, "sample", src, "")
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
+
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), []LocalSyncSkill{
+		{Name: "sample", AbsSource: src, LinkTarget: src},
+	}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Configured) != 1 {
+		t.Fatalf("configured = %#v", report.Configured)
+	}
+	master := filepath.Join(skillsDir, "sample")
+	if _, err := os.Lstat(master); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
+		t.Fatal("excluded Claude link exists")
+	}
+	if !IsManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
+		t.Fatal("declared Continue link missing")
+	}
+}
+
+func writeLocalGitSkill(t *testing.T, repo, skill string) {
+	t.Helper()
+	dir := filepath.Join(repo, skill)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+		{"add", "."},
+		{"commit", "-m", "init"},
+	} {
+		stdout, stderr, err := RunGit(repo, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s\n%s", args, err, stdout, stderr)
+		}
+	}
+}
