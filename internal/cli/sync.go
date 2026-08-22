@@ -8,6 +8,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -38,7 +39,7 @@ func newSyncCmd() *cobra.Command {
 				return runPrune(cmd, pruneOptions{yes: flagYes, dryRun: flagDryRun})
 			}
 
-			fmt.Printf("\n%s%s🚀 Syncing skills from %s...%s\n\n", colorBold, colorCyan, configPath, colorReset)
+			fmt.Printf("\n%s%s🚀 Syncing skills from %s...%s\n\n", colorBold, colorCyan, models.ToTildePath(configPath), colorReset)
 
 			if err := os.MkdirAll(skillsDir, 0755); err != nil {
 				return err
@@ -118,18 +119,18 @@ func newSyncCmd() *cobra.Command {
 					src := ResolveLocalSourcePath(localInfo.Source, skillsDir)
 					targetLink := filepath.Join(skillsDir, name)
 					if _, err := os.Stat(src); err != nil {
-						fmt.Printf("  %s⚠️  Local symlink source missing: %s (skill: %s)%s\n", colorYellow, src, name, colorReset)
+						fmt.Printf("  %s⚠️  Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(src), name, colorReset)
 						continue
 					}
 
 					if flagDryRun {
-						fmt.Printf("  [Dry-run] Would symlink %s -> %s\n", targetLink, src)
+						fmt.Printf("  [Dry-run] Would symlink %s -> %s\n", models.ToTildePath(targetLink), models.ToTildePath(src))
 					} else {
 						if err := engine.CreateSymlink(LocalSymlinkTarget(src, skillsDir), targetLink, true); err != nil {
 							fmt.Printf("  %s✖ Failed to symlink %s: %s%s\n", colorRed, name, err, colorReset)
 							continue
 						}
-						fmt.Printf("  %s✔%s Linked local skill %s%s%s -> %s\n", colorGreen, colorReset, colorBold, name, colorReset, src)
+						fmt.Printf("  %s✔%s Linked local skill %s%s%s -> %s\n", colorGreen, colorReset, colorBold, name, colorReset, models.ToTildePath(src))
 
 						for _, agent := range engine.GetTargetAgentsForSkill(name, "local", cfg, skillsDir) {
 							_, _ = engine.EnsureAgentSymlink(name, agent, skillsDir)

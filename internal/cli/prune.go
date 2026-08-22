@@ -8,6 +8,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -91,7 +92,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 	printPruneSummary(cmd, result)
 	if applyErr != nil {
 		for _, failure := range result.Failures {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to prune %s: %v\n", failure.Path, failure.Err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to prune %s: %v\n", models.ToTildePath(failure.Path), failure.Err)
 		}
 		return fmt.Errorf("prune completed with failures: %w", applyErr)
 	}
@@ -117,7 +118,7 @@ func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 		fmt.Fprintf(out, "  master skill: %s\n", skill)
 	}
 	for _, link := range plan.Unconfigured {
-		fmt.Fprintf(out, "  managed link: %s (%s)\n", link.Path, link.Agent)
+		fmt.Fprintf(out, "  managed link: %s (%s)\n", models.ToTildePath(link.Path), link.Agent)
 	}
 }
 
@@ -150,10 +151,10 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 		fmt.Fprintf(cmd.OutOrStdout(), "  Removed master skill: %s\n", skill)
 	}
 	for _, link := range result.RemovedLinks {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Removed managed link: %s\n", link.Path)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Removed managed link: %s\n", models.ToTildePath(link.Path))
 	}
 	for _, link := range result.SkippedLinks {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Skipped managed link: %s\n", link.Path)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Skipped managed link: %s\n", models.ToTildePath(link.Path))
 	}
 }
 
@@ -183,7 +184,7 @@ func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
 		groups["Agent: "+link.Agent] = append(groups["Agent: "+link.Agent], tui.SelectOption{
 			Key:       pruneLinkKey(link.Path),
 			Title:     filepath.Base(link.Path),
-			Extra:     link.Path,
+			Extra:     models.ToTildePath(link.Path),
 			DependsOn: masterKeys[filepath.Base(link.Path)],
 		})
 	}

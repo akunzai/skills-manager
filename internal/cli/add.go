@@ -272,7 +272,7 @@ func newAddCmd() *cobra.Command {
 				}
 				stat, err := os.Stat(absSourcePath)
 				if err != nil || !stat.IsDir() {
-					return fmt.Errorf("local source path does not exist or is not a directory: %s", sourcePath)
+					return fmt.Errorf("local source path does not exist or is not a directory: %s", models.ToTildePath(sourcePath))
 				}
 
 				out := cmd.OutOrStdout()
@@ -280,7 +280,7 @@ func newAddCmd() *cobra.Command {
 
 				discovered, err := engine.DiscoverSkillsInRepo(absSourcePath)
 				if err != nil {
-					return fmt.Errorf("discover skills in %s: %w", sourcePath, err)
+					return fmt.Errorf("discover skills in %s: %w", models.ToTildePath(sourcePath), err)
 				}
 				if len(discovered) == 0 {
 					if _, err := os.Stat(filepath.Join(absSourcePath, "SKILL.md")); err == nil {
@@ -290,7 +290,7 @@ func newAddCmd() *cobra.Command {
 						}
 						discovered[skillName] = "."
 					} else {
-						return fmt.Errorf("no SKILL.md found in %s", sourcePath)
+						return fmt.Errorf("no SKILL.md found in %s", models.ToTildePath(sourcePath))
 					}
 				}
 

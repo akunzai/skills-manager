@@ -57,10 +57,17 @@ func equalPath(p1, p2 string) bool {
 	return false
 }
 
+func toSlash(p string) string {
+	return strings.ReplaceAll(filepath.ToSlash(p), "\\", "/")
+}
+
 // ToTildePath replaces the user's home directory prefix with ~ if applicable.
 func ToTildePath(path string) string {
 	if path == "" {
 		return ""
+	}
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) || path == "~" {
+		return "~" + toSlash(path[1:])
 	}
 	home := UserHomeDir()
 	if home == "" || home == "." {
@@ -75,7 +82,7 @@ func ToTildePath(path string) string {
 	sep := string(filepath.Separator)
 	if hasPrefixPath(cleanPath, cleanHome+sep) {
 		rel := cleanPath[len(cleanHome):]
-		return "~" + filepath.ToSlash(rel)
+		return "~" + toSlash(rel)
 	}
 	if evalHome, err := filepath.EvalSymlinks(cleanHome); err == nil && evalHome != cleanHome {
 		if equalPath(cleanPath, evalHome) {
@@ -83,7 +90,7 @@ func ToTildePath(path string) string {
 		}
 		if hasPrefixPath(cleanPath, evalHome+sep) {
 			rel := cleanPath[len(evalHome):]
-			return "~" + filepath.ToSlash(rel)
+			return "~" + toSlash(rel)
 		}
 	}
 	if evalPath, err := filepath.EvalSymlinks(cleanPath); err == nil && evalPath != cleanPath {
@@ -92,7 +99,7 @@ func ToTildePath(path string) string {
 		}
 		if hasPrefixPath(evalPath, cleanHome+sep) {
 			rel := evalPath[len(cleanHome):]
-			return "~" + filepath.ToSlash(rel)
+			return "~" + toSlash(rel)
 		}
 	}
 	return path

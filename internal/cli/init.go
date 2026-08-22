@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +22,7 @@ func newInitCmd() *cobra.Command {
 			configPath, _, _ := GetEffectivePaths()
 
 			if _, err := os.Stat(configPath); err == nil && !flagForce {
-				return fmt.Errorf("config file already exists at %s (use --force to overwrite)", configPath)
+				return fmt.Errorf("config file already exists at %s (use --force to overwrite)", models.ToTildePath(configPath))
 			}
 
 			cfg := config.DefaultConfig()
@@ -29,7 +30,7 @@ func newInitCmd() *cobra.Command {
 				return fmt.Errorf("failed to save config: %w", err)
 			}
 
-			fmt.Printf("%s✔ Initialized skills configuration at %s%s\n", colorGreen, configPath, colorReset)
+			fmt.Printf("%s✔ Initialized skills configuration at %s%s\n", colorGreen, models.ToTildePath(configPath), colorReset)
 			return nil
 		},
 	}
