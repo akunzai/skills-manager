@@ -1,8 +1,10 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -169,5 +171,39 @@ func TestAvailabilityMutationsRemainConflictFree(t *testing.T) {
 	FollowDefaults(cfg, "sample")
 	if _, ok := cfg.Settings.Availability["sample"]; ok {
 		t.Fatal("follow-defaults did not clear override")
+	}
+}
+
+func TestSaveConfigDropsRemovedSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skills.json")
+	raw := `{
+  "version": 1,
+  "settings": {
+    "defaultAgents": ["claude"],
+    "excludeAgents": ["continue"],
+    "agentExclusions": {"continue": ["sample"]}
+  },
+  "postHooks": [{"name": "x", "run": "true"}]
+}
+`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveConfig(cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := string(data)
+	for _, key := range []string{"excludeAgents", "agentExclusions", "postHooks"} {
+		if strings.Contains(saved, key) {
+			t.Fatalf("saved config still contains %s:\n%s", key, saved)
+		}
 	}
 }

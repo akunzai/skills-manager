@@ -33,7 +33,6 @@ func newConfigCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "Scope: %s\nConfig: %s\n", scope, models.ToTildePath(configPath))
 			fmt.Fprintf(out, "Default agents: %s (%s)\n", displayList(cfg.Settings.DefaultAgents), models.ToTildePath(configPath))
-			fmt.Fprintf(out, "Excluded agents: %s (%s)\n", displayList(cfg.Settings.ExcludeAgents), models.ToTildePath(configPath))
 			if len(cfg.Settings.Availability) == 0 {
 				fmt.Fprintln(out, "Availability overrides: none")
 			} else {
@@ -70,8 +69,6 @@ func newConfigGetCmd() *cobra.Command {
 			switch {
 			case args[0] == "defaultAgents":
 				value = cfg.Settings.DefaultAgents
-			case args[0] == "excludeAgents":
-				value = cfg.Settings.ExcludeAgents
 			case strings.HasPrefix(args[0], "availability."):
 				value = cfg.Settings.Availability[strings.TrimPrefix(args[0], "availability.")]
 			default:
@@ -100,34 +97,30 @@ func newConfigSetCmd() *cobra.Command {
 			}
 			values := splitValues(args[1:])
 			switch args[0] {
-			case "defaultAgents", "excludeAgents":
-				if args[0] == "defaultAgents" && len(values) == 0 {
+			case "defaultAgents":
+				if len(values) == 0 {
 					return fmt.Errorf("defaultAgents requires at least one agent")
 				}
 				normalized, err := validateAgentNames(values, skillsDir)
 				if err != nil {
 					return err
 				}
-				if args[0] == "defaultAgents" {
-					cfg.Settings.DefaultAgents = normalized
-				} else {
-					cfg.Settings.ExcludeAgents = normalized
-				}
+				cfg.Settings.DefaultAgents = normalized
 			default:
 				return fmt.Errorf("unknown config key %q", args[0])
 			}
 			if err := config.SaveConfig(cfg, configPath); err != nil {
 				return err
 			}
-			if args[0] == "defaultAgents" || args[0] == "excludeAgents" {
+			if args[0] == "defaultAgents" {
 				for _, skill := range config.GetConfiguredSkillNames(cfg) {
-					source, installed, err := configuredSkillSource(cfg, skill, skillsDir)
+					_, installed, err := configuredSkillSource(cfg, skill, skillsDir)
 					if err != nil {
 						return err
 					}
 					if installed {
-						if err := engine.ReconcileAgentSymlinks(skill, source, cfg, skillsDir); err != nil {
-							return fmt.Errorf("saved %s but failed to reconcile %s: %w", args[0], skill, err)
+						if err := engine.ApplyAvailability(skill, cfg, skillsDir); err != nil {
+							return fmt.Errorf("saved %s but failed to apply availability for %s: %w", args[0], skill, err)
 						}
 					}
 				}

@@ -19,25 +19,8 @@
           "items": {
             "type": "string"
           },
-          "description": "List of target agents to link skills to by default"
+          "description": "Agents selected by Follow defaults for Availability"
         },
-        "excludeAgents": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "List of agents globally excluded from receiving skills"
-        },
-        "agentExclusions": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "description": "Per-agent exclusions mapping agent names to lists of excluded skill names or sources"
-		},
 		"availability": {
 		  "type": "object",
 		  "description": "Persistent per-skill agent availability overrides",
@@ -119,31 +102,6 @@
           }
         },
         "required": ["type"],
-        "additionalProperties": false
-      }
-    },
-    "postHooks": {
-      "type": "array",
-      "description": "Commands executed after syncing skills to ensure custom symlinks/states",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "condition": {
-            "type": "string",
-            "description": "Optional shell command to check before running"
-          },
-          "run": {
-            "type": "string",
-            "description": "Shell command to execute"
-          }
-        },
-        "required": ["name", "run"],
         "additionalProperties": false
       }
     }

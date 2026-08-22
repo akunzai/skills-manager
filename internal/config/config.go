@@ -11,10 +11,8 @@ import (
 )
 
 type SettingsConfig struct {
-	DefaultAgents   []string                        `json:"defaultAgents"`
-	ExcludeAgents   []string                        `json:"excludeAgents"`
-	AgentExclusions map[string][]string             `json:"agentExclusions"`
-	Availability    map[string]AvailabilityOverride `json:"availability,omitempty"`
+	DefaultAgents []string                        `json:"defaultAgents"`
+	Availability  map[string]AvailabilityOverride `json:"availability,omitempty"`
 }
 
 type AvailabilityOverride struct {
@@ -37,20 +35,12 @@ type LocalEntry struct {
 	Description string `json:"description,omitempty"`
 }
 
-type PostHook struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Condition   string `json:"condition,omitempty"`
-	Run         string `json:"run"`
-}
-
 type Config struct {
-	Schema    string                `json:"$schema,omitempty"`
-	Version   int                   `json:"version"`
-	Settings  SettingsConfig        `json:"settings"`
-	Remote    map[string]RemoteRepo `json:"remote"`
-	Local     map[string]LocalEntry `json:"local"`
-	PostHooks []PostHook            `json:"postHooks"`
+	Schema   string                `json:"$schema,omitempty"`
+	Version  int                   `json:"version"`
+	Settings SettingsConfig        `json:"settings"`
+	Remote   map[string]RemoteRepo `json:"remote"`
+	Local    map[string]LocalEntry `json:"local"`
 }
 
 // DefaultSchemaURL points at this project's config schema so editors can
@@ -62,14 +52,11 @@ func DefaultConfig() *Config {
 		Schema:  DefaultSchemaURL,
 		Version: 1,
 		Settings: SettingsConfig{
-			DefaultAgents:   []string{"claude"},
-			ExcludeAgents:   []string{},
-			AgentExclusions: map[string][]string{},
-			Availability:    map[string]AvailabilityOverride{},
+			DefaultAgents: []string{"claude"},
+			Availability:  map[string]AvailabilityOverride{},
 		},
-		Remote:    make(map[string]RemoteRepo),
-		Local:     make(map[string]LocalEntry),
-		PostHooks: make([]PostHook, 0),
+		Remote: make(map[string]RemoteRepo),
+		Local:  make(map[string]LocalEntry),
 	}
 }
 
@@ -102,17 +89,8 @@ func LoadConfig(configPath string) (*Config, error) {
 	if cfg.Local == nil {
 		cfg.Local = make(map[string]LocalEntry)
 	}
-	if cfg.PostHooks == nil {
-		cfg.PostHooks = make([]PostHook, 0)
-	}
 	if len(cfg.Settings.DefaultAgents) == 0 {
 		cfg.Settings.DefaultAgents = []string{"claude"}
-	}
-	if cfg.Settings.ExcludeAgents == nil {
-		cfg.Settings.ExcludeAgents = make([]string, 0)
-	}
-	if cfg.Settings.AgentExclusions == nil {
-		cfg.Settings.AgentExclusions = make(map[string][]string)
 	}
 	if cfg.Settings.Availability == nil {
 		cfg.Settings.Availability = make(map[string]AvailabilityOverride)
@@ -140,9 +118,6 @@ func SaveConfig(cfg *Config, configPath string) error {
 	}
 	if cfg.Local == nil {
 		cfg.Local = make(map[string]LocalEntry)
-	}
-	if cfg.PostHooks == nil {
-		cfg.PostHooks = make([]PostHook, 0)
 	}
 	if err := NormalizeAvailability(cfg); err != nil {
 		return err

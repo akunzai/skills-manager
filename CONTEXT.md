@@ -17,7 +17,7 @@ The active Global or Project configuration, its skills directory, and the root t
 _Avoid_: mode, environment, workspace
 
 **Config**:
-The declared set of Skills, Sources, Availability, and hooks for one Scope (`skills.json`).
+The declared set of Skills, Sources, and Availability for one Scope (`skills.json`).
 _Avoid_: settings file, manifest (except the JSON Schema)
 
 **Availability**:

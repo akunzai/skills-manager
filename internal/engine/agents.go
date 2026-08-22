@@ -27,18 +27,10 @@ func ConfiguredKnownAgents(cfg *config.Config, skillsDir string) map[string]stri
 		defaultAgents = []string{"claude"}
 	}
 
-	excludeSet := make(map[string]struct{})
-	for _, a := range cfg.Settings.ExcludeAgents {
-		excludeSet[models.NormalizeAgentName(a)] = struct{}{}
-	}
-
 	known := models.GetAgentsForSkillsDir(skillsDir)
 	out := make(map[string]string)
 	for _, a := range defaultAgents {
 		norm := models.NormalizeAgentName(a)
-		if _, excluded := excludeSet[norm]; excluded {
-			continue
-		}
 		if dir, ok := known[norm]; ok {
 			out[norm] = dir
 		}

@@ -53,7 +53,7 @@ func (r *SyncReport) add(ev SyncEvent) {
 }
 
 func (r *SyncReport) driftEvent(name, source string, cfg *config.Config, skillsDir string) {
-	missing, unexpected := AgentLinkDrift(name, source, cfg, skillsDir)
+	missing, unexpected := AvailabilityDrift(name, cfg, skillsDir)
 	if len(missing) == 0 && len(unexpected) == 0 {
 		return
 	}
@@ -95,15 +95,9 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		}
 
 		if len(missingSkills) == 0 && !force {
-			if dryRun {
-				for _, name := range sortedSkillKeys(repoInfo.Skills) {
-					report.driftEvent(name, source, cfg, skillsDir)
-				}
-				continue
-			}
 			for _, name := range sortedSkillKeys(repoInfo.Skills) {
-				if err := ReconcileAgentSymlinks(name, source, cfg, skillsDir); err != nil {
-					return report, fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
+				if err := applyDeclaredAvailability(name, source, cfg, skillsDir, dryRun, report); err != nil {
+					return report, err
 				}
 			}
 			continue
@@ -113,7 +107,9 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		if dryRun {
 			report.add(SyncEvent{Kind: SyncWouldSync, Source: source, Skills: sortedSkillKeys(missingSkills)})
 			for _, name := range sortedSkillKeys(repoInfo.Skills) {
-				report.driftEvent(name, source, cfg, skillsDir)
+				if err := applyDeclaredAvailability(name, source, cfg, skillsDir, true, report); err != nil {
+					return report, err
+				}
 			}
 			continue
 		}
@@ -138,8 +134,8 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 				}
 				report.add(SyncEvent{Kind: SyncMaterialized, Skill: name})
 			}
-			if err := ReconcileAgentSymlinks(name, source, cfg, skillsDir); err != nil {
-				return report, fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
+			if err := applyDeclaredAvailability(name, source, cfg, skillsDir, false, report); err != nil {
+				return report, err
 			}
 		}
 	}
@@ -164,7 +160,9 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		dest := filepath.Join(skillsDir, name)
 		if dryRun {
 			report.add(SyncEvent{Kind: SyncWouldSymlink, Skill: name, Path: dest, Target: absSource})
-			report.driftEvent(name, "local", cfg, skillsDir)
+			if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, true, report); err != nil {
+				return report, err
+			}
 			continue
 		}
 		if err := MaterializeLocalSymlink(name, models.LocalSymlinkTarget(absSource, skillsDir), skillsDir); err != nil {
@@ -172,8 +170,8 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 		report.add(SyncEvent{Kind: SyncSymlinked, Skill: name, Target: absSource})
-		if err := ReconcileAgentSymlinks(name, "local", cfg, skillsDir); err != nil {
-			return report, fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
+		if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, false, report); err != nil {
+			return report, err
 		}
 	}
 
@@ -191,15 +189,17 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		}
 		if dryRun {
 			report.add(SyncEvent{Kind: SyncWouldCommand, Skill: name, Target: info.Command})
-			report.driftEvent(name, "local", cfg, skillsDir)
+			if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, true, report); err != nil {
+				return report, err
+			}
 			continue
 		}
 		report.add(SyncEvent{Kind: SyncCommandStart, Skill: name})
 		if err := MaterializeCommand(info.Command); err != nil {
 			report.add(SyncEvent{Kind: SyncCommandFailed, Skill: name, Err: err.Error()})
 		}
-		if err := ReconcileAgentSymlinks(name, "local", cfg, skillsDir); err != nil {
-			return report, fmt.Errorf("failed to reconcile availability for %s: %w", name, err)
+		if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, false, report); err != nil {
+			return report, err
 		}
 	}
 

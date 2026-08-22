@@ -93,9 +93,9 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 			}
 		}
 		if includeConfiguredLinks {
-			for skill, source := range configured {
+			for skill := range configured {
 				targets := make(map[string]bool)
-				for _, agent := range GetTargetAgentsForSkill(skill, source, cfg, skillsDir) {
+				for _, agent := range DesiredAgents(skill, cfg, skillsDir) {
 					targets[agent] = true
 				}
 				addManagedLinks(skill, func(agent string) bool { return !targets[agent] })

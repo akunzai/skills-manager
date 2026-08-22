@@ -151,10 +151,24 @@ type UpdateResult struct {
 	UpdatedSkills []string          `json:"updated_skills"`
 	SkippedRepos  []SkippedRepoInfo `json:"skipped_repos"`
 	Errors        []UpdateErrorInfo `json:"errors"`
-	PostHooks     []HookResult      `json:"post_hooks"`
 }
 
 type ProgressCallback func(event string, data map[string]interface{})
+
+func emitAvailabilityDrift(onProgress ProgressCallback, name string, cfg *config.Config, skillsDir string) {
+	if onProgress == nil {
+		return
+	}
+	missing, unexpected := AvailabilityDrift(name, cfg, skillsDir)
+	if len(missing) == 0 && len(unexpected) == 0 {
+		return
+	}
+	onProgress("would_drift", map[string]interface{}{
+		"skill":      name,
+		"missing":    missing,
+		"unexpected": unexpected,
+	})
+}
 
 func UpdateRemoteSkills(
 	cfg *config.Config,
@@ -163,7 +177,6 @@ func UpdateRemoteSkills(
 	dryRun bool,
 	skillsDir string,
 	cacheDir string,
-	runPostHooks bool,
 	onProgress ProgressCallback,
 ) (*UpdateResult, error) {
 	baseSkills := skillsDir
@@ -221,7 +234,6 @@ func UpdateRemoteSkills(
 		UpdatedSkills: make([]string, 0),
 		SkippedRepos:  make([]SkippedRepoInfo, 0),
 		Errors:        make([]UpdateErrorInfo, 0),
-		PostHooks:     make([]HookResult, 0),
 	}
 
 	reposNeedingUpdate := make(map[string]config.RemoteRepo)
@@ -260,12 +272,13 @@ func UpdateRemoteSkills(
 						Skills:   skillList,
 					})
 
-					if !dryRun {
-						for _, e := range reconcileRemoteSkills(cfg, source, repoInfo.Skills, baseSkills) {
-							result.Errors = append(result.Errors, e)
-							if onProgress != nil {
-								onProgress("repo_error", map[string]interface{}{"source": e.Source, "skill": e.Skill, "error": e.Error})
-							}
+					for _, name := range skillList {
+						if dryRun {
+							emitAvailabilityDrift(onProgress, name, cfg, baseSkills)
+							continue
+						}
+						if err := ApplyAvailability(name, cfg, baseSkills); err != nil {
+							return result, fmt.Errorf("failed to apply availability for %s: %w", name, err)
 						}
 					}
 					continue
@@ -285,121 +298,100 @@ func UpdateRemoteSkills(
 		reposNeedingUpdate = reposToProcess
 	}
 
-	// 2. Process updates for repos that need them
+	// 2. Process updates for repos that need them. Cache refresh may run in
+	// parallel; Availability apply stays sequential.
 	sources := make([]string, 0, len(reposNeedingUpdate))
 	for src := range reposNeedingUpdate {
 		sources = append(sources, src)
 	}
 	sort.Strings(sources)
 
-	type repoResult struct {
-		updated UpdatedRepoInfo
-		skills  []string
-		errors  []UpdateErrorInfo
+	type fetchedRepo struct {
+		dir string
+		err error
 	}
-	results := make([]repoResult, len(sources))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	workers := 8
-	if workers > len(sources) {
-		workers = len(sources)
+	fetched := make([]fetchedRepo, len(sources))
+	if !dryRun && len(sources) > 0 {
+		jobs := make(chan int)
+		var wg sync.WaitGroup
+		workers := 8
+		if workers > len(sources) {
+			workers = len(sources)
+		}
+		for worker := 0; worker < workers; worker++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range jobs {
+					source := sources[i]
+					repoInfo := reposNeedingUpdate[source]
+					dir, err := EnsureGitRepo(source, repoInfo.URL, repoInfo.Branch, true, baseCache)
+					fetched[i] = fetchedRepo{dir: dir, err: err}
+				}
+			}()
+		}
+		for i := range sources {
+			jobs <- i
+		}
+		close(jobs)
+		wg.Wait()
 	}
-	for worker := 0; worker < workers; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				source := sources[i]
-				repoInfo := reposNeedingUpdate[source]
-				skillList := sortedSkillKeys(repoInfo.Skills)
-				if onProgress != nil {
-					onProgress("update_start", map[string]interface{}{"source": source, "index": i + 1, "total": len(sources), "skills": skillList, "dry_run": dryRun})
-				}
-				if dryRun {
-					results[i] = repoResult{updated: UpdatedRepoInfo{Source: source, Skills: skillList, DryRun: true}, skills: skillList}
-					continue
-				}
 
-				repoDir, err := EnsureGitRepo(source, repoInfo.URL, repoInfo.Branch, true, baseCache)
-				if err != nil {
-					errMsg := err.Error()
-					results[i].errors = append(results[i].errors, UpdateErrorInfo{Source: source, Error: errMsg})
-					if onProgress != nil {
-						onProgress("repo_error", map[string]interface{}{"source": source, "error": errMsg})
-					}
-					continue
-				}
-
-				repoUpdatedSkills := make([]string, 0)
-				for name, subpath := range repoInfo.Skills {
-					if err := MaterializeRemoteSkill(name, subpath, repoDir, baseSkills); err != nil {
-						errMsg := fmt.Sprintf("Failed to copy skill: %s", err)
-						if errors.Is(err, errRepoPathMissing) {
-							errMsg = fmt.Sprintf("Path missing in repository: %s", subpath)
-						}
-						results[i].errors = append(results[i].errors, UpdateErrorInfo{Source: source, Skill: name, Error: errMsg})
-						if onProgress != nil {
-							onProgress("repo_error", map[string]interface{}{"source": source, "skill": name, "error": errMsg})
-						}
-						continue
-					}
-					repoUpdatedSkills = append(repoUpdatedSkills, name)
-					if err := ReconcileAgentSymlinks(name, source, cfg, baseSkills); err != nil {
-						results[i].errors = append(results[i].errors, UpdateErrorInfo{Source: source, Skill: name, Error: err.Error()})
-					}
-					if onProgress != nil {
-						onProgress("skill_restored", map[string]interface{}{"source": source, "skill": name, "subpath": subpath})
-					}
-				}
-
-				newSHA := GetLocalRepoCommit(repoDir)
-				results[i].updated = UpdatedRepoInfo{Source: source, Skills: repoUpdatedSkills, NewSHA: newSHA}
-				results[i].skills = repoUpdatedSkills
-				if onProgress != nil {
-					onProgress("repo_done", map[string]interface{}{"source": source, "new_sha": newSHA, "skills": repoUpdatedSkills})
-				}
+	for i, source := range sources {
+		repoInfo := reposNeedingUpdate[source]
+		skillList := sortedSkillKeys(repoInfo.Skills)
+		if onProgress != nil {
+			onProgress("update_start", map[string]interface{}{"source": source, "index": i + 1, "total": len(sources), "skills": skillList, "dry_run": dryRun})
+		}
+		if dryRun {
+			result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, Skills: skillList, DryRun: true})
+			result.UpdatedSkills = append(result.UpdatedSkills, skillList...)
+			for _, name := range skillList {
+				emitAvailabilityDrift(onProgress, name, cfg, baseSkills)
 			}
-		}()
-	}
-	for i := range sources {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
-	for _, repo := range results {
-		result.UpdatedRepos = append(result.UpdatedRepos, repo.updated)
-		result.UpdatedSkills = append(result.UpdatedSkills, repo.skills...)
-		result.Errors = append(result.Errors, repo.errors...)
-	}
+			continue
+		}
 
-	// 3. Post hooks
-	if runPostHooks && len(result.UpdatedSkills) > 0 && !dryRun {
-		if len(cfg.PostHooks) > 0 {
+		if fetched[i].err != nil {
+			errMsg := fetched[i].err.Error()
+			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: errMsg})
 			if onProgress != nil {
-				onProgress("hooks_start", map[string]interface{}{})
+				onProgress("repo_error", map[string]interface{}{"source": source, "error": errMsg})
 			}
-			result.PostHooks = ExecutePostHooks(cfg.PostHooks, false)
-			if onProgress != nil {
-				for _, h := range result.PostHooks {
-					onProgress("hook_done", map[string]interface{}{
-						"name": h.Name,
-						"ok":   h.Success,
-						"msg":  h.Message,
-					})
+			continue
+		}
+
+		repoDir := fetched[i].dir
+		repoUpdatedSkills := make([]string, 0)
+		for _, name := range skillList {
+			subpath := repoInfo.Skills[name]
+			if err := MaterializeRemoteSkill(name, subpath, repoDir, baseSkills); err != nil {
+				errMsg := fmt.Sprintf("Failed to copy skill: %s", err)
+				if errors.Is(err, errRepoPathMissing) {
+					errMsg = fmt.Sprintf("Path missing in repository: %s", subpath)
 				}
+				result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Skill: name, Error: errMsg})
+				if onProgress != nil {
+					onProgress("repo_error", map[string]interface{}{"source": source, "skill": name, "error": errMsg})
+				}
+				continue
 			}
+			repoUpdatedSkills = append(repoUpdatedSkills, name)
+			if err := ApplyAvailability(name, cfg, baseSkills); err != nil {
+				return result, fmt.Errorf("failed to apply availability for %s: %w", name, err)
+			}
+			if onProgress != nil {
+				onProgress("skill_restored", map[string]interface{}{"source": source, "skill": name, "subpath": subpath})
+			}
+		}
+
+		newSHA := GetLocalRepoCommit(repoDir)
+		result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, Skills: repoUpdatedSkills, NewSHA: newSHA})
+		result.UpdatedSkills = append(result.UpdatedSkills, repoUpdatedSkills...)
+		if onProgress != nil {
+			onProgress("repo_done", map[string]interface{}{"source": source, "new_sha": newSHA, "skills": repoUpdatedSkills})
 		}
 	}
 
 	return result, nil
-}
-
-func reconcileRemoteSkills(cfg *config.Config, source string, skills map[string]string, skillsDir string) []UpdateErrorInfo {
-	var errs []UpdateErrorInfo
-	for _, name := range sortedSkillKeys(skills) {
-		if err := ReconcileAgentSymlinks(name, source, cfg, skillsDir); err != nil {
-			errs = append(errs, UpdateErrorInfo{Source: source, Skill: name, Error: err.Error()})
-		}
-	}
-	return errs
 }
