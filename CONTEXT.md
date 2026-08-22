@@ -45,7 +45,7 @@ Reconciling filesystem state with declared Config: materialize missing Skills an
 _Avoid_: restore, install (when you mean the whole declared state)
 
 **Materialize**:
-Putting one Skill from its Source onto the Scope skills directory (copy or symlink).
+Putting one Skill from its Source onto the Scope skills directory (copy, symlink, or command).
 _Avoid_: install (when you mean the disk write only), checkout, restore
 
 **Cache**:

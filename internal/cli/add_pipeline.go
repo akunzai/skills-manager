@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,7 +30,7 @@ type sourceLabels struct {
 
 // installSource is the seam between the add command's shared selection and
 // bookkeeping pipeline and how a skill actually gets materialized: a symlink
-// for a local directory, a copy for a cloned repository.
+// for a local directory, a copy for a cloned repository, or a command.
 type installSource interface {
 	// rootDir is the source's own filesystem root, used to resolve --path
 	// against a subdirectory when it doesn't match anything discovery found.
@@ -40,7 +41,7 @@ type installSource interface {
 	configSourceKey() string
 	// confirmReplacementArgs supplies confirmSkillReplacements' source-specific
 	// display arguments.
-	confirmReplacementArgs() (newSourceKey string, isLocal bool, absSourcePath string)
+	confirmReplacementArgs() replacementSource
 	install(name, subpath, skillsDir string) error
 	recordConfig(cfg *config.Config, name, subpath, skillsDir string)
 	progressLine(name, subpath string) string
@@ -81,8 +82,8 @@ func (s *localInstallSource) configSourceKey() string { return "local" }
 
 func (s *localInstallSource) allowsSoleDiscoveredRename() bool { return true }
 
-func (s *localInstallSource) confirmReplacementArgs() (string, bool, string) {
-	return "", true, s.absSourcePath
+func (s *localInstallSource) confirmReplacementArgs() replacementSource {
+	return replacementSource{kind: "symlink", path: s.absSourcePath}
 }
 
 func (s *localInstallSource) install(name, subpath, skillsDir string) error {
@@ -122,8 +123,8 @@ func (s *remoteInstallSource) configSourceKey() string { return s.sourceKey }
 
 func (s *remoteInstallSource) allowsSoleDiscoveredRename() bool { return false }
 
-func (s *remoteInstallSource) confirmReplacementArgs() (string, bool, string) {
-	return s.sourceKey, false, ""
+func (s *remoteInstallSource) confirmReplacementArgs() replacementSource {
+	return replacementSource{kind: "remote", key: s.sourceKey}
 }
 
 func (s *remoteInstallSource) install(name, subpath, skillsDir string) error {
@@ -136,6 +137,51 @@ func (s *remoteInstallSource) recordConfig(cfg *config.Config, name, subpath, _ 
 
 func (s *remoteInstallSource) progressLine(name, subpath string) string {
 	return fmt.Sprintf("Installing %s%s%s (from %s)...", colorBold, name, colorReset, subpath)
+}
+
+type commandInstallSource struct {
+	command     string
+	check       string
+	description string
+	out         io.Writer
+}
+
+func (s *commandInstallSource) rootDir() string { return "." }
+
+func (s *commandInstallSource) labels() sourceLabels {
+	return sourceLabels{
+		displayName:  "command",
+		resourceNoun: "Command",
+		promptVerb:   "register",
+		failVerb:     "register",
+		pastVerb:     "Registered",
+		unitNoun:     "command skill(s)",
+	}
+}
+
+func (s *commandInstallSource) configSourceKey() string { return "local" }
+
+func (s *commandInstallSource) allowsSoleDiscoveredRename() bool { return false }
+
+func (s *commandInstallSource) confirmReplacementArgs() replacementSource {
+	return replacementSource{kind: "command", key: s.command}
+}
+
+func (s *commandInstallSource) install(_, _, _ string) error {
+	fmt.Fprintf(s.out, "   Command: %s\n", s.command)
+	fmt.Fprintln(s.out, "   Executing installer command...")
+	if err := engine.MaterializeCommand(s.command); err != nil {
+		fmt.Fprintf(s.out, "%sWarning: Install command returned error: %s%s\n", colorYellow, err, colorReset)
+	}
+	return nil
+}
+
+func (s *commandInstallSource) recordConfig(cfg *config.Config, name, _, _ string) {
+	config.AddLocalCommandEntry(cfg, name, s.command, s.check, s.description)
+}
+
+func (s *commandInstallSource) progressLine(name, _ string) string {
+	return fmt.Sprintf("Configuring command skill: %s%s%s", colorBold, name, colorReset)
 }
 
 func sortedDiscoveredNames(discovered map[string]string) []string {
@@ -262,8 +308,8 @@ func resolveSkillsToInstall(
 
 // runAddPipeline resolves which skills to install, confirms replacements,
 // materializes each skill through src, and reconciles agent availability.
-// Both the local-symlink and remote-git add modes call this after acquiring
-// their own source (a local directory or a cloned repository).
+// Local-symlink, remote-git, and command add modes call this after acquiring
+// their own source.
 func runAddPipeline(
 	cmd *cobra.Command,
 	discovered map[string]string,
@@ -296,8 +342,7 @@ func runAddPipeline(
 		return err
 	}
 
-	newSourceKey, isLocal, absSourcePath := src.confirmReplacementArgs()
-	if err := confirmSkillReplacements(cfg, skillsDir, skillsToInstall, newSourceKey, isLocal, absSourcePath, flagYes, out); err != nil {
+	if err := confirmSkillReplacements(cfg, skillsDir, skillsToInstall, src.confirmReplacementArgs(), flagYes, out); err != nil {
 		if err.Error() == "operation cancelled by user" {
 			fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
 			return nil

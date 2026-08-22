@@ -1371,3 +1371,51 @@ func TestCLILsJSONTildePath(t *testing.T) {
 		t.Fatalf("expected path ~/.agents/skills/sample-skill, got: %v", items[0]["path"])
 	}
 }
+
+func TestCLICommandAddOverwriteRequiresYes(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if _, err := runCLI(t, "add", "--command", "echo first", "--skill", "cmd-skill", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	out, err := runCLI(t, "add", "--command", "echo second", "--skill", "cmd-skill", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil {
+		t.Fatalf("expected overwrite refusal, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "refusing to overwrite") {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := runCLI(t, "add", "--command", "echo second", "--skill", "cmd-skill", "-y", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Local["cmd-skill"].Command != "echo second" {
+		t.Fatalf("command = %#v", cfg.Local["cmd-skill"])
+	}
+}
+
+func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	out, err := runCLI(t, "add", "--command", "exit 1", "--skill", "cmd-skill", "-y", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Warning: Install command returned error") {
+		t.Fatalf("expected installer warning, got:\n%s", out)
+	}
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Local["cmd-skill"].Command != "exit 1" {
+		t.Fatalf("command = %#v", cfg.Local)
+	}
+}

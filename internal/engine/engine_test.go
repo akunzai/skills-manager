@@ -573,7 +573,7 @@ func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
 
 	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), []LocalSyncSkill{
 		{Name: "sample", AbsSource: src, LinkTarget: src},
-	}, false, false)
+	}, nil, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,6 +586,70 @@ func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
 		t.Fatal("excluded Claude link exists")
+	}
+	if !IsManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
+		t.Fatal("declared Continue link missing")
+	}
+}
+
+func TestSyncDeclaredCommandCheckSkipsMaterialize(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddLocalCommandEntry(cfg, "sample", "echo install", "exit 1", "")
+
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), nil, []CommandSyncSkill{
+		{Name: "sample", Command: "echo install", Check: "exit 1"},
+	}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Events) != 1 || report.Events[0].Kind != SyncCheckFailed {
+		t.Fatalf("events = %#v", report.Events)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
+		t.Fatal("failed check must not apply Availability")
+	}
+}
+
+func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	config.AddLocalCommandEntry(cfg, "sample", "exit 1", "", "")
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
+	for _, agent := range []string{"claude", "continue"} {
+		if _, err := EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), nil, []CommandSyncSkill{
+		{Name: "sample", Command: "exit 1"},
+	}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failed bool
+	for _, ev := range report.Events {
+		if ev.Kind == SyncCommandFailed {
+			failed = true
+		}
+	}
+	if !failed {
+		t.Fatalf("expected command failure event, got %#v", report.Events)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
+		t.Fatal("excluded Claude link still exists")
 	}
 	if !IsManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
 		t.Fatal("declared Continue link missing")
