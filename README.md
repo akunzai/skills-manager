@@ -126,6 +126,3 @@ See [`skills.schema.json`](skills.schema.json) for every field.
 ## More
 
 - Run `skills <command> --help` for flags and examples.
-- See [`docs/design.md`](docs/design.md) for the interaction and presentation principles.
-- See [`docs/release.md`](docs/release.md) for the release process.
-- Licensed under the [MIT License](LICENSE).
