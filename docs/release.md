@@ -63,15 +63,14 @@ Because `github-native` is in use, GoReleaser's own `groups`, `sort`, `filters`,
 
 ### 1. Refresh User-Facing Demo
 
-Rebuild the README demo when its commands, prompts, order, text, layout, icons, colors, workflow, flags, or relevant configuration schema change:
+Rebuild the README demo when its commands, prompts, order, text, layout, icons, colors, workflow, flags, or relevant configuration schema change, unless it was already regenerated and reviewed with those changes:
 
 ```bash
 mise install
 mise run demo
-git diff --exit-code -- docs/assets/demo.gif
 ```
 
-Review the GIF before committing it. Skip regeneration when a release has no user-visible CLI change.
+Review the GIF before committing it. At release time, reuse an already reviewed demo that covers the user-visible changes; do not regenerate it again. Skip regeneration when a release has no user-visible CLI change.
 
 ### 2. Pre-flight Checks
 Ensure test suite passes and working tree is clean:
