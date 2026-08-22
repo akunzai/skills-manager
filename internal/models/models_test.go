@@ -1,6 +1,7 @@
 package models
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -39,6 +40,70 @@ func TestIsUniversalAgent(t *testing.T) {
 	}
 	if IsUniversalAgent("claude-code") {
 		t.Errorf("expected claude-code to not be universal")
+	}
+}
+
+// A typo'd alias target would otherwise resolve to an agent with no
+// directory and no error anywhere in the call chain.
+func TestAgentAliasesResolveToExactlyOneKnownOrUniversalAgent(t *testing.T) {
+	known := GetKnownAgents()
+	universal := make(map[string]struct{}, len(UniversalAgents))
+	for _, u := range UniversalAgents {
+		universal[u] = struct{}{}
+	}
+
+	for alias, canonical := range AgentAliases {
+		_, isKnown := known[canonical]
+		_, isUniversal := universal[canonical]
+		switch {
+		case !isKnown && !isUniversal:
+			t.Errorf("alias %q resolves to %q, which is neither a known agent nor a universal agent", alias, canonical)
+		case isKnown && isUniversal:
+			t.Errorf("alias %q resolves to %q, which is both a known agent and a universal agent", alias, canonical)
+		}
+	}
+}
+
+func TestGetKnownAgentsExpandsPlainTemplatesUnderHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got := GetKnownAgents()
+	want := filepath.Join(home, ".adal", "skills")
+	if got["adal"] != want {
+		t.Errorf(`GetKnownAgents()["adal"] = %q; want %q`, got["adal"], want)
+	}
+}
+
+func TestGetKnownAgentsHonorsPerAgentEnvOverrides(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	claudeDir := filepath.Join(home, "custom-claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
+
+	got := GetKnownAgents()
+	want := filepath.Join(claudeDir, "skills")
+	if got["claude-code"] != want {
+		t.Errorf(`GetKnownAgents()["claude-code"] = %q; want %q`, got["claude-code"], want)
+	}
+}
+
+func TestGetKnownAgentsProbesOpenclawForks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	if got, want := GetKnownAgents()["openclaw"], filepath.Join(home, ".openclaw", "skills"); got != want {
+		t.Errorf("openclaw with no fork installed = %q; want %q", got, want)
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, ".clawdbot"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := GetKnownAgents()["openclaw"], filepath.Join(home, ".clawdbot", "skills"); got != want {
+		t.Errorf("openclaw with clawdbot installed = %q; want %q", got, want)
 	}
 }
 

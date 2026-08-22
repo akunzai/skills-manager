@@ -205,6 +205,62 @@ func GetUniversalAgentSkillDirs(skillsDir string) map[string]string {
 	}
 }
 
+// knownAgentSkillDirTemplates lists agents whose global skills directory is a
+// fixed path under the user's home directory: pure data, expanded with
+// ExpandUser and nothing else. Agents that need a per-agent environment
+// override, an XDG_CONFIG_HOME-relative path, or filesystem probing carry
+// that logic explicitly in GetKnownAgents instead of hiding it in this table.
+var knownAgentSkillDirTemplates = map[string]string{
+	"adal":            "~/.adal/skills",
+	"aider-desk":      "~/.aider-desk/skills",
+	"astrbot":         "~/.astrbot/data/skills",
+	"augment":         "~/.augment/skills",
+	"bob":             "~/.bob/skills",
+	"codearts-agent":  "~/.codeartsdoer/skills",
+	"codebuddy":       "~/.codebuddy/skills",
+	"codemaker":       "~/.codemaker/skills",
+	"codestudio":      "~/.codestudio/skills",
+	"command-code":    "~/.commandcode/skills",
+	"continue":        "~/.continue/skills",
+	"cortex":          "~/.snowflake/cortex/skills",
+	"crush":           "~/.config/crush/skills",
+	"droid":           "~/.factory/skills",
+	"forgecode":       "~/.forge/skills",
+	"iflow-cli":       "~/.iflow/skills",
+	"inference-sh":    "~/.inferencesh/skills",
+	"jazz":            "~/.jazz/skills",
+	"junie":           "~/.junie/skills",
+	"kilo":            "~/.kilocode/skills",
+	"kimchi":          "~/.config/kimchi/harness/skills",
+	"kiro-cli":        "~/.kiro/skills",
+	"kode":            "~/.kode/skills",
+	"lingma":          "~/.lingma/skills",
+	"mcpjam":          "~/.mcpjam/skills",
+	"minimax-code":    "~/.minimax/skills",
+	"moxby":           "~/.moxby/skills",
+	"mux":             "~/.mux/skills",
+	"neovate":         "~/.neovate/skills",
+	"ona":             "~/.ona/skills",
+	"openhands":       "~/.openhands/skills",
+	"pi":              "~/.pi/agent/skills",
+	"pochi":           "~/.pochi/skills",
+	"posit-assistant": "~/.posit/assistant/skills",
+	"qoder":           "~/.qoder/skills",
+	"qoder-cn":        "~/.qoder-cn/skills",
+	"qwen-code":       "~/.qwen/skills",
+	"reasonix":        "~/.reasonix/skills",
+	"roo":             "~/.roo/skills",
+	"rovodev":         "~/.rovodev/skills",
+	"tabnine-cli":     "~/.tabnine/agent/skills",
+	"terramind":       "~/.terramind/skills",
+	"tinycloud":       "~/.tinycloud/skills",
+	"trae":            "~/.trae/skills",
+	"trae-cn":         "~/.trae-cn/skills",
+	"windsurf":        "~/.codeium/windsurf/skills",
+	"zcode":           "~/.zcode/skills",
+	"zencoder":        "~/.zencoder/skills",
+}
+
 // GetKnownAgents returns mapping of non-universal agent names to their global skills directory.
 func GetKnownAgents() map[string]string {
 	xdgConfig := ResolveEnvPath("XDG_CONFIG_HOME", "~/.config")
@@ -221,64 +277,21 @@ func GetKnownAgents() map[string]string {
 		openclawDir = ExpandUser("~/.moltbot/skills")
 	}
 
-	return map[string]string{
-		"adal":            ExpandUser("~/.adal/skills"),
-		"aider-desk":      ExpandUser("~/.aider-desk/skills"),
-		"astrbot":         ExpandUser("~/.astrbot/data/skills"),
-		"augment":         ExpandUser("~/.augment/skills"),
-		"autohand-code":   filepath.Join(autohandHome, "skills"),
-		"bob":             ExpandUser("~/.bob/skills"),
-		"claude-code":     filepath.Join(claudeHome, "skills"),
-		"codearts-agent":  ExpandUser("~/.codeartsdoer/skills"),
-		"codebuddy":       ExpandUser("~/.codebuddy/skills"),
-		"codemaker":       ExpandUser("~/.codemaker/skills"),
-		"codestudio":      ExpandUser("~/.codestudio/skills"),
-		"command-code":    ExpandUser("~/.commandcode/skills"),
-		"continue":        ExpandUser("~/.continue/skills"),
-		"cortex":          ExpandUser("~/.snowflake/cortex/skills"),
-		"crush":           ExpandUser("~/.config/crush/skills"),
-		"devin":           filepath.Join(xdgConfig, "devin", "skills"),
-		"droid":           ExpandUser("~/.factory/skills"),
-		"forgecode":       ExpandUser("~/.forge/skills"),
-		"goose":           filepath.Join(xdgConfig, "goose", "skills"),
-		"grok":            filepath.Join(grokHome, "skills"),
-		"hermes-agent":    filepath.Join(hermesHome, "skills"),
-		"iflow-cli":       ExpandUser("~/.iflow/skills"),
-		"inference-sh":    ExpandUser("~/.inferencesh/skills"),
-		"jazz":            ExpandUser("~/.jazz/skills"),
-		"junie":           ExpandUser("~/.junie/skills"),
-		"kilo":            ExpandUser("~/.kilocode/skills"),
-		"kimchi":          ExpandUser("~/.config/kimchi/harness/skills"),
-		"kiro-cli":        ExpandUser("~/.kiro/skills"),
-		"kode":            ExpandUser("~/.kode/skills"),
-		"lingma":          ExpandUser("~/.lingma/skills"),
-		"mcpjam":          ExpandUser("~/.mcpjam/skills"),
-		"minimax-code":    ExpandUser("~/.minimax/skills"),
-		"mistral-vibe":    filepath.Join(vibeHome, "skills"),
-		"moxby":           ExpandUser("~/.moxby/skills"),
-		"mux":             ExpandUser("~/.mux/skills"),
-		"neovate":         ExpandUser("~/.neovate/skills"),
-		"ona":             ExpandUser("~/.ona/skills"),
-		"openclaw":        openclawDir,
-		"openhands":       ExpandUser("~/.openhands/skills"),
-		"pi":              ExpandUser("~/.pi/agent/skills"),
-		"pochi":           ExpandUser("~/.pochi/skills"),
-		"posit-assistant": ExpandUser("~/.posit/assistant/skills"),
-		"qoder":           ExpandUser("~/.qoder/skills"),
-		"qoder-cn":        ExpandUser("~/.qoder-cn/skills"),
-		"qwen-code":       ExpandUser("~/.qwen/skills"),
-		"reasonix":        ExpandUser("~/.reasonix/skills"),
-		"roo":             ExpandUser("~/.roo/skills"),
-		"rovodev":         ExpandUser("~/.rovodev/skills"),
-		"tabnine-cli":     ExpandUser("~/.tabnine/agent/skills"),
-		"terramind":       ExpandUser("~/.terramind/skills"),
-		"tinycloud":       ExpandUser("~/.tinycloud/skills"),
-		"trae":            ExpandUser("~/.trae/skills"),
-		"trae-cn":         ExpandUser("~/.trae-cn/skills"),
-		"windsurf":        ExpandUser("~/.codeium/windsurf/skills"),
-		"zcode":           ExpandUser("~/.zcode/skills"),
-		"zencoder":        ExpandUser("~/.zencoder/skills"),
+	known := make(map[string]string, len(knownAgentSkillDirTemplates)+8)
+	for agent, template := range knownAgentSkillDirTemplates {
+		known[agent] = ExpandUser(template)
 	}
+
+	known["autohand-code"] = filepath.Join(autohandHome, "skills")
+	known["claude-code"] = filepath.Join(claudeHome, "skills")
+	known["devin"] = filepath.Join(xdgConfig, "devin", "skills")
+	known["goose"] = filepath.Join(xdgConfig, "goose", "skills")
+	known["grok"] = filepath.Join(grokHome, "skills")
+	known["hermes-agent"] = filepath.Join(hermesHome, "skills")
+	known["mistral-vibe"] = filepath.Join(vibeHome, "skills")
+	known["openclaw"] = openclawDir
+
+	return known
 }
 
 // Universal agents that natively support ~/.agents/skills
