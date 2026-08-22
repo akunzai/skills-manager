@@ -61,31 +61,43 @@ Because `github-native` is in use, GoReleaser's own `groups`, `sort`, `filters`,
 
 ## Step-by-Step Release Checklist
 
-### 1. Pre-flight Checks
+### 1. Refresh User-Facing Demo
+
+Rebuild the README demo when its commands, prompts, order, text, layout, icons, colors, workflow, flags, or relevant configuration schema change:
+
+```bash
+mise install
+mise run demo
+git diff --exit-code -- docs/assets/demo.gif
+```
+
+Review the GIF before committing it. Skip regeneration when a release has no user-visible CLI change.
+
+### 2. Pre-flight Checks
 Ensure test suite passes and working tree is clean:
 ```bash
 go test -v ./...
 git status
 ```
 
-### 2. Bump Version Number
+### 3. Bump Version Number
 Update the version string in `internal/updater/updater.go`:
 - `internal/updater/updater.go`: `var Version = "X.Y.Z"`
 
-### 3. Commit and Tag
+### 4. Commit and Tag
 ```bash
 git add internal/updater/updater.go
 git commit -m "chore(release): bump version to vX.Y.Z"
 git tag -a vX.Y.Z -m "Release vX.Y.Z"
 ```
 
-### 4. Push Commit & Tag
+### 5. Push Commit & Tag
 ```bash
 git push origin main
 git push origin vX.Y.Z
 ```
 
-### 5. Verification
+### 6. Verification
 1. Check GitHub Actions run under the Actions tab.
 2. Confirm the release is published at `https://github.com/akunzai/skills-manager/releases`.
 3. Verify self-update detects the new release:
@@ -93,7 +105,7 @@ git push origin vX.Y.Z
    skills self-update --check
    ```
 
-### 6. Milestone Management
+### 7. Milestone Management
 1. **Close the released milestone**:
    ```bash
    # Find milestone number

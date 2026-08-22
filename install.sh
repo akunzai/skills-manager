@@ -18,7 +18,7 @@ TARGET_DIR="${HOME}/.local/bin"
 TARGET_BIN="${TARGET_DIR}/skills"
 GITHUB_REPO="akunzai/skills-manager"
 
-echo -e "${CYAN}${BOLD}🚀 Installing Skills Manager (skills)...${RESET}\n"
+echo -e "${CYAN}${BOLD}Installing Skills Manager...${RESET}\n"
 
 mkdir -p "$TARGET_DIR"
 
@@ -26,11 +26,11 @@ mkdir -p "$TARGET_DIR"
 if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
   LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if [[ -f "${LOCAL_ROOT}/cmd/skills/main.go" ]] && command -v go >/dev/null 2>&1; then
-    echo -e "⚙️  Building from local source with Go..."
+    echo -e "Building from local source with Go..."
     rm -f "$TARGET_BIN"
     (cd "$LOCAL_ROOT" && go build -ldflags="-s -w" -o "$TARGET_BIN" ./cmd/skills)
     chmod +x "$TARGET_BIN"
-    echo -e "\n${GREEN}${BOLD}✨ Installation successful!${RESET}"
+    echo -e "\n${GREEN}${BOLD}Installed Skills Manager.${RESET}"
     echo -e "   Installed at: ${BOLD}${TARGET_BIN}${RESET}\n"
     exit 0
   fi
@@ -48,7 +48,7 @@ case "$ARCH" in
     GOARCH="arm64"
     ;;
   *)
-    echo -e "${RED}❌ Unsupported architecture: $ARCH${RESET}" >&2
+    echo -e "${RED}Error: Unsupported architecture: $ARCH${RESET}" >&2
     exit 1
     ;;
 esac
@@ -58,16 +58,16 @@ case "$OS" in
     GOOS="$OS"
     ;;
   *)
-    echo -e "${RED}❌ Unsupported OS: $OS${RESET}" >&2
+    echo -e "${RED}Error: Unsupported OS: $OS${RESET}" >&2
     exit 1
     ;;
 esac
 
-echo -e "🔍 Detected platform: ${BOLD}${GOOS}_${GOARCH}${RESET}"
+echo -e "Platform: ${BOLD}${GOOS}_${GOARCH}${RESET}"
 
 # Fetch latest release info from GitHub API
 RELEASE_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
-echo -e "📦 Fetching latest release information..."
+echo -e "Fetching latest release information..."
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
@@ -77,7 +77,7 @@ trap cleanup EXIT
 
 RELEASE_JSON="${TMP_DIR}/release.json"
 curl -fsSL -H "Accept: application/vnd.github.v3+json" "$RELEASE_API" -o "$RELEASE_JSON" || {
-  echo -e "${RED}❌ Failed to fetch release metadata from GitHub.${RESET}" >&2
+  echo -e "${RED}Error: Failed to fetch release metadata from GitHub.${RESET}" >&2
   exit 1
 }
 
@@ -90,11 +90,11 @@ if [[ -z "$ASSET_URL" ]]; then
 fi
 
 if [[ -z "$ASSET_URL" ]]; then
-  echo -e "${RED}❌ No prebuilt binary found for ${GOOS}_${GOARCH}.${RESET}" >&2
+  echo -e "${RED}Error: No prebuilt binary found for ${GOOS}_${GOARCH}.${RESET}" >&2
   exit 1
 fi
 
-echo -e "📥 Downloading: ${DIM}${ASSET_URL}${RESET}"
+echo -e "Downloading: ${DIM}${ASSET_URL}${RESET}"
 ARCHIVE_FILE="${TMP_DIR}/downloaded"
 curl -fsSL "$ASSET_URL" -o "$ARCHIVE_FILE"
 
@@ -110,12 +110,12 @@ fi
 
 chmod +x "$TARGET_BIN"
 
-echo -e "\n${GREEN}${BOLD}✨ Installation successful!${RESET}"
+echo -e "\n${GREEN}${BOLD}Installed Skills Manager.${RESET}"
 echo -e "   Installed at: ${BOLD}${TARGET_BIN}${RESET}\n"
 
 # Check PATH
 if [[ ":$PATH:" != *":${TARGET_DIR}:"* ]]; then
-  echo -e "${YELLOW}⚠️  Note: ${TARGET_DIR} is not currently in your PATH.${RESET}"
+  echo -e "${YELLOW}Note: ${TARGET_DIR} is not currently in your PATH.${RESET}"
   echo -e "   Add it by running:"
   echo -e "   ${BOLD}export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}\n"
 fi

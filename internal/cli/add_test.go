@@ -2,9 +2,34 @@ package cli
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/akunzai/skills-manager/internal/tui"
 )
+
+func TestMarkInstalledSkillsAcrossUndecidedScopes(t *testing.T) {
+	globalDir := filepath.Join(t.TempDir(), "global")
+	projectDir := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(filepath.Join(projectDir, "installed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	options := []tui.SelectOption{
+		{Key: "installed", Title: "installed"},
+		{Key: "new", Title: "new"},
+	}
+
+	markInstalledSkills(options, []string{globalDir, projectDir})
+
+	if !options[0].Installed || !options[0].Selected {
+		t.Fatalf("installed option = %#v; want installed and selected", options[0])
+	}
+	if options[1].Installed || options[1].Selected {
+		t.Fatalf("new option = %#v; want unselected", options[1])
+	}
+}
 
 func TestGroupDiscoveredSkillsUsesSkillParentDirectories(t *testing.T) {
 	discovered := map[string]string{

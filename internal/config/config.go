@@ -11,9 +11,15 @@ import (
 )
 
 type SettingsConfig struct {
-	DefaultAgents   []string            `json:"defaultAgents"`
-	ExcludeAgents   []string            `json:"excludeAgents"`
-	AgentExclusions map[string][]string `json:"agentExclusions"`
+	DefaultAgents   []string                        `json:"defaultAgents"`
+	ExcludeAgents   []string                        `json:"excludeAgents"`
+	AgentExclusions map[string][]string             `json:"agentExclusions"`
+	Availability    map[string]AvailabilityOverride `json:"availability,omitempty"`
+}
+
+type AvailabilityOverride struct {
+	Include []string `json:"include,omitempty"`
+	Exclude []string `json:"exclude,omitempty"`
 }
 
 type RemoteRepo struct {
@@ -39,12 +45,12 @@ type PostHook struct {
 }
 
 type Config struct {
-	Schema    string                 `json:"$schema,omitempty"`
-	Version   int                    `json:"version"`
-	Settings  SettingsConfig         `json:"settings"`
-	Remote    map[string]RemoteRepo  `json:"remote"`
-	Local     map[string]LocalEntry  `json:"local"`
-	PostHooks []PostHook             `json:"postHooks"`
+	Schema    string                `json:"$schema,omitempty"`
+	Version   int                   `json:"version"`
+	Settings  SettingsConfig        `json:"settings"`
+	Remote    map[string]RemoteRepo `json:"remote"`
+	Local     map[string]LocalEntry `json:"local"`
+	PostHooks []PostHook            `json:"postHooks"`
 }
 
 // DefaultSchemaURL points at this project's config schema so editors can
@@ -59,6 +65,7 @@ func DefaultConfig() *Config {
 			DefaultAgents:   []string{"claude"},
 			ExcludeAgents:   []string{},
 			AgentExclusions: map[string][]string{},
+			Availability:    map[string]AvailabilityOverride{},
 		},
 		Remote:    make(map[string]RemoteRepo),
 		Local:     make(map[string]LocalEntry),
@@ -107,6 +114,12 @@ func LoadConfig(configPath string) (*Config, error) {
 	if cfg.Settings.AgentExclusions == nil {
 		cfg.Settings.AgentExclusions = make(map[string][]string)
 	}
+	if cfg.Settings.Availability == nil {
+		cfg.Settings.Availability = make(map[string]AvailabilityOverride)
+	}
+	if err := NormalizeAvailability(cfg); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
 }
@@ -131,6 +144,9 @@ func SaveConfig(cfg *Config, configPath string) error {
 	if cfg.PostHooks == nil {
 		cfg.PostHooks = make([]PostHook, 0)
 	}
+	if err := NormalizeAvailability(cfg); err != nil {
+		return err
+	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -139,6 +155,102 @@ func SaveConfig(cfg *Config, configPath string) error {
 
 	data = append(data, '\n')
 	return os.WriteFile(target, data, 0644)
+}
+
+func NormalizeAvailability(cfg *Config) error {
+	if cfg.Settings.Availability == nil {
+		cfg.Settings.Availability = make(map[string]AvailabilityOverride)
+		return nil
+	}
+	for skill, override := range cfg.Settings.Availability {
+		override.Include = normalizeAgents(override.Include)
+		override.Exclude = normalizeAgents(override.Exclude)
+		excluded := make(map[string]struct{}, len(override.Exclude))
+		for _, agent := range override.Exclude {
+			excluded[agent] = struct{}{}
+		}
+		for _, agent := range override.Include {
+			if _, conflict := excluded[agent]; conflict {
+				return fmt.Errorf("invalid availability for skill %q: agent %q is both included and excluded", skill, agent)
+			}
+		}
+		if len(override.Include) == 0 && len(override.Exclude) == 0 {
+			delete(cfg.Settings.Availability, skill)
+			continue
+		}
+		cfg.Settings.Availability[skill] = override
+	}
+	return nil
+}
+
+func normalizeAgents(agents []string) []string {
+	seen := make(map[string]struct{}, len(agents))
+	normalized := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		norm := models.NormalizeAgentName(agent)
+		if norm == "" {
+			continue
+		}
+		if _, exists := seen[norm]; exists {
+			continue
+		}
+		seen[norm] = struct{}{}
+		normalized = append(normalized, norm)
+	}
+	sort.Strings(normalized)
+	return normalized
+}
+
+func IncludeSkillAgents(cfg *Config, skill string, agents ...string) error {
+	ensureAvailability(cfg)
+	override := cfg.Settings.Availability[skill]
+	override.Include = append(override.Include, agents...)
+	override.Exclude = removeAgents(override.Exclude, agents)
+	cfg.Settings.Availability[skill] = override
+	return NormalizeAvailability(cfg)
+}
+
+func ExcludeSkillAgents(cfg *Config, skill string, agents ...string) error {
+	ensureAvailability(cfg)
+	override := cfg.Settings.Availability[skill]
+	override.Exclude = append(override.Exclude, agents...)
+	override.Include = removeAgents(override.Include, agents)
+	cfg.Settings.Availability[skill] = override
+	return NormalizeAvailability(cfg)
+}
+
+func ResetSkillAgents(cfg *Config, skill string, agents ...string) error {
+	ensureAvailability(cfg)
+	override := cfg.Settings.Availability[skill]
+	override.Include = removeAgents(override.Include, agents)
+	override.Exclude = removeAgents(override.Exclude, agents)
+	cfg.Settings.Availability[skill] = override
+	return NormalizeAvailability(cfg)
+}
+
+func FollowDefaults(cfg *Config, skill string) {
+	ensureAvailability(cfg)
+	delete(cfg.Settings.Availability, skill)
+}
+
+func ensureAvailability(cfg *Config) {
+	if cfg.Settings.Availability == nil {
+		cfg.Settings.Availability = make(map[string]AvailabilityOverride)
+	}
+}
+
+func removeAgents(current, removed []string) []string {
+	removeSet := make(map[string]struct{}, len(removed))
+	for _, agent := range removed {
+		removeSet[models.NormalizeAgentName(agent)] = struct{}{}
+	}
+	kept := current[:0]
+	for _, agent := range current {
+		if _, remove := removeSet[models.NormalizeAgentName(agent)]; !remove {
+			kept = append(kept, agent)
+		}
+	}
+	return kept
 }
 
 func FindSkillSource(cfg *Config, skillName string) (category string, sourceKey string, found bool) {
@@ -162,7 +274,7 @@ func AddRemoteSkillEntry(
 	url string,
 ) {
 	// Clean up any existing registration for this skill name across local and other remotes
-	RemoveSkillEntry(cfg, skillName)
+	removeSkillRegistration(cfg, skillName)
 
 	if cfg.Remote == nil {
 		cfg.Remote = make(map[string]RemoteRepo)
@@ -196,7 +308,7 @@ func AddLocalSymlinkEntry(
 	sourcePath string,
 	description string,
 ) {
-	RemoveSkillEntry(cfg, skillName)
+	removeSkillRegistration(cfg, skillName)
 	if cfg.Local == nil {
 		cfg.Local = make(map[string]LocalEntry)
 	}
@@ -214,7 +326,7 @@ func AddLocalCommandEntry(
 	checkCmd string,
 	description string,
 ) {
-	RemoveSkillEntry(cfg, skillName)
+	removeSkillRegistration(cfg, skillName)
 	if cfg.Local == nil {
 		cfg.Local = make(map[string]LocalEntry)
 	}
@@ -227,6 +339,15 @@ func AddLocalCommandEntry(
 }
 
 func RemoveSkillEntry(cfg *Config, skillName string) bool {
+	found := removeSkillRegistration(cfg, skillName)
+	if _, ok := cfg.Settings.Availability[skillName]; ok {
+		delete(cfg.Settings.Availability, skillName)
+		found = true
+	}
+	return found
+}
+
+func removeSkillRegistration(cfg *Config, skillName string) bool {
 	found := false
 
 	// Check remote

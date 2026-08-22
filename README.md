@@ -1,189 +1,131 @@
 # Skills Manager
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go: >=1.27](https://img.shields.io/badge/Go->=1.27-00ADD8.svg?logo=go)](https://golang.org/)
+[![CI](https://github.com/akunzai/skills-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/akunzai/skills-manager/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-24292f.svg)](LICENSE)
 
-Fast, zero-runtime skills manager for AI coding agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).
+One source of truth for skills across Claude Code, Codex, Google Antigravity CLI, and other coding agents.
 
-Deterministic `skills.json` configuration, centralized Git shallow clone caching, and automatic multi-agent symlink synchronization.
+Skills Manager installs skills once, records the result in `skills.json`, and keeps each agent's availability in sync. It ships as a standalone Go binary and uses the system `git` only when a remote repository needs updating.
 
----
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="Installing a skill, listing it, and inspecting its agent availability with Skills Manager" width="880">
+</p>
 
-## ⚡ Quick Install
+## Install
 
-```bash
-# macOS / Linux (bash / zsh)
+macOS and Linux:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/akunzai/skills-manager/main/install.sh | bash
+```
 
-# Windows (PowerShell)
+Windows PowerShell:
+
+```powershell
 irm https://raw.githubusercontent.com/akunzai/skills-manager/main/install.ps1 | iex
 ```
 
----
+## Start with one skill
 
-## 🚀 Quick Start
-
-```bash
-# Install skills from GitHub
+```sh
 skills add akunzai/agent-skills
-
-# List installed skills
 skills ls
-
-# Check for updates & upgrade
-skills outdated
-skills update
-
-# Sync / restore declared skills
-skills sync
 ```
 
----
+The interactive flow asks where the skill belongs and which agents should see it. For scripts and CI, provide the choices explicitly:
 
-## 🌐 Global & Project Scopes
-
-| Scope | Flag | Config File | Skills Directory | Agent Symlinks |
-| :--- | :--- | :--- | :--- | :--- |
-| **Global** (Default) | `-g` / `--global` | `~/.agents/skills.json` | `~/.agents/skills/` | `~/.claude/skills/`, etc. |
-| **Project** | `-p` / `--project` | `./.agents/skills.json` | `./.agents/skills/` | `./.claude/skills/`, etc. |
-
-> **Note**: Git caches are centralized in `~/.local/state/skills-manager/repo-cache`, keeping project workspaces 100% clean.
-
-### Working in Project Scope
-
-Every command accepts `-p` / `--project` to act on the current project instead of your global setup:
-
-```bash
-skills -p init                                   # create ./.agents/skills.json
-skills -p add akunzai/agent-skills -s agents-md  # install into ./.agents/skills/
-skills -p ls                                     # list this project's skills
-skills -p outdated                               # check remote repos for updates
-skills -p sync                                   # restore declared skills after a clone
-skills -p prune                                  # clean items no longer declared in configuration
-skills -p doctor --fix                           # verify & repair project symlinks
-skills -p rm agents-md                           # remove from this project
+```sh
+skills add akunzai/agent-skills --skill agents-md --agent claude --yes
 ```
 
-Commit `.agents/skills.json` to your repository so teammates get the same skills with a single `skills -p sync`.
+`--agent` is persistent policy, not a one-time link. A later `skills sync` restores the same availability.
 
----
+## Global or project-local
 
-<details>
-<summary>📖 <strong>Full Command Reference</strong></summary>
+Global is the default. Project mode keeps the declaration beside the code so a team can reproduce it after cloning.
 
-### Adding Skills
-```bash
-# Interactive selection from GitHub / GitLab / Git URLs
-skills add akunzai/agent-skills
-skills add gitlab:my-org/my-skills
-skills add https://github.com/owner/repo/tree/main/skills/foo
+| Scope | Command | Configuration | Installed skills |
+| --- | --- | --- | --- |
+| Global | `skills …` | `~/.agents/skills.json` | `~/.agents/skills/` |
+| Project | `skills --project …` | `./.agents/skills.json` | `./.agents/skills/` |
 
-# Local directory or monorepo auto-scan (interactive multi-select)
-skills add ~/code/agent-skills
-skills add ./local-skills --all
-skills add --symlink ~/code/my-skill --skill my-skill
-
-# Specific skill(s) or all skills (with -y / --yes to bypass prompts)
-skills add akunzai/agent-skills -s agents-md -s tidy-commits
-skills add akunzai/agent-skills --all -y
-
-# Custom CLI installer command
-skills add --command "agentsview skills install" --check "which agentsview" --skill finding-history
+```sh
+skills --project init
+skills --project add akunzai/agent-skills --skill agents-md
+git add .agents/skills.json
 ```
 
-### Managing & Inspecting Skills
-```bash
-# List skills (table or JSON)
-skills ls
-skills ls --json
-skills ls -a claude
-skills ls -s akunzai
+Teammates restore the declared state with:
 
-# Interactive removal
-skills rm
-skills rm tidy-commits
+```sh
+skills --project sync
 ```
 
-### Sync & Maintenance
-```bash
-# Sync / restore declared skills
-skills sync
-skills sync --force     # force re-fetch & re-link
-skills sync --dry-run
+## Control availability
 
-# Remove untracked master skills and unconfigured managed links
-skills prune             # interactively select items to remove (none preselected)
-skills prune --dry-run   # show the plan without changing files
-skills prune --yes       # run non-interactively
-skills prune --links-only
-skills prune --skills-only
+Defaults cover the common case. Per-skill policy handles the exceptions without hand-editing JSON.
 
-# Deprecated: use `skills prune` instead
-skills sync --prune --yes
+```sh
+skills config
+skills config set defaultAgents claude,antigravity
 
-# Check outdated & update
-skills outdated
-skills update
-skills update akunzai/agent-skills
-
-# Health check & auto-repair
-skills doctor
-skills doctor --fix
-
-# Self-update binary
-skills self-update
-skills self-update --check
+skills agents agents-md
+skills agents agents-md include antigravity
+skills agents agents-md exclude claude
+skills agents agents-md follow-defaults
 ```
 
-</details>
+Universal agents that read the central skills directory directly do not need links and are reported separately.
 
-<details>
-<summary>⚙️ <strong>Sample Configuration (<code>skills.json</code>)</strong></summary>
+## Daily commands
 
-Full field reference: [`skills.schema.json`](skills.schema.json).
+| Intent | Command |
+| --- | --- |
+| See installed and configured skills | `skills ls` |
+| Restore configuration and availability | `skills sync` |
+| Preview reconciliation | `skills sync --dry-run` |
+| Find available updates | `skills outdated` |
+| Update remote skills | `skills update` |
+| Diagnose drift | `skills doctor` |
+| Repair drift | `skills doctor --fix` |
+| Remove undeclared managed items | `skills prune` |
+| Remove a skill | `skills rm <skill>` |
+
+Every operational command accepts `--project`. Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
+
+## Configuration
+
+`skills init` creates a schema-backed `skills.json`. Most settings can be managed through `skills config` and `skills agents`; direct editing remains available with `skills config edit`.
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/akunzai/skills-manager/main/skills.schema.json",
   "version": 1,
   "settings": {
-    "defaultAgents": ["claude"]
+    "defaultAgents": ["claude-code"],
+    "availability": {
+      "agents-md": {
+        "include": ["antigravity-cli"]
+      }
+    }
   },
   "remote": {
     "akunzai/agent-skills": {
       "type": "github",
       "skills": {
-        "agents-md": "skills/agents-md",
-        "tidy-commits": "skills/tidy-commits"
+        "agents-md": "skills/agents-md"
       }
     }
   },
-  "local": {
-    "my-tool": {
-      "type": "symlink",
-      "source": "~/tools/my-tool"
-    }
-  }
+  "local": {}
 }
 ```
 
-</details>
+See [`skills.schema.json`](skills.schema.json) for every field.
 
-<details>
-<summary>🐚 <strong>Shell Autocompletion</strong></summary>
+## More
 
-```bash
-# Zsh (add to ~/.zshrc)
-source <(skills completion zsh)
-
-# Bash (add to ~/.bashrc)
-source <(skills completion bash)
-
-# Fish
-skills completion fish | source
-
-# PowerShell
-skills completion powershell | Out-String | Invoke-Expression
-```
-
-</details>
+- Run `skills <command> --help` for flags and examples.
+- See [`docs/design.md`](docs/design.md) for the interaction and presentation principles.
+- See [`docs/release.md`](docs/release.md) for the release process.
+- Licensed under the [MIT License](LICENSE).

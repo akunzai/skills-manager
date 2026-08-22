@@ -15,14 +15,13 @@ import (
 
 func newRmCmd() *cobra.Command {
 	var (
-		flagAgents []string
-		flagYes    bool
+		flagYes bool
 	)
 
 	cmd := &cobra.Command{
 		Use:     "rm [skills...]",
 		Aliases: []string{"remove"},
-		Short:   "Remove one or more skills globally or from specific agents",
+		Short:   "Remove one or more skills",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
@@ -75,36 +74,22 @@ func newRmCmd() *cobra.Command {
 			}
 
 			for _, skillName := range skillsToRemove {
-				fmt.Printf("\n%s🗑  Removing skill: %s%s%s...\n", colorCyan, colorBold, skillName, colorReset)
+				fmt.Printf("\n%sRemoving skill: %s%s%s...\n", colorCyan, colorBold, skillName, colorReset)
 
-				// 1. Remove only from specific agent(s)
-				if len(flagAgents) > 0 {
-					knownAgents := models.GetAgentsForSkillsDir(skillsDir)
-					for _, agent := range flagAgents {
-						norm := models.NormalizeAgentName(agent)
-						if agentDir, ok := knownAgents[norm]; ok {
-							linkPath := filepath.Join(agentDir, skillName)
-							_ = os.RemoveAll(linkPath)
-							fmt.Printf("  %s✔%s Removed link from %s\n", colorGreen, colorReset, norm)
-						}
-					}
-					continue
-				}
-
-				// 2. Full removal
+				// Full removal
 				unlinked := engine.RemoveAgentSymlinks(skillName, skillsDir)
 				if len(unlinked) > 0 {
-					fmt.Printf("  %s✔%s Unlinked from: %s\n", colorGreen, colorReset, strings.Join(unlinked, ", "))
+					fmt.Printf("  %sUnlinked from: %s.%s\n", colorGreen, strings.Join(unlinked, ", "), colorReset)
 				}
 
 				masterPath := filepath.Join(skillsDir, skillName)
 				if _, err := os.Lstat(masterPath); err == nil {
 					_ = os.RemoveAll(masterPath)
-					fmt.Printf("  %s✔%s Removed master directory: %s\n", colorGreen, colorReset, models.ToTildePath(masterPath))
+					fmt.Printf("  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(masterPath), colorReset)
 				}
 
 				if config.RemoveSkillEntry(cfg, skillName) {
-					fmt.Printf("  %s✔%s Removed from configuration\n", colorGreen, colorReset)
+					fmt.Printf("  %sRemoved from configuration.%s\n", colorGreen, colorReset)
 				}
 			}
 
@@ -112,12 +97,11 @@ func newRmCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("\n%s✨ Skill removal complete!%s\n\n", colorGreen, colorReset)
+			fmt.Printf("\n%sSkill removal complete.%s\n\n", colorGreen, colorReset)
 			return nil
 		},
 	}
 
-	cmd.Flags().StringSliceVarP(&flagAgents, "agent", "a", nil, "Remove only from specific agents")
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompts")
 
 	return cmd

@@ -1,33 +1,42 @@
 package tui
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
-	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
-	"syscall"
 
+	"github.com/akunzai/skills-manager/internal/presentation"
+	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
 
-const (
-	colorCyan   = "\033[96m"
-	colorGreen  = "\033[92m"
-	colorYellow = "\033[93m"
-	colorRed    = "\033[91m"
-	colorBold   = "\033[1m"
-	colorDim    = "\033[2m"
-	colorReset  = "\033[0m"
+var (
+	colorCyan   string
+	colorGreen  string
+	colorYellow string
+	colorBold   string
+	colorDim    string
+	colorReset  string
+)
 
+func applyPromptStyle() {
+	style := presentation.For(os.Stdout)
+	colorCyan = style.Cyan
+	colorGreen = style.Green
+	colorYellow = style.Yellow
+	colorBold = style.Bold
+	colorDim = style.Dim
+	colorReset = style.Reset
+}
+
+const (
 	hideCursor = "\033[?25l"
 	showCursor = "\033[?25h"
 	clearLine  = "\033[2K"
-
-	enterAlternateScreen = "\033[?1049h"
-	leaveAlternateScreen = "\033[?1049l"
-	promptRedraw         = "\033[H\033[2J"
 )
 
 type SelectOption struct {
@@ -41,8 +50,61 @@ type SelectOption struct {
 
 type GroupedItems map[string][]SelectOption
 
+func PromptChoice(prompt string, options []SelectOption, defaultIndex int) (string, error) {
+	if !IsTerminal() {
+		return "", fmt.Errorf("interactive prompt requires a terminal")
+	}
+	if len(options) == 0 || defaultIndex < 0 || defaultIndex >= len(options) {
+		return "", fmt.Errorf("invalid choice prompt")
+	}
+	applyPromptStyle()
+	fmt.Printf("%s%s%s%s\n", colorBold, colorCyan, prompt, colorReset)
+	for i, option := range options {
+		marker := " "
+		if i == defaultIndex {
+			marker = "*"
+		}
+		fmt.Printf("  %s %d. %s\n", marker, i+1, option.Title)
+	}
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Printf("Choice [%d]: ", defaultIndex+1)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+		index, ok := choiceIndex(line, len(options), defaultIndex)
+		if ok {
+			return options[index].Key, nil
+		}
+		fmt.Printf("Enter a number from 1 to %d.\n", len(options))
+	}
+}
+
+func PromptInput(prompt string) (string, error) {
+	if !IsTerminal() {
+		return "", fmt.Errorf("interactive prompt requires a terminal")
+	}
+	applyPromptStyle()
+	fmt.Printf("%s%s%s%s: ", colorBold, colorCyan, prompt, colorReset)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func choiceIndex(input string, optionCount, defaultIndex int) (int, bool) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultIndex, true
+	}
+	choice, err := strconv.Atoi(input)
+	return choice - 1, err == nil && choice >= 1 && choice <= optionCount
+}
+
 func IsTerminal() bool {
-	return term.IsTerminal(int(os.Stdin.Fd()))
+	return os.Getenv("TERM") != "dumb" && term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 type keyType int
@@ -116,12 +178,25 @@ func parseKey(b []byte) keyType {
 	return keyUnknown
 }
 
-func getTermHeight() int {
-	_, height, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil || height <= 0 {
-		return 24
+func promptViewport(width, height int) (int, int, int, bool) {
+	if width < 20 || height < 7 {
+		return 0, 0, 0, false
 	}
-	return height
+	contentWidth := width - 1
+	maxVisible := min(height-6, 20)
+	return contentWidth, maxVisible, maxVisible + 5, true
+}
+
+func terminalPromptViewport() (int, int, int, bool) {
+	width, height, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || width <= 0 || height <= 0 {
+		width, height = 80, 24
+	}
+	return promptViewport(width, height)
+}
+
+func clipLine(text string, width int) string {
+	return runewidth.Truncate(text, width, "")
 }
 
 func multiSelectInstructions() [2]string {
@@ -131,12 +206,13 @@ func multiSelectInstructions() [2]string {
 	}
 }
 
-// PromptMultiSelect displays interactive list with Esc/q to cancel, 'a' to toggle all, Space to toggle.
+// PromptMultiSelect displays a locally redrawn checkbox list.
 // Returns (selectedKeys, nil) or (nil, nil) on cancel.
 func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 	if !IsTerminal() {
 		return nil, fmt.Errorf("interactive prompt requires a terminal")
 	}
+	applyPromptStyle()
 
 	numItems := len(items)
 	if numItems == 0 {
@@ -144,8 +220,8 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 	}
 
 	selected := make([]bool, numItems)
-	for i, it := range items {
-		selected[i] = it.Selected
+	for i, item := range items {
+		selected[i] = item.Selected
 	}
 
 	fd := int(os.Stdin.Fd())
@@ -155,109 +231,71 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 	}
 	defer func() {
 		_ = term.Restore(fd, oldState)
-		fmt.Print(leaveAlternateScreen, showCursor)
+		fmt.Print(showCursor)
 	}()
-
-	// Handle SIGINT cleanly
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
 
 	cursorIdx := 0
 	windowStart := 0
-
-	termHeight := getTermHeight()
-	maxVisible := termHeight - 6
-	if maxVisible < 10 {
-		maxVisible = 10
+	contentWidth, maxVisible, frameLines, ok := terminalPromptViewport()
+	if !ok {
+		return nil, fmt.Errorf("terminal is too small for interactive selection")
 	}
-	if maxVisible > 20 {
-		maxVisible = 20
-	}
-	visibleCount := numItems
-	if visibleCount > maxVisible {
-		visibleCount = maxVisible
-	}
-	isScrollable := numItems > maxVisible
-
+	visibleCount := min(numItems, maxVisible)
+	rendered := false
 	render := func() {
-		fmt.Print(promptRedraw)
-
-		if isScrollable {
-			if cursorIdx < windowStart {
-				windowStart = cursorIdx
-			} else if cursorIdx >= windowStart+visibleCount {
-				windowStart = cursorIdx - visibleCount + 1
-			}
+		fmt.Print(redrawPrefix(rendered, frameLines))
+		if cursorIdx < windowStart {
+			windowStart = cursorIdx
+		} else if cursorIdx >= windowStart+visibleCount {
+			windowStart = cursorIdx - visibleCount + 1
 		}
-		windowEnd := windowStart + visibleCount
-		if windowEnd > numItems {
-			windowEnd = numItems
-		}
-
+		windowEnd := min(windowStart+visibleCount, numItems)
 		instructions := multiSelectInstructions()
-		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, title, colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, instructions[0], colorReset)
-		fmt.Printf("%s%s%s%s\r\n\r\n", clearLine, colorDim, instructions[1], colorReset)
-
-		if isScrollable {
-			if windowStart > 0 {
-				fmt.Printf("%s  %s▲ (%d more above)%s\r\n", clearLine, colorDim, windowStart, colorReset)
-			} else {
-				fmt.Printf("%s\r\n", clearLine)
-			}
-		}
-
+		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[1], contentWidth), colorReset)
+		fmt.Printf("%s\r\n", clearLine)
 		for i := windowStart; i < windowEnd; i++ {
-			it := items[i]
-			isCursor := (i == cursorIdx)
-			isChecked := selected[i]
-
-			prefix := " "
-			if isCursor {
-				prefix = fmt.Sprintf("%s❯%s", colorCyan, colorReset)
+			item := items[i]
+			cursor := " "
+			if i == cursorIdx {
+				cursor = "❯"
 			}
-			box := fmt.Sprintf("%s[ ]%s", colorDim, colorReset)
-			if isChecked {
-				box = fmt.Sprintf("%s[✔]%s", colorGreen, colorReset)
+			box := "[ ]"
+			if selected[i] {
+				box = "[✓]"
 			}
-
+			name := item.Title
+			if name == "" {
+				name = item.Key
+			}
 			badge := ""
-			if it.Installed {
-				badge = fmt.Sprintf(" %s(installed)%s", colorDim, colorReset)
+			if item.Installed {
+				badge = " (installed)"
 			}
-			if it.Extra != "" {
-				badge += fmt.Sprintf(" %s%s%s", colorDim, it.Extra, colorReset)
+			if item.Extra != "" {
+				badge += " " + item.Extra
 			}
-
-			nameDisplay := it.Title
-			if nameDisplay == "" {
-				nameDisplay = it.Key
-			}
-			if isCursor {
-				nameDisplay = fmt.Sprintf("%s%s%s", colorBold, nameDisplay, colorReset)
-			}
-
-			fmt.Printf("%s%s %s %s%s\r\n", clearLine, prefix, box, nameDisplay, badge)
+			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("%s %s %s%s", cursor, box, name, badge), contentWidth))
 		}
-
-		if isScrollable {
-			remaining := numItems - windowEnd
-			if remaining > 0 {
-				fmt.Printf("%s  %s▼ (%d more below)%s\r\n", clearLine, colorDim, remaining, colorReset)
-			} else {
-				fmt.Printf("%s\r\n", clearLine)
-			}
+		for i := visibleCount; i < maxVisible; i++ {
+			fmt.Printf("%s\r\n", clearLine)
 		}
-
+		remaining := numItems - windowEnd
+		if remaining > 0 {
+			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▼ (%d more below)", remaining), contentWidth))
+		} else if windowStart > 0 {
+			fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▲ (%d more above)", windowStart), contentWidth))
+		} else {
+			fmt.Printf("%s\r\n", clearLine)
+		}
+		rendered = true
 	}
 
-	fmt.Print(enterAlternateScreen, hideCursor)
+	fmt.Print(hideCursor)
 	render()
-
 	for {
-		k := readKey(fd)
-		switch k {
+		switch readKey(fd) {
 		case keyInterrupt:
 			fmt.Print("\r\n")
 			return nil, fmt.Errorf("interrupted")
@@ -266,9 +304,9 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			return nil, nil
 		case keyEnter:
 			fmt.Print("\r\n")
-			var chosen []string
-			for i, sel := range selected {
-				if sel {
+			chosen := make([]string, 0, numItems)
+			for i, isSelected := range selected {
+				if isSelected {
 					chosen = append(chosen, items[i].Key)
 				}
 			}
@@ -280,31 +318,25 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			cursorIdx = (cursorIdx + 1) % numItems
 			render()
 		case keyPageDown:
-			cursorIdx += visibleCount - 1
-			if cursorIdx >= numItems {
-				cursorIdx = numItems - 1
-			}
+			cursorIdx = min(cursorIdx+visibleCount-1, numItems-1)
 			render()
 		case keyPageUp:
-			cursorIdx -= visibleCount - 1
-			if cursorIdx < 0 {
-				cursorIdx = 0
-			}
-			render()
-		case keySpace:
-			selected[cursorIdx] = !selected[cursorIdx]
+			cursorIdx = max(cursorIdx-visibleCount+1, 0)
 			render()
 		case keyToggleAll:
-			allChecked := true
-			for _, sel := range selected {
-				if !sel {
-					allChecked = false
+			allSelected := true
+			for _, isSelected := range selected {
+				if !isSelected {
+					allSelected = false
 					break
 				}
 			}
 			for i := range selected {
-				selected[i] = !allChecked
+				selected[i] = !allSelected
 			}
+			render()
+		case keySpace:
+			selected[cursorIdx] = !selected[cursorIdx]
 			render()
 		}
 	}
@@ -330,10 +362,17 @@ type displayRow struct {
 
 func groupedTopIndicator(windowStart int, isScrollable bool) string {
 	if !isScrollable || windowStart == 0 {
-		return clearLine + "\r\n"
+		return ""
 	}
 
-	return fmt.Sprintf("%s  %s▲ (%d more above)%s\r\n", clearLine, colorDim, windowStart, colorReset)
+	return fmt.Sprintf("  ▲ (%d more above)", windowStart)
+}
+
+func redrawPrefix(rendered bool, frameLines int) string {
+	if !rendered {
+		return ""
+	}
+	return fmt.Sprintf("\033[%dA\r", frameLines)
 }
 
 // PromptGroupedMultiSelect displays grouped items with collapsible/batch-selectable group headers.
@@ -353,6 +392,7 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 	if !IsTerminal() {
 		return nil, fmt.Errorf("interactive prompt requires a terminal")
 	}
+	applyPromptStyle()
 
 	var rows []displayRow
 	var allSkillKeys []string
@@ -443,22 +483,19 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 	}
 	defer func() {
 		_ = term.Restore(fd, oldState)
-		fmt.Print(leaveAlternateScreen, showCursor)
+		fmt.Print(showCursor)
 	}()
 
 	cursorIdx := 0
 	windowStart := 0
 
-	termHeight := getTermHeight()
-	maxVisible := termHeight - 6
-	if maxVisible < 10 {
-		maxVisible = 10
-	}
-	if maxVisible > 20 {
-		maxVisible = 20
+	contentWidth, maxVisible, frameLines, ok := terminalPromptViewport()
+	if !ok {
+		return nil, fmt.Errorf("terminal is too small for interactive selection")
 	}
 	visibleCount := 0
 	isScrollable := false
+	rendered := false
 	isCovered := func(row displayRow) bool {
 		return row.dependsOn != "" && selectedMap[row.dependsOn]
 	}
@@ -467,7 +504,7 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 	}
 
 	render := func() {
-		fmt.Print(promptRedraw)
+		fmt.Print(redrawPrefix(rendered, frameLines))
 		visibleCount = totalRows
 		if visibleCount > maxVisible {
 			visibleCount = maxVisible
@@ -488,17 +525,17 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 			windowEnd = totalRows
 		}
 
-		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, title, colorReset)
-		fmt.Printf("%s%sUse ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups, Ctrl+f/b to page.%s\r\n", clearLine, colorDim, colorReset)
-		fmt.Printf("%s%sSpace to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.%s\r\n", clearLine, colorDim, colorReset)
-		fmt.Print(groupedTopIndicator(windowStart, isScrollable))
+		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine("Use ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups, Ctrl+f/b to page.", contentWidth), colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine("Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.", contentWidth), colorReset)
+		fmt.Printf("%s%s\r\n", clearLine, clipLine(groupedTopIndicator(windowStart, isScrollable), contentWidth))
 
 		for i := windowStart; i < windowEnd; i++ {
 			row := rows[i]
 			isCursor := (i == cursorIdx)
 			cursorStr := " "
 			if isCursor {
-				cursorStr = fmt.Sprintf("%s❯%s", colorCyan, colorReset)
+				cursorStr = "❯"
 			}
 
 			if row.rType == rowGroup {
@@ -512,11 +549,11 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 					}
 				}
 
-				box := fmt.Sprintf("%s[ ]%s", colorDim, colorReset)
+				box := "[ ]"
 				if len(row.groupSkills) > 0 && allSel {
-					box = fmt.Sprintf("%s[✔]%s", colorGreen, colorReset)
+					box = "[✓]"
 				} else if selectedCount > 0 {
-					box = fmt.Sprintf("%s[-]%s", colorYellow, colorReset)
+					box = "[-]"
 				}
 
 				countStr := fmt.Sprintf("%d/%d selected", selectedCount, len(row.groupSkills))
@@ -528,51 +565,52 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 				if collapsed[row.groupSource] {
 					disclosure = "▸"
 				}
-				line := fmt.Sprintf("%s %s %s%s %s%s %s(%s)%s", cursorStr, box, colorBold, disclosure, row.groupSource, colorReset, colorDim, countStr, colorReset)
-				fmt.Printf("%s%s\r\n", clearLine, line)
+				line := fmt.Sprintf("%s %s %s %s (%s)", cursorStr, box, disclosure, row.groupSource, countStr)
+				fmt.Printf("%s%s\r\n", clearLine, clipLine(line, contentWidth))
 			} else {
 				isChecked := isSelected(row)
-				box := fmt.Sprintf("%s[ ]%s", colorDim, colorReset)
+				box := "[ ]"
 				if isChecked {
-					box = fmt.Sprintf("%s[✔]%s", colorGreen, colorReset)
+					box = "[✓]"
 				}
 
 				badge := ""
 				if row.installed {
-					badge = fmt.Sprintf(" %s(installed)%s", colorDim, colorReset)
+					badge = " (installed)"
 				}
 				if row.extra != "" {
-					badge += fmt.Sprintf(" %s%s%s", colorDim, row.extra, colorReset)
+					badge += " " + row.extra
 				}
 				if isCovered(row) {
-					badge += fmt.Sprintf(" %s(covered by selected master)%s", colorDim, colorReset)
+					badge += " (covered by selected master)"
 				}
 
 				display := row.skillTitle
 				if display == "" {
 					display = row.skillKey
 				}
-				if isCursor {
-					display = fmt.Sprintf("%s%s%s", colorBold, display, colorReset)
-				}
-
 				line := fmt.Sprintf("%s    %s %s%s", cursorStr, box, display, badge)
-				fmt.Printf("%s%s\r\n", clearLine, line)
+				fmt.Printf("%s%s\r\n", clearLine, clipLine(line, contentWidth))
 			}
+		}
+		for i := visibleCount; i < maxVisible; i++ {
+			fmt.Printf("%s\r\n", clearLine)
 		}
 
 		if isScrollable {
 			remaining := totalRows - windowEnd
 			if remaining > 0 {
-				fmt.Printf("%s  %s▼ (%d more below)%s\r\n", clearLine, colorDim, remaining, colorReset)
+				fmt.Printf("%s%s\r\n", clearLine, clipLine(fmt.Sprintf("  ▼ (%d more below)", remaining), contentWidth))
 			} else {
 				fmt.Printf("%s\r\n", clearLine)
 			}
+		} else {
+			fmt.Printf("%s\r\n", clearLine)
 		}
-
+		rendered = true
 	}
 
-	fmt.Print(enterAlternateScreen, hideCursor)
+	fmt.Print(hideCursor)
 	render()
 
 	for {
@@ -670,6 +708,7 @@ func PromptConfirm(prompt string, defaultYes bool) (bool, error) {
 	if !IsTerminal() {
 		return false, fmt.Errorf("interactive prompt requires a terminal")
 	}
+	applyPromptStyle()
 	suffix := " [y/N]: "
 	if defaultYes {
 		suffix = " [Y/n]: "
@@ -684,4 +723,3 @@ func PromptConfirm(prompt string, defaultYes bool) (bool, error) {
 	}
 	return response == "y" || response == "yes", nil
 }
-

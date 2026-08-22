@@ -18,6 +18,27 @@ func TestSelectOptionData(t *testing.T) {
 	}
 }
 
+func TestDumbTerminalDisablesInteractivePrompt(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	if IsTerminal() {
+		t.Fatal("TERM=dumb must not enter the full-screen prompt")
+	}
+}
+
+func TestChoiceIndex(t *testing.T) {
+	if got, ok := choiceIndex("", 2, 0); !ok || got != 0 {
+		t.Fatalf("default choice = %d, %v", got, ok)
+	}
+	if got, ok := choiceIndex("2", 2, 0); !ok || got != 1 {
+		t.Fatalf("explicit choice = %d, %v", got, ok)
+	}
+	for _, input := range []string{"0", "3", "no"} {
+		if _, ok := choiceIndex(input, 2, 0); ok {
+			t.Fatalf("invalid choice %q accepted", input)
+		}
+	}
+}
+
 func TestGroupedItemsStructure(t *testing.T) {
 	groups := GroupedItems{
 		"owner/repo": {
@@ -55,18 +76,40 @@ func TestParseKeyRecognizesGroupCollapseNavigation(t *testing.T) {
 	}
 }
 
-func TestPromptRedrawStartsAtFixedScreenOrigin(t *testing.T) {
-	const want = "\033[H\033[2J"
+func TestGroupedRedrawOnlyMovesWithinItsFrame(t *testing.T) {
+	if got := redrawPrefix(false, 20); got != "" {
+		t.Fatalf("initial redraw prefix = %q; want empty", got)
+	}
+	if got := redrawPrefix(true, 20); got != "\033[20A\r" {
+		t.Fatalf("subsequent redraw prefix = %q", got)
+	}
+}
 
-	if got := promptRedraw; got != want {
-		t.Fatalf("prompt redraw sequence = %q; want %q", got, want)
+func TestPromptViewportFitsTerminal(t *testing.T) {
+	width, visible, frame, ok := promptViewport(40, 8)
+	if !ok || width != 39 || visible != 2 || frame != 7 {
+		t.Fatalf("viewport = %d, %d, %d, %v", width, visible, frame, ok)
+	}
+	for _, size := range [][2]int{{19, 24}, {80, 6}} {
+		if _, _, _, ok := promptViewport(size[0], size[1]); ok {
+			t.Fatalf("unsafe terminal size %v accepted", size)
+		}
+	}
+}
+
+func TestClipLinePreventsWrapping(t *testing.T) {
+	if got := clipLine("abcdefghijkl", 8); got != "abcdefgh" {
+		t.Fatalf("clipped line = %q", got)
+	}
+	if got := clipLine("技能管理器", 8); got != "技能管理" {
+		t.Fatalf("wide clipped line = %q", got)
 	}
 }
 
 func TestGroupedTopIndicatorUsesOneRowWhenGroupExpandsAtTop(t *testing.T) {
 	for _, isScrollable := range []bool{false, true} {
-		if got := groupedTopIndicator(0, isScrollable); got != clearLine+"\r\n" {
-			t.Fatalf("top indicator for scrollable=%t = %q; want one blank row", isScrollable, got)
+		if got := groupedTopIndicator(0, isScrollable); got != "" {
+			t.Fatalf("top indicator for scrollable=%t = %q; want blank", isScrollable, got)
 		}
 	}
 }

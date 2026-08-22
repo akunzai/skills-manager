@@ -46,9 +46,9 @@ func newUpdateCmd() *cobra.Command {
 
 			if !flagJSON {
 				if flagDryRun {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s🔍 [Dry-Run] Checking and previewing skills update...%s\n\n", colorBold, colorCyan, colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s[Dry-run] Checking and previewing skills update...%s\n\n", colorBold, colorCyan, colorReset)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s🚀 Updating skills from remote repositories...%s\n\n", colorBold, colorCyan, colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sUpdating skills from remote repositories...%s\n\n", colorBold, colorCyan, colorReset)
 				}
 			}
 
@@ -58,14 +58,14 @@ func newUpdateCmd() *cobra.Command {
 				}
 				switch event {
 				case "check_start":
-					fmt.Fprintf(cmd.OutOrStdout(), "  🔍 Checking %v remote repositories in parallel...\n", data["total"])
+					fmt.Fprintf(cmd.OutOrStdout(), "  Checking %v remote repositories in parallel...\n", data["total"])
 				case "check_done":
 					outdated, _ := data["outdated"].(int)
 					upToDate, _ := data["up_to_date"].(int)
 					if outdated == 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %s✔ All %d repositories are already up to date.%s\n\n", colorGreen, upToDate, colorReset)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d repositories are already up to date.%s\n\n", colorGreen, upToDate, colorReset)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %sℹ %d repository update(s) needed, %d already up to date.%s\n\n", colorCyan, outdated, upToDate, colorReset)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d repository update(s) needed, %d already up to date.%s\n\n", colorCyan, outdated, upToDate, colorReset)
 					}
 				case "update_start":
 					idx := data["index"]
@@ -77,26 +77,26 @@ func newUpdateCmd() *cobra.Command {
 						skillsList = strings.Join(sList, ", ")
 					}
 					if data["dry_run"] == true {
-						fmt.Fprintf(cmd.OutOrStdout(), "  [%v/%v] %sℹ [Dry-run]%s Would update %s%s%s (%s)\n", idx, total, colorCyan, colorReset, colorBold, source, colorReset, skillsList)
+						fmt.Fprintf(cmd.OutOrStdout(), "  [%v/%v] %s[Dry-run]%s Would update %s%s%s (%s)\n", idx, total, colorCyan, colorReset, colorBold, source, colorReset, skillsList)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  [%v/%v] 📦 Updating %s%s%s (%s)...\n", idx, total, colorBold, source, colorReset, skillsList)
+						fmt.Fprintf(cmd.OutOrStdout(), "  [%v/%v] Updating %s%s%s (%s)...\n", idx, total, colorBold, source, colorReset, skillsList)
 					}
 				case "skill_restored":
-					fmt.Fprintf(cmd.OutOrStdout(), "      📥 Restored %s%s%s\n", colorBold, data["skill"], colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "      Restored %s%s%s\n", colorBold, data["skill"], colorReset)
 				case "repo_done":
 					shaStr := ""
 					if sha, ok := data["new_sha"].(string); ok && len(sha) >= 7 {
 						shaStr = fmt.Sprintf(" (%s)", sha[:7])
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "      %s✔%s Successfully updated %s%s%s%s\n", colorGreen, colorReset, colorBold, data["source"], colorReset, shaStr)
+					fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, data["source"], colorReset, shaStr, colorReset)
 				case "repo_error":
-					fmt.Fprintf(cmd.OutOrStdout(), "      %s✖ Error updating %s: %s%s\n", colorRed, data["source"], data["error"], colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, data["source"], data["error"], colorReset)
 				case "hooks_start":
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s⚡ Running post-sync hooks...%s\n", colorCyan, colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%sRunning post-sync hooks...%s\n", colorCyan, colorReset)
 				case "hook_done":
-					badge := fmt.Sprintf("%s✔%s", colorGreen, colorReset)
+					badge := fmt.Sprintf("%sOK%s", colorGreen, colorReset)
 					if ok, _ := data["ok"].(bool); !ok {
-						badge = fmt.Sprintf("%s✖%s", colorRed, colorReset)
+						badge = fmt.Sprintf("%sError%s", colorRed, colorReset)
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "  %s [%s] %s\n", badge, data["name"], data["msg"])
 				}
@@ -126,13 +126,13 @@ func newUpdateCmd() *cobra.Command {
 
 			if totalUpdated > 0 {
 				if flagDryRun {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s✨ Dry-run complete: %d skill(s) would be updated.%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sDry run complete: %d skill(s) would be updated.%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s✨ Successfully updated %d skill(s)!%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sUpdated %d skill(s).%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
 				}
 			} else {
 				if len(result.Errors) == 0 {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s✨ Everything is already up to date.%s\n\n", colorBold, colorGreen, colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sEverything is already up to date.%s\n\n", colorBold, colorGreen, colorReset)
 				} else {
 					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sUpdate completed with errors.%s\n\n", colorBold, colorYellow, colorReset)
 				}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -42,7 +43,6 @@ func TestConfigLoadAndSave(t *testing.T) {
 	if len(loaded.Local) != 2 {
 		t.Fatalf("expected 2 local skills, got %d", len(loaded.Local))
 	}
-
 	// 4. Test FindSkillSource
 	cat, src, found := FindSkillSource(loaded, "skill-a")
 	if !found || cat != "remote" || src != "owner/repo" {
@@ -83,6 +83,7 @@ func TestGetConfiguredSkillNames(t *testing.T) {
 
 func TestAddSkillEntryReplacesConflictingSource(t *testing.T) {
 	cfg := DefaultConfig()
+	cfg.Settings.Availability["my-skill"] = AvailabilityOverride{Include: []string{"codex"}}
 
 	// 1. Add local symlink skill
 	AddLocalSymlinkEntry(cfg, "my-skill", "/path/to/my-skill", "local")
@@ -107,5 +108,66 @@ func TestAddSkillEntryReplacesConflictingSource(t *testing.T) {
 	if cfg.Local["my-skill"].Command != "echo hi" {
 		t.Fatal("expected local command entry for my-skill")
 	}
+	if len(cfg.Settings.Availability["my-skill"].Include) != 1 {
+		t.Fatal("replacing a skill source must preserve its availability")
+	}
+	if !RemoveSkillEntry(cfg, "my-skill") {
+		t.Fatal("expected skill removal to succeed")
+	}
+	if _, ok := cfg.Settings.Availability["my-skill"]; ok {
+		t.Fatal("removing a skill must remove its availability override")
+	}
 }
 
+func TestNormalizeAvailabilityCanonicalizesAgents(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Settings.Availability["sample"] = AvailabilityOverride{
+		Include: []string{"claude", "CLAUDE-CODE", "continue"},
+		Exclude: []string{"roo-code", "roo"},
+	}
+	if err := NormalizeAvailability(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Settings.Availability["sample"]
+	if !reflect.DeepEqual(got.Include, []string{"claude-code", "continue"}) {
+		t.Fatalf("include = %#v", got.Include)
+	}
+	if !reflect.DeepEqual(got.Exclude, []string{"roo"}) {
+		t.Fatalf("exclude = %#v", got.Exclude)
+	}
+}
+
+func TestNormalizeAvailabilityRejectsConflicts(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Settings.Availability["sample"] = AvailabilityOverride{
+		Include: []string{"claude"},
+		Exclude: []string{"claude-code"},
+	}
+	if err := NormalizeAvailability(cfg); err == nil {
+		t.Fatal("expected include/exclude conflict")
+	}
+}
+
+func TestAvailabilityMutationsRemainConflictFree(t *testing.T) {
+	cfg := DefaultConfig()
+	if err := ExcludeSkillAgents(cfg, "sample", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	if err := IncludeSkillAgents(cfg, "sample", "claude", "continue"); err != nil {
+		t.Fatal(err)
+	}
+	override := cfg.Settings.Availability["sample"]
+	if !reflect.DeepEqual(override.Include, []string{"claude-code", "continue"}) || len(override.Exclude) != 0 {
+		t.Fatalf("override = %#v", override)
+	}
+	if err := ResetSkillAgents(cfg, "sample", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.Settings.Availability["sample"].Include, []string{"continue"}) {
+		t.Fatalf("reset override = %#v", cfg.Settings.Availability["sample"])
+	}
+	FollowDefaults(cfg, "sample")
+	if _, ok := cfg.Settings.Availability["sample"]; ok {
+		t.Fatal("follow-defaults did not clear override")
+	}
+}

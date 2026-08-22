@@ -30,7 +30,7 @@ func newInitCmd() *cobra.Command {
 				return fmt.Errorf("failed to save config: %w", err)
 			}
 
-			fmt.Printf("%s✔ Initialized skills configuration at %s%s\n", colorGreen, models.ToTildePath(configPath), colorReset)
+			fmt.Printf("%sInitialized skills configuration at %s.%s\n", colorGreen, models.ToTildePath(configPath), colorReset)
 			return nil
 		},
 	}

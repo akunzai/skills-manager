@@ -10,45 +10,11 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
-
-const (
-	colorCyan   = "\033[96m"
-	colorGreen  = "\033[92m"
-	colorYellow = "\033[93m"
-	colorRed    = "\033[91m"
-	colorBold   = "\033[1m"
-	colorDim    = "\033[2m"
-	colorReset  = "\033[0m"
-)
-
-func getSourceIcon(sourceType string) string {
-	if os.Getenv("NO_NERD_FONT") == "1" || os.Getenv("TERM") == "dumb" {
-		switch {
-		case sourceType == "symlink" || sourceType == "local_symlink":
-			return "🔗"
-		case sourceType == "local_command" || sourceType == "command":
-			return "⚙️"
-		case sourceType == "untracked":
-			return "📂"
-		default:
-			return "📦"
-		}
-	}
-	switch {
-	case sourceType == "symlink" || sourceType == "local_symlink":
-		return "\U000f0337" // 󰌷
-	case sourceType == "local_command" || sourceType == "command":
-		return "\U000f018d" // 󰆍
-	case sourceType == "untracked":
-		return "\U000f024b" // 󰉋
-	default:
-		return "\U000f02a4" // 󰊤
-	}
-}
 
 func stringRuneLen(s string) int {
 	return len([]rune(s))
@@ -89,6 +55,8 @@ func newLsCmd() *cobra.Command {
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
 			configPath, skillsDir, _ := GetEffectivePaths()
+			out := cmd.OutOrStdout()
+			style := presentation.For(out)
 
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
@@ -151,15 +119,15 @@ func newLsCmd() *cobra.Command {
 					})
 				}
 				data, _ := json.MarshalIndent(outList, "", "  ")
-				fmt.Fprintln(cmd.OutOrStdout(), string(data))
+				fmt.Fprintln(out, string(data))
 				return nil
 			}
 
 			if len(skills) == 0 {
 				if flagSource != "" || flagAgent != "" {
-					fmt.Printf("%sNo skills found matching the specified filters.%s\n", colorYellow, colorReset)
+					fmt.Fprintf(out, "%sNo skills found matching the specified filters.%s\n", style.Yellow, style.Reset)
 				} else {
-					fmt.Printf("%sNo skills installed or configured.%s\n", colorYellow, colorReset)
+					fmt.Fprintf(out, "%sNo skills installed or configured.%s\n", style.Yellow, style.Reset)
 				}
 				return nil
 			}
@@ -230,27 +198,26 @@ func newLsCmd() *cobra.Command {
 			}
 			totalLineWidth := nameWidth + sourceWidth + agentsWidth + statusWidth + 3
 
-			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "\n%s%sSkills (%d total):%s\n\n", colorBold, colorCyan, len(skills), colorReset)
-			fmt.Fprintf(out, "%s%s %s %s %s%s\n", colorBold, padRight("NAME", nameWidth), padRight("SOURCE", sourceWidth), padRight("AGENTS", agentsWidth), padRight("STATUS", statusWidth), colorReset)
-			fmt.Fprintln(out, strings.Repeat("─", totalLineWidth))
+			fmt.Fprintf(out, "\n%s%sSkills (%d total):%s\n\n", style.Bold, style.Cyan, len(skills), style.Reset)
+			fmt.Fprintf(out, "%s%s %s %s %s%s\n", style.Bold, padRight("NAME", nameWidth), padRight("SOURCE", sourceWidth), padRight("AGENTS", agentsWidth), padRight("STATUS", statusWidth), style.Reset)
+			fmt.Fprintln(out, strings.Repeat(style.Rule, totalLineWidth))
 
 			for _, s := range skills {
 				var statusDisplay string
 				if s.IsInstalled {
 					if s.IsValidSkill {
-						statusDisplay = fmt.Sprintf("%s%s%s", colorGreen, padRight("Installed", statusWidth), colorReset)
+						statusDisplay = fmt.Sprintf("%s%s%s", style.Green, padRight("Installed", statusWidth), style.Reset)
 					} else {
-						statusDisplay = fmt.Sprintf("%s%s%s", colorRed, padRight("Invalid (No SKILL.md)", statusWidth), colorReset)
+						statusDisplay = fmt.Sprintf("%s%s%s", style.Red, padRight("Invalid (No SKILL.md)", statusWidth), style.Reset)
 					}
 				} else {
-					statusDisplay = fmt.Sprintf("%s%s%s", colorYellow, padRight("Missing", statusWidth), colorReset)
+					statusDisplay = fmt.Sprintf("%s%s%s", style.Yellow, padRight("Missing", statusWidth), style.Reset)
 				}
 
-				icon := getSourceIcon(s.SourceType)
+				icon := style.SourceIcon(s.SourceType)
 				var rawSource string
 				if s.SourceType == "untracked" {
-					rawSource = fmt.Sprintf("%s [untracked]", icon)
+					rawSource = icon
 				} else if strings.HasPrefix(s.SourceType, "local_symlink") || s.SourceType == "symlink" {
 					rawSource = fmt.Sprintf("%s %s", icon, models.ToTildePath(s.Source))
 				} else if s.SourceType == "local_command" || s.SourceType == "command" {
@@ -307,16 +274,16 @@ func newLsCmd() *cobra.Command {
 				if len(targetList) > 0 {
 					agentsDisplay = agentsCol
 				} else {
-					agentsDisplay = fmt.Sprintf("%s%s%s", colorDim, agentsCol, colorReset)
+					agentsDisplay = fmt.Sprintf("%s%s%s", style.Dim, agentsCol, style.Reset)
 				}
 
 				nameCol := padRight(truncateWithEllipsis(s.Name, nameWidth), nameWidth)
-				nameDisplay := fmt.Sprintf("%s%s%s", colorBold, nameCol, colorReset)
+				nameDisplay := fmt.Sprintf("%s%s%s", style.Bold, nameCol, style.Reset)
 
 				fmt.Fprintf(out, "%s %s %s %s\n", nameDisplay, sourceCol, agentsDisplay, statusDisplay)
 			}
 
-			fmt.Fprintln(out, strings.Repeat("─", totalLineWidth)+"\n")
+			fmt.Fprintln(out, strings.Repeat(style.Rule, totalLineWidth)+"\n")
 			return nil
 		},
 	}

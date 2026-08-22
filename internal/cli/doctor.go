@@ -31,15 +31,15 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(out, "\n%s%s🩺 Diagnosing Skills Health...%s\n\n", colorBold, colorCyan, colorReset)
+			fmt.Fprintf(out, "\n%s%sDiagnosing skills health...%s\n\n", colorBold, colorCyan, colorReset)
 			issuesFound := 0
 
 			// 1. Check master skills dir
 			if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
-				fmt.Fprintf(out, "%s✖ Master skills directory does not exist: %s%s\n", colorRed, models.ToTildePath(skillsDir), colorReset)
+				fmt.Fprintf(out, "%sMissing master skills directory: %s%s\n", colorRed, models.ToTildePath(skillsDir), colorReset)
 				issuesFound++
 			} else {
-				fmt.Fprintf(out, "%s✔%s Master skills directory: %s\n", colorGreen, colorReset, models.ToTildePath(skillsDir))
+				fmt.Fprintf(out, "%sMaster skills directory: %s%s\n", colorGreen, models.ToTildePath(skillsDir), colorReset)
 			}
 
 			// 2. Check broken symlinks in configured agent directories
@@ -61,6 +61,7 @@ func newDoctorCmd() *cobra.Command {
 				}
 
 				var brokenInAgent []string
+				var unmanagedBrokenInAgent []string
 				var physicalInAgent []string
 
 				entries, err := os.ReadDir(agentDir)
@@ -79,50 +80,46 @@ func newDoctorCmd() *cobra.Command {
 
 					if fi.Mode()&os.ModeSymlink != 0 {
 						if _, err := os.Stat(fullP); err != nil {
-							brokenInAgent = append(brokenInAgent, name)
+							if engine.IsManagedSkillLink(fullP, name, skillsDir) {
+								brokenInAgent = append(brokenInAgent, name)
+							} else {
+								unmanagedBrokenInAgent = append(unmanagedBrokenInAgent, name)
+							}
 						}
-					} else if fi.IsDir() && !strings.HasPrefix(name, ".") {
+					} else if fi.IsDir() && !strings.HasPrefix(name, ".") && !engine.IsManagedSkillCopy(fullP, name, skillsDir) {
 						physicalInAgent = append(physicalInAgent, name)
 					}
 				}
 
 				if len(brokenInAgent) > 0 {
-					fmt.Fprintf(out, "  %s✖ [%s] Broken symlinks:%s %s\n", colorRed, agentName, colorReset, strings.Join(brokenInAgent, ", "))
+					fmt.Fprintf(out, "  %s[%s] Broken symlinks:%s %s\n", colorRed, agentName, colorReset, strings.Join(brokenInAgent, ", "))
 					if flagFix {
 						// Only what --fix could not repair still counts as an issue.
 						for _, b := range brokenInAgent {
 							if err := os.Remove(filepath.Join(agentDir, b)); err != nil {
 								issuesFound++
-								fmt.Fprintf(out, "    %s✖ Failed to remove broken symlink %s: %s%s\n", colorRed, b, err, colorReset)
+								fmt.Fprintf(out, "    %sFailed to remove broken symlink %s: %s%s\n", colorRed, b, err, colorReset)
 								continue
 							}
-							fmt.Fprintf(out, "    %s✔ Fixed: Removed broken symlink %s%s\n", colorGreen, b, colorReset)
+							fmt.Fprintf(out, "    %sFixed: Removed broken symlink %s.%s\n", colorGreen, b, colorReset)
 						}
 					} else {
 						issuesFound += len(brokenInAgent)
 					}
 				} else {
-					fmt.Fprintf(out, "  %s✔%s [%s] Symlinks healthy (%s)\n", colorGreen, colorReset, agentName, models.ToTildePath(agentDir))
+					fmt.Fprintf(out, "  %s[%s] Symlinks healthy (%s).%s\n", colorGreen, agentName, models.ToTildePath(agentDir), colorReset)
+				}
+				if len(unmanagedBrokenInAgent) > 0 {
+					issuesFound += len(unmanagedBrokenInAgent)
+					fmt.Fprintf(out, "  %sWarning: [%s] Unmanaged broken symlinks were left unchanged:%s %s\n", colorYellow, agentName, colorReset, strings.Join(unmanagedBrokenInAgent, ", "))
 				}
 
 				if len(physicalInAgent) > 0 {
-					fmt.Fprintf(out, "  %s⚠️  [%s] Physical directories found instead of symlinks:%s %s\n", colorYellow, agentName, colorReset, strings.Join(physicalInAgent, ", "))
+					fmt.Fprintf(out, "  %sWarning: [%s] Physical directories found instead of symlinks:%s %s\n", colorYellow, agentName, colorReset, strings.Join(physicalInAgent, ", "))
 					if flagFix {
-						// Only what --fix could not repair still counts as an issue.
 						for _, pName := range physicalInAgent {
-							masterSkillPath := filepath.Join(skillsDir, pName)
-							if _, err := os.Stat(masterSkillPath); err != nil {
-								issuesFound++
-								fmt.Fprintf(out, "    %s✖ Cannot convert %s: no master skill at %s%s\n", colorRed, pName, models.ToTildePath(masterSkillPath), colorReset)
-								continue
-							}
-							_ = os.RemoveAll(filepath.Join(agentDir, pName))
-							if _, err := engine.EnsureAgentSymlink(pName, agentName, skillsDir); err != nil {
-								issuesFound++
-								fmt.Fprintf(out, "    %s✖ Failed to convert %s in %s: %s%s\n", colorRed, pName, agentName, err, colorReset)
-								continue
-							}
-							fmt.Fprintf(out, "    %s✔ Fixed: Converted %s in %s to symlink%s\n", colorGreen, pName, agentName, colorReset)
+							issuesFound++
+							fmt.Fprintf(out, "    %sCannot replace unmanaged directory %s in %s.%s\n", colorRed, pName, agentName, colorReset)
 						}
 					} else {
 						issuesFound += len(physicalInAgent)
@@ -166,15 +163,15 @@ func newDoctorCmd() *cobra.Command {
 				if len(stale) == 0 {
 					continue
 				}
-				fmt.Fprintf(out, "  %s✖ [%s] Stale links to removed skills:%s %s\n", colorRed, agentName, colorReset, strings.Join(stale, ", "))
+				fmt.Fprintf(out, "  %s[%s] Stale links to removed skills:%s %s\n", colorRed, agentName, colorReset, strings.Join(stale, ", "))
 				if flagFix {
 					for _, name := range stale {
 						if !engine.RemoveManagedSkillLink(filepath.Join(agentDir, name), name, skillsDir) {
 							issuesFound++
-							fmt.Fprintf(out, "    %s✖ Failed to remove stale link %s%s\n", colorRed, name, colorReset)
+							fmt.Fprintf(out, "    %sFailed to remove stale link %s%s\n", colorRed, name, colorReset)
 							continue
 						}
-						fmt.Fprintf(out, "    %s✔ Fixed: Removed stale link %s%s\n", colorGreen, name, colorReset)
+						fmt.Fprintf(out, "    %sFixed: Removed stale link %s.%s\n", colorGreen, name, colorReset)
 					}
 				} else {
 					issuesFound += len(stale)
@@ -192,17 +189,17 @@ func newDoctorCmd() *cobra.Command {
 					for _, leftover := range leftoverEmpty {
 						if err := engine.RemoveEmptyAgentDir(leftover.Dir, pruneBoundary); err != nil {
 							issuesFound++
-							fmt.Fprintf(out, "  %s✖ Failed to remove leftover %s dir %s: %s%s\n", colorRed, leftover.Name, models.ToTildePath(leftover.Dir), err, colorReset)
+							fmt.Fprintf(out, "  %sFailed to remove leftover %s dir %s: %s%s\n", colorRed, leftover.Name, models.ToTildePath(leftover.Dir), err, colorReset)
 							continue
 						}
 						removed++
 					}
 					if removed > 0 {
-						fmt.Fprintf(out, "  %s✔%s Removed %d leftover empty agent directories: %s\n", colorGreen, colorReset, removed, strings.Join(names, ", "))
+						fmt.Fprintf(out, "  %sRemoved %d leftover empty agent directories: %s.%s\n", colorGreen, removed, strings.Join(names, ", "), colorReset)
 					}
 				} else {
 					issuesFound += len(leftoverEmpty)
-					fmt.Fprintf(out, "  %s⚠️  %d leftover empty agent directories (not in defaultAgents):%s %s\n", colorYellow, len(leftoverEmpty), colorReset, strings.Join(names, ", "))
+					fmt.Fprintf(out, "  %sWarning: %d leftover empty agent directories (not in defaultAgents):%s %s\n", colorYellow, len(leftoverEmpty), colorReset, strings.Join(names, ", "))
 				}
 			}
 
@@ -220,23 +217,50 @@ func newDoctorCmd() *cobra.Command {
 				} else if !s.IsValidSkill {
 					invalid = append(invalid, s.Name)
 				}
+				if !s.IsInstalled || s.SourceType == "untracked" {
+					continue
+				}
+				source := s.Source
+				if strings.HasPrefix(s.SourceType, "local_") {
+					source = "local"
+				}
+				missingLinks, unexpectedLinks := engine.AgentLinkDrift(s.Name, source, cfg, skillsDir)
+				if len(missingLinks) == 0 && len(unexpectedLinks) == 0 {
+					continue
+				}
+				if flagFix {
+					if err := engine.ReconcileAgentSymlinks(s.Name, source, cfg, skillsDir); err != nil {
+						issuesFound++
+						fmt.Fprintf(out, "\n%sFailed to reconcile availability for %s: %s%s\n", colorRed, s.Name, err, colorReset)
+					} else {
+						fmt.Fprintf(out, "\n%sFixed availability drift for %s.%s\n", colorGreen, s.Name, colorReset)
+					}
+					continue
+				}
+				issuesFound += len(missingLinks) + len(unexpectedLinks)
+				if len(missingLinks) > 0 {
+					fmt.Fprintf(out, "\n%sAvailability drift for %s; missing links:%s %s\n", colorYellow, s.Name, colorReset, strings.Join(missingLinks, ", "))
+				}
+				if len(unexpectedLinks) > 0 {
+					fmt.Fprintf(out, "\n%sAvailability drift for %s; unexpected links:%s %s\n", colorYellow, s.Name, colorReset, strings.Join(unexpectedLinks, ", "))
+				}
 			}
 
 			if len(missing) > 0 {
-				fmt.Fprintf(out, "\n%s⚠️  Configured but missing skills:%s %s\n", colorYellow, colorReset, strings.Join(missing, ", "))
+				fmt.Fprintf(out, "\n%sWarning: Configured but missing skills:%s %s\n", colorYellow, colorReset, strings.Join(missing, ", "))
 				issuesFound += len(missing)
 			}
 			if len(untracked) > 0 {
-				fmt.Fprintf(out, "\n%s⚠️  Untracked skills in %s:%s %s\n", colorYellow, models.ToTildePath(skillsDir), colorReset, strings.Join(untracked, ", "))
+				fmt.Fprintf(out, "\n%sWarning: Untracked skills in %s:%s %s\n", colorYellow, models.ToTildePath(skillsDir), colorReset, strings.Join(untracked, ", "))
 			}
 			if len(invalid) > 0 {
-				fmt.Fprintf(out, "\n%s✖ Installed folders missing SKILL.md:%s %s\n", colorRed, colorReset, strings.Join(invalid, ", "))
+				fmt.Fprintf(out, "\n%sInstalled folders missing SKILL.md:%s %s\n", colorRed, colorReset, strings.Join(invalid, ", "))
 				issuesFound += len(invalid)
 			}
 
-			fmt.Fprintln(out, "\n"+strings.Repeat("─", 60))
+			fmt.Fprintln(out, "\n"+strings.Repeat(tableRule, 60))
 			if issuesFound == 0 {
-				fmt.Fprintf(out, "%s%s🎉 Everything is in top condition! No issues detected.%s\n\n", colorBold, colorGreen, colorReset)
+				fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n\n", colorBold, colorGreen, colorReset)
 				return nil
 			}
 
