@@ -49,9 +49,15 @@ type SelectOption struct {
 
 type GroupedItems map[string][]SelectOption
 
-func singleSelectInstructions() [2]string {
+func singleSelectInstructions(isScrollable bool) [2]string {
+	if isScrollable {
+		return [2]string{
+			"Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page.",
+			"Enter to confirm, Esc/q to cancel.",
+		}
+	}
 	return [2]string{
-		"Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page.",
+		"Use ↑/↓ (or k/j) to navigate.",
 		"Enter to confirm, Esc/q to cancel.",
 	}
 }
@@ -89,12 +95,13 @@ func PromptSelect(title string, options []SelectOption, defaultIndex int) (strin
 		return "", fmt.Errorf("terminal is too small for interactive selection")
 	}
 	visibleCount := min(numItems, maxVisible)
+	isScrollable := numItems > maxVisible
 	rendered := false
 	render := func() {
 		fmt.Print(redrawPrefix(rendered, frameLines))
 		newWindowStart, _, windowEnd, _ := viewportWindow(cursorIdx, windowStart, numItems, maxVisible)
 		windowStart = newWindowStart
-		instructions := singleSelectInstructions()
+		instructions := singleSelectInstructions(isScrollable)
 		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
 		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
 		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[1], contentWidth), colorReset)
@@ -153,11 +160,15 @@ func PromptSelect(title string, options []SelectOption, defaultIndex int) (strin
 			cursorIdx = viewportMoveDown(cursorIdx, numItems)
 			render()
 		case keyPageDown:
-			cursorIdx = viewportPageDown(cursorIdx, visibleCount, numItems)
-			render()
+			if isScrollable {
+				cursorIdx = viewportPageDown(cursorIdx, visibleCount, numItems)
+				render()
+			}
 		case keyPageUp:
-			cursorIdx = viewportPageUp(cursorIdx, visibleCount)
-			render()
+			if isScrollable {
+				cursorIdx = viewportPageUp(cursorIdx, visibleCount)
+				render()
+			}
 		}
 	}
 }
@@ -271,9 +282,15 @@ func clipLine(text string, width int) string {
 	return runewidth.Truncate(text, width, "")
 }
 
-func multiSelectInstructions() [2]string {
+func multiSelectInstructions(isScrollable bool) [2]string {
+	if isScrollable {
+		return [2]string{
+			"Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page.",
+			"Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.",
+		}
+	}
 	return [2]string{
-		"Use ↑/↓ (or k/j) to navigate, Ctrl+f/b to page.",
+		"Use ↑/↓ (or k/j) to navigate.",
 		"Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.",
 	}
 }
@@ -313,12 +330,13 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 		return nil, fmt.Errorf("terminal is too small for interactive selection")
 	}
 	visibleCount := min(numItems, maxVisible)
+	isScrollable := numItems > maxVisible
 	rendered := false
 	render := func() {
 		fmt.Print(redrawPrefix(rendered, frameLines))
 		newWindowStart, _, windowEnd, _ := viewportWindow(cursorIdx, windowStart, numItems, maxVisible)
 		windowStart = newWindowStart
-		instructions := multiSelectInstructions()
+		instructions := multiSelectInstructions(isScrollable)
 		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
 		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
 		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[1], contentWidth), colorReset)
@@ -386,11 +404,15 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 			cursorIdx = viewportMoveDown(cursorIdx, numItems)
 			render()
 		case keyPageDown:
-			cursorIdx = viewportPageDown(cursorIdx, visibleCount, numItems)
-			render()
+			if isScrollable {
+				cursorIdx = viewportPageDown(cursorIdx, visibleCount, numItems)
+				render()
+			}
 		case keyPageUp:
-			cursorIdx = viewportPageUp(cursorIdx, visibleCount)
-			render()
+			if isScrollable {
+				cursorIdx = viewportPageUp(cursorIdx, visibleCount)
+				render()
+			}
 		case keyToggleAll:
 			allSelected := true
 			for _, isSelected := range selected {
@@ -426,6 +448,19 @@ type displayRow struct {
 	extra       string
 	dependsOn   string
 	groupSkills []string
+}
+
+func groupedMultiSelectInstructions(isScrollable bool) [2]string {
+	if isScrollable {
+		return [2]string{
+			"Use ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups, Ctrl+f/b to page.",
+			"Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.",
+		}
+	}
+	return [2]string{
+		"Use ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups.",
+		"Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.",
+	}
 }
 
 func groupedTopIndicator(windowStart int, isScrollable bool) string {
@@ -577,9 +612,10 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 		newWindowStart, visibleCount, windowEnd, isScrollable = viewportWindow(cursorIdx, windowStart, totalRows, maxVisible)
 		windowStart = newWindowStart
 
+		instructions := groupedMultiSelectInstructions(isScrollable)
 		fmt.Printf("%s%s%s%s\r\n", colorBold, colorCyan, clipLine(title, contentWidth), colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine("Use ↑/↓ (or k/j) to navigate, ←/→ to collapse/expand groups, Ctrl+f/b to page.", contentWidth), colorReset)
-		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine("Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel.", contentWidth), colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[0], contentWidth), colorReset)
+		fmt.Printf("%s%s%s%s\r\n", clearLine, colorDim, clipLine(instructions[1], contentWidth), colorReset)
 		fmt.Printf("%s%s\r\n", clearLine, clipLine(groupedTopIndicator(windowStart, isScrollable), contentWidth))
 
 		for i := windowStart; i < windowEnd; i++ {
@@ -690,11 +726,15 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 			cursorIdx = viewportMoveDown(cursorIdx, totalRows)
 			render()
 		case keyPageDown:
-			cursorIdx = viewportPageDown(cursorIdx, visibleCount, totalRows)
-			render()
+			if isScrollable {
+				cursorIdx = viewportPageDown(cursorIdx, visibleCount, totalRows)
+				render()
+			}
 		case keyPageUp:
-			cursorIdx = viewportPageUp(cursorIdx, visibleCount)
-			render()
+			if isScrollable {
+				cursorIdx = viewportPageUp(cursorIdx, visibleCount)
+				render()
+			}
 		case keyLeft:
 			row := rows[cursorIdx]
 			if !collapsed[row.groupSource] {
