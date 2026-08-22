@@ -243,6 +243,33 @@ func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 	}
 }
 
+func TestCLISyncPrintsCommandFailed(t *testing.T) {
+	resetRootCmdFlags()
+	project := t.TempDir()
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalCommandEntry(cfg, "sample", "exit 1", "", "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("sync: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Failed to run installer for sample") {
+		t.Fatalf("missing command failure output:\n%s", out)
+	}
+}
+
 func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	resetRootCmdFlags()
 	project := t.TempDir()
@@ -714,18 +741,8 @@ func TestCLIConfigSetGetAndClear(t *testing.T) {
 		t.Fatalf("config get output = %q", out)
 	}
 
-	if _, err := runCLI(t, "config", "set", "excludeAgents", "continue", "--config", configFile, "--skills-dir", skillsDir); err != nil {
-		t.Fatalf("config set excludeAgents: %v", err)
-	}
-	if _, err := runCLI(t, "config", "set", "excludeAgents", "--config", configFile, "--skills-dir", skillsDir); err != nil {
-		t.Fatalf("config clear excludeAgents: %v", err)
-	}
-	cfg, err := config.LoadConfig(configFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.Settings.ExcludeAgents) != 0 {
-		t.Fatalf("excludeAgents = %v, want empty", cfg.Settings.ExcludeAgents)
+	if _, err := runCLI(t, "config", "set", "excludeAgents", "continue", "--config", configFile, "--skills-dir", skillsDir); err == nil {
+		t.Fatal("expected unknown config key excludeAgents")
 	}
 }
 

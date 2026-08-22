@@ -56,19 +56,6 @@ func newSyncCmd() *cobra.Command {
 				configuredSkills[name] = struct{}{}
 			}
 
-			// 3. Post-hooks
-			if len(cfg.PostHooks) > 0 {
-				fmt.Fprintf(out, "\n%sRunning post-sync hooks...%s\n", colorCyan, colorReset)
-				hookResults := engine.ExecutePostHooks(cfg.PostHooks, flagDryRun)
-				for _, h := range hookResults {
-					badge := fmt.Sprintf("%sOK%s", colorGreen, colorReset)
-					if !h.Success {
-						badge = fmt.Sprintf("%sError%s", colorRed, colorReset)
-					}
-					fmt.Fprintf(out, "  %s [%s] %s\n", badge, h.Name, h.Message)
-				}
-			}
-
 			fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, len(configuredSkills), colorReset)
 			return nil
 		},
@@ -124,6 +111,8 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 			fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", ev.Target)
 		case engine.SyncCommandStart:
 			fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
+		case engine.SyncCommandFailed:
+			fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		}
 	}
 }

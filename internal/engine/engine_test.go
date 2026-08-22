@@ -118,33 +118,6 @@ func TestCopySkillFolder(t *testing.T) {
 	}
 }
 
-func TestPostHooks(t *testing.T) {
-	hooks := []config.PostHook{
-		{
-			Name:        "test-success",
-			Description: "Echo test",
-			Run:         "echo hook_ran",
-		},
-		{
-			Name:        "test-skipped",
-			Description: "Skipped hook",
-			Condition:   "false",
-			Run:         "echo should_not_run",
-		},
-	}
-
-	results := ExecutePostHooks(hooks, false)
-	if len(results) != 2 {
-		t.Fatalf("expected 2 hook results, got %d", len(results))
-	}
-	if !results[0].Success {
-		t.Errorf("expected first hook to succeed: %s", results[0].Message)
-	}
-	if !results[1].Success {
-		t.Errorf("expected skipped hook to report success status")
-	}
-}
-
 func TestScanAllSkills(t *testing.T) {
 	tmpSkillsDir := t.TempDir()
 	cfg := config.DefaultConfig()
@@ -217,25 +190,23 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 	}
 }
 
-func TestTargetAgentsApplyPerSkillAvailability(t *testing.T) {
+func TestDesiredAgentsApplyPerSkillAvailability(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	cfg.Settings.ExcludeAgents = []string{"continue"}
-	cfg.Settings.AgentExclusions = map[string][]string{"continue": {"sample"}}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{
 		Include: []string{"continue"},
 		Exclude: []string{"claude"},
 	}
 
-	got := GetTargetAgentsForSkill("sample", "owner/repo", cfg, skillsDir)
+	got := DesiredAgents("sample", cfg, skillsDir)
 	if !reflect.DeepEqual(got, []string{"continue"}) {
 		t.Fatalf("target agents = %#v, want continue", got)
 	}
 }
 
-func TestReconcileAgentSymlinksMatchesDeclaredAvailability(t *testing.T) {
+func TestApplyAvailabilityMatchesDeclaredAvailability(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	master := filepath.Join(skillsDir, "sample")
@@ -247,7 +218,7 @@ func TestReconcileAgentSymlinksMatchesDeclaredAvailability(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
-	if err := ReconcileAgentSymlinks("sample", "owner/repo", cfg, skillsDir); err != nil {
+	if err := ApplyAvailability("sample", cfg, skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
@@ -263,11 +234,11 @@ func TestReconcileAgentSymlinksMatchesDeclaredAvailability(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	missing, unexpected := AgentLinkDrift("sample", "owner/repo", cfg, skillsDir)
+	missing, unexpected := AvailabilityDrift("sample", cfg, skillsDir)
 	if len(missing) != 0 || !reflect.DeepEqual(unexpected, []string{"claude-code"}) {
 		t.Fatalf("drift = missing %#v, unexpected %#v", missing, unexpected)
 	}
-	if err := ReconcileAgentSymlinks("sample", "owner/repo", cfg, skillsDir); err != nil {
+	if err := ApplyAvailability("sample", cfg, skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
@@ -281,7 +252,7 @@ func TestReconcileAgentSymlinksMatchesDeclaredAvailability(t *testing.T) {
 	}
 }
 
-func TestReconcileAgentSymlinksPreservesUnmanagedTarget(t *testing.T) {
+func TestApplyAvailabilityPreservesUnmanagedTarget(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	master := filepath.Join(skillsDir, "sample")
@@ -303,7 +274,7 @@ func TestReconcileAgentSymlinksPreservesUnmanagedTarget(t *testing.T) {
 	if err := os.Symlink(unmanagedTarget, unmanaged); err != nil {
 		t.Fatal(err)
 	}
-	if err := ReconcileAgentSymlinks("sample", "owner/repo", config.DefaultConfig(), skillsDir); err == nil {
+	if err := ApplyAvailability("sample", config.DefaultConfig(), skillsDir); err == nil {
 		t.Fatal("expected unmanaged target conflict")
 	}
 	if _, err := os.Stat(marker); err != nil {
@@ -311,7 +282,7 @@ func TestReconcileAgentSymlinksPreservesUnmanagedTarget(t *testing.T) {
 	}
 }
 
-func TestReconcileAgentSymlinksRemovesManagedCopy(t *testing.T) {
+func TestApplyAvailabilityRemovesManagedCopy(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	master := filepath.Join(skillsDir, "sample")
@@ -339,7 +310,7 @@ func TestReconcileAgentSymlinksRemovesManagedCopy(t *testing.T) {
 		t.Fatal("copy marker was not recognized")
 	}
 	cfg := config.DefaultConfig()
-	if err := ReconcileAgentSymlinks("sample", "owner/repo", cfg, skillsDir); err != nil {
+	if err := ApplyAvailability("sample", cfg, skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(filepath.Join(copyPath, "SKILL.md"))
@@ -347,7 +318,7 @@ func TestReconcileAgentSymlinksRemovesManagedCopy(t *testing.T) {
 		t.Fatalf("managed copy was not refreshed: content=%q err=%v", content, err)
 	}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	if err := ReconcileAgentSymlinks("sample", "owner/repo", cfg, skillsDir); err != nil {
+	if err := ApplyAvailability("sample", cfg, skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
@@ -481,7 +452,7 @@ func TestUpdateRemoteSkillsDryRun(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo1", "skill-1", "skills/skill-1", "github", "")
 	config.AddRemoteSkillEntry(cfg, "github:owner/repo2", "skill-2", "skills/skill-2", "github", "")
 
-	result, err := UpdateRemoteSkills(cfg, []string{"skill-1", "skill-2"}, false, true, skillsDir, cacheDir, false, nil)
+	result, err := UpdateRemoteSkills(cfg, []string{"skill-1", "skill-2"}, false, true, skillsDir, cacheDir, nil)
 	if err != nil {
 		t.Fatalf("UpdateRemoteSkills dry-run failed: %v", err)
 	}
@@ -539,7 +510,7 @@ func TestUpdateRemoteSkillsReconcilesAvailabilityWhenUpToDate(t *testing.T) {
 		}
 	}
 
-	result, err := UpdateRemoteSkills(cfg, nil, false, false, skillsDir, cacheDir, false, nil)
+	result, err := UpdateRemoteSkills(cfg, nil, false, false, skillsDir, cacheDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,6 +524,80 @@ func TestUpdateRemoteSkillsReconcilesAvailabilityWhenUpToDate(t *testing.T) {
 	}
 	if !IsManagedSkillLink(continueLink, "sample", skillsDir) {
 		t.Fatal("declared Continue link was removed")
+	}
+}
+
+func TestUpdateRemoteSkillsDryRunReportsAvailabilityDrift(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
+
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := MaterializeRemoteSkill("sample", "sample", filepath.Join(cacheDir, "owner", "repo"), skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range []string{"claude", "continue"} {
+		if _, err := EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var drifted []string
+	_, err := UpdateRemoteSkills(cfg, nil, false, true, skillsDir, cacheDir, func(event string, data map[string]interface{}) {
+		if event != "would_drift" {
+			return
+		}
+		skill, _ := data["skill"].(string)
+		unexpected, _ := data["unexpected"].([]string)
+		if skill == "sample" && len(unexpected) > 0 {
+			drifted = unexpected
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(drifted, []string{"claude-code"}) {
+		t.Fatalf("dry-run drift unexpected = %#v", drifted)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); err != nil {
+		t.Fatal("dry-run must not apply availability")
+	}
+}
+
+func TestUpdateRemoteSkillsApplyAvailabilityFailsClosed(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := MaterializeRemoteSkill("sample", "sample", filepath.Join(cacheDir, "owner", "repo"), skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	unmanaged := filepath.Join(project, ".claude", "skills", "sample")
+	if err := os.MkdirAll(unmanaged, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := UpdateRemoteSkills(cfg, nil, false, false, skillsDir, cacheDir, nil)
+	if err == nil {
+		t.Fatal("expected availability apply failure to fail the update")
 	}
 }
 

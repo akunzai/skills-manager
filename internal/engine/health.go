@@ -147,7 +147,7 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 			plan.Invalid = append(plan.Invalid, s.Name)
 		}
 		source := availabilitySource(s)
-		missing, unexpected := AgentLinkDrift(s.Name, source, cfg, skillsDir)
+		missing, unexpected := AvailabilityDrift(s.Name, cfg, skillsDir)
 		if len(missing) == 0 && len(unexpected) == 0 {
 			continue
 		}
@@ -229,7 +229,7 @@ func ApplyHealthPlan(plan HealthPlan, cfg *config.Config, skillsDir string) Heal
 		result.RemovedLeftover = append(result.RemovedLeftover, leftover)
 	}
 	for _, d := range plan.Drift {
-		if err := ReconcileAgentSymlinks(d.Skill, d.Source, cfg, skillsDir); err != nil {
+		if err := ApplyAvailability(d.Skill, cfg, skillsDir); err != nil {
 			result.FailedDrift = append(result.FailedDrift, HealthFix{Name: d.Skill, Err: err})
 			continue
 		}

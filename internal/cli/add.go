@@ -459,7 +459,7 @@ func newAddCmd() *cobra.Command {
 	return cmd
 }
 
-func promptAddAvailability(cfg *config.Config, skills map[string]string, source, skillsDir string, skip bool, explicitAgents []string) error {
+func promptAddAvailability(cfg *config.Config, skills map[string]string, _, skillsDir string, skip bool, explicitAgents []string) error {
 	if skip || len(explicitAgents) > 0 || !tui.IsTerminal() {
 		return nil
 	}
@@ -493,11 +493,11 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, source,
 	sort.Strings(skillNames)
 	firstSkill := skillNames[0]
 	baseline := make(map[string]struct{})
-	for _, agent := range engine.GetTargetAgentsForSkill(firstSkill, source, cfg, skillsDir) {
+	for _, agent := range engine.DesiredAgents(firstSkill, cfg, skillsDir) {
 		baseline[agent] = struct{}{}
 	}
 	for _, skill := range skillNames[1:] {
-		other := engine.GetTargetAgentsForSkill(skill, source, cfg, skillsDir)
+		other := engine.DesiredAgents(skill, cfg, skillsDir)
 		if !sameAgentSelection(baseline, other) {
 			return fmt.Errorf("selected skills have different availability; configure them individually with skills agents")
 		}
@@ -521,7 +521,7 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, source,
 	for skill := range skills {
 		config.FollowDefaults(cfg, skill)
 		skillBaseline := make(map[string]struct{})
-		for _, agent := range engine.GetTargetAgentsForSkill(skill, source, cfg, skillsDir) {
+		for _, agent := range engine.DesiredAgents(skill, cfg, skillsDir) {
 			skillBaseline[agent] = struct{}{}
 		}
 		var include, exclude []string

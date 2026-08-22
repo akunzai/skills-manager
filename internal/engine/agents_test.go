@@ -27,17 +27,17 @@ func TestConfiguredKnownAgentsSelectsDefaultAgentsOnly(t *testing.T) {
 	}
 }
 
-func TestConfiguredKnownAgentsHonorsExcludeAgents(t *testing.T) {
+func TestConfiguredKnownAgentsHonorsAvailabilityInclude(t *testing.T) {
 	proj := t.TempDir()
 	skillsDir := filepath.Join(proj, ".agents", "skills")
 
 	cfg := config.DefaultConfig()
-	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
-	cfg.Settings.ExcludeAgents = []string{"continue"}
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Include: []string{"continue"}}
 
 	got := ConfiguredKnownAgents(cfg, skillsDir)
-	if _, ok := got["continue"]; ok {
-		t.Fatal("excluded continue should not be configured")
+	if _, ok := got["continue"]; !ok {
+		t.Fatal("included continue should be configured")
 	}
 	if _, ok := got["claude-code"]; !ok {
 		t.Fatal("expected claude-code to remain configured")

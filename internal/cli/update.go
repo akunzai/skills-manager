@@ -35,7 +35,7 @@ func newUpdateCmd() *cobra.Command {
 
 			if len(cfg.Remote) == 0 {
 				if flagJSON {
-					fmt.Fprintln(cmd.OutOrStdout(), `{"updated_repos":[],"updated_skills":[],"skipped_repos":[],"errors":[],"post_hooks":[]}`)
+					fmt.Fprintln(cmd.OutOrStdout(), `{"updated_repos":[],"updated_skills":[],"skipped_repos":[],"errors":[]}`)
 				} else {
 					fmt.Fprintf(cmd.OutOrStdout(), "%sNo remote repositories configured in %s.%s\n", colorYellow, filepath.Base(configPath), colorReset)
 				}
@@ -91,18 +91,18 @@ func newUpdateCmd() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, data["source"], colorReset, shaStr, colorReset)
 				case "repo_error":
 					fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, data["source"], data["error"], colorReset)
-				case "hooks_start":
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%sRunning post-sync hooks...%s\n", colorCyan, colorReset)
-				case "hook_done":
-					badge := fmt.Sprintf("%sOK%s", colorGreen, colorReset)
-					if ok, _ := data["ok"].(bool); !ok {
-						badge = fmt.Sprintf("%sError%s", colorRed, colorReset)
+				case "would_drift":
+					skill, _ := data["skill"].(string)
+					if missing, ok := data["missing"].([]string); ok && len(missing) > 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "      [Dry-run] Would link %s to %s.\n", skill, strings.Join(missing, ", "))
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s [%s] %s\n", badge, data["name"], data["msg"])
+					if unexpected, ok := data["unexpected"].([]string); ok && len(unexpected) > 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "      [Dry-run] Would unlink %s from %s.\n", skill, strings.Join(unexpected, ", "))
+					}
 				}
 			}
 
-			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, skillsDir, cacheDir, true, onProgress)
+			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, skillsDir, cacheDir, onProgress)
 			if err != nil {
 				return err
 			}

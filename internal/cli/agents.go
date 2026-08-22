@@ -68,8 +68,8 @@ func newAgentsCmd() *cobra.Command {
 				return err
 			}
 			if installed {
-				if err := engine.ReconcileAgentSymlinks(skill, source, cfg, skillsDir); err != nil {
-					return fmt.Errorf("saved policy but failed to reconcile %s: %w", skill, err)
+				if err := engine.ApplyAvailability(skill, cfg, skillsDir); err != nil {
+					return fmt.Errorf("saved policy but failed to apply availability for %s: %w", skill, err)
 				}
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Updated availability for %s.\n", skill)
@@ -113,7 +113,7 @@ func printSkillAvailability(cmd *cobra.Command, cfg *config.Config, skill, sourc
 	if customized {
 		policy = fmt.Sprintf("include [%s]; exclude [%s]", strings.Join(override.Include, ", "), strings.Join(override.Exclude, ", "))
 	}
-	effective := engine.GetTargetAgentsForSkill(skill, source, cfg, skillsDir)
+	effective := engine.DesiredAgents(skill, cfg, skillsDir)
 	sort.Strings(effective)
 	fmt.Fprintf(cmd.OutOrStdout(), "Skill: %s\nPolicy: %s\nLinked by policy: %s\nUniversal agents: automatically available\n", skill, policy, displayList(effective))
 	return nil

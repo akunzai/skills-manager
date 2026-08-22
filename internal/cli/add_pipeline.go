@@ -307,7 +307,7 @@ func resolveSkillsToInstall(
 }
 
 // runAddPipeline resolves which skills to install, confirms replacements,
-// materializes each skill through src, and reconciles agent availability.
+// writes Config, then Materializes each skill and applies Availability.
 // Local-symlink, remote-git, and command add modes call this after acquiring
 // their own source.
 func runAddPipeline(
@@ -357,10 +357,6 @@ func runAddPipeline(
 	labels := src.labels()
 	var installedNames []string
 	for name, subpath := range skillsToInstall {
-		fmt.Fprintf(out, "  %s\n", src.progressLine(name, subpath))
-		if err := src.install(name, subpath, skillsDir); err != nil {
-			return fmt.Errorf("failed to %s skill %s: %w", labels.failVerb, name, err)
-		}
 		src.recordConfig(cfg, name, subpath, skillsDir)
 		if len(flagAgents) > 0 {
 			if err := config.IncludeSkillAgents(cfg, name, flagAgents...); err != nil {
@@ -374,8 +370,13 @@ func runAddPipeline(
 		return err
 	}
 	for _, name := range installedNames {
-		if err := engine.ReconcileAgentSymlinks(name, src.configSourceKey(), cfg, skillsDir); err != nil {
-			return fmt.Errorf("saved config but failed to reconcile availability for %s: %w", name, err)
+		subpath := skillsToInstall[name]
+		fmt.Fprintf(out, "  %s\n", src.progressLine(name, subpath))
+		if err := src.install(name, subpath, skillsDir); err != nil {
+			return fmt.Errorf("failed to %s skill %s: %w", labels.failVerb, name, err)
+		}
+		if err := engine.ApplyAvailability(name, cfg, skillsDir); err != nil {
+			return fmt.Errorf("saved config but failed to apply availability for %s: %w", name, err)
 		}
 	}
 
