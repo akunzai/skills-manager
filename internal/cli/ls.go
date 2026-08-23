@@ -72,7 +72,7 @@ func newLsCmd() *cobra.Command {
 				filterAgent := models.NormalizeAgentName(flagAgent)
 				filtered := make([]models.SkillItem, 0)
 				for _, s := range skills {
-					if models.IsUniversalAgent(filterAgent) || filterAgent == "agents" || filterAgent == "all" || filterAgent == "universal" {
+					if models.IsUniversalAgent(filterAgent, skillsDir) || filterAgent == "agents" || filterAgent == "all" || filterAgent == "universal" {
 						if s.IsInstalled {
 							filtered = append(filtered, s)
 						}

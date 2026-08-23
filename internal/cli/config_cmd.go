@@ -181,7 +181,7 @@ func validateAgentNames(values []string, skillsDir string) ([]string, error) {
 	normalized := make([]string, 0, len(values))
 	for _, value := range values {
 		agent := models.NormalizeAgentName(value)
-		if models.IsUniversalAgent(agent) {
+		if models.IsUniversalAgent(agent, skillsDir) {
 			return nil, fmt.Errorf("%s is automatically available and does not need an agent policy", agent)
 		}
 		if _, ok := known[agent]; !ok {
