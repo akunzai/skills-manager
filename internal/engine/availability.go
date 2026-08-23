@@ -276,16 +276,13 @@ func (a *Availability) SetManagedAgents(skill string, selected []string) error {
 	return a.Exclude(skill, exclude...)
 }
 
-func isManagedAvailabilityPath(path, skillName, skillsDir string) bool {
-	return IsManagedSkillLink(path, skillName, skillsDir) || IsManagedSkillCopy(path, skillName, skillsDir)
-}
-
 // availabilityState is desired Availability vs disk for one Skill.
 type availabilityState struct {
 	skillName string
 	skillsDir string
 	desired   map[string]struct{}
 	known     map[string]string
+	links     AgentLinkManager
 }
 
 func (a *Availability) state(skillName string) availabilityState {
@@ -294,7 +291,14 @@ func (a *Availability) state(skillName string) availabilityState {
 		skillsDir: a.skillsDir,
 		desired:   agentSet(a.ManagedAgents(skillName)),
 		known:     a.known,
+		links:     a.links,
 	}
+}
+
+// isManagedPath reports whether path is a managed symlink or a managed copy
+// of this Skill (the Windows fallback when symlinks aren't available).
+func (s availabilityState) isManagedPath(path string) bool {
+	return s.links.IsManagedLink(path, s.skillName) || s.links.IsManagedCopy(path, s.skillName)
 }
 
 func (s availabilityState) drift() (missing, unexpected []string) {
@@ -303,12 +307,12 @@ func (s availabilityState) drift() (missing, unexpected []string) {
 		_, want := s.desired[agent]
 		if want {
 			_, err := os.Lstat(linkPath)
-			if os.IsNotExist(err) || (err == nil && !isManagedAvailabilityPath(linkPath, s.skillName, s.skillsDir)) {
+			if os.IsNotExist(err) || (err == nil && !s.isManagedPath(linkPath)) {
 				missing = append(missing, agent)
 			}
 			continue
 		}
-		if isManagedAvailabilityPath(linkPath, s.skillName, s.skillsDir) {
+		if s.isManagedPath(linkPath) {
 			unexpected = append(unexpected, agent)
 		}
 	}
@@ -325,25 +329,25 @@ func (s availabilityState) apply() error {
 		}
 		linkPath := filepath.Join(agentDir, s.skillName)
 		_, err := os.Lstat(linkPath)
-		if err == nil && !isManagedAvailabilityPath(linkPath, s.skillName, s.skillsDir) {
+		if err == nil && !s.isManagedPath(linkPath) {
 			return fmt.Errorf("agent path already exists and is not managed by skills: %s", linkPath)
 		}
 	}
 	for agent, agentDir := range s.known {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		if _, shouldLink := s.desired[agent]; shouldLink {
-			if IsManagedSkillCopy(linkPath, s.skillName, s.skillsDir) {
+			if s.links.IsManagedCopy(linkPath, s.skillName) {
 				if err := replaceManagedCopy(filepath.Join(s.skillsDir, s.skillName), linkPath); err != nil {
 					return err
 				}
 				continue
 			}
-			if _, err := EnsureAgentSymlink(s.skillName, agent, s.skillsDir); err != nil {
+			if _, err := s.links.EnsureLink(s.skillName, agent); err != nil {
 				return err
 			}
 			continue
 		}
-		if isManagedAvailabilityPath(linkPath, s.skillName, s.skillsDir) && !RemoveManagedSkillPath(linkPath, s.skillName, s.skillsDir) {
+		if s.isManagedPath(linkPath) && !s.links.RemoveManagedPath(linkPath, s.skillName) {
 			return fmt.Errorf("failed to remove managed availability path: %s", linkPath)
 		}
 	}

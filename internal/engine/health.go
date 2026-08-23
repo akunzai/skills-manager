@@ -138,7 +138,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 		if _, err := os.Stat(agentDir); os.IsNotExist(err) {
 			continue
 		}
-		broken, unmanaged, physical := DiagnoseAgentDirHealth(agentDir, d.skillsDir)
+		broken, unmanaged, physical := d.links.DiagnoseHealth(agentDir)
 		plan.Agents = append(plan.Agents, agentHealth{
 			Name:            agentName,
 			Dir:             agentDir,
@@ -158,7 +158,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			continue
 		}
 		agentDir := universalDirs[agentName]
-		stale := FindStaleManagedLinks(agentDir, d.skillsDir)
+		stale := d.links.FindStaleLinks(agentDir)
 		if len(stale) == 0 {
 			continue
 		}
