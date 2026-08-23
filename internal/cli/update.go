@@ -22,7 +22,10 @@ func newUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "update [targets...]",
 		Aliases: []string{"upgrade"},
-		Short:   "Update remote skills to latest versions",
+		Short:   "Fetch updates and refresh remote skills in the selected scope",
+		Long: `Fetch remote repository updates and refresh installed remote skills in the
+selected global or project scope. The Git cache is shared between scopes, but
+skills are written to the selected scope's skills directory.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.

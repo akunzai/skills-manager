@@ -30,6 +30,16 @@ func TestCLIVersion(t *testing.T) {
 	}
 }
 
+func TestCLIUpdateHelpExplainsSelectedScope(t *testing.T) {
+	cmd := newUpdateCmd()
+	got := cmd.Long
+	for _, want := range []string{"selected global or project scope", "Git cache is shared", "selected scope's skills directory"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("update help missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestCLIInitAndLs(t *testing.T) {
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")

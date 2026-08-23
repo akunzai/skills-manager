@@ -85,13 +85,15 @@ Universal agents that read the central skills directory directly do not need lin
 | Restore configuration and availability | `skills sync` |
 | Preview reconciliation | `skills sync --dry-run` |
 | Find available updates | `skills outdated` |
-| Update remote skills | `skills update` |
+| Fetch updates and refresh remote skills in the selected scope | `skills update` |
 | Diagnose drift | `skills doctor` |
 | Repair drift | `skills doctor --fix` |
 | Remove undeclared managed items | `skills prune` |
 | Remove a skill | `skills rm <skill>` |
 
 Every operational command accepts `--project`. Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
+
+`skills update` refreshes remote skills in the global scope; `skills update --project` refreshes them in the current project. Both use the shared Git cache, then write the updated skills to the selected scope's skills directory.
 
 ## Configuration
 
