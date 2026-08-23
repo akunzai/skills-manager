@@ -2,7 +2,6 @@ package cli
 
 import (
 	"os"
-	"path/filepath"
 
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
@@ -25,58 +24,21 @@ var (
 )
 
 func getProjectPaths(cwd string) (configPath, skillsDir string) {
-	agentsConfigFile := filepath.Join(cwd, ".agents", "skills.json")
-	rootConfigFile := filepath.Join(cwd, "skills.json")
-	if _, err := os.Stat(agentsConfigFile); err == nil {
-		return agentsConfigFile, filepath.Join(cwd, ".agents", "skills")
-	}
-	if _, err := os.Stat(rootConfigFile); err == nil {
-		return rootConfigFile, filepath.Join(cwd, "skills")
-	}
-	return agentsConfigFile, filepath.Join(cwd, ".agents", "skills")
+	return models.GetProjectPaths(cwd)
 }
 
 // Scope is the resolved Global or Project configuration for one command
 // invocation: its Config path, skills directory, and git Cache directory.
 // Every command decides its Scope once, at the top of RunE via ResolveScope;
 // nothing past that point re-derives it from flags. IsProject is the flag
-// choice, not the skills-dir path shape. SkillsDir alone is still what
-// models.IsProjectScope/ScopeRoot need for portable local Source paths and
-// prune — that aspect of the CONTEXT.md "Scope" definition is not duplicated here.
-type Scope struct {
-	ConfigPath string
-	SkillsDir  string
-	CacheDir   string
-	IsProject  bool
-}
+// choice, not the skills-dir path shape.
+type Scope = models.Scope
 
 // resolveScope is ResolveScope's pure core: given whether this invocation is
 // Project-scoped, the working directory, and any explicit path overrides, it
-// derives a Scope. It reads no package state and writes none, so a caller
-// that already knows its Scope — the add prompt, once the user has picked
-// one — can call it directly instead of going through mutable flag vars.
-// An empty override leaves that path at its Scope default.
+// derives a Scope.
 func resolveScope(isProject bool, cwd, configOverride, skillsDirOverride, cacheDirOverride string) Scope {
-	cacheDir := models.DefaultCacheDir()
-	var configPath, skillsDir string
-	if isProject {
-		configPath, skillsDir = getProjectPaths(cwd)
-	} else {
-		configPath = models.DefaultConfigFile()
-		skillsDir = models.DefaultSkillsDir()
-	}
-
-	if configOverride != "" {
-		configPath = models.ExpandUser(configOverride)
-	}
-	if skillsDirOverride != "" {
-		skillsDir = models.ExpandUser(skillsDirOverride)
-	}
-	if cacheDirOverride != "" {
-		cacheDir = models.ExpandUser(cacheDirOverride)
-	}
-
-	return Scope{ConfigPath: configPath, SkillsDir: skillsDir, CacheDir: cacheDir, IsProject: isProject}
+	return models.ResolveScope(isProject, cwd, configOverride, skillsDirOverride, cacheDirOverride)
 }
 
 // flagPathOverrides reads the parsed --config/--skills-dir/--cache-dir flags:
