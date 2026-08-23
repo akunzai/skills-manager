@@ -917,7 +917,7 @@ func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
 	}
 }
 
-func TestCommandAdderFailureSavesAndAppliesAvailability(t *testing.T) {
+func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	configPath := filepath.Join(project, ".agents", "skills.json")
@@ -960,7 +960,7 @@ func TestCommandAdderFailureSavesAndAppliesAvailability(t *testing.T) {
 	}
 }
 
-func TestSymlinkAdderRunDeclaresAndMaterializes(t *testing.T) {
+func TestAddPlanSymlinkDeclaresAndMaterializes(t *testing.T) {
 	project := t.TempDir()
 	source := filepath.Join(project, "source")
 	writeLocalGitSkill(t, source, "sample")
@@ -988,7 +988,7 @@ func TestSymlinkAdderRunDeclaresAndMaterializes(t *testing.T) {
 	}
 }
 
-func TestRemoteAdderRunDeclaresAndMaterializes(t *testing.T) {
+func TestAddPlanRemoteDeclaresAndMaterializes(t *testing.T) {
 	project := t.TempDir()
 	repoDir := filepath.Join(project, "cache")
 	writeLocalGitSkill(t, repoDir, "sample")
