@@ -447,3 +447,30 @@ func TestIsManagedSkillLinkAcceptsDanglingAndAbsoluteForms(t *testing.T) {
 		t.Error("a real directory must never be reported as a managed link")
 	}
 }
+
+func TestAgentLinkManager(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "alpha")
+	manager := NewAgentLinkManager(skillsDir)
+
+	if manager.SkillsDir() != skillsDir {
+		t.Errorf("SkillsDir() = %q, want %q", manager.SkillsDir(), skillsDir)
+	}
+	if manager.StopAt() != home {
+		t.Errorf("StopAt() = %q, want %q", manager.StopAt(), home)
+	}
+
+	linked, err := manager.EnsureLink("alpha", "claude")
+	if err != nil || !linked {
+		t.Fatalf("EnsureLink() = %v, %v; want true, nil", linked, err)
+	}
+
+	claudeLink := filepath.Join(home, ".claude", "skills", "alpha")
+	if !manager.IsManagedLink(claudeLink, "alpha") {
+		t.Error("expected claudeLink to be a managed link")
+	}
+
+	removed := manager.RemoveLinks("alpha")
+	if len(removed) == 0 {
+		t.Error("expected RemoveLinks to remove claude link")
+	}
+}

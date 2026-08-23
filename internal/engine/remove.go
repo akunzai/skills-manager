@@ -82,8 +82,9 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 		return result, err
 	}
 
+	links := NewAgentLinkManager(skillsDir)
 	for i, item := range plan.Skills {
-		unlinked := RemoveAgentSymlinks(item.Name, skillsDir)
+		unlinked := links.RemoveLinks(item.Name)
 		result.Skills[i].Unlinked = unlinked
 
 		if _, err := os.Lstat(item.MasterPath); err != nil {

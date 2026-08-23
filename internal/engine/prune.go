@@ -116,9 +116,10 @@ func pruneAgentDirs(skillsDir string) map[string]string {
 // while an interactive confirmation prompt is open.
 func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 	result := PruneResult{}
+	links := NewAgentLinkManager(skillsDir)
 	var errs []error
 	for _, link := range plan.Unconfigured {
-		if !IsManagedSkillLink(link.Path, filepath.Base(link.Path), skillsDir) {
+		if !links.IsManagedLink(link.Path, filepath.Base(link.Path)) {
 			result.SkippedLinks = append(result.SkippedLinks, link)
 			continue
 		}
