@@ -1,6 +1,6 @@
 [tools]
 go = "1.27"
-"github:AmanVarshney01/tcut" = "1.0.0"
+"github:AmanVarshney01/tcut" = "1.0.1"
 
 [tasks.demo]
 description = "Rebuild the README terminal demo"

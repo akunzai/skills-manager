@@ -60,7 +60,7 @@ export default defineVideo(
     await t.wait(/Agent availability:/, { scope: "screen" });
     await t.sleep("1s");
     await t.enter();
-    await t.wait(/Installed 1 skill/, { scope: "screen" });
+    await t.wait(/Added 1 skill/, { scope: "screen" });
     await t.wait(/^>$/);
     await t.run("skills ls");
     await t.sleep("3s");
