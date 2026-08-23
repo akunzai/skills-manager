@@ -19,7 +19,7 @@ func newInitCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
-			configPath, _, _ := GetEffectivePaths()
+			configPath := ResolveScope().ConfigPath
 
 			if _, err := os.Stat(configPath); err == nil && !flagForce {
 				return fmt.Errorf("config file already exists at %s (use --force to overwrite)", models.ToTildePath(configPath))

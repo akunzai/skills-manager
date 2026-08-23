@@ -23,8 +23,7 @@ func shouldPromptForDiscoveredSkills(skillCount int, interactive, skipConfirmati
 
 func selectionSkillsDirs(cmd *cobra.Command) []string {
 	if cmd.Flags().Changed("global") || cmd.Flags().Changed("project") || cmd.Flags().Changed("skills-dir") {
-		_, skillsDir, _ := GetEffectivePaths()
-		return []string{skillsDir}
+		return []string{ResolveScope().SkillsDir}
 	}
 
 	dirs := []string{models.DefaultSkillsDir()}
@@ -329,7 +328,7 @@ func newAddCmd() *cobra.Command {
 				}
 				args = []string{source}
 			}
-			_, _, cacheDir := GetEffectivePaths()
+			cacheDir := ResolveScope().CacheDir
 
 			// Positional skills arguments override or append to --skill
 			if len(args) > 1 {

@@ -38,11 +38,11 @@ func getProjectPaths(cwd string) (configPath, skillsDir string) {
 
 // Scope is the resolved Global or Project configuration for one command
 // invocation: its Config path, skills directory, and git Cache directory.
-// Every command decides its Scope once, at the top of RunE; nothing past
-// that point re-derives it from flags. SkillsDir alone is what
-// models.IsProjectScope/ScopeRoot need to derive the Scope root — the
-// boundary portable local Source paths and prune must not escape — so that
-// aspect of the CONTEXT.md "Scope" definition is not duplicated here.
+// Every command decides its Scope once, at the top of RunE via ResolveScope;
+// nothing past that point re-derives it from flags. IsProject is the flag
+// choice, not the skills-dir path shape. SkillsDir alone is still what
+// models.IsProjectScope/ScopeRoot need for portable local Source paths and
+// prune — that aspect of the CONTEXT.md "Scope" definition is not duplicated here.
 type Scope struct {
 	ConfigPath string
 	SkillsDir  string
@@ -120,13 +120,6 @@ func ResolveScope() Scope {
 		isProject = false
 	}
 	return resolveScopeFor(isProject)
-}
-
-// GetEffectivePaths is ResolveScope's Scope unpacked into its three paths,
-// for callers that only need the paths.
-func GetEffectivePaths() (configPath string, skillsDir string, cacheDir string) {
-	scope := ResolveScope()
-	return scope.ConfigPath, scope.SkillsDir, scope.CacheDir
 }
 
 var RootCmd = &cobra.Command{

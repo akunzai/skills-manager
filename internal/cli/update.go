@@ -26,7 +26,8 @@ func newUpdateCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
-			configPath, skillsDir, cacheDir := GetEffectivePaths()
+			scope := ResolveScope()
+			configPath, skillsDir, cacheDir := scope.ConfigPath, scope.SkillsDir, scope.CacheDir
 
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {

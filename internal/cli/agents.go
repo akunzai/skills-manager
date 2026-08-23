@@ -18,7 +18,8 @@ func newAgentsCmd() *cobra.Command {
 		Short: "Inspect and change skill availability",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, skillsDir, _ := GetEffectivePaths()
+			scope := ResolveScope()
+			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
 				return err

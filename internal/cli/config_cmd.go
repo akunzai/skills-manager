@@ -21,18 +21,18 @@ func newConfigCmd() *cobra.Command {
 		Short: "Inspect and change skills configuration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, skillsDir, _ := GetEffectivePaths()
-			cfg, err := config.LoadConfig(configPath)
+			scope := ResolveScope()
+			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
 			}
-			scope := "Global"
-			if models.IsProjectScope(skillsDir) {
-				scope = "Project"
+			label := "Global"
+			if scope.IsProject {
+				label = "Project"
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Scope: %s\nConfig: %s\n", scope, models.ToTildePath(configPath))
-			fmt.Fprintf(out, "Default agents: %s (%s)\n", displayList(cfg.Settings.DefaultAgents), models.ToTildePath(configPath))
+			fmt.Fprintf(out, "Scope: %s\nConfig: %s\n", label, models.ToTildePath(scope.ConfigPath))
+			fmt.Fprintf(out, "Default agents: %s (%s)\n", displayList(cfg.Settings.DefaultAgents), models.ToTildePath(scope.ConfigPath))
 			if len(cfg.Settings.Availability) == 0 {
 				fmt.Fprintln(out, "Availability overrides: none")
 			} else {
@@ -60,7 +60,7 @@ func newConfigGetCmd() *cobra.Command {
 		Short: "Read a configuration value",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, _, _ := GetEffectivePaths()
+			configPath := ResolveScope().ConfigPath
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
 				return err
@@ -90,7 +90,8 @@ func newConfigSetCmd() *cobra.Command {
 		Short: "Set a configuration value",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, skillsDir, _ := GetEffectivePaths()
+			scope := ResolveScope()
+			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
 				return err
@@ -137,7 +138,7 @@ func newConfigEditCmd() *cobra.Command {
 		Short: "Open the active configuration in an editor",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, _, _ := GetEffectivePaths()
+			configPath := ResolveScope().ConfigPath
 			if _, err := os.Stat(configPath); os.IsNotExist(err) {
 				if err := config.SaveConfig(config.DefaultConfig(), configPath); err != nil {
 					return err
