@@ -95,3 +95,43 @@ func TestApplyHealthPlanRemovesLeftoverEmptyDirs(t *testing.T) {
 		t.Fatal("configured claude dir must remain")
 	}
 }
+
+func TestBuildHealthPlanFlagsUnknownAgentReferences(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "not-a-real-agent"}
+	cfg.Settings.Availability["some-skill"] = config.AvailabilityOverride{
+		Include: []string{"also-fake"},
+	}
+
+	plan := BuildHealthPlan(cfg, skillsDir)
+	if len(plan.UnknownAgents) != 2 {
+		t.Fatalf("UnknownAgents = %#v; want 2 entries", plan.UnknownAgents)
+	}
+
+	var sawDefault, sawInclude bool
+	for _, ref := range plan.UnknownAgents {
+		switch {
+		case ref.Field == "defaultAgents" && ref.Agent == "not-a-real-agent":
+			sawDefault = true
+		case ref.Field == "include" && ref.Skill == "some-skill" && ref.Agent == "also-fake":
+			sawInclude = true
+		}
+	}
+	if !sawDefault || !sawInclude {
+		t.Fatalf("UnknownAgents = %#v; missing expected entries", plan.UnknownAgents)
+	}
+	if plan.IssueCount() != 2 {
+		t.Fatalf("IssueCount = %d; want 2", plan.IssueCount())
+	}
+
+	result := ApplyHealthPlan(plan, cfg, skillsDir)
+	if RemainingIssues(plan, result) != 2 {
+		t.Fatalf("RemainingIssues = %d; want 2 (unknown agents are never auto-fixed)", RemainingIssues(plan, result))
+	}
+}
