@@ -44,7 +44,8 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		cmd.SilenceUsage = false
 		return fmt.Errorf("--skills-only and --links-only cannot be used together")
 	}
-	configPath, skillsDir, _ := GetEffectivePaths()
+	scope := ResolveScope()
+	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return err

@@ -30,7 +30,8 @@ func newSyncCmd() *cobra.Command {
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
-			configPath, skillsDir, cacheDir := GetEffectivePaths()
+			scope := ResolveScope()
+			configPath, skillsDir, cacheDir := scope.ConfigPath, scope.SkillsDir, scope.CacheDir
 
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {

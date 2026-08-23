@@ -609,6 +609,24 @@ func TestCLILsJSONScopeLabelIgnoresCustomSkillsDirWithoutProjectFlag(t *testing.
 	}
 }
 
+func TestCLIConfigScopeLabelIgnoresCustomSkillsDirWithoutProjectFlag(t *testing.T) {
+	resetRootCmdFlags()
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "skills.json")
+	skillsDir := filepath.Join(tmpDir, "skills")
+	cacheDir := filepath.Join(tmpDir, ".cache")
+	if _, err := runCLI(t, "init", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCLI(t, "config", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Scope: Global") {
+		t.Fatalf("custom --skills-dir without --project must report Global, got:\n%s", out)
+	}
+}
+
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()

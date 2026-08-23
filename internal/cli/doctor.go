@@ -21,7 +21,8 @@ func newDoctorCmd() *cobra.Command {
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
-			configPath, skillsDir, _ := GetEffectivePaths()
+			scope := ResolveScope()
+			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {

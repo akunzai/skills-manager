@@ -23,7 +23,8 @@ func newOutdatedCmd() *cobra.Command {
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
-			configPath, _, cacheDir := GetEffectivePaths()
+			scope := ResolveScope()
+			configPath, cacheDir := scope.ConfigPath, scope.CacheDir
 
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
