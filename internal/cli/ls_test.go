@@ -79,6 +79,7 @@ func TestAgentDisplayLabels(t *testing.T) {
 		{"excludes internal agents marker", []string{"claude", "agents"}, []string{"claude"}},
 		{"claude listed first regardless of input order", []string{"codex", "claude-code", "cursor"}, []string{"claude", "codex", "cursor"}},
 		{"deduplicates repeated agents", []string{"codex", "codex", "claude"}, []string{"claude", "codex"}},
+		{"claude-code and claude alias both present fold to one claude", []string{"claude-code", "claude"}, []string{"claude"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
