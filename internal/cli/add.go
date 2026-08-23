@@ -49,22 +49,22 @@ func markInstalledSkills(options []tui.SelectOption, skillsDirs []string) {
 }
 
 func prepareAddTarget(cmd *cobra.Command, skip bool, agents []string) (string, string, *config.Config, []string, error) {
+	scope := ResolveScope()
 	if tui.IsTerminal() && !skip && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
-		scope, err := tui.PromptSelect("Choose a scope:", []tui.SelectOption{
+		choice, err := tui.PromptSelect("Choose a scope:", []tui.SelectOption{
 			{Key: "global", Title: "Global"},
 			{Key: "project", Title: "Project"},
 		}, 0)
 		if err != nil {
 			return "", "", nil, nil, err
 		}
-		if scope == "" {
+		if choice == "" {
 			return "", "", nil, nil, fmt.Errorf("add cancelled")
 		}
-		flagProject = scope == "project"
-		flagGlobal = !flagProject
+		scope = resolveScopeFor(choice == "project")
 	}
 
-	configPath, skillsDir, _ := GetEffectivePaths()
+	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return "", "", nil, nil, err
