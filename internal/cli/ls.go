@@ -54,7 +54,8 @@ func newLsCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
-			configPath, skillsDir, _ := GetEffectivePaths()
+			resolvedScope := ResolveScope()
+			configPath, skillsDir := resolvedScope.ConfigPath, resolvedScope.SkillsDir
 			out := cmd.OutOrStdout()
 			style := presentation.For(out)
 
@@ -105,14 +106,17 @@ func newLsCmd() *cobra.Command {
 					if installedP == "" {
 						installedP = filepath.Join(skillsDir, s.Name)
 					}
-					scope := "global"
-					if flagProject || skillsDir != models.DefaultSkillsDir() {
-						scope = "project"
+					// Intentionally IsProject alone: --skills-dir pointed
+					// somewhere nonstandard, with neither --project nor
+					// --global given, does not by itself mean Project Scope.
+					scopeLabel := "global"
+					if resolvedScope.IsProject {
+						scopeLabel = "project"
 					}
 					outList = append(outList, map[string]interface{}{
 						"name":       s.Name,
 						"path":       models.ToTildePath(installedP),
-						"scope":      scope,
+						"scope":      scopeLabel,
 						"agents":     s.Agents,
 						"source":     models.ToTildePath(s.Source),
 						"sourceType": s.SourceType,

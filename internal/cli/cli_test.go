@@ -55,16 +55,11 @@ func TestCLIInitAndLs(t *testing.T) {
 }
 
 func TestCLIProjectMode(t *testing.T) {
-	flagConfigFile = ""
-	flagSkillsDir = ""
-	flagCacheDir = ""
-	flagProject = false
+	resetRootCmdFlags()
+	// resetRootCmdFlags marks --global as Changed, which makes ResolveScope
+	// force Global Scope. Clear it so -p on individual commands survives.
 	flagGlobal = false
-	RootCmd.PersistentFlags().Set("config", "")
-	RootCmd.PersistentFlags().Set("skills-dir", "")
-	RootCmd.PersistentFlags().Set("cache-dir", "")
-	RootCmd.PersistentFlags().Set("global", "false")
-	RootCmd.PersistentFlags().Set("project", "false")
+	_ = RootCmd.PersistentFlags().Set("global", "false")
 
 	tmpProjectDir := t.TempDir()
 	oldWd, _ := os.Getwd()
@@ -210,11 +205,7 @@ func TestCLIOutdatedNoRemoteReposPrintsThroughCapturedOutput(t *testing.T) {
 }
 
 func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
-	flagConfigFile = ""
-	flagSkillsDir = ""
-	flagCacheDir = ""
-	flagProject = false
-	flagGlobal = true
+	resetRootCmdFlags()
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
@@ -564,11 +555,7 @@ func TestCLILsJSONAgentsAreDeclaredAvailability(t *testing.T) {
 }
 
 func TestCLILsFormatting(t *testing.T) {
-	flagConfigFile = ""
-	flagSkillsDir = ""
-	flagCacheDir = ""
-	flagProject = false
-	flagGlobal = true
+	resetRootCmdFlags()
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
@@ -592,6 +579,33 @@ func TestCLILsFormatting(t *testing.T) {
 	RootCmd.SetArgs([]string{"ls", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
 	if err := RootCmd.Execute(); err != nil {
 		t.Fatalf("ls table view failed: %v", err)
+	}
+}
+
+// A custom --skills-dir with neither --project nor --global set must not by
+// itself flip the reported Scope to project: only the flag says which Scope
+// this is, not where its skills directory happens to point.
+func TestCLILsJSONScopeLabelIgnoresCustomSkillsDirWithoutProjectFlag(t *testing.T) {
+	resetRootCmdFlags()
+
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "skills.json")
+	skillsDir := filepath.Join(tmpDir, "skills")
+	cacheDir := filepath.Join(tmpDir, ".cache")
+
+	RootCmd.SetArgs([]string{"init", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	var buf bytes.Buffer
+	RootCmd.SetOut(&buf)
+	RootCmd.SetArgs([]string{"ls", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatalf("ls --json failed: %v", err)
+	}
+	if strings.Contains(buf.String(), `"scope": "project"`) {
+		t.Fatalf("custom --skills-dir without --project must not report project scope, got: %s", buf.String())
 	}
 }
 
@@ -728,11 +742,7 @@ func TestCLIDoctorFixRemovesLeftoverEmptyAgentDirs(t *testing.T) {
 }
 
 func TestCLIUpdateDryRunAndJSON(t *testing.T) {
-	flagConfigFile = ""
-	flagSkillsDir = ""
-	flagCacheDir = ""
-	flagProject = false
-	flagGlobal = true
+	resetRootCmdFlags()
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
@@ -760,8 +770,8 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 func projectScope(t *testing.T) string {
 	t.Helper()
 	resetRootCmdFlags()
-	// resetRootCmdFlags marks --global as Changed, which makes GetEffectivePaths
-	// force global scope and ignore -p. Clear it so project scope survives.
+	// resetRootCmdFlags marks --global as Changed, which makes ResolveScope
+	// force Global Scope and ignore -p. Clear it so Project Scope survives.
 	flagGlobal = false
 	_ = RootCmd.PersistentFlags().Set("global", "false")
 	home := isolateHome(t)
