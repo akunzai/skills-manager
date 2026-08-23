@@ -30,24 +30,20 @@ func newDoctorCmd() *cobra.Command {
 			}
 
 			fmt.Fprintf(out, "\n%s%sDiagnosing skills health...%s\n\n", colorBold, colorCyan, colorReset)
-			plan := engine.BuildHealthPlan(cfg, skillsDir)
-			var result *engine.HealthFixResult
-			issuesFound := plan.IssueCount()
-			if flagFix {
-				applied := engine.ApplyHealthPlan(plan, cfg, skillsDir)
-				result = &applied
-				issuesFound = engine.RemainingIssues(plan, applied)
+			outcome, runErr := engine.NewDoctor(cfg, skillsDir).Run(flagFix)
+			printHealthReport(out, outcome.Findings)
+			if runErr != nil {
+				return runErr
 			}
-			printHealthReport(out, plan, result)
 
 			fmt.Fprintln(out, "\n"+strings.Repeat(tableRule, 60))
-			if issuesFound == 0 {
+			if outcome.Remaining == 0 {
 				fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n\n", colorBold, colorGreen, colorReset)
 				return nil
 			}
 
-			fmt.Fprintf(out, "%s%sFound %d issue(s). Run with --fix or 'skills sync' to repair.%s\n\n", colorBold, colorYellow, issuesFound, colorReset)
-			return fmt.Errorf("doctor detected %d issue(s)", issuesFound)
+			fmt.Fprintf(out, "%s%sFound %d issue(s). Run with --fix or 'skills sync' to repair.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+			return fmt.Errorf("doctor detected %d issue(s)", outcome.Remaining)
 		},
 	}
 
@@ -56,10 +52,8 @@ func newDoctorCmd() *cobra.Command {
 	return cmd
 }
 
-// printHealthReport renders plan.Findings(result): doctor's only job here is
-// to pick a color per Severity and print the line.
-func printHealthReport(out io.Writer, plan engine.HealthPlan, result *engine.HealthFixResult) {
-	for _, f := range plan.Findings(result) {
+func printHealthReport(out io.Writer, findings []engine.Finding) {
+	for _, f := range findings {
 		if f.Blank {
 			fmt.Fprintln(out)
 		}
