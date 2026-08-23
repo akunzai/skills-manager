@@ -64,6 +64,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 	}
 
 	if includeSkills || includeConfiguredLinks {
+		agentLinks := NewAgentLinkManager(skillsDir)
 		links := make(map[string]PruneLink)
 		addManagedLinks := func(skill string, predicate func(string) bool) {
 			for agent, dir := range pruneAgentDirs(skillsDir) {
@@ -71,7 +72,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 					continue
 				}
 				path := filepath.Join(dir, skill)
-				if IsManagedSkillLink(path, skill, skillsDir) {
+				if agentLinks.IsManagedLink(path, skill) {
 					links[path] = PruneLink{Agent: agent, Path: path}
 				}
 			}
