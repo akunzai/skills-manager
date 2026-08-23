@@ -39,6 +39,36 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-rLen)
 }
 
+// agentDisplayLabels collapses a Skill's Agents into ls's display labels:
+// claude-code and claude fold into one "claude" entry, other Agents drop
+// their "-code" suffix, and the internal "agents" marker is excluded.
+// Order of first appearance is preserved; duplicates are dropped.
+func agentDisplayLabels(agents []string) []string {
+	var labels []string
+	for _, a := range agents {
+		if a == "claude-code" || a == "claude" {
+			labels = append(labels, "claude")
+		}
+	}
+	for _, a := range agents {
+		if a == "claude-code" || a == "claude" || a == "agents" {
+			continue
+		}
+		cleanA := strings.TrimSuffix(a, "-code")
+		found := false
+		for _, l := range labels {
+			if l == cleanA {
+				found = true
+				break
+			}
+		}
+		if !found {
+			labels = append(labels, cleanA)
+		}
+	}
+	return labels
+}
+
 func newLsCmd() *cobra.Command {
 	var (
 		flagJSON   bool
@@ -167,28 +197,7 @@ func newLsCmd() *cobra.Command {
 			if termWidth >= 120 {
 				maxAgentsLen := 12
 				for _, s := range skills {
-					var targetList []string
-					for _, a := range s.Agents {
-						if a == "claude-code" || a == "claude" {
-							targetList = append(targetList, "claude")
-						}
-					}
-					for _, a := range s.Agents {
-						cleanA := strings.TrimSuffix(a, "-code")
-						if a != "claude-code" && a != "claude" && a != "agents" {
-							found := false
-							for _, t := range targetList {
-								if t == cleanA {
-									found = true
-									break
-								}
-							}
-							if !found {
-								targetList = append(targetList, cleanA)
-							}
-						}
-					}
-					joined := strings.Join(targetList, ", ")
+					joined := strings.Join(agentDisplayLabels(s.Agents), ", ")
 					if len(joined) > maxAgentsLen {
 						maxAgentsLen = len(joined)
 					}
@@ -237,27 +246,7 @@ func newLsCmd() *cobra.Command {
 
 				sourceCol := padRight(truncateWithEllipsis(rawSource, sourceWidth), sourceWidth)
 
-				var targetList []string
-				for _, a := range s.Agents {
-					if a == "claude-code" || a == "claude" {
-						targetList = append(targetList, "claude")
-					}
-				}
-				for _, a := range s.Agents {
-					cleanA := strings.TrimSuffix(a, "-code")
-					if a != "claude-code" && a != "claude" && a != "agents" {
-						found := false
-						for _, t := range targetList {
-							if t == cleanA {
-								found = true
-								break
-							}
-						}
-						if !found {
-							targetList = append(targetList, cleanA)
-						}
-					}
-				}
+				targetList := agentDisplayLabels(s.Agents)
 
 				rawTargets := "-"
 				if len(targetList) > 0 {
