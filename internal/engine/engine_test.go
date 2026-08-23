@@ -610,14 +610,12 @@ func TestUpdateRemoteSkillsDryRunReportsAvailabilityDrift(t *testing.T) {
 	}
 
 	var drifted []string
-	_, err := UpdateRemoteSkills(cfg, nil, false, true, skillsDir, cacheDir, func(event string, data map[string]interface{}) {
-		if event != "would_drift" {
+	_, err := UpdateRemoteSkills(cfg, nil, false, true, skillsDir, cacheDir, func(ev UpdateEvent) {
+		if ev.Kind != UpdateWouldDrift {
 			return
 		}
-		skill, _ := data["skill"].(string)
-		unexpected, _ := data["unexpected"].([]string)
-		if skill == "sample" && len(unexpected) > 0 {
-			drifted = unexpected
+		if ev.Skill == "sample" && len(ev.Unexpected) > 0 {
+			drifted = ev.Unexpected
 		}
 	})
 	if err != nil {

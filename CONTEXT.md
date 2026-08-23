@@ -61,5 +61,5 @@ A coding harness that can load Skills (Claude Code, Copilot, Codex, …).
 _Avoid_: harness (in user-facing copy), tool, IDE
 
 **Update**:
-Refreshing remote Cache to a new commit, then Syncing those Skills.
+Refreshing remote Cache to a new commit, then Syncing those remote Skills. Does not Materialize local symlink or command Skills.
 _Avoid_: upgrade, pull (when you mean this command)

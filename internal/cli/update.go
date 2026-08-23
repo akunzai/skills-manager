@@ -52,52 +52,42 @@ func newUpdateCmd() *cobra.Command {
 				}
 			}
 
-			onProgress := func(event string, data map[string]interface{}) {
+			onProgress := func(ev engine.UpdateEvent) {
 				if flagJSON {
 					return
 				}
-				switch event {
-				case "check_start":
-					fmt.Fprintf(cmd.OutOrStdout(), "  Checking %v remote repositories in parallel...\n", data["total"])
-				case "check_done":
-					outdated, _ := data["outdated"].(int)
-					upToDate, _ := data["up_to_date"].(int)
-					if outdated == 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d repositories are already up to date.%s\n\n", colorGreen, upToDate, colorReset)
+				switch ev.Kind {
+				case engine.UpdateCheckStart:
+					fmt.Fprintf(cmd.OutOrStdout(), "  Checking %d remote repositories in parallel...\n", ev.Total)
+				case engine.UpdateCheckDone:
+					if ev.Outdated == 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d repositories are already up to date.%s\n\n", colorGreen, ev.UpToDate, colorReset)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d repository update(s) needed, %d already up to date.%s\n\n", colorCyan, outdated, upToDate, colorReset)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d repository update(s) needed, %d already up to date.%s\n\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
 					}
-				case "update_start":
-					idx := data["index"]
-					total := data["total"]
-					source := data["source"]
-					skills := data["skills"]
-					skillsList := ""
-					if sList, ok := skills.([]string); ok {
-						skillsList = strings.Join(sList, ", ")
-					}
-					if data["dry_run"] == true {
-						fmt.Fprintf(cmd.OutOrStdout(), "  [%v/%v] %s[Dry-run]%s Would update %s%s%s (%s)\n", idx, total, colorCyan, colorReset, colorBold, source, colorReset, skillsList)
+				case engine.UpdateStart:
+					skillsList := strings.Join(ev.Skills, ", ")
+					if ev.DryRun {
+						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] %s[Dry-run]%s Would update %s%s%s (%s)\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset, skillsList)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  [%v/%v] Updating %s%s%s (%s)...\n", idx, total, colorBold, source, colorReset, skillsList)
+						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] Updating %s%s%s (%s)...\n", ev.Index, ev.Total, colorBold, ev.Source, colorReset, skillsList)
 					}
-				case "skill_restored":
-					fmt.Fprintf(cmd.OutOrStdout(), "      Restored %s%s%s\n", colorBold, data["skill"], colorReset)
-				case "repo_done":
+				case engine.UpdateSkillRestored:
+					fmt.Fprintf(cmd.OutOrStdout(), "      Restored %s%s%s\n", colorBold, ev.Skill, colorReset)
+				case engine.UpdateRepoDone:
 					shaStr := ""
-					if sha, ok := data["new_sha"].(string); ok && len(sha) >= 7 {
-						shaStr = fmt.Sprintf(" (%s)", sha[:7])
+					if len(ev.NewSHA) >= 7 {
+						shaStr = fmt.Sprintf(" (%s)", ev.NewSHA[:7])
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, data["source"], colorReset, shaStr, colorReset)
-				case "repo_error":
-					fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, data["source"], data["error"], colorReset)
-				case "would_drift":
-					skill, _ := data["skill"].(string)
-					if missing, ok := data["missing"].([]string); ok && len(missing) > 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "      [Dry-run] Would link %s to %s.\n", skill, strings.Join(missing, ", "))
+					fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
+				case engine.UpdateRepoError:
+					fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
+				case engine.UpdateWouldDrift:
+					if len(ev.Missing) > 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "      [Dry-run] Would link %s to %s.\n", ev.Skill, strings.Join(ev.Missing, ", "))
 					}
-					if unexpected, ok := data["unexpected"].([]string); ok && len(unexpected) > 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "      [Dry-run] Would unlink %s from %s.\n", skill, strings.Join(unexpected, ", "))
+					if len(ev.Unexpected) > 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "      [Dry-run] Would unlink %s from %s.\n", ev.Skill, strings.Join(ev.Unexpected, ", "))
 					}
 				}
 			}
