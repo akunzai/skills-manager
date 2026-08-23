@@ -70,7 +70,7 @@ func prepareAddTarget(cmd *cobra.Command, skip bool, agents []string) (string, s
 		return "", "", nil, nil, err
 	}
 	if len(agents) > 0 {
-		agents, err = validateAgentNames(agents, skillsDir)
+		agents, err = engine.NewAvailability(cfg, skillsDir).ValidateManagedAgents(agents)
 		if err != nil {
 			return "", "", nil, nil, err
 		}
@@ -476,18 +476,15 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, _, skil
 		return fmt.Errorf("add cancelled")
 	}
 	if choice == "defaults" {
+		availability := engine.NewAvailability(cfg, skillsDir)
 		for skill := range skills {
-			config.FollowDefaults(cfg, skill)
+			availability.FollowDefaults(skill)
 		}
 		return nil
 	}
 
-	known := models.GetAgentsForSkillsDir(skillsDir)
-	agents := make([]string, 0, len(known))
-	for agent := range known {
-		agents = append(agents, agent)
-	}
-	sort.Strings(agents)
+	availability := engine.NewAvailability(cfg, skillsDir)
+	agents := availability.ManageableAgents()
 	skillNames := make([]string, 0, len(skills))
 	for skill := range skills {
 		skillNames = append(skillNames, skill)
@@ -495,11 +492,11 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, _, skil
 	sort.Strings(skillNames)
 	firstSkill := skillNames[0]
 	baseline := make(map[string]struct{})
-	for _, agent := range engine.DesiredAgents(firstSkill, cfg, skillsDir) {
+	for _, agent := range availability.ManagedAgents(firstSkill) {
 		baseline[agent] = struct{}{}
 	}
 	for _, skill := range skillNames[1:] {
-		other := engine.DesiredAgents(skill, cfg, skillsDir)
+		other := availability.ManagedAgents(skill)
 		if !sameAgentSelection(baseline, other) {
 			return fmt.Errorf("selected skills have different availability; configure them individually with skills agents")
 		}
@@ -516,31 +513,8 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, _, skil
 	if selected == nil {
 		return fmt.Errorf("operation cancelled by user")
 	}
-	selectedSet := make(map[string]struct{}, len(selected))
-	for _, agent := range selected {
-		selectedSet[agent] = struct{}{}
-	}
 	for skill := range skills {
-		config.FollowDefaults(cfg, skill)
-		skillBaseline := make(map[string]struct{})
-		for _, agent := range engine.DesiredAgents(skill, cfg, skillsDir) {
-			skillBaseline[agent] = struct{}{}
-		}
-		var include, exclude []string
-		for _, agent := range agents {
-			_, chosen := selectedSet[agent]
-			_, defaulted := skillBaseline[agent]
-			if chosen && !defaulted {
-				include = append(include, agent)
-			}
-			if !chosen && defaulted {
-				exclude = append(exclude, agent)
-			}
-		}
-		if err := config.IncludeSkillAgents(cfg, skill, include...); err != nil {
-			return err
-		}
-		if err := config.ExcludeSkillAgents(cfg, skill, exclude...); err != nil {
+		if err := availability.SetManagedAgents(skill, selected); err != nil {
 			return err
 		}
 	}

@@ -12,7 +12,7 @@ import (
 
 // The wording bug the "findings as the interface" refactor was meant to
 // catch: leftover dirs are excluded from configuredAgents by
-// ConfiguredKnownAgents, which unions defaultAgents with every per-Skill
+// Availability.ConfiguredAgentDirs, which unions defaultAgents with every per-Skill
 // Include — not defaultAgents alone.
 func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 	project := t.TempDir()
@@ -41,7 +41,7 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 		t.Fatalf("expected a leftover finding, got %#v", findings)
 	}
 	if strings.Contains(leftover.Message, "not in defaultAgents") {
-		t.Errorf("leftover finding still says %q; that undersells what ConfiguredKnownAgents actually excludes (defaultAgents + every per-Skill include)", leftover.Message)
+		t.Errorf("leftover finding still says %q; that undersells what Availability.ConfiguredAgentDirs actually excludes (defaultAgents + every per-Skill include)", leftover.Message)
 	}
 	if leftover.Severity != SeverityWarning {
 		t.Errorf("leftover severity = %v; want SeverityWarning", leftover.Severity)

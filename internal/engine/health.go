@@ -42,26 +42,6 @@ type HealthFix struct {
 	Err   error
 }
 
-// Field values for UnknownAgentReference, matching the skills.json key each
-// names.
-const (
-	AgentRefDefaultAgents = "defaultAgents"
-	AgentRefInclude       = "include"
-	AgentRefExclude       = "exclude"
-)
-
-// UnknownAgentReference is a defaultAgents or per-Skill include/exclude entry
-// naming an Agent this Scope does not recognize — neither a known linkable
-// dir nor Automatically available. Availability apply silently skips it
-// (DesiredAgents only counts recognized Agents), so doctor is the only place
-// a typo'd or renamed Agent name ever surfaces. Not auto-fixable: there is no
-// safe guess at the intended name.
-type UnknownAgentReference struct {
-	Skill string // "" for cfg.Settings.DefaultAgents
-	Field string // one of the AgentRef* constants
-	Agent string
-}
-
 // HealthPlan is the diagnosed state of one Scope. ApplyHealthPlan repairs
 // only broken managed links, stale universal links, leftover empty agent
 // dirs, and Availability Drift.
@@ -90,45 +70,6 @@ type HealthFixResult struct {
 	FailedDrift     []HealthFix
 }
 
-// unknownAgentRefs finds defaultAgents and per-Skill include/exclude entries
-// that name an Agent unrecognized in this Scope.
-func unknownAgentRefs(cfg *config.Config, skillsDir string, known map[string]string) []UnknownAgentReference {
-	isRecognized := func(name string) bool {
-		norm := models.NormalizeAgentName(name)
-		if _, ok := known[norm]; ok {
-			return true
-		}
-		return models.IsUniversalAgent(norm, skillsDir)
-	}
-
-	var refs []UnknownAgentReference
-	for _, a := range cfg.Settings.DefaultAgents {
-		if !isRecognized(a) {
-			refs = append(refs, UnknownAgentReference{Field: AgentRefDefaultAgents, Agent: models.NormalizeAgentName(a)})
-		}
-	}
-
-	skillNames := make([]string, 0, len(cfg.Settings.Availability))
-	for name := range cfg.Settings.Availability {
-		skillNames = append(skillNames, name)
-	}
-	sort.Strings(skillNames)
-	for _, skill := range skillNames {
-		override := cfg.Settings.Availability[skill]
-		for _, a := range override.Include {
-			if !isRecognized(a) {
-				refs = append(refs, UnknownAgentReference{Skill: skill, Field: AgentRefInclude, Agent: models.NormalizeAgentName(a)})
-			}
-		}
-		for _, a := range override.Exclude {
-			if !isRecognized(a) {
-				refs = append(refs, UnknownAgentReference{Skill: skill, Field: AgentRefExclude, Agent: models.NormalizeAgentName(a)})
-			}
-		}
-	}
-	return refs
-}
-
 func availabilitySource(item models.SkillItem) string {
 	if strings.HasPrefix(item.SourceType, "local_") {
 		return "local"
@@ -149,7 +90,8 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 
 	knownAgents := models.GetAgentsForSkillsDir(skillsDir)
 	universalDirs := models.GetUniversalAgentSkillDirs(skillsDir)
-	configuredAgents := ConfiguredKnownAgents(cfg, skillsDir)
+	availability := NewAvailability(cfg, skillsDir)
+	configuredAgents := availability.ConfiguredAgentDirs()
 
 	configuredNames := make([]string, 0, len(configuredAgents))
 	for name := range configuredAgents {
@@ -193,7 +135,7 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 	}
 
 	plan.LeftoverEmpty = LeftoverEmptyAgentDirs(knownAgents, configuredAgents)
-	plan.UnknownAgents = unknownAgentRefs(cfg, skillsDir, knownAgents)
+	plan.UnknownAgents = availability.UnknownAgentReferences()
 
 	inv, err := Inventory(cfg, skillsDir)
 	if err != nil {
@@ -212,7 +154,7 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 			plan.Invalid = append(plan.Invalid, s.Name)
 		}
 		source := availabilitySource(s)
-		missing, unexpected := AvailabilityDrift(s.Name, cfg, skillsDir)
+		missing, unexpected := availability.Drift(s.Name)
 		if len(missing) == 0 && len(unexpected) == 0 {
 			continue
 		}
@@ -253,6 +195,7 @@ func (p HealthPlan) IssueCount() int {
 // materialized or pruned.
 func ApplyHealthPlan(plan HealthPlan, cfg *config.Config, skillsDir string) HealthFixResult {
 	result := HealthFixResult{}
+	availability := NewAvailability(cfg, skillsDir)
 	for _, agent := range plan.Agents {
 		for _, name := range agent.Broken {
 			path := filepath.Join(agent.Dir, name)
@@ -295,7 +238,7 @@ func ApplyHealthPlan(plan HealthPlan, cfg *config.Config, skillsDir string) Heal
 		result.RemovedLeftover = append(result.RemovedLeftover, leftover)
 	}
 	for _, d := range plan.Drift {
-		if err := ApplyAvailability(d.Skill, cfg, skillsDir); err != nil {
+		if err := availability.Apply(d.Skill); err != nil {
 			result.FailedDrift = append(result.FailedDrift, HealthFix{Name: d.Skill, Err: err})
 			continue
 		}

@@ -913,6 +913,13 @@ func TestCLIAgentsMutationsPersistAndReconcile(t *testing.T) {
 	if _, ok := cfg.Settings.Availability["sample"]; ok {
 		t.Fatalf("follow-defaults left an override: %#v", cfg.Settings.Availability["sample"])
 	}
+	out, err := runCLI(t, "agents", "sample", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("agents inspect: %v", err)
+	}
+	if !strings.Contains(out, "Linked by policy: claude-code") || !strings.Contains(out, "Automatically available: ") || !strings.Contains(out, "codex") {
+		t.Fatalf("agents output does not separate managed and Automatically available Agents:\n%s", out)
+	}
 }
 
 func TestCLIAddAgentPersistsAndRmAgentIsRemoved(t *testing.T) {

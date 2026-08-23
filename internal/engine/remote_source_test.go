@@ -27,7 +27,7 @@ func TestRemoteSourceSyncDryRunDoesNotRefreshCache(t *testing.T) {
 	cacheDir := filepath.Join(project, "cache")
 	cfg := config.DefaultConfig()
 	repo := config.RemoteRepo{URL: filepath.Join(project, "missing-origin"), Skills: map[string]string{"sample": "sample"}}
-	remote := newRemoteSource(cfg, "owner/repo", repo, filepath.Join(project, ".agents", "skills"), cacheDir)
+	remote := newRemoteSource(NewAvailability(cfg, filepath.Join(project, ".agents", "skills")), "owner/repo", repo, cacheDir)
 
 	var kinds []string
 	if err := remote.sync(false, true, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err != nil {
@@ -45,7 +45,7 @@ func TestRemoteSourceSyncReportsCacheFailure(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.DefaultConfig()
 	repo := config.RemoteRepo{URL: filepath.Join(project, "missing-origin"), Skills: map[string]string{"sample": "sample"}}
-	remote := newRemoteSource(cfg, "owner/repo", repo, filepath.Join(project, ".agents", "skills"), filepath.Join(project, "cache"))
+	remote := newRemoteSource(NewAvailability(cfg, filepath.Join(project, ".agents", "skills")), "owner/repo", repo, filepath.Join(project, "cache"))
 
 	var kinds []string
 	if err := remote.sync(false, false, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err != nil {
@@ -70,7 +70,7 @@ func TestRemoteSourceReconcileContinuesAfterMaterializeFailure(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	skills := map[string]string{"bad": "missing", "good": "good"}
-	remote := newRemoteSource(cfg, "owner/repo", config.RemoteRepo{Skills: skills}, filepath.Join(project, ".agents", "skills"), "")
+	remote := newRemoteSource(NewAvailability(cfg, filepath.Join(project, ".agents", "skills")), "owner/repo", config.RemoteRepo{Skills: skills}, "")
 	var kinds []string
 	if err := remote.reconcile(repoDir, false, skills, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestRemoteSourceReconcileAvailabilityFailsClosed(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	skills := map[string]string{"sample": "sample"}
-	remote := newRemoteSource(cfg, "owner/repo", config.RemoteRepo{Skills: skills}, filepath.Join(project, ".agents", "skills"), "")
+	remote := newRemoteSource(NewAvailability(cfg, filepath.Join(project, ".agents", "skills")), "owner/repo", config.RemoteRepo{Skills: skills}, "")
 	if err := remote.reconcile(repoDir, false, skills, nil); err == nil {
 		t.Fatal("expected unmanaged Availability path to fail closed")
 	}

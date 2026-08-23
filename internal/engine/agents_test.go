@@ -8,12 +8,12 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 )
 
-func TestConfiguredKnownAgentsSelectsDefaultAgentsOnly(t *testing.T) {
+func TestAvailabilityConfiguredAgentDirsSelectsDefaultsOnly(t *testing.T) {
 	proj := t.TempDir()
 	skillsDir := filepath.Join(proj, ".agents", "skills")
 
 	cfg := config.DefaultConfig()
-	got := ConfiguredKnownAgents(cfg, skillsDir)
+	got := NewAvailability(cfg, skillsDir).ConfiguredAgentDirs()
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 configured agent, got %d: %v", len(got), got)
@@ -27,7 +27,7 @@ func TestConfiguredKnownAgentsSelectsDefaultAgentsOnly(t *testing.T) {
 	}
 }
 
-func TestConfiguredKnownAgentsHonorsAvailabilityInclude(t *testing.T) {
+func TestAvailabilityConfiguredAgentDirsHonorsInclude(t *testing.T) {
 	proj := t.TempDir()
 	skillsDir := filepath.Join(proj, ".agents", "skills")
 
@@ -35,7 +35,7 @@ func TestConfiguredKnownAgentsHonorsAvailabilityInclude(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Include: []string{"continue"}}
 
-	got := ConfiguredKnownAgents(cfg, skillsDir)
+	got := NewAvailability(cfg, skillsDir).ConfiguredAgentDirs()
 	if _, ok := got["continue"]; !ok {
 		t.Fatal("included continue should be configured")
 	}

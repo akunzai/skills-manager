@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -206,6 +207,23 @@ func GetUniversalAgentSkillDirs(skillsDir string) map[string]string {
 		"opencode":       filepath.Join(xdgConfig, "opencode", "skills"),
 		"zed":            filepath.Join(xdgConfig, "zed", "skills"),
 	}
+}
+
+// GetAutomaticallyAvailableAgents returns the Agents that read the central
+// skills directory directly in the Scope that skillsDir belongs to.
+func GetAutomaticallyAvailableAgents(skillsDir string) []string {
+	want := scopeProject
+	if IsGlobalSkillsDir(skillsDir) {
+		want = scopeGlobal
+	}
+	agents := make([]string, 0, len(universalAgentScopes))
+	for agent, scopes := range universalAgentScopes {
+		if agent != "universal" && scopes&want != 0 {
+			agents = append(agents, agent)
+		}
+	}
+	sort.Strings(agents)
+	return agents
 }
 
 // knownAgentSkillDirTemplates lists agents whose global skills directory is a

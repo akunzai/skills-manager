@@ -176,58 +176,6 @@ func normalizeAgents(agents []string) []string {
 	return normalized
 }
 
-func IncludeSkillAgents(cfg *Config, skill string, agents ...string) error {
-	ensureAvailability(cfg)
-	override := cfg.Settings.Availability[skill]
-	override.Include = append(override.Include, agents...)
-	override.Exclude = removeAgents(override.Exclude, agents)
-	cfg.Settings.Availability[skill] = override
-	return NormalizeAvailability(cfg)
-}
-
-func ExcludeSkillAgents(cfg *Config, skill string, agents ...string) error {
-	ensureAvailability(cfg)
-	override := cfg.Settings.Availability[skill]
-	override.Exclude = append(override.Exclude, agents...)
-	override.Include = removeAgents(override.Include, agents)
-	cfg.Settings.Availability[skill] = override
-	return NormalizeAvailability(cfg)
-}
-
-func ResetSkillAgents(cfg *Config, skill string, agents ...string) error {
-	ensureAvailability(cfg)
-	override := cfg.Settings.Availability[skill]
-	override.Include = removeAgents(override.Include, agents)
-	override.Exclude = removeAgents(override.Exclude, agents)
-	cfg.Settings.Availability[skill] = override
-	return NormalizeAvailability(cfg)
-}
-
-func FollowDefaults(cfg *Config, skill string) {
-	ensureAvailability(cfg)
-	delete(cfg.Settings.Availability, skill)
-}
-
-func ensureAvailability(cfg *Config) {
-	if cfg.Settings.Availability == nil {
-		cfg.Settings.Availability = make(map[string]AvailabilityOverride)
-	}
-}
-
-func removeAgents(current, removed []string) []string {
-	removeSet := make(map[string]struct{}, len(removed))
-	for _, agent := range removed {
-		removeSet[models.NormalizeAgentName(agent)] = struct{}{}
-	}
-	kept := current[:0]
-	for _, agent := range current {
-		if _, remove := removeSet[models.NormalizeAgentName(agent)]; !remove {
-			kept = append(kept, agent)
-		}
-	}
-	return kept
-}
-
 func FindSkillSource(cfg *Config, skillName string) (category string, sourceKey string, found bool) {
 	for srcKey, repo := range cfg.Remote {
 		if _, ok := repo.Skills[skillName]; ok {

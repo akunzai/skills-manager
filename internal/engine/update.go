@@ -211,6 +211,7 @@ func UpdateRemoteSkills(
 		baseSkills = models.DefaultSkillsDir()
 	}
 	baseCache := cacheDirOrDefault(cacheDir)
+	availability := NewAvailability(cfg, baseSkills)
 
 	if err := os.MkdirAll(baseSkills, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create skills dir: %w", err)
@@ -294,7 +295,7 @@ func UpdateRemoteSkills(
 						Skills:   skillList,
 					})
 
-					remote := newRemoteSource(cfg, source, repoInfo, baseSkills, baseCache)
+					remote := newRemoteSource(availability, source, repoInfo, baseCache)
 					if err := remote.reconcile("", dryRun, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
 						return result, err
 					}
@@ -342,7 +343,7 @@ func UpdateRemoteSkills(
 				for i := range jobs {
 					source := sources[i]
 					repoInfo := reposNeedingUpdate[source]
-					remote := newRemoteSource(cfg, source, repoInfo, baseSkills, baseCache)
+					remote := newRemoteSource(availability, source, repoInfo, baseCache)
 					dir, err := remote.refresh(true)
 					fetched[i] = fetchedRepo{dir: dir, err: err}
 				}
@@ -363,7 +364,7 @@ func UpdateRemoteSkills(
 		if dryRun {
 			result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, Skills: skillList, DryRun: true})
 			result.UpdatedSkills = append(result.UpdatedSkills, skillList...)
-			remote := newRemoteSource(cfg, source, repoInfo, baseSkills, baseCache)
+			remote := newRemoteSource(availability, source, repoInfo, baseCache)
 			if err := remote.reconcile("", true, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
 				return result, err
 			}
@@ -379,7 +380,7 @@ func UpdateRemoteSkills(
 
 		repoDir := fetched[i].dir
 		repoUpdatedSkills := make([]string, 0)
-		remote := newRemoteSource(cfg, source, repoInfo, baseSkills, baseCache)
+		remote := newRemoteSource(availability, source, repoInfo, baseCache)
 		if err := remote.reconcile(repoDir, false, repoInfo.Skills, updateReconcileEmit(onProgress, result, source, &repoUpdatedSkills)); err != nil {
 			return result, err
 		}

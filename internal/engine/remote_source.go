@@ -12,21 +12,20 @@ import (
 // remoteSource owns one remote Source's Cache, Materialize, and Availability
 // lifecycle. Batch scheduling remains with Sync and Update.
 type remoteSource struct {
-	cfg       *config.Config
-	key       string
-	repo      config.RemoteRepo
-	skillsDir string
-	cacheDir  string
+	availability *Availability
+	key          string
+	repo         config.RemoteRepo
+	cacheDir     string
 }
 
-func newRemoteSource(cfg *config.Config, key string, repo config.RemoteRepo, skillsDir, cacheDir string) remoteSource {
-	return remoteSource{cfg: cfg, key: key, repo: repo, skillsDir: skillsDir, cacheDir: cacheDir}
+func newRemoteSource(availability *Availability, key string, repo config.RemoteRepo, cacheDir string) remoteSource {
+	return remoteSource{availability: availability, key: key, repo: repo, cacheDir: cacheDir}
 }
 
 // PrepareRemoteSource refreshes one Source's Cache and discovers its Skills.
 // Add uses this before it knows which Skills the user will declare.
 func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir string) (string, map[string]string, error) {
-	remote := newRemoteSource(nil, key, repo, "", cacheDir)
+	remote := newRemoteSource(nil, key, repo, cacheDir)
 	repoDir, err := remote.refresh(true)
 	if err != nil {
 		return "", nil, fmt.Errorf("refresh Source %s: %w", key, err)
@@ -45,7 +44,7 @@ func (s remoteSource) missingSkills(force bool) map[string]string {
 			missing[name] = subpath
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(s.skillsDir, name)); err != nil {
+		if _, err := os.Stat(filepath.Join(s.availability.skillsDir, name)); err != nil {
 			missing[name] = subpath
 		}
 	}
@@ -67,7 +66,7 @@ func (s remoteSource) reconcile(repoDir string, dryRun bool, toWrite map[string]
 		subpath := s.repo.Skills[name]
 		if !dryRun && toWrite != nil {
 			if _, write := toWrite[name]; write {
-				if err := MaterializeRemoteSkill(name, subpath, repoDir, s.skillsDir); err != nil {
+				if err := MaterializeRemoteSkill(name, subpath, repoDir, s.availability.skillsDir); err != nil {
 					if errors.Is(err, errRepoPathMissing) {
 						emit(SyncEvent{Kind: SyncPathMissing, Source: s.key, Skill: name, Path: subpath})
 					} else {
@@ -78,7 +77,7 @@ func (s remoteSource) reconcile(repoDir string, dryRun bool, toWrite map[string]
 				emit(SyncEvent{Kind: SyncMaterialized, Source: s.key, Skill: name, Path: subpath})
 			}
 		}
-		if err := applyDeclaredAvailability(name, s.key, s.cfg, s.skillsDir, dryRun, emit); err != nil {
+		if err := s.availability.applyDeclared(name, s.key, dryRun, emit); err != nil {
 			return err
 		}
 	}
