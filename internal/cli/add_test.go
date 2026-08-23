@@ -4,9 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/tui"
 )
 
@@ -133,4 +136,68 @@ func TestShouldPromptForDiscoveredSkills(t *testing.T) {
 	if shouldPromptForDiscoveredSkills(1, true, true) {
 		t.Fatal("--yes must skip confirmation")
 	}
+}
+
+func TestSameAgentSelection(t *testing.T) {
+	want := map[string]struct{}{"claude-code": {}, "continue": {}}
+	if !sameAgentSelection(want, []string{"claude-code", "continue"}) {
+		t.Fatal("identical sets must match regardless of input order")
+	}
+	if sameAgentSelection(want, []string{"claude-code"}) {
+		t.Fatal("a shorter got must not match")
+	}
+	if sameAgentSelection(want, []string{"claude-code", "roo"}) {
+		t.Fatal("a differing member must not match despite equal length")
+	}
+	if !sameAgentSelection(map[string]struct{}{}, nil) {
+		t.Fatal("two empty selections must match")
+	}
+}
+
+func TestAgentSelectionBaseline(t *testing.T) {
+	skillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
+
+	t.Run("single skill reports its own Availability", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Settings.DefaultAgents = []string{"claude"}
+		availability := engine.NewAvailability(cfg, skillsDir)
+
+		baseline, ok := agentSelectionBaseline(availability, []string{"only"})
+		if !ok {
+			t.Fatal("a single skill can never conflict with itself")
+		}
+		if !reflect.DeepEqual(baseline, map[string]struct{}{"claude-code": {}}) {
+			t.Fatalf("baseline = %#v", baseline)
+		}
+	})
+
+	t.Run("agreeing skills report the shared Availability", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+		availability := engine.NewAvailability(cfg, skillsDir)
+
+		baseline, ok := agentSelectionBaseline(availability, []string{"a", "b"})
+		if !ok {
+			t.Fatal("skills sharing the default policy must not conflict")
+		}
+		want := map[string]struct{}{"claude-code": {}, "continue": {}}
+		if !reflect.DeepEqual(baseline, want) {
+			t.Fatalf("baseline = %#v, want %#v", baseline, want)
+		}
+	})
+
+	t.Run("disagreeing skills report a conflict", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Settings.DefaultAgents = []string{"claude"}
+		cfg.Settings.Availability["b"] = config.AvailabilityOverride{Include: []string{"continue"}}
+		availability := engine.NewAvailability(cfg, skillsDir)
+
+		baseline, ok := agentSelectionBaseline(availability, []string{"a", "b"})
+		if ok {
+			t.Fatalf("expected a conflict, got baseline = %#v", baseline)
+		}
+		if baseline != nil {
+			t.Fatalf("a conflict must not leak a partial baseline, got %#v", baseline)
+		}
+	})
 }

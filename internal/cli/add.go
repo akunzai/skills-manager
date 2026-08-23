@@ -437,16 +437,9 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsD
 		skillNames = append(skillNames, skill)
 	}
 	sort.Strings(skillNames)
-	firstSkill := skillNames[0]
-	baseline := make(map[string]struct{})
-	for _, agent := range availability.ManagedAgents(firstSkill) {
-		baseline[agent] = struct{}{}
-	}
-	for _, skill := range skillNames[1:] {
-		other := availability.ManagedAgents(skill)
-		if !sameAgentSelection(baseline, other) {
-			return fmt.Errorf("selected skills have different availability; configure them individually with skills agents")
-		}
+	baseline, ok := agentSelectionBaseline(availability, skillNames)
+	if !ok {
+		return fmt.Errorf("selected skills have different availability; configure them individually with skills agents")
 	}
 	options := make([]tui.SelectOption, 0, len(agents))
 	for _, agent := range agents {
@@ -478,4 +471,20 @@ func sameAgentSelection(want map[string]struct{}, got []string) bool {
 		}
 	}
 	return true
+}
+
+// agentSelectionBaseline reports the managed-agent Availability shared by
+// every named skill, or ok=false if any two selected skills disagree.
+// skillNames must be non-empty.
+func agentSelectionBaseline(availability *engine.Availability, skillNames []string) (baseline map[string]struct{}, ok bool) {
+	baseline = make(map[string]struct{})
+	for _, agent := range availability.ManagedAgents(skillNames[0]) {
+		baseline[agent] = struct{}{}
+	}
+	for _, skill := range skillNames[1:] {
+		if !sameAgentSelection(baseline, availability.ManagedAgents(skill)) {
+			return nil, false
+		}
+	}
+	return baseline, true
 }
