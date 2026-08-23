@@ -120,8 +120,8 @@ func resolveSkillsToAdd(
 	return skillsToAdd, false, nil
 }
 
-// run selects Skills, confirms replacements, then delegates declaration,
-// Materialize, and Availability to the Source-specific Adder.
+// run selects Skills, confirms replacements, then declares, Materializes,
+// and applies Availability via BuildAddPlan and ApplyAddPlan.
 func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
 	out := cmd.OutOrStdout()
 
