@@ -48,6 +48,7 @@ func agentDisplayLabels(agents []string) []string {
 	for _, a := range agents {
 		if a == "claude-code" || a == "claude" {
 			labels = append(labels, "claude")
+			break
 		}
 	}
 	for _, a := range agents {
