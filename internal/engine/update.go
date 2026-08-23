@@ -33,37 +33,22 @@ func sortedSkillKeys(skills map[string]string) []string {
 }
 
 func CheckRepoUpdateStatus(source string, repoInfo config.RemoteRepo, cacheDir string) UpdateStatusResult {
-	parsed := models.ParseRepoSource(source)
-	cleanSource := parsed.SourceKey
-
-	baseCache := cacheDir
-	if baseCache == "" {
-		baseCache = models.DefaultCacheDir()
-	}
-	repoDest := filepath.Join(baseCache, filepath.FromSlash(cleanSource))
-
-	repoURL := repoInfo.URL
-	if repoURL == "" {
-		repoURL = parsed.URL
-	}
-	targetBranch := repoInfo.Branch
-	if targetBranch == "" {
-		targetBranch = parsed.Branch
-	}
+	repo := resolveCacheRepo(source, repoInfo.URL, repoInfo.Branch, cacheDir)
+	targetBranch := repo.Branch
 	if targetBranch == "" {
 		targetBranch = "HEAD"
 	}
 
 	skillList := sortedSkillKeys(repoInfo.Skills)
 
-	localSHA := GetLocalRepoCommit(repoDest)
+	localSHA := GetLocalRepoCommit(repo.Dir)
 	remoteSHA := ""
 
 	status := "up_to_date"
 	if localSHA == "" {
 		status = "not_cached"
 	} else {
-		remoteSHA = GetRemoteRepoCommit(source, repoURL, targetBranch)
+		remoteSHA = GetRemoteRepoCommit(source, repo.URL, targetBranch)
 		if remoteSHA == "" {
 			status = "error"
 		} else if localSHA != remoteSHA {
@@ -73,13 +58,13 @@ func CheckRepoUpdateStatus(source string, repoInfo config.RemoteRepo, cacheDir s
 
 	return UpdateStatusResult{
 		Source:    source,
-		URL:       repoURL,
+		URL:       repo.URL,
 		Branch:    targetBranch,
 		Status:    status,
 		LocalSHA:  localSHA,
 		RemoteSHA: remoteSHA,
 		Skills:    skillList,
-		CachePath: repoDest,
+		CachePath: repo.Dir,
 	}
 }
 
@@ -223,10 +208,7 @@ func UpdateRemoteSkills(
 	if baseSkills == "" {
 		baseSkills = models.DefaultSkillsDir()
 	}
-	baseCache := cacheDir
-	if baseCache == "" {
-		baseCache = models.DefaultCacheDir()
-	}
+	baseCache := cacheDirOrDefault(cacheDir)
 
 	if err := os.MkdirAll(baseSkills, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create skills dir: %w", err)
