@@ -917,7 +917,7 @@ func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
 	}
 }
 
-func TestAddDeclaredCommandFailureSavesAndAppliesAvailability(t *testing.T) {
+func TestCommandAdderFailureSavesAndAppliesAvailability(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	configPath := filepath.Join(project, ".agents", "skills.json")
@@ -940,7 +940,7 @@ func TestAddDeclaredCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 		}
 	}
 
-	err := AddDeclared(cfg, configPath, skillsDir, AddSource{Kind: AddCommand, Command: "exit 1"}, map[string]string{"sample": "."}, nil, nil)
+	err := NewCommandAdder(cfg, configPath, skillsDir, "exit 1", "", "").Run(map[string]string{"sample": "."}, nil, nil)
 	if err == nil {
 		t.Fatal("expected materialize error")
 	}
@@ -956,6 +956,60 @@ func TestAddDeclaredCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 	}
 	if !IsManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
 		t.Fatal("declared Continue link missing")
+	}
+}
+
+func TestSymlinkAdderRunDeclaresAndMaterializes(t *testing.T) {
+	project := t.TempDir()
+	source := filepath.Join(project, "source")
+	writeLocalGitSkill(t, source, "sample")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	cfg := config.DefaultConfig()
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := NewSymlinkAdder(cfg, configPath, skillsDir, source, "local sample").Run(map[string]string{"sample": "sample"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Local["sample"]; got.Type != "symlink" || got.Description != "local sample" {
+		t.Fatalf("saved local entry = %#v", got)
+	}
+	if target, err := os.Readlink(filepath.Join(skillsDir, "sample")); err != nil || target == "" {
+		t.Fatalf("local Skill was not Materialized as a symlink: target=%q err=%v", target, err)
+	}
+}
+
+func TestRemoteAdderRunDeclaresAndMaterializes(t *testing.T) {
+	project := t.TempDir()
+	repoDir := filepath.Join(project, "cache")
+	writeLocalGitSkill(t, repoDir, "sample")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	cfg := config.DefaultConfig()
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := NewRemoteAdder(cfg, configPath, skillsDir, repoDir, "owner/repo", "github", "").Run(map[string]string{"sample": "sample"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Remote["owner/repo"].Skills["sample"]; got != "sample" {
+		t.Fatalf("saved remote subpath = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatalf("remote Skill was not Materialized: %v", err)
 	}
 }
 

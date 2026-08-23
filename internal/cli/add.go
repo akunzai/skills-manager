@@ -209,13 +209,13 @@ func (s replacementSource) display(subpath string) string {
 func confirmSkillReplacements(
 	cfg *config.Config,
 	skillsDir string,
-	skillsToInstall map[string]string,
+	skillsToAdd map[string]string,
 	src replacementSource,
 	flagYes bool,
 	out io.Writer,
 ) error {
 	var conflicts []conflictItem
-	for name, subpath := range skillsToInstall {
+	for name, subpath := range skillsToAdd {
 		newSrcDisplay := src.display(subpath)
 		localSkillSource := src.path
 		if src.kind == "symlink" && subpath != "" && subpath != "." {
@@ -297,6 +297,130 @@ func confirmSkillReplacements(
 	return nil
 }
 
+func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath string) (*addIntake, error) {
+	sourcePath := models.ExpandUser(localPath)
+	absSourcePath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		absSourcePath = sourcePath
+	}
+	stat, err := os.Stat(absSourcePath)
+	if err != nil || !stat.IsDir() {
+		return nil, fmt.Errorf("local source path does not exist or is not a directory: %s", models.ToTildePath(sourcePath))
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "%sScanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
+	discovered, err := engine.DiscoverSkillsInRepo(absSourcePath)
+	if err != nil {
+		return nil, fmt.Errorf("discover skills in %s: %w", models.ToTildePath(sourcePath), err)
+	}
+	if len(discovered) == 0 {
+		skillFile := filepath.Join(absSourcePath, "SKILL.md")
+		if _, err := os.Stat(skillFile); err != nil {
+			return nil, fmt.Errorf("no SKILL.md found in %s", models.ToTildePath(sourcePath))
+		}
+		skillName := engine.ParseSkillNameFromMD(skillFile)
+		if skillName == "" {
+			skillName = filepath.Base(absSourcePath)
+		}
+		discovered[skillName] = "."
+	}
+
+	resolvedPath := func(subpath string) string {
+		if subpath != "" && subpath != "." {
+			return filepath.Join(absSourcePath, filepath.FromSlash(subpath))
+		}
+		return absSourcePath
+	}
+	return &addIntake{
+		rootDir:       absSourcePath,
+		discovered:    discovered,
+		selectionPath: selectionPath,
+		allowRename:   true,
+		labels: sourceLabels{
+			displayName:  models.ToTildePath(absSourcePath),
+			resourceNoun: "Local directory",
+		},
+		replacement: replacementSource{kind: "symlink", path: absSourcePath},
+		progressLine: func(name, subpath string) string {
+			return fmt.Sprintf("Linking local skill: %s%s%s -> %s", colorBold, name, colorReset, models.ToTildePath(resolvedPath(subpath)))
+		},
+		newAdder: func(cfg *config.Config, configPath, skillsDir string) *engine.Adder {
+			return engine.NewSymlinkAdder(cfg, configPath, skillsDir, absSourcePath, description)
+		},
+	}, nil
+}
+
+func newCommandIntake(skillName, command, check, description string) *addIntake {
+	return &addIntake{
+		rootDir:    ".",
+		discovered: map[string]string{skillName: "."},
+		labels: sourceLabels{
+			displayName:  "command",
+			resourceNoun: "Command",
+		},
+		replacement: replacementSource{kind: "command", key: command},
+		progressLine: func(name, _ string) string {
+			return fmt.Sprintf("Configuring command skill: %s%s%s\n   Command: %s\n   Executing installer command...", colorBold, name, colorReset, command)
+		},
+		newAdder: func(cfg *config.Config, configPath, skillsDir string) *engine.Adder {
+			return engine.NewCommandAdder(cfg, configPath, skillsDir, command, check, description)
+		},
+	}
+}
+
+func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
+	parsed := models.ParseRepoSource(rawSource)
+	cloneURL := flagURL
+	if cloneURL == "" {
+		cloneURL = parsed.URL
+	}
+	branch := flagBranch
+	if branch == "" {
+		branch = parsed.Branch
+	}
+	selectionPath := flagPath
+	if selectionPath == "" {
+		selectionPath = parsed.Subpath
+	}
+
+	out := cmd.OutOrStdout()
+	errOut := cmd.ErrOrStderr()
+	if presentation.For(errOut).Plain {
+		fmt.Fprintf(out, "%sFetching Source: %s%s%s...\n", colorCyan, colorBold, parsed.SourceKey, colorReset)
+	}
+	progress := presentation.StartProgress(errOut, "Fetching Source: "+parsed.SourceKey+"...")
+	repoDir, discovered, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir)
+	progress.Stop()
+	if err != nil {
+		return nil, err
+	}
+	discovered, err = discoveryResult(discovered, nil, parsed.SourceKey)
+	if err != nil {
+		return nil, err
+	}
+
+	var storedURL string
+	if flagURL != "" || parsed.RepoType != "github" || !strings.HasPrefix(cloneURL, "https://github.com/") {
+		storedURL = cloneURL
+	}
+	return &addIntake{
+		rootDir:       repoDir,
+		discovered:    discovered,
+		selectionPath: selectionPath,
+		labels: sourceLabels{
+			displayName:  parsed.SourceKey,
+			resourceNoun: "Repository",
+		},
+		replacement: replacementSource{kind: "remote", key: parsed.SourceKey},
+		progressLine: func(name, subpath string) string {
+			return fmt.Sprintf("Installing %s%s%s (from %s)...", colorBold, name, colorReset, subpath)
+		},
+		newAdder: func(cfg *config.Config, configPath, skillsDir string) *engine.Adder {
+			return engine.NewRemoteAdder(cfg, configPath, skillsDir, repoDir, parsed.SourceKey, parsed.RepoType, storedURL)
+		},
+	}, nil
+}
+
 func newAddCmd() *cobra.Command {
 	var (
 		flagSkills      []string
@@ -342,38 +466,11 @@ func newAddCmd() *cobra.Command {
 				if localPath == "" {
 					localPath = args[0]
 				}
-
-				sourcePath := models.ExpandUser(localPath)
-				absSourcePath, err := filepath.Abs(sourcePath)
+				intake, err := newLocalIntake(cmd, localPath, flagDescription, flagPath)
 				if err != nil {
-					absSourcePath = sourcePath
+					return err
 				}
-				stat, err := os.Stat(absSourcePath)
-				if err != nil || !stat.IsDir() {
-					return fmt.Errorf("local source path does not exist or is not a directory: %s", models.ToTildePath(sourcePath))
-				}
-
-				out := cmd.OutOrStdout()
-				fmt.Fprintf(out, "%sScanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
-
-				discovered, err := engine.DiscoverSkillsInRepo(absSourcePath)
-				if err != nil {
-					return fmt.Errorf("discover skills in %s: %w", models.ToTildePath(sourcePath), err)
-				}
-				if len(discovered) == 0 {
-					if _, err := os.Stat(filepath.Join(absSourcePath, "SKILL.md")); err == nil {
-						skillName := engine.ParseSkillNameFromMD(filepath.Join(absSourcePath, "SKILL.md"))
-						if skillName == "" {
-							skillName = filepath.Base(absSourcePath)
-						}
-						discovered[skillName] = "."
-					} else {
-						return fmt.Errorf("no SKILL.md found in %s", models.ToTildePath(sourcePath))
-					}
-				}
-
-				src := &localInstallSource{absSourcePath: absSourcePath, description: flagDescription}
-				return runAddPipeline(cmd, discovered, src, flagAll, flagPath, flagSkills, flagYes, flagAgents)
+				return intake.run(cmd, addRequest{all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
 			}
 
 			// 2. Command Skill Mode
@@ -388,12 +485,8 @@ func newAddCmd() *cobra.Command {
 				} else {
 					skillName = args[0]
 				}
-				src := &commandInstallSource{
-					command:     flagCommand,
-					check:       flagCheck,
-					description: flagDescription,
-				}
-				return runAddPipeline(cmd, map[string]string{skillName: "."}, src, false, "", []string{skillName}, flagYes, flagAgents)
+				intake := newCommandIntake(skillName, flagCommand, flagCheck, flagDescription)
+				return intake.run(cmd, addRequest{skills: []string{skillName}, yes: flagYes, agents: flagAgents})
 			}
 
 			// 3. Remote Git Repository Mode
@@ -401,67 +494,30 @@ func newAddCmd() *cobra.Command {
 				cmd.SilenceUsage = false
 				return fmt.Errorf("source repository or --symlink/--command required")
 			}
-			rawSource := args[0]
-
-			parsed := models.ParseRepoSource(rawSource)
-			sourceKey := parsed.SourceKey
-			cloneURL := flagURL
-			if cloneURL == "" {
-				cloneURL = parsed.URL
-			}
-			branch := flagBranch
-			if branch == "" {
-				branch = parsed.Branch
-			}
-			subpathOverride := flagPath
-			if subpathOverride == "" {
-				subpathOverride = parsed.Subpath
-			}
-			repoType := parsed.RepoType
-
-			out := cmd.OutOrStdout()
-			errOut := cmd.ErrOrStderr()
-			if presentation.For(errOut).Plain {
-				fmt.Fprintf(out, "%sFetching Source: %s%s%s...\n", colorCyan, colorBold, sourceKey, colorReset)
-			}
-			progress := presentation.StartProgress(errOut, "Fetching Source: "+sourceKey+"...")
-			repoDir, discovered, err := engine.PrepareRemoteSource(sourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir)
-			progress.Stop()
+			intake, err := newRemoteIntake(cmd, args[0], flagURL, flagBranch, flagPath, cacheDir)
 			if err != nil {
 				return err
 			}
-
-			discovered, err = discoveryResult(discovered, nil, sourceKey)
-			if err != nil {
-				return err
-			}
-
-			var storedURL string
-			if flagURL != "" || repoType != "github" || !strings.HasPrefix(cloneURL, "https://github.com/") {
-				storedURL = cloneURL
-			}
-
-			src := &remoteInstallSource{repoDir: repoDir, sourceKey: sourceKey, repoType: repoType, storedURL: storedURL}
-			return runAddPipeline(cmd, discovered, src, flagAll, subpathOverride, flagSkills, flagYes, flagAgents)
+			return intake.run(cmd, addRequest{all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
 		},
 	}
 
 	cmd.Flags().StringSliceVarP(&flagSkills, "skill", "s", nil, "Specific skill name(s)")
-	cmd.Flags().BoolVar(&flagAll, "all", false, "Install all skills found in the repository")
+	cmd.Flags().BoolVar(&flagAll, "all", false, "Add all Skills found in the repository")
 	cmd.Flags().StringVar(&flagPath, "path", "", "Relative path within repo")
 	cmd.Flags().StringVar(&flagURL, "url", "", "Custom Git clone URL")
 	cmd.Flags().StringVar(&flagBranch, "branch", "", "Git branch or tag")
 	cmd.Flags().StringSliceVarP(&flagAgents, "agent", "a", nil, "Persistently include agents for added skills")
-	cmd.Flags().StringVar(&flagSymlink, "symlink", "", "Path to local skill directory for symlink install")
-	cmd.Flags().StringVar(&flagCommand, "command", "", "Command to install the skill")
-	cmd.Flags().StringVar(&flagCheck, "check", "", "Command to check before installing command skill")
+	cmd.Flags().StringVar(&flagSymlink, "symlink", "", "Path to a local Skill Source")
+	cmd.Flags().StringVar(&flagCommand, "command", "", "Command Source for the Skill")
+	cmd.Flags().StringVar(&flagCheck, "check", "", "Command to check before running the command Source")
 	cmd.Flags().StringVar(&flagDescription, "description", "", "Description of the skill")
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompts")
 
 	return cmd
 }
 
-func promptAddAvailability(cfg *config.Config, skills map[string]string, _, skillsDir string, skip bool, explicitAgents []string) error {
+func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsDir string, skip bool, explicitAgents []string) error {
 	if skip || len(explicitAgents) > 0 || !tui.IsTerminal() {
 		return nil
 	}

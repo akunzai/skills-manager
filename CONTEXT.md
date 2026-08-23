@@ -67,3 +67,7 @@ _Avoid_: upgrade, pull (when you mean this command)
 **Doctor**:
 Diagnosis and optional repair of one Scope's Skill, Agent directory, and Availability health.
 _Avoid_: health check (diagnosis only), fixer (repair only)
+
+**Add**:
+Declaring selected Skills from one Source in a Scope's Config, then Materializing them and applying Availability.
+_Avoid_: install (when you mean the whole Add), import, register
