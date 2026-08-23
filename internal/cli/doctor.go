@@ -133,6 +133,13 @@ func printHealthReport(out io.Writer, plan engine.HealthPlan, result *engine.Hea
 	if len(plan.Invalid) > 0 {
 		fmt.Fprintf(out, "\n%sInstalled folders missing SKILL.md:%s %s\n", colorRed, colorReset, strings.Join(plan.Invalid, ", "))
 	}
+	for _, ref := range plan.UnknownAgents {
+		where := "settings." + ref.Field
+		if ref.Skill != "" {
+			where = fmt.Sprintf("settings.availability.%s.%s", ref.Skill, ref.Field)
+		}
+		fmt.Fprintf(out, "\n%sWarning: unknown agent %q in %s%s\n", colorYellow, ref.Agent, where, colorReset)
+	}
 }
 
 func leftoverNames(dirs []engine.AgentDir) []string {

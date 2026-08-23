@@ -138,13 +138,15 @@ func GetProjectRootFromSkillsDir(skillsDir string) string {
 	return parent
 }
 
-// GetProjectKnownAgents returns mapping of agent names to their project-level skills directory.
+// GetProjectKnownAgents returns mapping of agent names to their project-level
+// skills directory. Cursor is not here: it reads project .agents/skills
+// directly, same as at Global Scope (cursor.com/docs/skills#skill-directories).
 func GetProjectKnownAgents(projectRoot string) map[string]string {
 	return map[string]string{
 		"claude-code": filepath.Join(projectRoot, ".claude", "skills"),
 		"continue":    filepath.Join(projectRoot, ".continue", "skills"),
-		"cursor":      filepath.Join(projectRoot, ".cursor", "skills"),
 		"cline":       filepath.Join(projectRoot, ".cline", "skills"),
+		"firebender":  filepath.Join(projectRoot, ".firebender", "skills"),
 		"roo":         filepath.Join(projectRoot, ".roo", "skills"),
 		"windsurf":    filepath.Join(projectRoot, ".codeium", "windsurf", "skills"),
 	}
@@ -172,11 +174,14 @@ func GetAgentsForSkillsDir(skillsDir string) map[string]string {
 	return GetProjectKnownAgents(projectRoot)
 }
 
-// GetUniversalAgentSkillDirs returns skills directories that universal agents
-// may have had materialized for them. skills-manager never creates these —
-// universal agents read the master skills directory directly — but earlier
-// versions and external setup scripts did, and links left behind there still
-// have to be cleaned up when a skill goes away.
+// GetUniversalAgentSkillDirs returns skills directories that Automatically
+// available agents may have had materialized for them. skills-manager never
+// creates these — those agents read the master skills directory directly in
+// every Scope they hold that status — but earlier versions and external setup
+// scripts did, and links left behind there still have to be cleaned up when a
+// skill goes away. An agent that is Automatically available in only one Scope
+// (see universalAgentScopes) is a real, actively-managed known dir in the
+// other, so it belongs in GetKnownAgents/GetProjectKnownAgents instead.
 //
 // These paths are conventions, not guarantees. Callers must only ever act on a
 // symlink that resolves into the master skills directory, so a path that turns
@@ -193,15 +198,13 @@ func GetUniversalAgentSkillDirs(skillsDir string) map[string]string {
 	}
 	xdgConfig := ResolveEnvPath("XDG_CONFIG_HOME", "~/.config")
 	return map[string]string{
-		"amp":             ExpandUser("~/.amp/skills"),
-		"antigravity-cli": ExpandUser("~/.antigravity/skills"),
-		"cline":           ExpandUser("~/.cline/skills"),
-		"codex":           ExpandUser("~/.codex/skills"),
-		"cursor":          ExpandUser("~/.cursor/skills"),
-		"gemini-cli":      ExpandUser("~/.gemini/skills"),
-		"github-copilot":  ExpandUser("~/.copilot/skills"),
-		"opencode":        filepath.Join(xdgConfig, "opencode", "skills"),
-		"zed":             filepath.Join(xdgConfig, "zed", "skills"),
+		"amp":            ExpandUser("~/.amp/skills"),
+		"codex":          ExpandUser("~/.codex/skills"),
+		"cursor":         ExpandUser("~/.cursor/skills"),
+		"gemini-cli":     ExpandUser("~/.gemini/skills"),
+		"github-copilot": ExpandUser("~/.copilot/skills"),
+		"opencode":       filepath.Join(xdgConfig, "opencode", "skills"),
+		"zed":            filepath.Join(xdgConfig, "zed", "skills"),
 	}
 }
 
@@ -213,9 +216,11 @@ func GetUniversalAgentSkillDirs(skillsDir string) map[string]string {
 var knownAgentSkillDirTemplates = map[string]string{
 	"adal":            "~/.adal/skills",
 	"aider-desk":      "~/.aider-desk/skills",
+	"antigravity-cli": "~/.gemini/antigravity-cli/skills",
 	"astrbot":         "~/.astrbot/data/skills",
 	"augment":         "~/.augment/skills",
 	"bob":             "~/.bob/skills",
+	"cline":           "~/.cline/skills",
 	"codearts-agent":  "~/.codeartsdoer/skills",
 	"codebuddy":       "~/.codebuddy/skills",
 	"codemaker":       "~/.codemaker/skills",
@@ -225,6 +230,7 @@ var knownAgentSkillDirTemplates = map[string]string{
 	"cortex":          "~/.snowflake/cortex/skills",
 	"crush":           "~/.config/crush/skills",
 	"droid":           "~/.factory/skills",
+	"firebender":      "~/.firebender/skills",
 	"forgecode":       "~/.forge/skills",
 	"iflow-cli":       "~/.iflow/skills",
 	"inference-sh":    "~/.inferencesh/skills",
@@ -294,27 +300,45 @@ func GetKnownAgents() map[string]string {
 	return known
 }
 
-// Universal agents that natively support ~/.agents/skills
-var UniversalAgents = []string{
-	"amp",
-	"antigravity",
-	"antigravity-cli",
-	"cline",
-	"codex",
-	"cursor",
-	"deepagents",
-	"dexto",
-	"firebender",
-	"gemini-cli",
-	"github-copilot",
-	"kimi-code-cli",
-	"loaf",
-	"opencode",
-	"promptscript",
-	"replit",
-	"warp",
-	"zed",
-	"universal",
+// agentScope is which Scope(s) an Automatically available Agent holds that
+// status in. An Agent absent from universalAgentScopes needs a linkable
+// directory (GetKnownAgents / GetProjectKnownAgents) in every Scope instead.
+type agentScope int
+
+const (
+	scopeGlobal agentScope = 1 << iota
+	scopeProject
+)
+
+const scopeBoth = scopeGlobal | scopeProject
+
+// universalAgentScopes lists, per Agent, the Scope(s) confirmed (against each
+// tool's own documentation) to read the master skills directory directly:
+// Global ~/.agents/skills, Project .agents/skills. An Agent that reads its own
+// dedicated directory instead — in either Scope — is not listed for that
+// Scope, even if some other tool with a similar name is.
+//
+// A handful of entries are Scope-split because the same Agent's Global and
+// Project behavior differ:
+//   - antigravity-cli: Project reads .agents/skills; Global reads its own
+//     ~/.gemini/antigravity-cli/skills instead — a different tool from the
+//     Antigravity IDE, which reads ~/.gemini/skills
+//     (antigravity.google/docs/cli/plugins#sharing-global-skills).
+//   - replit: confirmed only for Project (docs.replit.com); Replit Agent runs
+//     in the cloud with no local Global skills directory to read.
+var universalAgentScopes = map[string]agentScope{
+	"amp":             scopeBoth,
+	"antigravity-cli": scopeProject,
+	"codex":           scopeBoth,
+	"cursor":          scopeBoth,
+	"gemini-cli":      scopeBoth,
+	"github-copilot":  scopeBoth,
+	"kimi-code-cli":   scopeBoth,
+	"opencode":        scopeBoth,
+	"replit":          scopeProject,
+	"warp":            scopeBoth,
+	"zed":             scopeBoth,
+	"universal":       scopeBoth,
 }
 
 var AgentAliases = map[string]string{
@@ -356,14 +380,18 @@ func NormalizeAgentName(name string) string {
 	return low
 }
 
-func IsUniversalAgent(name string) bool {
+// IsUniversalAgent reports whether name is Automatically available in the
+// Scope skillsDir belongs to, so it needs no Availability link there.
+func IsUniversalAgent(name, skillsDir string) bool {
 	norm := NormalizeAgentName(name)
-	for _, u := range UniversalAgents {
-		if u == norm {
-			return true
-		}
+	scopes, ok := universalAgentScopes[norm]
+	if !ok {
+		return false
 	}
-	return false
+	if IsGlobalSkillsDir(skillsDir) {
+		return scopes&scopeGlobal != 0
+	}
+	return scopes&scopeProject != 0
 }
 
 type ParsedRepoSource struct {

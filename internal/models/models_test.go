@@ -29,37 +29,70 @@ func TestNormalizeAgentName(t *testing.T) {
 }
 
 func TestIsUniversalAgent(t *testing.T) {
-	if !IsUniversalAgent("gemini") {
-		t.Errorf("expected gemini to be universal")
+	if !IsUniversalAgent("gemini", "") {
+		t.Errorf("expected gemini to be universal at Global Scope")
 	}
-	if !IsUniversalAgent("antigravity-cli") {
-		t.Errorf("expected antigravity-cli to be universal")
+	if !IsUniversalAgent("cursor", "") {
+		t.Errorf("expected cursor to be universal at Global Scope")
 	}
-	if !IsUniversalAgent("cursor") {
-		t.Errorf("expected cursor to be universal")
-	}
-	if IsUniversalAgent("claude-code") {
+	if IsUniversalAgent("claude-code", "") {
 		t.Errorf("expected claude-code to not be universal")
+	}
+	// Confirmed live via `copilot skill list`, which lists exactly the
+	// contents of ~/.agents/skills.
+	if !IsUniversalAgent("github-copilot", "") {
+		t.Errorf("expected github-copilot to be universal at Global Scope")
+	}
+}
+
+func TestIsUniversalAgentIsScopeAware(t *testing.T) {
+	projectSkillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
+
+	for _, agent := range []string{"antigravity-cli", "replit"} {
+		if IsUniversalAgent(agent, "") {
+			t.Errorf("expected %s to not be universal at Global Scope", agent)
+		}
+		if !IsUniversalAgent(agent, projectSkillsDir) {
+			t.Errorf("expected %s to be universal at Project Scope", agent)
+		}
+	}
+
+	// cline reads its own directory in every Scope (docs.cline.bot), not
+	// .agents/skills, so it must never be universal.
+	if IsUniversalAgent("cline", "") || IsUniversalAgent("cline", projectSkillsDir) {
+		t.Errorf("expected cline to not be universal in any Scope")
 	}
 }
 
 // A typo'd alias target would otherwise resolve to an agent with no
-// directory and no error anywhere in the call chain.
-func TestAgentAliasesResolveToExactlyOneKnownOrUniversalAgent(t *testing.T) {
+// directory and no error anywhere in the call chain. Every alias must land
+// on a Global agent that is known or universal, never both.
+func TestAgentAliasesResolveToExactlyOneKnownOrUniversalGlobalAgent(t *testing.T) {
 	known := GetKnownAgents()
-	universal := make(map[string]struct{}, len(UniversalAgents))
-	for _, u := range UniversalAgents {
-		universal[u] = struct{}{}
-	}
-
 	for alias, canonical := range AgentAliases {
 		_, isKnown := known[canonical]
-		_, isUniversal := universal[canonical]
+		isUniversal := IsUniversalAgent(canonical, "")
 		switch {
 		case !isKnown && !isUniversal:
-			t.Errorf("alias %q resolves to %q, which is neither a known agent nor a universal agent", alias, canonical)
+			t.Errorf("alias %q resolves to %q, which is neither a known agent nor a universal agent at Global Scope", alias, canonical)
 		case isKnown && isUniversal:
-			t.Errorf("alias %q resolves to %q, which is both a known agent and a universal agent", alias, canonical)
+			t.Errorf("alias %q resolves to %q, which is both a known agent and a universal agent at Global Scope", alias, canonical)
+		}
+	}
+}
+
+// An Agent must never be both a linkable known dir and Automatically
+// available in the same Scope — that contradiction is exactly the cursor/cline
+// bug this registry fixes. Project Scope only supports a subset of Agents, so
+// unlike the Global check this does not require every alias to resolve.
+func TestNoAgentIsBothKnownAndUniversalInSameScope(t *testing.T) {
+	projectSkillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
+	projectRoot := GetProjectRootFromSkillsDir(projectSkillsDir)
+	knownProject := GetProjectKnownAgents(projectRoot)
+
+	for agent := range knownProject {
+		if IsUniversalAgent(agent, projectSkillsDir) {
+			t.Errorf("%s is both a known Project agent dir and universal at Project Scope", agent)
 		}
 	}
 }
@@ -73,6 +106,45 @@ func TestGetKnownAgentsExpandsPlainTemplatesUnderHome(t *testing.T) {
 	want := filepath.Join(home, ".adal", "skills")
 	if got["adal"] != want {
 		t.Errorf(`GetKnownAgents()["adal"] = %q; want %q`, got["adal"], want)
+	}
+}
+
+// cline and antigravity-cli were previously misclassified as Automatically
+// available at Global Scope; they need a real linkable dir there instead
+// (docs.cline.bot; antigravity-cli's own dir confirmed live via its skills
+// panel — antigravity.google/docs/cli/plugins#sharing-global-skills).
+// github-copilot is not here: confirmed live via `copilot skill list` to read
+// ~/.agents/skills at Global Scope too, so it stays universal in both.
+func TestGetKnownAgentsIncludesReclassifiedGlobalAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got := GetKnownAgents()
+	for agent, want := range map[string]string{
+		"cline":           filepath.Join(home, ".cline", "skills"),
+		"antigravity-cli": filepath.Join(home, ".gemini", "antigravity-cli", "skills"),
+		"firebender":      filepath.Join(home, ".firebender", "skills"),
+	} {
+		if got[agent] != want {
+			t.Errorf("GetKnownAgents()[%q] = %q; want %q", agent, got[agent], want)
+		}
+	}
+	if _, ok := got["github-copilot"]; ok {
+		t.Errorf("github-copilot should not be a Global known dir; it is Automatically available")
+	}
+}
+
+func TestGetProjectKnownAgentsOmitsCursorButIncludesFirebender(t *testing.T) {
+	projectRoot := filepath.FromSlash("/path/to/my-project")
+	agents := GetProjectKnownAgents(projectRoot)
+
+	if _, ok := agents["cursor"]; ok {
+		t.Errorf("cursor should not be a Project linkable dir; it reads .agents/skills directly in both Scopes")
+	}
+	want := filepath.Join(projectRoot, ".firebender", "skills")
+	if agents["firebender"] != want {
+		t.Errorf(`GetProjectKnownAgents()["firebender"] = %q; want %q`, agents["firebender"], want)
 	}
 }
 
