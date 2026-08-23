@@ -1,13 +1,37 @@
 package engine
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 var errRepoPathMissing = errors.New("path missing in repository")
+
+func RunCmd(cmdStr string, cwd string) (string, string, error) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd.exe", "/c", cmdStr)
+	} else {
+		cmd = exec.Command("sh", "-c", cmdStr)
+	}
+
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+}
 
 // MaterializeRemoteSkill copies one Skill from a cached repository into the
 // Scope skills directory.

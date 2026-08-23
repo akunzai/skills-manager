@@ -555,6 +555,31 @@ func TestCheckRepoUpdateStatusSourceParsing(t *testing.T) {
 	}
 }
 
+func TestResolveCacheRepoDefaultsURLBranchAndDir(t *testing.T) {
+	cache := t.TempDir()
+	repo := resolveCacheRepo("https://github.com/owner/repo/tree/dev", "", "", cache)
+	if repo.SourceKey != "owner/repo" {
+		t.Fatalf("SourceKey = %q", repo.SourceKey)
+	}
+	if repo.URL != "https://github.com/owner/repo.git" {
+		t.Fatalf("URL = %q", repo.URL)
+	}
+	if repo.Branch != "dev" {
+		t.Fatalf("Branch = %q", repo.Branch)
+	}
+	wantDir := filepath.Join(cache, "owner", "repo")
+	if repo.Dir != wantDir {
+		t.Fatalf("Dir = %q; want %q", repo.Dir, wantDir)
+	}
+	over := resolveCacheRepo("owner/repo", "https://example.com/r.git", "main", cache)
+	if over.URL != "https://example.com/r.git" || over.Branch != "main" {
+		t.Fatalf("overrides = %#v", over)
+	}
+	if cacheDirOrDefault("") == "" {
+		t.Fatal("empty cacheDir should fall back")
+	}
+}
+
 func TestCopySkillFolderWithReadOnlyFilesAndRemoveAll(t *testing.T) {
 	srcDir := t.TempDir()
 	targetDir := filepath.Join(t.TempDir(), "target-ro-skill")
