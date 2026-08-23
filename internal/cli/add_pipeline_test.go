@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/spf13/cobra"
 )
 
 func selectionIntake(dir string, allowRename bool) *addIntake {
 	return &addIntake{
-		rootDir:     dir,
-		allowRename: allowRename,
+		source:  engine.NewSymlinkAddSource(dir, "", allowRename),
+		rootDir: dir,
 		labels: sourceLabels{
 			displayName: "test", resourceNoun: "Test source",
 		},

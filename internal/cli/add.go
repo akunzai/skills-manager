@@ -179,120 +179,21 @@ func isLocalPath(raw string) bool {
 	return false
 }
 
-type conflictItem struct {
-	name       string
-	currentSrc string
-	newSrc     string
-}
-
-type replacementSource struct {
-	kind string // "symlink", "remote", "command"
-	key  string
-	path string
-}
-
-func (s replacementSource) display(subpath string) string {
-	switch s.kind {
-	case "command":
-		return fmt.Sprintf("[command] %s", s.key)
-	case "symlink":
-		p := s.path
-		if subpath != "" && subpath != "." {
-			p = filepath.Join(s.path, filepath.FromSlash(subpath))
-		}
-		return fmt.Sprintf("[symlink] %s", models.ToTildePath(p))
-	default:
-		return fmt.Sprintf("[remote] %s (%s)", s.key, subpath)
+func promptConfirmConflicts(out io.Writer, conflicts []engine.AddConflict) error {
+	if !tui.IsTerminal() {
+		return fmt.Errorf("refusing to overwrite %d existing skill(s) without a terminal; rerun with --yes", len(conflicts))
 	}
-}
-
-func confirmSkillReplacements(
-	cfg *config.Config,
-	skillsDir string,
-	skillsToAdd map[string]string,
-	src replacementSource,
-	flagYes bool,
-	out io.Writer,
-) error {
-	var conflicts []conflictItem
-	for name, subpath := range skillsToAdd {
-		newSrcDisplay := src.display(subpath)
-		localSkillSource := src.path
-		if src.kind == "symlink" && subpath != "" && subpath != "." {
-			localSkillSource = filepath.Join(src.path, filepath.FromSlash(subpath))
-		}
-		isLocal := src.kind == "symlink"
-
-		cat, srcKey, found := config.FindSkillSource(cfg, name)
-		if found {
-			if cat == "remote" {
-				if src.kind != "remote" || srcKey != src.key {
-					conflicts = append(conflicts, conflictItem{
-						name:       name,
-						currentSrc: fmt.Sprintf("[remote] %s", srcKey),
-						newSrc:     newSrcDisplay,
-					})
-				}
-			} else if cat == "local" {
-				if entry, ok := cfg.Local[name]; ok {
-					if entry.Type == "command" {
-						if src.kind != "command" || entry.Command != src.key {
-							conflicts = append(conflicts, conflictItem{
-								name:       name,
-								currentSrc: fmt.Sprintf("[command] %s", entry.Command),
-								newSrc:     newSrcDisplay,
-							})
-						}
-					} else {
-						if !isLocal || (entry.Source != models.StoreLocalSourcePath(localSkillSource, skillsDir) && models.ToTildePath(entry.Source) != models.ToTildePath(localSkillSource)) {
-							conflicts = append(conflicts, conflictItem{
-								name:       name,
-								currentSrc: fmt.Sprintf("[symlink] %s", models.ToTildePath(entry.Source)),
-								newSrc:     newSrcDisplay,
-							})
-						}
-					}
-				}
-			}
-		} else {
-			targetPath := filepath.Join(skillsDir, name)
-			if fi, err := os.Lstat(targetPath); err == nil {
-				current := "[untracked directory]"
-				if fi.Mode()&os.ModeSymlink != 0 {
-					if target, err := os.Readlink(targetPath); err == nil {
-						current = fmt.Sprintf("[symlink] %s", models.ToTildePath(target))
-					} else {
-						current = "[symlink]"
-					}
-				}
-				conflicts = append(conflicts, conflictItem{
-					name:       name,
-					currentSrc: current,
-					newSrc:     newSrcDisplay,
-				})
-			}
-		}
+	fmt.Fprintf(out, "\n%sWarning: The following %d skill(s) already exist and will be overwritten:%s\n", colorYellow, len(conflicts), colorReset)
+	for _, c := range conflicts {
+		fmt.Fprintf(out, "  • %s%s%s: %s -> %s\n", colorBold, c.Skill, colorReset, c.CurrentSrc, c.ProposedSrc)
 	}
-
-	if len(conflicts) > 0 && !flagYes {
-		if !tui.IsTerminal() {
-			return fmt.Errorf("refusing to overwrite %d existing skill(s) without a terminal; rerun with --yes", len(conflicts))
-		}
-		sort.Slice(conflicts, func(i, j int) bool {
-			return conflicts[i].name < conflicts[j].name
-		})
-		fmt.Fprintf(out, "\n%sWarning: The following %d skill(s) already exist and will be overwritten:%s\n", colorYellow, len(conflicts), colorReset)
-		for _, c := range conflicts {
-			fmt.Fprintf(out, "  • %s%s%s: %s -> %s\n", colorBold, c.name, colorReset, c.currentSrc, c.newSrc)
-		}
-		fmt.Fprintln(out)
-		confirmed, err := tui.PromptConfirm("Do you want to proceed with overwriting these skills?", false)
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			return fmt.Errorf("operation cancelled by user")
-		}
+	fmt.Fprintln(out)
+	confirmed, err := tui.PromptConfirm("Do you want to proceed with overwriting these skills?", false)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return fmt.Errorf("operation cancelled by user")
 	}
 	return nil
 }
@@ -332,38 +233,31 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 		return absSourcePath
 	}
 	return &addIntake{
+		source:        engine.NewSymlinkAddSource(absSourcePath, description, true),
 		rootDir:       absSourcePath,
 		discovered:    discovered,
 		selectionPath: selectionPath,
-		allowRename:   true,
 		labels: sourceLabels{
 			displayName:  models.ToTildePath(absSourcePath),
 			resourceNoun: "Local directory",
 		},
-		replacement: replacementSource{kind: "symlink", path: absSourcePath},
 		progressLine: func(name, subpath string) string {
 			return fmt.Sprintf("Linking local skill: %s%s%s -> %s", colorBold, name, colorReset, models.ToTildePath(resolvedPath(subpath)))
-		},
-		newAdder: func(cfg *config.Config, configPath, skillsDir string) *engine.Adder {
-			return engine.NewSymlinkAdder(cfg, configPath, skillsDir, absSourcePath, description)
 		},
 	}, nil
 }
 
 func newCommandIntake(skillName, command, check, description string) *addIntake {
 	return &addIntake{
+		source:     engine.NewCommandAddSource(command, check, description),
 		rootDir:    ".",
 		discovered: map[string]string{skillName: "."},
 		labels: sourceLabels{
 			displayName:  "command",
 			resourceNoun: "Command",
 		},
-		replacement: replacementSource{kind: "command", key: command},
 		progressLine: func(name, _ string) string {
 			return fmt.Sprintf("Configuring command skill: %s%s%s\n   Command: %s\n   Executing installer command...", colorBold, name, colorReset, command)
-		},
-		newAdder: func(cfg *config.Config, configPath, skillsDir string) *engine.Adder {
-			return engine.NewCommandAdder(cfg, configPath, skillsDir, command, check, description)
 		},
 	}
 }
@@ -404,6 +298,7 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 		storedURL = cloneURL
 	}
 	return &addIntake{
+		source:        engine.NewRemoteAddSource(parsed.SourceKey, parsed.RepoType, storedURL, repoDir),
 		rootDir:       repoDir,
 		discovered:    discovered,
 		selectionPath: selectionPath,
@@ -411,12 +306,8 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 			displayName:  parsed.SourceKey,
 			resourceNoun: "Repository",
 		},
-		replacement: replacementSource{kind: "remote", key: parsed.SourceKey},
 		progressLine: func(name, subpath string) string {
 			return fmt.Sprintf("Installing %s%s%s (from %s)...", colorBold, name, colorReset, subpath)
-		},
-		newAdder: func(cfg *config.Config, configPath, skillsDir string) *engine.Adder {
-			return engine.NewRemoteAdder(cfg, configPath, skillsDir, repoDir, parsed.SourceKey, parsed.RepoType, storedURL)
 		},
 	}, nil
 }
