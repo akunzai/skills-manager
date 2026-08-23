@@ -25,6 +25,7 @@ type Availability struct {
 	skillsDir string
 	known     map[string]string
 	automatic []string
+	links     AgentLinkManager
 }
 
 // Field values for UnknownAgentReference match the skills.json key each names.
@@ -54,6 +55,7 @@ func NewAvailability(cfg *config.Config, skillsDir string) *Availability {
 		skillsDir: skillsDir,
 		known:     models.GetAgentsForSkillsDir(skillsDir),
 		automatic: models.GetAutomaticallyAvailableAgents(skillsDir),
+		links:     NewAgentLinkManager(skillsDir),
 	}
 }
 

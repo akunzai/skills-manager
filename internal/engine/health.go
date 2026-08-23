@@ -68,6 +68,7 @@ type Doctor struct {
 	cfg          *config.Config
 	skillsDir    string
 	availability *Availability
+	links        AgentLinkManager
 }
 
 // DoctorOutcome is the ordered report plus the issues that remain after Run.
@@ -79,7 +80,12 @@ type DoctorOutcome struct {
 
 func NewDoctor(cfg *config.Config, skillsDir string) *Doctor {
 	availability := NewAvailability(cfg, skillsDir)
-	return &Doctor{cfg: availability.cfg, skillsDir: availability.skillsDir, availability: availability}
+	return &Doctor{
+		cfg:          availability.cfg,
+		skillsDir:    availability.skillsDir,
+		availability: availability,
+		links:        NewAgentLinkManager(availability.skillsDir),
+	}
 }
 
 // Run diagnoses the Scope. With fix, it repairs independent findings, keeps
@@ -227,8 +233,8 @@ func (d *Doctor) repair(plan healthPlan) healthFixResult {
 		for _, name := range agent.Broken {
 			path := filepath.Join(agent.Dir, name)
 			fix := healthFix{Agent: agent.Name, Name: name}
-			if err := removeManagedAvailability(path, name, d.skillsDir); err != nil {
-				fix.Err = err
+			if !d.links.RemoveManagedPath(path, name) {
+				fix.Err = fmt.Errorf("failed to remove broken symlink %s", name)
 				result.FailedBroken = append(result.FailedBroken, fix)
 				continue
 			}
@@ -239,22 +245,16 @@ func (d *Doctor) repair(plan healthPlan) healthFixResult {
 		for _, name := range stale.Names {
 			fix := healthFix{Agent: stale.Agent, Name: name}
 			path := filepath.Join(stale.Dir, name)
-			if !IsManagedSkillLink(path, name, d.skillsDir) {
+			if !d.links.RemoveManagedPath(path, name) {
 				fix.Err = fmt.Errorf("failed to remove stale link %s", name)
-				result.FailedStale = append(result.FailedStale, fix)
-				continue
-			}
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				fix.Err = err
 				result.FailedStale = append(result.FailedStale, fix)
 				continue
 			}
 			result.RemovedStale = append(result.RemovedStale, fix)
 		}
 	}
-	stopAt := models.ScopeRoot(d.skillsDir)
 	for _, leftover := range plan.LeftoverEmpty {
-		if err := RemoveEmptyAgentDir(leftover.Dir, stopAt); err != nil {
+		if err := d.links.RemoveEmptyDir(leftover.Dir); err != nil {
 			result.FailedLeftover = append(result.FailedLeftover, healthFix{
 				Agent: leftover.Name,
 				Name:  leftover.Dir,
@@ -272,20 +272,4 @@ func (d *Doctor) repair(plan healthPlan) healthFixResult {
 		result.FixedDrift = append(result.FixedDrift, drift.Skill)
 	}
 	return result
-}
-
-func removeManagedAvailability(path, skillName, skillsDir string) error {
-	if IsManagedSkillLink(path, skillName, skillsDir) {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		return nil
-	}
-	if IsManagedSkillCopy(path, skillName, skillsDir) {
-		if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		return nil
-	}
-	return fmt.Errorf("failed to remove broken symlink %s", skillName)
 }

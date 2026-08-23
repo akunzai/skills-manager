@@ -15,6 +15,67 @@ type AgentDir struct {
 	Dir  string
 }
 
+// AgentLinkManager handles agent skills directories, symlink creation,
+// health inspection, managed link removal, and boundary-safe parent directory pruning.
+type AgentLinkManager struct {
+	skillsDir string
+	stopAt    string
+}
+
+func NewAgentLinkManager(skillsDir string) AgentLinkManager {
+	if skillsDir == "" {
+		skillsDir = models.DefaultSkillsDir()
+	}
+	return AgentLinkManager{
+		skillsDir: skillsDir,
+		stopAt:    models.ScopeRoot(skillsDir),
+	}
+}
+
+func (m AgentLinkManager) SkillsDir() string {
+	return m.skillsDir
+}
+
+func (m AgentLinkManager) StopAt() string {
+	return m.stopAt
+}
+
+func (m AgentLinkManager) EnsureLink(skillName, agentName string) (bool, error) {
+	return EnsureAgentSymlink(skillName, agentName, m.skillsDir)
+}
+
+func (m AgentLinkManager) RemoveLinks(skillName string) []string {
+	return RemoveAgentSymlinks(skillName, m.skillsDir)
+}
+
+func (m AgentLinkManager) DiagnoseHealth(agentDir string) (broken, unmanagedBroken, physical []string) {
+	return DiagnoseAgentDirHealth(agentDir, m.skillsDir)
+}
+
+func (m AgentLinkManager) FindStaleLinks(agentDir string) []string {
+	return FindStaleManagedLinks(agentDir, m.skillsDir)
+}
+
+func (m AgentLinkManager) RemoveEmptyDir(agentDir string) error {
+	return RemoveEmptyAgentDir(agentDir, m.stopAt)
+}
+
+func (m AgentLinkManager) PruneParents(dir string) error {
+	return pruneEmptyParents(dir, m.stopAt)
+}
+
+func (m AgentLinkManager) IsManagedLink(linkPath, skillName string) bool {
+	return IsManagedSkillLink(linkPath, skillName, m.skillsDir)
+}
+
+func (m AgentLinkManager) IsManagedCopy(path, skillName string) bool {
+	return IsManagedSkillCopy(path, skillName, m.skillsDir)
+}
+
+func (m AgentLinkManager) RemoveManagedPath(path, skillName string) bool {
+	return RemoveManagedSkillPath(path, skillName, m.skillsDir)
+}
+
 // DiagnoseAgentDirHealth classifies every entry in a configured agent's
 // skills directory: broken is a managed symlink whose target has gone
 // missing, unmanagedBroken is a dangling symlink this tool never created,
