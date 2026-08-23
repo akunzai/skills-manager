@@ -8,67 +8,74 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-const (
-	AddRemote  = "remote"
-	AddSymlink = "symlink"
-	AddCommand = "command"
-)
-
-// AddSource is the Source add selected Skills from. CLI owns discovery and
-// display verbs; this is what records Config and Materializes.
-type AddSource struct {
-	Kind          string
-	RepoDir       string
-	SourceKey     string
-	RepoType      string
-	URL           string
-	AbsSourcePath string
-	Description   string
-	Command       string
-	Check         string
+// Adder declares selected Skills from one Source, saves Config, Materializes
+// them, and applies Availability.
+type Adder struct {
+	cfg         *config.Config
+	configPath  string
+	skillsDir   string
+	record      func(name, subpath string)
+	materialize func(*Availability, string, string, func(SyncEvent)) error
 }
 
-func (s AddSource) resolvedPath(subpath string) string {
-	if subpath != "" && subpath != "." {
-		return filepath.Join(s.AbsSourcePath, filepath.FromSlash(subpath))
-	}
-	return s.AbsSourcePath
-}
-
-func recordAdded(cfg *config.Config, src AddSource, name, subpath, skillsDir string) {
-	switch src.Kind {
-	case AddSymlink:
-		config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(src.resolvedPath(subpath), skillsDir), src.Description)
-	case AddCommand:
-		config.AddLocalCommandEntry(cfg, name, src.Command, src.Check, src.Description)
-	default:
-		config.AddRemoteSkillEntry(cfg, src.SourceKey, name, subpath, src.RepoType, src.URL)
+func NewRemoteAdder(cfg *config.Config, configPath, skillsDir, repoDir, sourceKey, repoType, url string) *Adder {
+	return &Adder{
+		cfg: cfg, configPath: configPath, skillsDir: skillsDir,
+		record: func(name, subpath string) {
+			config.AddRemoteSkillEntry(cfg, sourceKey, name, subpath, repoType, url)
+		},
+		materialize: func(availability *Availability, name, subpath string, note func(SyncEvent)) error {
+			one := map[string]string{name: subpath}
+			return newRemoteSource(availability, sourceKey, config.RemoteRepo{Skills: one}, "").reconcile(repoDir, false, one, note)
+		},
 	}
 }
 
-// AddDeclared records the selected Skills into Config, saves, then
-// Materializes only those Skills and applies Availability. Copy/symlink/
-// command/check failures are returned after that skill's step; Availability
-// still applies when a command installer fails.
-func AddDeclared(
-	cfg *config.Config,
-	configPath, skillsDir string,
-	src AddSource,
-	skills map[string]string,
-	agents []string,
-	progress func(name, subpath string),
-) error {
-	availability := NewAvailability(cfg, skillsDir)
+func NewSymlinkAdder(cfg *config.Config, configPath, skillsDir, absSourcePath, description string) *Adder {
+	resolvedPath := func(subpath string) string {
+		if subpath != "" && subpath != "." {
+			return filepath.Join(absSourcePath, filepath.FromSlash(subpath))
+		}
+		return absSourcePath
+	}
+	return &Adder{
+		cfg: cfg, configPath: configPath, skillsDir: skillsDir,
+		record: func(name, subpath string) {
+			config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(resolvedPath(subpath), skillsDir), description)
+		},
+		materialize: func(availability *Availability, name, _ string, note func(SyncEvent)) error {
+			return reconcileLocalSymlink(availability, name, false, note)
+		},
+	}
+}
+
+func NewCommandAdder(cfg *config.Config, configPath, skillsDir, command, check, description string) *Adder {
+	return &Adder{
+		cfg: cfg, configPath: configPath, skillsDir: skillsDir,
+		record: func(name, _ string) {
+			config.AddLocalCommandEntry(cfg, name, command, check, description)
+		},
+		materialize: func(availability *Availability, name, _ string, note func(SyncEvent)) error {
+			return reconcileCommand(availability, name, false, note)
+		},
+	}
+}
+
+// Run records all selected Skills before Materializing them. Copy, symlink,
+// command, and check failures stop at that Skill; the saved declaration stays
+// available for a later Sync. Availability still applies after command failure.
+func (a *Adder) Run(skills map[string]string, agents []string, progress func(name, subpath string)) error {
+	availability := NewAvailability(a.cfg, a.skillsDir)
 	names := sortedSkillKeys(skills)
 	for _, name := range names {
-		recordAdded(cfg, src, name, skills[name], skillsDir)
+		a.record(name, skills[name])
 		if len(agents) > 0 {
 			if err := availability.Include(name, agents...); err != nil {
 				return err
 			}
 		}
 	}
-	if err := config.SaveConfig(cfg, configPath); err != nil {
+	if err := config.SaveConfig(a.cfg, a.configPath); err != nil {
 		return err
 	}
 	var stepErr error
@@ -93,17 +100,7 @@ func AddDeclared(
 			progress(name, subpath)
 		}
 		stepErr = nil
-		var err error
-		switch src.Kind {
-		case AddSymlink:
-			err = reconcileLocalSymlink(availability, name, false, note)
-		case AddCommand:
-			err = reconcileCommand(availability, name, false, note)
-		default:
-			one := map[string]string{name: subpath}
-			remote := newRemoteSource(availability, src.SourceKey, config.RemoteRepo{Skills: one}, "")
-			err = remote.reconcile(src.RepoDir, false, one, note)
-		}
+		err := a.materialize(availability, name, subpath, note)
 		if err != nil {
 			return fmt.Errorf("saved config but failed to apply availability for %s: %w", name, err)
 		}

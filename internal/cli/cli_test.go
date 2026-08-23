@@ -1282,7 +1282,7 @@ func TestCLILocalDirectoryScanMultipleSkills(t *testing.T) {
 		t.Fatalf("add --symlink --all failed: %v\n%s", err, out)
 	}
 
-	if !strings.Contains(out, "Linked 2 local skill(s)") {
+	if !strings.Contains(out, "Added 2 skill(s)") {
 		t.Fatalf("expected 2 skills linked, got:\n%s", out)
 	}
 
@@ -1332,7 +1332,7 @@ func TestCLILocalPositionalPathAutoDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add positional local path failed: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Linked 1 local skill(s)") {
+	if !strings.Contains(out, "Added 1 skill(s)") {
 		t.Fatalf("expected 1 skill linked, got:\n%s", out)
 	}
 
