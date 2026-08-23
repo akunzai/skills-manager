@@ -52,12 +52,41 @@ func (r *SyncReport) add(ev SyncEvent) {
 	r.Events = append(r.Events, ev)
 }
 
-func (r *SyncReport) driftEvent(name, source string, cfg *config.Config, skillsDir string) {
-	missing, unexpected := AvailabilityDrift(name, cfg, skillsDir)
-	if len(missing) == 0 && len(unexpected) == 0 {
-		return
+// reconcileRemoteSource Materializes selected remote Skills from repoDir, then
+// applies Availability for every Skill in the Source. Copy failures are events
+// and continue; Availability failures fail closed. dryRun never writes.
+func reconcileRemoteSource(
+	cfg *config.Config,
+	source string,
+	skills map[string]string,
+	repoDir, skillsDir string,
+	dryRun bool,
+	toWrite map[string]string,
+	emit func(SyncEvent),
+) error {
+	if emit == nil {
+		emit = func(SyncEvent) {}
 	}
-	r.add(SyncEvent{Kind: SyncWouldDrift, Source: source, Skill: name, Missing: missing, Unexpected: unexpected})
+	for _, name := range sortedSkillKeys(skills) {
+		subpath := skills[name]
+		if !dryRun && toWrite != nil {
+			if _, write := toWrite[name]; write {
+				if err := MaterializeRemoteSkill(name, subpath, repoDir, skillsDir); err != nil {
+					if errors.Is(err, errRepoPathMissing) {
+						emit(SyncEvent{Kind: SyncPathMissing, Source: source, Skill: name, Path: subpath})
+					} else {
+						emit(SyncEvent{Kind: SyncCopyFailed, Source: source, Skill: name, Err: err.Error()})
+					}
+					continue
+				}
+				emit(SyncEvent{Kind: SyncMaterialized, Source: source, Skill: name, Path: subpath})
+			}
+		}
+		if err := applyDeclaredAvailability(name, source, cfg, skillsDir, dryRun, emit); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SyncDeclared materializes declared remote, local-symlink, and command Skills
@@ -95,10 +124,8 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		}
 
 		if len(missingSkills) == 0 && !force {
-			for _, name := range sortedSkillKeys(repoInfo.Skills) {
-				if err := applyDeclaredAvailability(name, source, cfg, skillsDir, dryRun, report); err != nil {
-					return report, err
-				}
+			if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, "", skillsDir, dryRun, nil, report.add); err != nil {
+				return report, err
 			}
 			continue
 		}
@@ -106,10 +133,8 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		report.add(SyncEvent{Kind: SyncRepoStart, Source: source, Skills: sortedSkillKeys(repoInfo.Skills)})
 		if dryRun {
 			report.add(SyncEvent{Kind: SyncWouldSync, Source: source, Skills: sortedSkillKeys(missingSkills)})
-			for _, name := range sortedSkillKeys(repoInfo.Skills) {
-				if err := applyDeclaredAvailability(name, source, cfg, skillsDir, true, report); err != nil {
-					return report, err
-				}
+			if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, "", skillsDir, true, nil, report.add); err != nil {
+				return report, err
 			}
 			continue
 		}
@@ -120,23 +145,8 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 
-		for _, name := range sortedSkillKeys(repoInfo.Skills) {
-			subpath := repoInfo.Skills[name]
-			_, needsWrite := missingSkills[name]
-			if needsWrite {
-				if err := MaterializeRemoteSkill(name, subpath, repoDir, skillsDir); err != nil {
-					if errors.Is(err, errRepoPathMissing) {
-						report.add(SyncEvent{Kind: SyncPathMissing, Source: source, Skill: name, Path: subpath})
-					} else {
-						report.add(SyncEvent{Kind: SyncCopyFailed, Source: source, Skill: name, Err: err.Error()})
-					}
-					continue
-				}
-				report.add(SyncEvent{Kind: SyncMaterialized, Skill: name})
-			}
-			if err := applyDeclaredAvailability(name, source, cfg, skillsDir, false, report); err != nil {
-				return report, err
-			}
+		if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, repoDir, skillsDir, false, missingSkills, report.add); err != nil {
+			return report, err
 		}
 	}
 
@@ -160,7 +170,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		dest := filepath.Join(skillsDir, name)
 		if dryRun {
 			report.add(SyncEvent{Kind: SyncWouldSymlink, Skill: name, Path: dest, Target: absSource})
-			if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, true, report); err != nil {
+			if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, true, report.add); err != nil {
 				return report, err
 			}
 			continue
@@ -170,7 +180,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 		report.add(SyncEvent{Kind: SyncSymlinked, Skill: name, Target: absSource})
-		if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, false, report); err != nil {
+		if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, false, report.add); err != nil {
 			return report, err
 		}
 	}
@@ -189,7 +199,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		}
 		if dryRun {
 			report.add(SyncEvent{Kind: SyncWouldCommand, Skill: name, Target: info.Command})
-			if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, true, report); err != nil {
+			if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, true, report.add); err != nil {
 				return report, err
 			}
 			continue
@@ -198,7 +208,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		if err := MaterializeCommand(info.Command); err != nil {
 			report.add(SyncEvent{Kind: SyncCommandFailed, Skill: name, Err: err.Error()})
 		}
-		if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, false, report); err != nil {
+		if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, false, report.add); err != nil {
 			return report, err
 		}
 	}

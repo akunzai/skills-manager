@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -153,21 +152,62 @@ type UpdateResult struct {
 	Errors        []UpdateErrorInfo `json:"errors"`
 }
 
-type ProgressCallback func(event string, data map[string]interface{})
+const (
+	UpdateCheckStart    = "check_start"
+	UpdateCheckDone     = "check_done"
+	UpdateStart         = "update_start"
+	UpdateSkillRestored = "skill_restored"
+	UpdateRepoDone      = "repo_done"
+	UpdateRepoError     = "repo_error"
+	UpdateWouldDrift    = "would_drift"
+)
 
-func emitAvailabilityDrift(onProgress ProgressCallback, name string, cfg *config.Config, skillsDir string) {
-	if onProgress == nil {
-		return
+// UpdateEvent is one step of UpdateRemoteSkills for the CLI to print.
+type UpdateEvent struct {
+	Kind       string
+	Source     string
+	Skill      string
+	Skills     []string
+	Index      int
+	Total      int
+	Outdated   int
+	UpToDate   int
+	DryRun     bool
+	NewSHA     string
+	Subpath    string
+	Err        string
+	Missing    []string
+	Unexpected []string
+}
+
+type UpdateProgress func(UpdateEvent)
+
+func emitUpdate(onProgress UpdateProgress, ev UpdateEvent) {
+	if onProgress != nil {
+		onProgress(ev)
 	}
-	missing, unexpected := AvailabilityDrift(name, cfg, skillsDir)
-	if len(missing) == 0 && len(unexpected) == 0 {
-		return
+}
+
+func updateReconcileEmit(onProgress UpdateProgress, result *UpdateResult, source string, restored *[]string) func(SyncEvent) {
+	return func(ev SyncEvent) {
+		switch ev.Kind {
+		case SyncMaterialized:
+			if restored != nil {
+				*restored = append(*restored, ev.Skill)
+			}
+			emitUpdate(onProgress, UpdateEvent{Kind: UpdateSkillRestored, Source: source, Skill: ev.Skill, Subpath: ev.Path})
+		case SyncPathMissing:
+			errMsg := fmt.Sprintf("Path missing in repository: %s", ev.Path)
+			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Skill: ev.Skill, Error: errMsg})
+			emitUpdate(onProgress, UpdateEvent{Kind: UpdateRepoError, Source: source, Skill: ev.Skill, Err: errMsg})
+		case SyncCopyFailed:
+			errMsg := fmt.Sprintf("Failed to copy skill: %s", ev.Err)
+			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Skill: ev.Skill, Error: errMsg})
+			emitUpdate(onProgress, UpdateEvent{Kind: UpdateRepoError, Source: source, Skill: ev.Skill, Err: errMsg})
+		case SyncWouldDrift:
+			emitUpdate(onProgress, UpdateEvent{Kind: UpdateWouldDrift, Skill: ev.Skill, Missing: ev.Missing, Unexpected: ev.Unexpected})
+		}
 	}
-	onProgress("would_drift", map[string]interface{}{
-		"skill":      name,
-		"missing":    missing,
-		"unexpected": unexpected,
-	})
 }
 
 func UpdateRemoteSkills(
@@ -177,7 +217,7 @@ func UpdateRemoteSkills(
 	dryRun bool,
 	skillsDir string,
 	cacheDir string,
-	onProgress ProgressCallback,
+	onProgress UpdateProgress,
 ) (*UpdateResult, error) {
 	baseSkills := skillsDir
 	if baseSkills == "" {
@@ -240,9 +280,7 @@ func UpdateRemoteSkills(
 
 	// 1. Fast parallel check if no targets specified and not forced
 	if !force && targetSet == nil && len(reposToProcess) > 0 {
-		if onProgress != nil {
-			onProgress("check_start", map[string]interface{}{"total": len(reposToProcess)})
-		}
+		emitUpdate(onProgress, UpdateEvent{Kind: UpdateCheckStart, Total: len(reposToProcess)})
 
 		statusResults := CheckAllRemoteSkillsOutdated(cfg, baseCache, 8)
 		statusMap := make(map[string]UpdateStatusResult)
@@ -272,14 +310,8 @@ func UpdateRemoteSkills(
 						Skills:   skillList,
 					})
 
-					for _, name := range skillList {
-						if dryRun {
-							emitAvailabilityDrift(onProgress, name, cfg, baseSkills)
-							continue
-						}
-						if err := ApplyAvailability(name, cfg, baseSkills); err != nil {
-							return result, fmt.Errorf("failed to apply availability for %s: %w", name, err)
-						}
+					if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, "", baseSkills, dryRun, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
+						return result, err
 					}
 					continue
 				}
@@ -287,13 +319,12 @@ func UpdateRemoteSkills(
 			reposNeedingUpdate[source] = repoInfo
 		}
 
-		if onProgress != nil {
-			onProgress("check_done", map[string]interface{}{
-				"total":      len(reposToProcess),
-				"up_to_date": len(result.SkippedRepos),
-				"outdated":   len(reposNeedingUpdate),
-			})
-		}
+		emitUpdate(onProgress, UpdateEvent{
+			Kind:     UpdateCheckDone,
+			Total:    len(reposToProcess),
+			UpToDate: len(result.SkippedRepos),
+			Outdated: len(reposNeedingUpdate),
+		})
 	} else {
 		reposNeedingUpdate = reposToProcess
 	}
@@ -340,14 +371,12 @@ func UpdateRemoteSkills(
 	for i, source := range sources {
 		repoInfo := reposNeedingUpdate[source]
 		skillList := sortedSkillKeys(repoInfo.Skills)
-		if onProgress != nil {
-			onProgress("update_start", map[string]interface{}{"source": source, "index": i + 1, "total": len(sources), "skills": skillList, "dry_run": dryRun})
-		}
+		emitUpdate(onProgress, UpdateEvent{Kind: UpdateStart, Source: source, Index: i + 1, Total: len(sources), Skills: skillList, DryRun: dryRun})
 		if dryRun {
 			result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, Skills: skillList, DryRun: true})
 			result.UpdatedSkills = append(result.UpdatedSkills, skillList...)
-			for _, name := range skillList {
-				emitAvailabilityDrift(onProgress, name, cfg, baseSkills)
+			if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, "", baseSkills, true, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
+				return result, err
 			}
 			continue
 		}
@@ -355,42 +384,20 @@ func UpdateRemoteSkills(
 		if fetched[i].err != nil {
 			errMsg := fetched[i].err.Error()
 			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: errMsg})
-			if onProgress != nil {
-				onProgress("repo_error", map[string]interface{}{"source": source, "error": errMsg})
-			}
+			emitUpdate(onProgress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: errMsg})
 			continue
 		}
 
 		repoDir := fetched[i].dir
 		repoUpdatedSkills := make([]string, 0)
-		for _, name := range skillList {
-			subpath := repoInfo.Skills[name]
-			if err := MaterializeRemoteSkill(name, subpath, repoDir, baseSkills); err != nil {
-				errMsg := fmt.Sprintf("Failed to copy skill: %s", err)
-				if errors.Is(err, errRepoPathMissing) {
-					errMsg = fmt.Sprintf("Path missing in repository: %s", subpath)
-				}
-				result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Skill: name, Error: errMsg})
-				if onProgress != nil {
-					onProgress("repo_error", map[string]interface{}{"source": source, "skill": name, "error": errMsg})
-				}
-				continue
-			}
-			repoUpdatedSkills = append(repoUpdatedSkills, name)
-			if err := ApplyAvailability(name, cfg, baseSkills); err != nil {
-				return result, fmt.Errorf("failed to apply availability for %s: %w", name, err)
-			}
-			if onProgress != nil {
-				onProgress("skill_restored", map[string]interface{}{"source": source, "skill": name, "subpath": subpath})
-			}
+		if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, repoDir, baseSkills, false, repoInfo.Skills, updateReconcileEmit(onProgress, result, source, &repoUpdatedSkills)); err != nil {
+			return result, err
 		}
 
 		newSHA := GetLocalRepoCommit(repoDir)
 		result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, Skills: repoUpdatedSkills, NewSHA: newSHA})
 		result.UpdatedSkills = append(result.UpdatedSkills, repoUpdatedSkills...)
-		if onProgress != nil {
-			onProgress("repo_done", map[string]interface{}{"source": source, "new_sha": newSHA, "skills": repoUpdatedSkills})
-		}
+		emitUpdate(onProgress, UpdateEvent{Kind: UpdateRepoDone, Source: source, NewSHA: newSHA, Skills: repoUpdatedSkills})
 	}
 
 	return result, nil

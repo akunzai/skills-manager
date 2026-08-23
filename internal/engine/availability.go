@@ -136,10 +136,16 @@ func AvailabilityDrift(skillName string, cfg *config.Config, skillsDir string) (
 	return availabilityFor(skillName, cfg, skillsDir).drift()
 }
 
-// applyDeclaredAvailability applies Availability, or records Drift when dry-run.
-func applyDeclaredAvailability(name, source string, cfg *config.Config, skillsDir string, dryRun bool, report *SyncReport) error {
+// applyDeclaredAvailability applies Availability, or emits Drift when dry-run.
+func applyDeclaredAvailability(name, source string, cfg *config.Config, skillsDir string, dryRun bool, emit func(SyncEvent)) error {
 	if dryRun {
-		report.driftEvent(name, source, cfg, skillsDir)
+		missing, unexpected := AvailabilityDrift(name, cfg, skillsDir)
+		if len(missing) == 0 && len(unexpected) == 0 {
+			return nil
+		}
+		if emit != nil {
+			emit(SyncEvent{Kind: SyncWouldDrift, Source: source, Skill: name, Missing: missing, Unexpected: unexpected})
+		}
 		return nil
 	}
 	if err := ApplyAvailability(name, cfg, skillsDir); err != nil {
