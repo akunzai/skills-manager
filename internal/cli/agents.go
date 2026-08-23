@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -24,6 +23,7 @@ func newAgentsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			availability := engine.NewAvailability(cfg, skillsDir)
 			if len(args) == 0 {
 				return printAllAvailability(cmd, cfg)
 			}
@@ -43,22 +43,22 @@ func newAgentsCmd() *cobra.Command {
 				if len(agents) == 0 {
 					return fmt.Errorf("%s requires at least one agent", action)
 				}
-				agents, err = validateAgentNames(agents, skillsDir)
+				agents, err = availability.ValidateManagedAgents(agents)
 				if err != nil {
 					return err
 				}
 				if action == "include" {
-					err = config.IncludeSkillAgents(cfg, skill, agents...)
+					err = availability.Include(skill, agents...)
 				} else if action == "exclude" {
-					err = config.ExcludeSkillAgents(cfg, skill, agents...)
+					err = availability.Exclude(skill, agents...)
 				} else {
-					err = config.ResetSkillAgents(cfg, skill, agents...)
+					err = availability.Reset(skill, agents...)
 				}
 			case "follow-defaults":
 				if len(agents) > 0 {
 					return fmt.Errorf("follow-defaults does not accept agents")
 				}
-				config.FollowDefaults(cfg, skill)
+				availability.FollowDefaults(skill)
 			default:
 				return fmt.Errorf("unknown availability action %q", action)
 			}
@@ -69,7 +69,7 @@ func newAgentsCmd() *cobra.Command {
 				return err
 			}
 			if installed {
-				if err := engine.ApplyAvailability(skill, cfg, skillsDir); err != nil {
+				if err := availability.Apply(skill); err != nil {
 					return fmt.Errorf("saved policy but failed to apply availability for %s: %w", skill, err)
 				}
 			}
@@ -114,8 +114,7 @@ func printSkillAvailability(cmd *cobra.Command, cfg *config.Config, skill, sourc
 	if customized {
 		policy = fmt.Sprintf("include [%s]; exclude [%s]", strings.Join(override.Include, ", "), strings.Join(override.Exclude, ", "))
 	}
-	effective := engine.DesiredAgents(skill, cfg, skillsDir)
-	sort.Strings(effective)
-	fmt.Fprintf(cmd.OutOrStdout(), "Skill: %s\nPolicy: %s\nLinked by policy: %s\nUniversal agents: automatically available\n", skill, policy, displayList(effective))
+	availability := engine.NewAvailability(cfg, skillsDir)
+	fmt.Fprintf(cmd.OutOrStdout(), "Skill: %s\nPolicy: %s\nLinked by policy: %s\nAutomatically available: %s\n", skill, policy, displayList(availability.ManagedAgents(skill)), displayList(availability.AutomaticallyAvailable()))
 	return nil
 }

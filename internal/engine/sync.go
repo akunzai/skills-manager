@@ -53,34 +53,34 @@ func (r *SyncReport) add(ev SyncEvent) {
 	r.Events = append(r.Events, ev)
 }
 
-func reconcileLocalSymlink(cfg *config.Config, name, skillsDir string, dryRun bool, emit func(SyncEvent)) error {
+func reconcileLocalSymlink(availability *Availability, name string, dryRun bool, emit func(SyncEvent)) error {
 	if emit == nil {
 		emit = func(SyncEvent) {}
 	}
-	info := cfg.Local[name]
-	absSource := models.ResolveLocalSourcePath(info.Source, skillsDir)
+	info := availability.cfg.Local[name]
+	absSource := models.ResolveLocalSourcePath(info.Source, availability.skillsDir)
 	if _, err := os.Stat(absSource); err != nil {
 		emit(SyncEvent{Kind: SyncSourceMissing, Skill: name, Path: absSource})
 		return nil
 	}
 	if dryRun {
-		dest := filepath.Join(skillsDir, name)
+		dest := filepath.Join(availability.skillsDir, name)
 		emit(SyncEvent{Kind: SyncWouldSymlink, Skill: name, Path: dest, Target: absSource})
-		return applyDeclaredAvailability(name, "local", cfg, skillsDir, true, emit)
+		return availability.applyDeclared(name, "local", true, emit)
 	}
-	if err := MaterializeLocalSymlink(name, models.LocalSymlinkTarget(absSource, skillsDir), skillsDir); err != nil {
+	if err := MaterializeLocalSymlink(name, models.LocalSymlinkTarget(absSource, availability.skillsDir), availability.skillsDir); err != nil {
 		emit(SyncEvent{Kind: SyncSymlinkFailed, Skill: name, Err: err.Error()})
 		return nil
 	}
 	emit(SyncEvent{Kind: SyncSymlinked, Skill: name, Target: absSource})
-	return applyDeclaredAvailability(name, "local", cfg, skillsDir, false, emit)
+	return availability.applyDeclared(name, "local", false, emit)
 }
 
-func reconcileCommand(cfg *config.Config, name, skillsDir string, dryRun bool, emit func(SyncEvent)) error {
+func reconcileCommand(availability *Availability, name string, dryRun bool, emit func(SyncEvent)) error {
 	if emit == nil {
 		emit = func(SyncEvent) {}
 	}
-	info := cfg.Local[name]
+	info := availability.cfg.Local[name]
 	if info.Check != "" {
 		if _, _, err := RunCmd(info.Check, ""); err != nil {
 			emit(SyncEvent{Kind: SyncCheckFailed, Skill: name, Path: info.Check})
@@ -89,13 +89,13 @@ func reconcileCommand(cfg *config.Config, name, skillsDir string, dryRun bool, e
 	}
 	if dryRun {
 		emit(SyncEvent{Kind: SyncWouldCommand, Skill: name, Target: info.Command})
-		return applyDeclaredAvailability(name, "local", cfg, skillsDir, true, emit)
+		return availability.applyDeclared(name, "local", true, emit)
 	}
 	emit(SyncEvent{Kind: SyncCommandStart, Skill: name})
 	if err := MaterializeCommand(info.Command); err != nil {
 		emit(SyncEvent{Kind: SyncCommandFailed, Skill: name, Err: err.Error()})
 	}
-	return applyDeclaredAvailability(name, "local", cfg, skillsDir, false, emit)
+	return availability.applyDeclared(name, "local", false, emit)
 }
 
 // SyncDeclared materializes declared remote, local-symlink, and command Skills
@@ -107,6 +107,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 		return nil, fmt.Errorf("failed to create skills dir: %w", err)
 	}
 	report := &SyncReport{}
+	availability := NewAvailability(cfg, skillsDir)
 	emit := func(ev SyncEvent) {
 		report.add(ev)
 		if onProgress != nil {
@@ -127,7 +128,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			configured[sk] = struct{}{}
 		}
 
-		if err := newRemoteSource(cfg, source, repoInfo, skillsDir, cacheDir).sync(force, dryRun, emit); err != nil {
+		if err := newRemoteSource(availability, source, repoInfo, cacheDir).sync(force, dryRun, emit); err != nil {
 			return report, err
 		}
 	}
@@ -144,7 +145,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 		configured[name] = struct{}{}
-		if err := reconcileLocalSymlink(cfg, name, skillsDir, dryRun, emit); err != nil {
+		if err := reconcileLocalSymlink(availability, name, dryRun, emit); err != nil {
 			return report, err
 		}
 	}
@@ -155,7 +156,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 		configured[name] = struct{}{}
-		if err := reconcileCommand(cfg, name, skillsDir, dryRun, emit); err != nil {
+		if err := reconcileCommand(availability, name, dryRun, emit); err != nil {
 			return report, err
 		}
 	}

@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
@@ -14,36 +13,6 @@ import (
 type AgentDir struct {
 	Name string
 	Dir  string
-}
-
-// ConfiguredKnownAgents returns non-universal agent dirs used by the global
-// policy or an explicit per-skill include.
-func ConfiguredKnownAgents(cfg *config.Config, skillsDir string) map[string]string {
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
-	defaultAgents := cfg.Settings.DefaultAgents
-	if len(defaultAgents) == 0 {
-		defaultAgents = []string{"claude"}
-	}
-
-	known := models.GetAgentsForSkillsDir(skillsDir)
-	out := make(map[string]string)
-	for _, a := range defaultAgents {
-		norm := models.NormalizeAgentName(a)
-		if dir, ok := known[norm]; ok {
-			out[norm] = dir
-		}
-	}
-	for _, override := range cfg.Settings.Availability {
-		for _, a := range override.Include {
-			norm := models.NormalizeAgentName(a)
-			if dir, ok := known[norm]; ok {
-				out[norm] = dir
-			}
-		}
-	}
-	return out
 }
 
 // DiagnoseAgentDirHealth classifies every entry in a configured agent's

@@ -58,11 +58,12 @@ func AddDeclared(
 	agents []string,
 	progress func(name, subpath string),
 ) error {
+	availability := NewAvailability(cfg, skillsDir)
 	names := sortedSkillKeys(skills)
 	for _, name := range names {
 		recordAdded(cfg, src, name, skills[name], skillsDir)
 		if len(agents) > 0 {
-			if err := config.IncludeSkillAgents(cfg, name, agents...); err != nil {
+			if err := availability.Include(name, agents...); err != nil {
 				return err
 			}
 		}
@@ -70,7 +71,6 @@ func AddDeclared(
 	if err := config.SaveConfig(cfg, configPath); err != nil {
 		return err
 	}
-
 	var stepErr error
 	note := func(ev SyncEvent) {
 		switch ev.Kind {
@@ -96,12 +96,12 @@ func AddDeclared(
 		var err error
 		switch src.Kind {
 		case AddSymlink:
-			err = reconcileLocalSymlink(cfg, name, skillsDir, false, note)
+			err = reconcileLocalSymlink(availability, name, false, note)
 		case AddCommand:
-			err = reconcileCommand(cfg, name, skillsDir, false, note)
+			err = reconcileCommand(availability, name, false, note)
 		default:
 			one := map[string]string{name: subpath}
-			remote := newRemoteSource(cfg, src.SourceKey, config.RemoteRepo{Skills: one}, skillsDir, "")
+			remote := newRemoteSource(availability, src.SourceKey, config.RemoteRepo{Skills: one}, "")
 			err = remote.reconcile(src.RepoDir, false, one, note)
 		}
 		if err != nil {

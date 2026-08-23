@@ -3,6 +3,8 @@ package models
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"testing"
 )
 
@@ -61,6 +63,21 @@ func TestIsUniversalAgentIsScopeAware(t *testing.T) {
 	// .agents/skills, so it must never be universal.
 	if IsUniversalAgent("cline", "") || IsUniversalAgent("cline", projectSkillsDir) {
 		t.Errorf("expected cline to not be universal in any Scope")
+	}
+}
+
+func TestGetAutomaticallyAvailableAgentsIsScopeAwareAndSorted(t *testing.T) {
+	project := GetAutomaticallyAvailableAgents(filepath.Join(t.TempDir(), ".agents", "skills"))
+	for _, want := range []string{"antigravity-cli", "codex", "replit"} {
+		if !slices.Contains(project, want) {
+			t.Fatalf("Project Automatically available Agents missing %q: %#v", want, project)
+		}
+	}
+	if slices.Contains(project, "universal") {
+		t.Fatalf("filter alias must not be reported as an Agent: %#v", project)
+	}
+	if !sort.StringsAreSorted(project) {
+		t.Fatalf("Agents are not sorted: %#v", project)
 	}
 }
 

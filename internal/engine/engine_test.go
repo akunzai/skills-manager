@@ -248,7 +248,7 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 	}
 }
 
-func TestDesiredAgentsApplyPerSkillAvailability(t *testing.T) {
+func TestAvailabilityManagedAgentsApplyPerSkillPolicy(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cfg := config.DefaultConfig()
@@ -258,13 +258,13 @@ func TestDesiredAgentsApplyPerSkillAvailability(t *testing.T) {
 		Exclude: []string{"claude"},
 	}
 
-	got := DesiredAgents("sample", cfg, skillsDir)
+	got := NewAvailability(cfg, skillsDir).ManagedAgents("sample")
 	if !reflect.DeepEqual(got, []string{"continue"}) {
 		t.Fatalf("target agents = %#v, want continue", got)
 	}
 }
 
-func TestApplyAvailabilityMatchesDeclaredAvailability(t *testing.T) {
+func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	master := filepath.Join(skillsDir, "sample")
@@ -276,7 +276,8 @@ func TestApplyAvailabilityMatchesDeclaredAvailability(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
-	if err := ApplyAvailability("sample", cfg, skillsDir); err != nil {
+	availability := NewAvailability(cfg, skillsDir)
+	if err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
@@ -292,11 +293,11 @@ func TestApplyAvailabilityMatchesDeclaredAvailability(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	missing, unexpected := AvailabilityDrift("sample", cfg, skillsDir)
+	missing, unexpected := availability.Drift("sample")
 	if len(missing) != 0 || !reflect.DeepEqual(unexpected, []string{"claude-code"}) {
 		t.Fatalf("drift = missing %#v, unexpected %#v", missing, unexpected)
 	}
-	if err := ApplyAvailability("sample", cfg, skillsDir); err != nil {
+	if err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
@@ -310,7 +311,7 @@ func TestApplyAvailabilityMatchesDeclaredAvailability(t *testing.T) {
 	}
 }
 
-func TestApplyAvailabilityPreservesUnmanagedTarget(t *testing.T) {
+func TestAvailabilityApplyPreservesUnmanagedTarget(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	master := filepath.Join(skillsDir, "sample")
@@ -332,7 +333,7 @@ func TestApplyAvailabilityPreservesUnmanagedTarget(t *testing.T) {
 	if err := os.Symlink(unmanagedTarget, unmanaged); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyAvailability("sample", config.DefaultConfig(), skillsDir); err == nil {
+	if err := NewAvailability(config.DefaultConfig(), skillsDir).Apply("sample"); err == nil {
 		t.Fatal("expected unmanaged target conflict")
 	}
 	if _, err := os.Stat(marker); err != nil {
@@ -340,7 +341,7 @@ func TestApplyAvailabilityPreservesUnmanagedTarget(t *testing.T) {
 	}
 }
 
-func TestApplyAvailabilityRemovesManagedCopy(t *testing.T) {
+func TestAvailabilityApplyRemovesManagedCopy(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	master := filepath.Join(skillsDir, "sample")
@@ -368,7 +369,8 @@ func TestApplyAvailabilityRemovesManagedCopy(t *testing.T) {
 		t.Fatal("copy marker was not recognized")
 	}
 	cfg := config.DefaultConfig()
-	if err := ApplyAvailability("sample", cfg, skillsDir); err != nil {
+	availability := NewAvailability(cfg, skillsDir)
+	if err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(filepath.Join(copyPath, "SKILL.md"))
@@ -376,7 +378,7 @@ func TestApplyAvailabilityRemovesManagedCopy(t *testing.T) {
 		t.Fatalf("managed copy was not refreshed: content=%q err=%v", content, err)
 	}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	if err := ApplyAvailability("sample", cfg, skillsDir); err != nil {
+	if err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {

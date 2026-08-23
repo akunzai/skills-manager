@@ -96,13 +96,14 @@ func newConfigSetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			availability := engine.NewAvailability(cfg, skillsDir)
 			values := splitValues(args[1:])
 			switch args[0] {
 			case "defaultAgents":
 				if len(values) == 0 {
 					return fmt.Errorf("defaultAgents requires at least one agent")
 				}
-				normalized, err := validateAgentNames(values, skillsDir)
+				normalized, err := availability.ValidateManagedAgents(values)
 				if err != nil {
 					return err
 				}
@@ -120,7 +121,7 @@ func newConfigSetCmd() *cobra.Command {
 						return err
 					}
 					if installed {
-						if err := engine.ApplyAvailability(skill, cfg, skillsDir); err != nil {
+						if err := availability.Apply(skill); err != nil {
 							return fmt.Errorf("saved %s but failed to apply availability for %s: %w", args[0], skill, err)
 						}
 					}
@@ -174,28 +175,6 @@ func editorCommand(editor, configPath string) *exec.Cmd {
 	// "code --wait"). Pass the config path separately so the shell cannot
 	// reinterpret it.
 	return exec.Command("sh", "-c", editor+` "$1"`, "skills-config", configPath)
-}
-
-func validateAgentNames(values []string, skillsDir string) ([]string, error) {
-	known := models.GetAgentsForSkillsDir(skillsDir)
-	seen := make(map[string]struct{}, len(values))
-	normalized := make([]string, 0, len(values))
-	for _, value := range values {
-		agent := models.NormalizeAgentName(value)
-		if models.IsUniversalAgent(agent, skillsDir) {
-			return nil, fmt.Errorf("%s is automatically available and does not need an agent policy", agent)
-		}
-		if _, ok := known[agent]; !ok {
-			return nil, fmt.Errorf("unknown agent %q for this scope", value)
-		}
-		if _, duplicate := seen[agent]; duplicate {
-			continue
-		}
-		seen[agent] = struct{}{}
-		normalized = append(normalized, agent)
-	}
-	sort.Strings(normalized)
-	return normalized, nil
 }
 
 func splitValues(values []string) []string {

@@ -18,6 +18,7 @@ func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error)
 	if baseSkills == "" {
 		baseSkills = models.DefaultSkillsDir()
 	}
+	availability := NewAvailability(cfg, baseSkills)
 
 	items := make(map[string]*models.SkillItem)
 
@@ -32,7 +33,7 @@ func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error)
 				SourceType: repoType,
 				Source:     sourceKey,
 				Subpath:    subpath,
-				Agents:     DesiredAgents(name, cfg, baseSkills),
+				Agents:     availability.ManagedAgents(name),
 			}
 		}
 	}
@@ -50,7 +51,7 @@ func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error)
 			SourceType:  "local_" + localInfo.Type,
 			Source:      src,
 			Description: localInfo.Description,
-			Agents:      DesiredAgents(name, cfg, baseSkills),
+			Agents:      availability.ManagedAgents(name),
 		}
 	}
 

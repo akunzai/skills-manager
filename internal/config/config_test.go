@@ -150,30 +150,6 @@ func TestNormalizeAvailabilityRejectsConflicts(t *testing.T) {
 	}
 }
 
-func TestAvailabilityMutationsRemainConflictFree(t *testing.T) {
-	cfg := DefaultConfig()
-	if err := ExcludeSkillAgents(cfg, "sample", "claude"); err != nil {
-		t.Fatal(err)
-	}
-	if err := IncludeSkillAgents(cfg, "sample", "claude", "continue"); err != nil {
-		t.Fatal(err)
-	}
-	override := cfg.Settings.Availability["sample"]
-	if !reflect.DeepEqual(override.Include, []string{"claude-code", "continue"}) || len(override.Exclude) != 0 {
-		t.Fatalf("override = %#v", override)
-	}
-	if err := ResetSkillAgents(cfg, "sample", "claude"); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(cfg.Settings.Availability["sample"].Include, []string{"continue"}) {
-		t.Fatalf("reset override = %#v", cfg.Settings.Availability["sample"])
-	}
-	FollowDefaults(cfg, "sample")
-	if _, ok := cfg.Settings.Availability["sample"]; ok {
-		t.Fatal("follow-defaults did not clear override")
-	}
-}
-
 func TestSaveConfigDropsRemovedSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skills.json")
 	raw := `{
