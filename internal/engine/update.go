@@ -33,39 +33,7 @@ func sortedSkillKeys(skills map[string]string) []string {
 }
 
 func CheckRepoUpdateStatus(source string, repoInfo config.RemoteRepo, cacheDir string) UpdateStatusResult {
-	repo := resolveCacheRepo(source, repoInfo.URL, repoInfo.Branch, cacheDir)
-	targetBranch := repo.Branch
-	if targetBranch == "" {
-		targetBranch = "HEAD"
-	}
-
-	skillList := sortedSkillKeys(repoInfo.Skills)
-
-	localSHA := GetLocalRepoCommit(repo.Dir)
-	remoteSHA := ""
-
-	status := "up_to_date"
-	if localSHA == "" {
-		status = "not_cached"
-	} else {
-		remoteSHA = GetRemoteRepoCommit(source, repo.URL, targetBranch)
-		if remoteSHA == "" {
-			status = "error"
-		} else if localSHA != remoteSHA {
-			status = "update_available"
-		}
-	}
-
-	return UpdateStatusResult{
-		Source:    source,
-		URL:       repo.URL,
-		Branch:    targetBranch,
-		Status:    status,
-		LocalSHA:  localSHA,
-		RemoteSHA: remoteSHA,
-		Skills:    skillList,
-		CachePath: repo.Dir,
-	}
+	return newRemoteSource(nil, source, repoInfo, cacheDir).CheckStatus()
 }
 
 func CheckAllRemoteSkillsOutdated(cfg *config.Config, cacheDir string, maxWorkers int) []UpdateStatusResult {
@@ -96,7 +64,7 @@ func CheckAllRemoteSkillsOutdated(cfg *config.Config, cacheDir string, maxWorker
 		go func(idx int, tsk task) {
 			defer wg.Done()
 			sem <- struct{}{}
-			results[idx] = CheckRepoUpdateStatus(tsk.source, tsk.repoInfo, cacheDir)
+			results[idx] = newRemoteSource(nil, tsk.source, tsk.repoInfo, cacheDir).CheckStatus()
 			<-sem
 		}(i, t)
 	}

@@ -55,6 +55,42 @@ func (s remoteSource) refresh(force bool) (string, error) {
 	return EnsureGitRepo(s.key, s.repo.URL, s.repo.Branch, force, s.cacheDir)
 }
 
+// CheckStatus queries local and remote git commit SHAs for freshness.
+func (s remoteSource) CheckStatus() UpdateStatusResult {
+	repo := resolveCacheRepo(s.key, s.repo.URL, s.repo.Branch, s.cacheDir)
+	targetBranch := repo.Branch
+	if targetBranch == "" {
+		targetBranch = "HEAD"
+	}
+
+	skillList := sortedSkillKeys(s.repo.Skills)
+	localSHA := GetLocalRepoCommit(repo.Dir)
+	remoteSHA := ""
+
+	status := "up_to_date"
+	if localSHA == "" {
+		status = "not_cached"
+	} else {
+		remoteSHA = GetRemoteRepoCommit(s.key, repo.URL, targetBranch)
+		if remoteSHA == "" {
+			status = "error"
+		} else if localSHA != remoteSHA {
+			status = "update_available"
+		}
+	}
+
+	return UpdateStatusResult{
+		Source:    s.key,
+		URL:       repo.URL,
+		Branch:    targetBranch,
+		Status:    status,
+		LocalSHA:  localSHA,
+		RemoteSHA: remoteSHA,
+		Skills:    skillList,
+		CachePath: repo.Dir,
+	}
+}
+
 // reconcile Materializes selected Skills, then applies Availability for every
 // Skill in the Source. Materialize failures are events and continue;
 // Availability failures fail closed. dryRun never writes.
