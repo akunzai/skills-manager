@@ -101,7 +101,8 @@ func AddDeclared(
 			err = reconcileCommand(cfg, name, skillsDir, false, note)
 		default:
 			one := map[string]string{name: subpath}
-			err = reconcileRemoteSource(cfg, src.SourceKey, one, src.RepoDir, skillsDir, false, one, note)
+			remote := newRemoteSource(cfg, src.SourceKey, config.RemoteRepo{Skills: one}, skillsDir, "")
+			err = remote.reconcile(src.RepoDir, false, one, note)
 		}
 		if err != nil {
 			return fmt.Errorf("saved config but failed to apply availability for %s: %w", name, err)

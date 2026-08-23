@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +12,8 @@ import (
 
 const (
 	SyncRepoStart     = "repo_start"
+	SyncRefreshStart  = "refresh_start"
+	SyncRefreshDone   = "refresh_done"
 	SyncFetchFailed   = "fetch_failed"
 	SyncPathMissing   = "path_missing"
 	SyncCopyFailed    = "copy_failed"
@@ -50,43 +51,6 @@ type SyncReport struct {
 
 func (r *SyncReport) add(ev SyncEvent) {
 	r.Events = append(r.Events, ev)
-}
-
-// reconcileRemoteSource Materializes selected remote Skills from repoDir, then
-// applies Availability for every Skill in the Source. Copy failures are events
-// and continue; Availability failures fail closed. dryRun never writes.
-func reconcileRemoteSource(
-	cfg *config.Config,
-	source string,
-	skills map[string]string,
-	repoDir, skillsDir string,
-	dryRun bool,
-	toWrite map[string]string,
-	emit func(SyncEvent),
-) error {
-	if emit == nil {
-		emit = func(SyncEvent) {}
-	}
-	for _, name := range sortedSkillKeys(skills) {
-		subpath := skills[name]
-		if !dryRun && toWrite != nil {
-			if _, write := toWrite[name]; write {
-				if err := MaterializeRemoteSkill(name, subpath, repoDir, skillsDir); err != nil {
-					if errors.Is(err, errRepoPathMissing) {
-						emit(SyncEvent{Kind: SyncPathMissing, Source: source, Skill: name, Path: subpath})
-					} else {
-						emit(SyncEvent{Kind: SyncCopyFailed, Source: source, Skill: name, Err: err.Error()})
-					}
-					continue
-				}
-				emit(SyncEvent{Kind: SyncMaterialized, Source: source, Skill: name, Path: subpath})
-			}
-		}
-		if err := applyDeclaredAvailability(name, source, cfg, skillsDir, dryRun, emit); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func reconcileLocalSymlink(cfg *config.Config, name, skillsDir string, dryRun bool, emit func(SyncEvent)) error {
@@ -138,11 +102,17 @@ func reconcileCommand(cfg *config.Config, name, skillsDir string, dryRun bool, e
 // and applies Availability. Reconcile failures fail closed; fetch/copy/symlink
 // failures are events and continue. A failed command installer is an event;
 // Availability is still applied.
-func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun bool) (*SyncReport, error) {
+func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun bool, onProgress func(SyncEvent)) (*SyncReport, error) {
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create skills dir: %w", err)
 	}
 	report := &SyncReport{}
+	emit := func(ev SyncEvent) {
+		report.add(ev)
+		if onProgress != nil {
+			onProgress(ev)
+		}
+	}
 	configured := make(map[string]struct{})
 
 	remoteSources := make([]string, 0, len(cfg.Remote))
@@ -157,40 +127,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			configured[sk] = struct{}{}
 		}
 
-		missingSkills := make(map[string]string)
-		for name, subpath := range repoInfo.Skills {
-			if force {
-				missingSkills[name] = subpath
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(skillsDir, name)); err != nil {
-				missingSkills[name] = subpath
-			}
-		}
-
-		if len(missingSkills) == 0 && !force {
-			if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, "", skillsDir, dryRun, nil, report.add); err != nil {
-				return report, err
-			}
-			continue
-		}
-
-		report.add(SyncEvent{Kind: SyncRepoStart, Source: source, Skills: sortedSkillKeys(repoInfo.Skills)})
-		if dryRun {
-			report.add(SyncEvent{Kind: SyncWouldSync, Source: source, Skills: sortedSkillKeys(missingSkills)})
-			if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, "", skillsDir, true, nil, report.add); err != nil {
-				return report, err
-			}
-			continue
-		}
-
-		repoDir, err := EnsureGitRepo(source, repoInfo.URL, repoInfo.Branch, force, cacheDir)
-		if err != nil {
-			report.add(SyncEvent{Kind: SyncFetchFailed, Source: source, Err: err.Error()})
-			continue
-		}
-
-		if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, repoDir, skillsDir, false, missingSkills, report.add); err != nil {
+		if err := newRemoteSource(cfg, source, repoInfo, skillsDir, cacheDir).sync(force, dryRun, emit); err != nil {
 			return report, err
 		}
 	}
@@ -207,7 +144,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 		configured[name] = struct{}{}
-		if err := reconcileLocalSymlink(cfg, name, skillsDir, dryRun, report.add); err != nil {
+		if err := reconcileLocalSymlink(cfg, name, skillsDir, dryRun, emit); err != nil {
 			return report, err
 		}
 	}
@@ -218,7 +155,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 		configured[name] = struct{}{}
-		if err := reconcileCommand(cfg, name, skillsDir, dryRun, report.add); err != nil {
+		if err := reconcileCommand(cfg, name, skillsDir, dryRun, emit); err != nil {
 			return report, err
 		}
 	}

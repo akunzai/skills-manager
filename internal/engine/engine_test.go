@@ -768,6 +768,59 @@ func TestUpdateRemoteSkillsApplyAvailabilityFailsClosed(t *testing.T) {
 	}
 }
 
+func TestUpdateRemoteSkillsReportsAggregateRefreshLifecycle(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	var kinds []string
+	_, err := UpdateRemoteSkills(cfg, []string{"sample"}, true, false, skillsDir, cacheDir, func(ev UpdateEvent) {
+		kinds = append(kinds, ev.Kind)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{UpdateRefreshStart, UpdateRefreshDone, UpdateStart, UpdateSkillRestored, UpdateRepoDone}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
+	}
+}
+
+func TestSyncDeclaredReportsLiveRemoteSourceLifecycle(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	var live []SyncEvent
+	report, err := SyncDeclared(cfg, skillsDir, cacheDir, false, false, func(ev SyncEvent) {
+		live = append(live, ev)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(live, report.Events) {
+		t.Fatalf("live events = %#v, report = %#v", live, report.Events)
+	}
+
+	var kinds []string
+	for _, ev := range live {
+		kinds = append(kinds, ev.Kind)
+	}
+	want := []string{SyncRepoStart, SyncRefreshStart, SyncRefreshDone, SyncMaterialized}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
+	}
+}
+
 func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
@@ -783,7 +836,7 @@ func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "sample", src, "")
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false)
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -809,7 +862,7 @@ func TestSyncDeclaredCommandCheckSkipsMaterialize(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddLocalCommandEntry(cfg, "sample", "echo install", "exit 1", "")
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false)
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -841,7 +894,7 @@ func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
 		}
 	}
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false)
+	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
