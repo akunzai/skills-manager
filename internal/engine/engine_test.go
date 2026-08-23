@@ -403,6 +403,92 @@ func TestReplaceManagedCopyFailurePreservesExistingCopy(t *testing.T) {
 	}
 }
 
+func TestApplyRemovePlanDropsConfigBeforeMaster(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddLocalCommandEntry(cfg, "sample", "echo ok", "", "")
+	if err := config.SaveConfig(cfg, configPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureAgentSymlink("sample", "claude", skillsDir); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := BuildRemovePlan(cfg, skillsDir, []string{"sample"})
+	if len(plan.Skills) != 1 || !plan.Skills[0].InConfig || !plan.Skills[0].MasterExists {
+		t.Fatalf("plan = %#v", plan)
+	}
+	result, err := ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Skills) != 1 || !result.Skills[0].RemovedFromConfig || !result.Skills[0].RemovedMaster {
+		t.Fatalf("result = %#v", result.Skills)
+	}
+	if len(result.Skills[0].Unlinked) == 0 {
+		t.Fatal("expected Availability unlink")
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Local["sample"]; ok {
+		t.Fatal("config still declares sample")
+	}
+	if _, err := os.Lstat(master); !os.IsNotExist(err) {
+		t.Fatal("master still exists")
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
+		t.Fatal("agent link still exists")
+	}
+}
+
+func TestApplyRemovePlanSavesConfigWhenMasterMissing(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalCommandEntry(cfg, "ghost", "echo ok", "", "")
+	if err := config.SaveConfig(cfg, configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := BuildRemovePlan(cfg, skillsDir, []string{"ghost"})
+	if !plan.Skills[0].InConfig || plan.Skills[0].MasterExists {
+		t.Fatalf("plan = %#v", plan.Skills[0])
+	}
+	result, err := ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Skills[0].RemovedFromConfig || result.Skills[0].RemovedMaster {
+		t.Fatalf("result = %#v", result.Skills[0])
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Local["ghost"]; ok {
+		t.Fatal("config still declares ghost")
+	}
+}
+
 func TestApplyPrunePlanLeavesLinkReplacedAfterPlanning(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
