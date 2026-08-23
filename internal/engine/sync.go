@@ -89,6 +89,51 @@ func reconcileRemoteSource(
 	return nil
 }
 
+func reconcileLocalSymlink(cfg *config.Config, name, skillsDir string, dryRun bool, emit func(SyncEvent)) error {
+	if emit == nil {
+		emit = func(SyncEvent) {}
+	}
+	info := cfg.Local[name]
+	absSource := models.ResolveLocalSourcePath(info.Source, skillsDir)
+	if _, err := os.Stat(absSource); err != nil {
+		emit(SyncEvent{Kind: SyncSourceMissing, Skill: name, Path: absSource})
+		return nil
+	}
+	if dryRun {
+		dest := filepath.Join(skillsDir, name)
+		emit(SyncEvent{Kind: SyncWouldSymlink, Skill: name, Path: dest, Target: absSource})
+		return applyDeclaredAvailability(name, "local", cfg, skillsDir, true, emit)
+	}
+	if err := MaterializeLocalSymlink(name, models.LocalSymlinkTarget(absSource, skillsDir), skillsDir); err != nil {
+		emit(SyncEvent{Kind: SyncSymlinkFailed, Skill: name, Err: err.Error()})
+		return nil
+	}
+	emit(SyncEvent{Kind: SyncSymlinked, Skill: name, Target: absSource})
+	return applyDeclaredAvailability(name, "local", cfg, skillsDir, false, emit)
+}
+
+func reconcileCommand(cfg *config.Config, name, skillsDir string, dryRun bool, emit func(SyncEvent)) error {
+	if emit == nil {
+		emit = func(SyncEvent) {}
+	}
+	info := cfg.Local[name]
+	if info.Check != "" {
+		if _, _, err := RunCmd(info.Check, ""); err != nil {
+			emit(SyncEvent{Kind: SyncCheckFailed, Skill: name, Path: info.Check})
+			return nil
+		}
+	}
+	if dryRun {
+		emit(SyncEvent{Kind: SyncWouldCommand, Skill: name, Target: info.Command})
+		return applyDeclaredAvailability(name, "local", cfg, skillsDir, true, emit)
+	}
+	emit(SyncEvent{Kind: SyncCommandStart, Skill: name})
+	if err := MaterializeCommand(info.Command); err != nil {
+		emit(SyncEvent{Kind: SyncCommandFailed, Skill: name, Err: err.Error()})
+	}
+	return applyDeclaredAvailability(name, "local", cfg, skillsDir, false, emit)
+}
+
 // SyncDeclared materializes declared remote, local-symlink, and command Skills
 // and applies Availability. Reconcile failures fail closed; fetch/copy/symlink
 // failures are events and continue. A failed command installer is an event;
@@ -162,25 +207,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 		configured[name] = struct{}{}
-		absSource := models.ResolveLocalSourcePath(info.Source, skillsDir)
-		if _, err := os.Stat(absSource); err != nil {
-			report.add(SyncEvent{Kind: SyncSourceMissing, Skill: name, Path: absSource})
-			continue
-		}
-		dest := filepath.Join(skillsDir, name)
-		if dryRun {
-			report.add(SyncEvent{Kind: SyncWouldSymlink, Skill: name, Path: dest, Target: absSource})
-			if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, true, report.add); err != nil {
-				return report, err
-			}
-			continue
-		}
-		if err := MaterializeLocalSymlink(name, models.LocalSymlinkTarget(absSource, skillsDir), skillsDir); err != nil {
-			report.add(SyncEvent{Kind: SyncSymlinkFailed, Skill: name, Err: err.Error()})
-			continue
-		}
-		report.add(SyncEvent{Kind: SyncSymlinked, Skill: name, Target: absSource})
-		if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, false, report.add); err != nil {
+		if err := reconcileLocalSymlink(cfg, name, skillsDir, dryRun, report.add); err != nil {
 			return report, err
 		}
 	}
@@ -191,24 +218,7 @@ func SyncDeclared(cfg *config.Config, skillsDir, cacheDir string, force, dryRun 
 			continue
 		}
 		configured[name] = struct{}{}
-		if info.Check != "" {
-			if _, _, err := RunCmd(info.Check, ""); err != nil {
-				report.add(SyncEvent{Kind: SyncCheckFailed, Skill: name, Path: info.Check})
-				continue
-			}
-		}
-		if dryRun {
-			report.add(SyncEvent{Kind: SyncWouldCommand, Skill: name, Target: info.Command})
-			if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, true, report.add); err != nil {
-				return report, err
-			}
-			continue
-		}
-		report.add(SyncEvent{Kind: SyncCommandStart, Skill: name})
-		if err := MaterializeCommand(info.Command); err != nil {
-			report.add(SyncEvent{Kind: SyncCommandFailed, Skill: name, Err: err.Error()})
-		}
-		if err := applyDeclaredAvailability(name, "local", cfg, skillsDir, false, report.add); err != nil {
+		if err := reconcileCommand(cfg, name, skillsDir, dryRun, report.add); err != nil {
 			return report, err
 		}
 	}

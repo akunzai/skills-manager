@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/spf13/cobra"
 )
 
@@ -27,8 +27,9 @@ func (f *fakeInstallSource) configSourceKey() string { return "fake" }
 func (f *fakeInstallSource) confirmReplacementArgs() replacementSource {
 	return replacementSource{kind: "remote", key: "fake"}
 }
-func (f *fakeInstallSource) install(_, _, _ string) error                  { return nil }
-func (f *fakeInstallSource) recordConfig(_ *config.Config, _, _, _ string) {}
+func (f *fakeInstallSource) addSource() engine.AddSource {
+	return engine.AddSource{Kind: engine.AddRemote, SourceKey: "fake"}
+}
 func (f *fakeInstallSource) progressLine(name, subpath string) string {
 	return "installing " + name + " " + subpath
 }
