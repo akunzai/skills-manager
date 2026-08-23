@@ -917,7 +917,7 @@ func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
 	}
 }
 
-func TestCommandAdderFailureSavesAndAppliesAvailability(t *testing.T) {
+func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	configPath := filepath.Join(project, ".agents", "skills.json")
@@ -940,7 +940,8 @@ func TestCommandAdderFailureSavesAndAppliesAvailability(t *testing.T) {
 		}
 	}
 
-	err := NewCommandAdder(cfg, configPath, skillsDir, "exit 1", "", "").Run(map[string]string{"sample": "."}, nil, nil)
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, nil)
+	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err == nil {
 		t.Fatal("expected materialize error")
 	}
@@ -959,7 +960,7 @@ func TestCommandAdderFailureSavesAndAppliesAvailability(t *testing.T) {
 	}
 }
 
-func TestSymlinkAdderRunDeclaresAndMaterializes(t *testing.T) {
+func TestAddPlanSymlinkDeclaresAndMaterializes(t *testing.T) {
 	project := t.TempDir()
 	source := filepath.Join(project, "source")
 	writeLocalGitSkill(t, source, "sample")
@@ -970,7 +971,8 @@ func TestSymlinkAdderRunDeclaresAndMaterializes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := NewSymlinkAdder(cfg, configPath, skillsDir, source, "local sample").Run(map[string]string{"sample": "sample"}, nil, nil)
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, "local sample", false), map[string]string{"sample": "sample"}, nil)
+	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +988,7 @@ func TestSymlinkAdderRunDeclaresAndMaterializes(t *testing.T) {
 	}
 }
 
-func TestRemoteAdderRunDeclaresAndMaterializes(t *testing.T) {
+func TestAddPlanRemoteDeclaresAndMaterializes(t *testing.T) {
 	project := t.TempDir()
 	repoDir := filepath.Join(project, "cache")
 	writeLocalGitSkill(t, repoDir, "sample")
@@ -997,7 +999,8 @@ func TestRemoteAdderRunDeclaresAndMaterializes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := NewRemoteAdder(cfg, configPath, skillsDir, repoDir, "owner/repo", "github", "").Run(map[string]string{"sample": "sample"}, nil, nil)
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource("owner/repo", "github", "", repoDir), map[string]string{"sample": "sample"}, nil)
+	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
