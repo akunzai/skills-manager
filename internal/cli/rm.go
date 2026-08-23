@@ -2,8 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"io"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -77,28 +76,11 @@ func newRmCmd() *cobra.Command {
 				}
 			}
 
-			for _, skillName := range skillsToRemove {
-				fmt.Fprintf(out, "\n%sRemoving skill: %s%s%s...\n", colorCyan, colorBold, skillName, colorReset)
-
-				// Full removal
-				unlinked := engine.RemoveAgentSymlinks(skillName, skillsDir)
-				if len(unlinked) > 0 {
-					fmt.Fprintf(out, "  %sUnlinked from: %s.%s\n", colorGreen, strings.Join(unlinked, ", "), colorReset)
-				}
-
-				masterPath := filepath.Join(skillsDir, skillName)
-				if _, err := os.Lstat(masterPath); err == nil {
-					_ = os.RemoveAll(masterPath)
-					fmt.Fprintf(out, "  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(masterPath), colorReset)
-				}
-
-				if config.RemoveSkillEntry(cfg, skillName) {
-					fmt.Fprintf(out, "  %sRemoved from configuration.%s\n", colorGreen, colorReset)
-				}
-			}
-
-			if err := config.SaveConfig(cfg, configPath); err != nil {
-				return err
+			plan := engine.BuildRemovePlan(cfg, skillsDir, skillsToRemove)
+			result, applyErr := engine.ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+			printRemoveResult(out, result)
+			if applyErr != nil {
+				return applyErr
 			}
 
 			fmt.Fprintf(out, "\n%sSkill removal complete.%s\n\n", colorGreen, colorReset)
@@ -109,4 +91,22 @@ func newRmCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompts")
 
 	return cmd
+}
+
+func printRemoveResult(out io.Writer, result engine.RemoveResult) {
+	for _, s := range result.Skills {
+		fmt.Fprintf(out, "\n%sRemoving skill: %s%s%s...\n", colorCyan, colorBold, s.Name, colorReset)
+		if s.RemovedFromConfig {
+			fmt.Fprintf(out, "  %sRemoved from configuration.%s\n", colorGreen, colorReset)
+		}
+		if len(s.Unlinked) > 0 {
+			fmt.Fprintf(out, "  %sUnlinked from: %s.%s\n", colorGreen, strings.Join(s.Unlinked, ", "), colorReset)
+		}
+		if s.RemovedMaster {
+			fmt.Fprintf(out, "  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(s.MasterPath), colorReset)
+		}
+		if s.MasterErr != nil {
+			fmt.Fprintf(out, "  %sFailed to remove master directory: %s: %s%s\n", colorRed, models.ToTildePath(s.MasterPath), s.MasterErr, colorReset)
+		}
+	}
 }
