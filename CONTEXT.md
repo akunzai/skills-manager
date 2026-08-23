@@ -63,3 +63,7 @@ _Avoid_: harness (in user-facing copy), tool, IDE
 **Update**:
 Refreshing remote Cache to a new commit, then Syncing those remote Skills. Does not Materialize local symlink or command Skills.
 _Avoid_: upgrade, pull (when you mean this command)
+
+**Doctor**:
+Diagnosis and optional repair of one Scope's Skill, Agent directory, and Availability health.
+_Avoid_: health check (diagnosis only), fixer (repair only)

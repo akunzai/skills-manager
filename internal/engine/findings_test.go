@@ -28,9 +28,11 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	plan := BuildHealthPlan(cfg, skillsDir)
-
-	findings := plan.Findings(nil)
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := outcome.Findings
 	var leftover *Finding
 	for i := range findings {
 		if strings.Contains(findings[i].Message, "leftover empty agent director") {
@@ -48,10 +50,9 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 	}
 }
 
-// Once ApplyHealthPlan has run, the same finding category reports the repair
-// outcome instead of the pre-fix diagnosis — Findings(result) is what makes
-// that swap, not a second hand-written printer.
-func TestFindingsReflectsFixOutcome(t *testing.T) {
+// A fixing run reports repair actions, then derives Remaining from a fresh
+// diagnosis rather than subtracting successful actions from the old plan.
+func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -64,15 +65,21 @@ func TestFindingsReflectsFixOutcome(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	plan := BuildHealthPlan(cfg, skillsDir)
-
-	before := plan.Findings(nil)
+	doctor := NewDoctor(cfg, skillsDir)
+	beforeOutcome, err := doctor.Run(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := beforeOutcome.Findings
 	if !containsMessage(before, "Warning:") {
 		t.Fatalf("expected a pre-fix warning finding, got %#v", before)
 	}
 
-	result := ApplyHealthPlan(plan, cfg, skillsDir)
-	after := plan.Findings(&result)
+	afterOutcome, err := doctor.Run(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := afterOutcome.Findings
 	if containsMessage(after, "Warning:") {
 		t.Errorf("post-fix findings still contain a pre-fix warning: %#v", after)
 	}
@@ -114,20 +121,11 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	plan := BuildHealthPlan(cfg, skillsDir)
-	if len(plan.LeftoverEmpty) != 2 {
-		t.Fatalf("expected 2 leftover candidates (continue, roo), got %#v", plan.LeftoverEmpty)
+	outcome, err := NewDoctor(cfg, skillsDir).Run(true)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	result := ApplyHealthPlan(plan, cfg, skillsDir)
-	if len(result.RemovedLeftover) != 1 || result.RemovedLeftover[0].Name != "continue" {
-		t.Fatalf("expected only continue to be removed, got %#v", result.RemovedLeftover)
-	}
-	if len(result.FailedLeftover) != 1 {
-		t.Fatalf("expected roo's removal to fail, got %#v", result.FailedLeftover)
-	}
-
-	findings := plan.Findings(&result)
+	findings := outcome.Findings
 	var removedMsg string
 	for _, f := range findings {
 		if strings.HasPrefix(f.Message, "  Removed ") {
@@ -145,6 +143,9 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 	}
 	if !containsMessage(findings, "Failed to remove leftover roo dir") {
 		t.Errorf("expected a Failed finding for roo, got %#v", findings)
+	}
+	if outcome.Remaining != 1 {
+		t.Errorf("Remaining = %d; want fresh diagnosis to retain roo", outcome.Remaining)
 	}
 }
 

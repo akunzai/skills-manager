@@ -30,12 +30,12 @@ type Finding struct {
 	Blank    bool
 }
 
-// Findings renders the plan as an ordered list doctor prints as-is. With
+// findings renders the plan as an ordered list doctor prints as-is. With
 // result nil this is the diagnosis; with result set, entries that
-// ApplyHealthPlan touched report its outcome instead. This is the one place
-// that interprets HealthPlan for display, so a new finding is added here
+// repair touched report its outcome instead. This is the one place that
+// interprets a health plan for display, so a new finding is added here
 // once rather than in a second, hand-synced printer.
-func (p HealthPlan) Findings(result *HealthFixResult) []Finding {
+func (p healthPlan) findings(result *healthFixResult) []Finding {
 	var findings []Finding
 	add := func(f Finding) { findings = append(findings, f) }
 
@@ -130,7 +130,7 @@ func (p HealthPlan) Findings(result *HealthFixResult) []Finding {
 
 // agentFixFindings renders one agent's Fixed/Failed sub-lines for a repair
 // category (broken symlinks or stale links) — the shape shared by both.
-func agentFixFindings(removed, failed []HealthFix, agent, noun string, includeErr bool) []Finding {
+func agentFixFindings(removed, failed []healthFix, agent, noun string, includeErr bool) []Finding {
 	var findings []Finding
 	for _, fix := range removed {
 		if fix.Agent == agent {

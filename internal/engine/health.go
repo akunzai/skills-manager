@@ -11,8 +11,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-// AgentHealth is one configured agent's skills directory.
-type AgentHealth struct {
+type agentHealth struct {
 	Name            string
 	Dir             string
 	Broken          []string
@@ -20,54 +19,88 @@ type AgentHealth struct {
 	Physical        []string
 }
 
-// StaleUniversalLinks is managed links left in a universal agent directory.
-type StaleUniversalLinks struct {
+type staleUniversalLinks struct {
 	Agent string
 	Dir   string
 	Names []string
 }
 
-// DriftFinding is Availability Drift for one installed, configured Skill.
-type DriftFinding struct {
+type driftFinding struct {
 	Skill      string
 	Source     string
 	Missing    []string
 	Unexpected []string
 }
 
-// HealthFix is one repaired or unrepaired path (Name is a skill name or dir).
-type HealthFix struct {
+type healthFix struct {
 	Agent string
 	Name  string
 	Err   error
 }
 
-// HealthPlan is the diagnosed state of one Scope. ApplyHealthPlan repairs
-// only broken managed links, stale universal links, leftover empty agent
-// dirs, and Availability Drift.
-type HealthPlan struct {
+type healthPlan struct {
 	SkillsDir      string
 	MasterMissing  bool
-	Agents         []AgentHealth
-	StaleUniversal []StaleUniversalLinks
+	Agents         []agentHealth
+	StaleUniversal []staleUniversalLinks
 	LeftoverEmpty  []AgentDir
-	Drift          []DriftFinding
+	Drift          []driftFinding
 	Missing        []string
 	Untracked      []string
 	Invalid        []string
 	UnknownAgents  []UnknownAgentReference
 }
 
-// HealthFixResult is what ApplyHealthPlan did.
-type HealthFixResult struct {
-	RemovedBroken   []HealthFix
-	FailedBroken    []HealthFix
-	RemovedStale    []HealthFix
-	FailedStale     []HealthFix
+type healthFixResult struct {
+	RemovedBroken   []healthFix
+	FailedBroken    []healthFix
+	RemovedStale    []healthFix
+	FailedStale     []healthFix
 	RemovedLeftover []AgentDir
-	FailedLeftover  []HealthFix
+	FailedLeftover  []healthFix
 	FixedDrift      []string
-	FailedDrift     []HealthFix
+	FailedDrift     []healthFix
+}
+
+// Doctor diagnoses and optionally repairs one Scope's Skill, Agent directory,
+// and Availability health.
+type Doctor struct {
+	cfg          *config.Config
+	skillsDir    string
+	availability *Availability
+}
+
+// DoctorOutcome is the ordered report plus the issues that remain after Run.
+// Remaining is unavailable when Run returns an execution error.
+type DoctorOutcome struct {
+	Findings  []Finding
+	Remaining int
+}
+
+func NewDoctor(cfg *config.Config, skillsDir string) *Doctor {
+	availability := NewAvailability(cfg, skillsDir)
+	return &Doctor{cfg: availability.cfg, skillsDir: availability.skillsDir, availability: availability}
+}
+
+// Run diagnoses the Scope. With fix, it repairs independent findings, keeps
+// their action report, then diagnoses again to count the actual remaining state.
+func (d *Doctor) Run(fix bool) (DoctorOutcome, error) {
+	plan, err := d.diagnose()
+	if err != nil {
+		return DoctorOutcome{}, err
+	}
+	if !fix {
+		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount()}, nil
+	}
+
+	result := d.repair(plan)
+	outcome := DoctorOutcome{Findings: plan.findings(&result)}
+	after, err := d.diagnose()
+	if err != nil {
+		return outcome, err
+	}
+	outcome.Remaining = after.issueCount()
+	return outcome, nil
 }
 
 func availabilitySource(item models.SkillItem) string {
@@ -77,21 +110,17 @@ func availabilitySource(item models.SkillItem) string {
 	return item.Source
 }
 
-// BuildHealthPlan diagnoses one Scope. Untracked Skills are recorded but are
-// not issues; missing Skills and invalid folders are issues but not repaired.
-func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
-	plan := HealthPlan{SkillsDir: skillsDir}
-	if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
+// diagnose records untracked Skills as warnings. Missing Skills and invalid
+// folders are issues but are not repaired.
+func (d *Doctor) diagnose() (healthPlan, error) {
+	plan := healthPlan{SkillsDir: d.skillsDir}
+	if _, err := os.Stat(d.skillsDir); os.IsNotExist(err) {
 		plan.MasterMissing = true
 	}
 
-	knownAgents := models.GetAgentsForSkillsDir(skillsDir)
-	universalDirs := models.GetUniversalAgentSkillDirs(skillsDir)
-	availability := NewAvailability(cfg, skillsDir)
-	configuredAgents := availability.ConfiguredAgentDirs()
+	knownAgents := models.GetAgentsForSkillsDir(d.skillsDir)
+	universalDirs := models.GetUniversalAgentSkillDirs(d.skillsDir)
+	configuredAgents := d.availability.ConfiguredAgentDirs()
 
 	configuredNames := make([]string, 0, len(configuredAgents))
 	for name := range configuredAgents {
@@ -103,8 +132,8 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 		if _, err := os.Stat(agentDir); os.IsNotExist(err) {
 			continue
 		}
-		broken, unmanaged, physical := DiagnoseAgentDirHealth(agentDir, skillsDir)
-		plan.Agents = append(plan.Agents, AgentHealth{
+		broken, unmanaged, physical := DiagnoseAgentDirHealth(agentDir, d.skillsDir)
+		plan.Agents = append(plan.Agents, agentHealth{
 			Name:            agentName,
 			Dir:             agentDir,
 			Broken:          broken,
@@ -123,11 +152,11 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 			continue
 		}
 		agentDir := universalDirs[agentName]
-		stale := FindStaleManagedLinks(agentDir, skillsDir)
+		stale := FindStaleManagedLinks(agentDir, d.skillsDir)
 		if len(stale) == 0 {
 			continue
 		}
-		plan.StaleUniversal = append(plan.StaleUniversal, StaleUniversalLinks{
+		plan.StaleUniversal = append(plan.StaleUniversal, staleUniversalLinks{
 			Agent: agentName,
 			Dir:   agentDir,
 			Names: stale,
@@ -135,11 +164,11 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 	}
 
 	plan.LeftoverEmpty = LeftoverEmptyAgentDirs(knownAgents, configuredAgents)
-	plan.UnknownAgents = availability.UnknownAgentReferences()
+	plan.UnknownAgents = d.availability.UnknownAgentReferences()
 
-	inv, err := Inventory(cfg, skillsDir)
+	inv, err := Inventory(d.cfg, d.skillsDir)
 	if err != nil {
-		return plan
+		return healthPlan{}, err
 	}
 	for _, s := range inv {
 		if !s.IsInstalled {
@@ -154,23 +183,23 @@ func BuildHealthPlan(cfg *config.Config, skillsDir string) HealthPlan {
 			plan.Invalid = append(plan.Invalid, s.Name)
 		}
 		source := availabilitySource(s)
-		missing, unexpected := availability.Drift(s.Name)
+		missing, unexpected := d.availability.Drift(s.Name)
 		if len(missing) == 0 && len(unexpected) == 0 {
 			continue
 		}
-		plan.Drift = append(plan.Drift, DriftFinding{
+		plan.Drift = append(plan.Drift, driftFinding{
 			Skill:      s.Name,
 			Source:     source,
 			Missing:    missing,
 			Unexpected: unexpected,
 		})
 	}
-	return plan
+	return plan, nil
 }
 
 // IssueCount is the number of issues doctor reports without --fix.
 // Untracked Skills are warnings only.
-func (p HealthPlan) IssueCount() int {
+func (p healthPlan) issueCount() int {
 	n := 0
 	if p.MasterMissing {
 		n++
@@ -190,17 +219,15 @@ func (p HealthPlan) IssueCount() int {
 	return n
 }
 
-// ApplyHealthPlan repairs fixable findings. Physical dirs and unmanaged
-// broken links are left unchanged. Missing/untracked/invalid Skills are not
-// materialized or pruned.
-func ApplyHealthPlan(plan HealthPlan, cfg *config.Config, skillsDir string) HealthFixResult {
-	result := HealthFixResult{}
-	availability := NewAvailability(cfg, skillsDir)
+// repair leaves physical dirs, unmanaged broken links, and missing/untracked/
+// invalid Skills unchanged. Independent repair failures do not stop the run.
+func (d *Doctor) repair(plan healthPlan) healthFixResult {
+	result := healthFixResult{}
 	for _, agent := range plan.Agents {
 		for _, name := range agent.Broken {
 			path := filepath.Join(agent.Dir, name)
-			fix := HealthFix{Agent: agent.Name, Name: name}
-			if err := removeManagedAvailability(path, name, skillsDir); err != nil {
+			fix := healthFix{Agent: agent.Name, Name: name}
+			if err := removeManagedAvailability(path, name, d.skillsDir); err != nil {
 				fix.Err = err
 				result.FailedBroken = append(result.FailedBroken, fix)
 				continue
@@ -210,9 +237,9 @@ func ApplyHealthPlan(plan HealthPlan, cfg *config.Config, skillsDir string) Heal
 	}
 	for _, stale := range plan.StaleUniversal {
 		for _, name := range stale.Names {
-			fix := HealthFix{Agent: stale.Agent, Name: name}
+			fix := healthFix{Agent: stale.Agent, Name: name}
 			path := filepath.Join(stale.Dir, name)
-			if !IsManagedSkillLink(path, name, skillsDir) {
+			if !IsManagedSkillLink(path, name, d.skillsDir) {
 				fix.Err = fmt.Errorf("failed to remove stale link %s", name)
 				result.FailedStale = append(result.FailedStale, fix)
 				continue
@@ -225,10 +252,10 @@ func ApplyHealthPlan(plan HealthPlan, cfg *config.Config, skillsDir string) Heal
 			result.RemovedStale = append(result.RemovedStale, fix)
 		}
 	}
-	stopAt := models.ScopeRoot(skillsDir)
+	stopAt := models.ScopeRoot(d.skillsDir)
 	for _, leftover := range plan.LeftoverEmpty {
 		if err := RemoveEmptyAgentDir(leftover.Dir, stopAt); err != nil {
-			result.FailedLeftover = append(result.FailedLeftover, HealthFix{
+			result.FailedLeftover = append(result.FailedLeftover, healthFix{
 				Agent: leftover.Name,
 				Name:  leftover.Dir,
 				Err:   err,
@@ -237,34 +264,14 @@ func ApplyHealthPlan(plan HealthPlan, cfg *config.Config, skillsDir string) Heal
 		}
 		result.RemovedLeftover = append(result.RemovedLeftover, leftover)
 	}
-	for _, d := range plan.Drift {
-		if err := availability.Apply(d.Skill); err != nil {
-			result.FailedDrift = append(result.FailedDrift, HealthFix{Name: d.Skill, Err: err})
+	for _, drift := range plan.Drift {
+		if err := d.availability.Apply(drift.Skill); err != nil {
+			result.FailedDrift = append(result.FailedDrift, healthFix{Name: drift.Skill, Err: err})
 			continue
 		}
-		result.FixedDrift = append(result.FixedDrift, d.Skill)
+		result.FixedDrift = append(result.FixedDrift, drift.Skill)
 	}
 	return result
-}
-
-// RemainingIssues is the number of issues after --fix: unrepaired items plus
-// findings --fix never touches. A failed Drift reconcile counts as one issue
-// (not missing+unexpected), matching prior doctor --fix arithmetic.
-func RemainingIssues(plan HealthPlan, result HealthFixResult) int {
-	n := 0
-	if plan.MasterMissing {
-		n++
-	}
-	n += len(result.FailedBroken)
-	n += len(result.FailedStale)
-	n += len(result.FailedLeftover)
-	n += len(result.FailedDrift)
-	for _, a := range plan.Agents {
-		n += len(a.UnmanagedBroken) + len(a.Physical)
-	}
-	n += len(plan.Missing) + len(plan.Invalid)
-	n += len(plan.UnknownAgents)
-	return n
 }
 
 func removeManagedAvailability(path, skillName, skillsDir string) error {

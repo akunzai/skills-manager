@@ -8,7 +8,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 )
 
-func TestBuildHealthPlanCountsLeftoverButNotUntracked(t *testing.T) {
+func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -29,19 +29,25 @@ func TestBuildHealthPlanCountsLeftoverButNotUntracked(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	plan := BuildHealthPlan(cfg, skillsDir)
-	if len(plan.Untracked) != 1 || plan.Untracked[0] != "orphan" {
-		t.Fatalf("untracked = %#v", plan.Untracked)
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(plan.LeftoverEmpty) != 1 || plan.LeftoverEmpty[0].Name != "continue" {
-		t.Fatalf("leftover = %#v", plan.LeftoverEmpty)
+	if !containsMessage(outcome.Findings, "Untracked skills") || !containsMessage(outcome.Findings, ": orphan") {
+		t.Fatalf("missing untracked finding: %#v", outcome.Findings)
 	}
-	if plan.IssueCount() != 1 {
-		t.Fatalf("IssueCount = %d; want 1 (untracked must not count)", plan.IssueCount())
+	if !containsMessage(outcome.Findings, "leftover empty agent director") {
+		t.Fatalf("missing leftover finding: %#v", outcome.Findings)
+	}
+	if outcome.Remaining != 1 {
+		t.Fatalf("Remaining = %d; want 1 (untracked must not count)", outcome.Remaining)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".continue", "skills")); err != nil {
+		t.Fatalf("diagnose-only run mutated the filesystem: %v", err)
 	}
 }
 
-func TestBuildHealthPlanReadsInventoryMissingAndInvalid(t *testing.T) {
+func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -56,16 +62,19 @@ func TestBuildHealthPlanReadsInventoryMissingAndInvalid(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "missing", ".", "github", "")
 	config.AddLocalSymlinkEntry(cfg, "broken", invalid, "")
 
-	plan := BuildHealthPlan(cfg, skillsDir)
-	if len(plan.Missing) != 1 || plan.Missing[0] != "missing" {
-		t.Fatalf("missing = %#v", plan.Missing)
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(plan.Invalid) != 1 || plan.Invalid[0] != "broken" {
-		t.Fatalf("invalid = %#v", plan.Invalid)
+	if !containsMessage(outcome.Findings, "Configured but missing skills: missing") {
+		t.Fatalf("missing inventory finding: %#v", outcome.Findings)
+	}
+	if !containsMessage(outcome.Findings, "Installed folders missing SKILL.md: broken") {
+		t.Fatalf("missing invalid finding: %#v", outcome.Findings)
 	}
 }
 
-func TestApplyHealthPlanRemovesLeftoverEmptyDirs(t *testing.T) {
+func TestDoctorRunFixesThenRediagnosesFilesystem(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -80,13 +89,15 @@ func TestApplyHealthPlanRemovesLeftoverEmptyDirs(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	plan := BuildHealthPlan(cfg, skillsDir)
-	result := ApplyHealthPlan(plan, cfg, skillsDir)
-	if len(result.RemovedLeftover) == 0 {
-		t.Fatalf("expected leftover removal, plan leftover=%#v result=%#v", plan.LeftoverEmpty, result)
+	outcome, err := NewDoctor(cfg, skillsDir).Run(true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if RemainingIssues(plan, result) != 0 {
-		t.Fatalf("remaining = %d", RemainingIssues(plan, result))
+	if !containsMessage(outcome.Findings, "Removed") {
+		t.Fatalf("expected leftover removal finding: %#v", outcome.Findings)
+	}
+	if outcome.Remaining != 0 {
+		t.Fatalf("Remaining = %d; want actual post-fix state to be healthy", outcome.Remaining)
 	}
 	if _, err := os.Stat(continueDir); !os.IsNotExist(err) {
 		t.Fatal("continue leftover should be removed")
@@ -96,7 +107,7 @@ func TestApplyHealthPlanRemovesLeftoverEmptyDirs(t *testing.T) {
 	}
 }
 
-func TestBuildHealthPlanFlagsUnknownAgentReferences(t *testing.T) {
+func TestDoctorRunLeavesUnknownAgentReferencesForUser(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -109,29 +120,43 @@ func TestBuildHealthPlanFlagsUnknownAgentReferences(t *testing.T) {
 		Include: []string{"also-fake"},
 	}
 
-	plan := BuildHealthPlan(cfg, skillsDir)
-	if len(plan.UnknownAgents) != 2 {
-		t.Fatalf("UnknownAgents = %#v; want 2 entries", plan.UnknownAgents)
+	doctor := NewDoctor(cfg, skillsDir)
+	before, err := doctor.Run(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Remaining != 2 {
+		t.Fatalf("Remaining = %d; want 2", before.Remaining)
+	}
+	if !containsMessage(before.Findings, `unknown agent "not-a-real-agent" in settings.defaultAgents`) ||
+		!containsMessage(before.Findings, `unknown agent "also-fake" in settings.availability.some-skill.include`) {
+		t.Fatalf("missing unknown-agent findings: %#v", before.Findings)
 	}
 
-	var sawDefault, sawInclude bool
-	for _, ref := range plan.UnknownAgents {
-		switch {
-		case ref.Field == "defaultAgents" && ref.Agent == "not-a-real-agent":
-			sawDefault = true
-		case ref.Field == "include" && ref.Skill == "some-skill" && ref.Agent == "also-fake":
-			sawInclude = true
-		}
+	after, err := doctor.Run(true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !sawDefault || !sawInclude {
-		t.Fatalf("UnknownAgents = %#v; missing expected entries", plan.UnknownAgents)
+	if after.Remaining != 2 {
+		t.Fatalf("Remaining after fix = %d; want 2 (unknown agents are never auto-fixed)", after.Remaining)
 	}
-	if plan.IssueCount() != 2 {
-		t.Fatalf("IssueCount = %d; want 2", plan.IssueCount())
+}
+
+func TestDoctorRunPropagatesInventoryErrors(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Dir(skillsDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillsDir, []byte("not a directory"), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	result := ApplyHealthPlan(plan, cfg, skillsDir)
-	if RemainingIssues(plan, result) != 2 {
-		t.Fatalf("RemainingIssues = %d; want 2 (unknown agents are never auto-fixed)", RemainingIssues(plan, result))
+	outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
+	if err == nil {
+		t.Fatal("expected inventory error")
+	}
+	if len(outcome.Findings) != 0 {
+		t.Fatalf("Findings = %#v; want no partial healthy report", outcome.Findings)
 	}
 }
