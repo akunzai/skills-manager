@@ -8,6 +8,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/spf13/cobra"
 )
 
@@ -53,6 +54,7 @@ func newUpdateCmd() *cobra.Command {
 				}
 			}
 
+			var progress *presentation.Progress
 			onProgress := func(ev engine.UpdateEvent) {
 				if flagJSON {
 					return
@@ -66,6 +68,11 @@ func newUpdateCmd() *cobra.Command {
 					} else {
 						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d repository update(s) needed, %d already up to date.%s\n\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
 					}
+				case engine.UpdateRefreshStart:
+					progress = presentation.StartProgress(cmd.ErrOrStderr(), fmt.Sprintf("Refreshing remote Sources (%d)...", ev.Total))
+				case engine.UpdateRefreshDone:
+					progress.Stop()
+					progress = nil
 				case engine.UpdateStart:
 					skillsList := strings.Join(ev.Skills, ", ")
 					if ev.DryRun {
@@ -94,6 +101,7 @@ func newUpdateCmd() *cobra.Command {
 			}
 
 			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, skillsDir, cacheDir, onProgress)
+			progress.Stop()
 			if err != nil {
 				return err
 			}

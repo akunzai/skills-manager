@@ -140,6 +140,8 @@ type UpdateResult struct {
 const (
 	UpdateCheckStart    = "check_start"
 	UpdateCheckDone     = "check_done"
+	UpdateRefreshStart  = "refresh_start"
+	UpdateRefreshDone   = "refresh_done"
 	UpdateStart         = "update_start"
 	UpdateSkillRestored = "skill_restored"
 	UpdateRepoDone      = "repo_done"
@@ -292,7 +294,8 @@ func UpdateRemoteSkills(
 						Skills:   skillList,
 					})
 
-					if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, "", baseSkills, dryRun, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
+					remote := newRemoteSource(cfg, source, repoInfo, baseSkills, baseCache)
+					if err := remote.reconcile("", dryRun, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
 						return result, err
 					}
 					continue
@@ -325,6 +328,7 @@ func UpdateRemoteSkills(
 	}
 	fetched := make([]fetchedRepo, len(sources))
 	if !dryRun && len(sources) > 0 {
+		emitUpdate(onProgress, UpdateEvent{Kind: UpdateRefreshStart, Total: len(sources)})
 		jobs := make(chan int)
 		var wg sync.WaitGroup
 		workers := 8
@@ -338,7 +342,8 @@ func UpdateRemoteSkills(
 				for i := range jobs {
 					source := sources[i]
 					repoInfo := reposNeedingUpdate[source]
-					dir, err := EnsureGitRepo(source, repoInfo.URL, repoInfo.Branch, true, baseCache)
+					remote := newRemoteSource(cfg, source, repoInfo, baseSkills, baseCache)
+					dir, err := remote.refresh(true)
 					fetched[i] = fetchedRepo{dir: dir, err: err}
 				}
 			}()
@@ -348,6 +353,7 @@ func UpdateRemoteSkills(
 		}
 		close(jobs)
 		wg.Wait()
+		emitUpdate(onProgress, UpdateEvent{Kind: UpdateRefreshDone, Total: len(sources)})
 	}
 
 	for i, source := range sources {
@@ -357,7 +363,8 @@ func UpdateRemoteSkills(
 		if dryRun {
 			result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, Skills: skillList, DryRun: true})
 			result.UpdatedSkills = append(result.UpdatedSkills, skillList...)
-			if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, "", baseSkills, true, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
+			remote := newRemoteSource(cfg, source, repoInfo, baseSkills, baseCache)
+			if err := remote.reconcile("", true, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
 				return result, err
 			}
 			continue
@@ -372,7 +379,8 @@ func UpdateRemoteSkills(
 
 		repoDir := fetched[i].dir
 		repoUpdatedSkills := make([]string, 0)
-		if err := reconcileRemoteSource(cfg, source, repoInfo.Skills, repoDir, baseSkills, false, repoInfo.Skills, updateReconcileEmit(onProgress, result, source, &repoUpdatedSkills)); err != nil {
+		remote := newRemoteSource(cfg, source, repoInfo, baseSkills, baseCache)
+		if err := remote.reconcile(repoDir, false, repoInfo.Skills, updateReconcileEmit(onProgress, result, source, &repoUpdatedSkills)); err != nil {
 			return result, err
 		}
 

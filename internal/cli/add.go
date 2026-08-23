@@ -11,6 +11,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -419,15 +420,18 @@ func newAddCmd() *cobra.Command {
 			repoType := parsed.RepoType
 
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "%sFetching repository: %s%s%s...\n", colorCyan, colorBold, sourceKey, colorReset)
-
-			repoDir, err := engine.EnsureGitRepo(sourceKey, cloneURL, branch, true, cacheDir)
+			errOut := cmd.ErrOrStderr()
+			if presentation.For(errOut).Plain {
+				fmt.Fprintf(out, "%sFetching Source: %s%s%s...\n", colorCyan, colorBold, sourceKey, colorReset)
+			}
+			progress := presentation.StartProgress(errOut, "Fetching Source: "+sourceKey+"...")
+			repoDir, discovered, err := engine.PrepareRemoteSource(sourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir)
+			progress.Stop()
 			if err != nil {
-				return fmt.Errorf("error cloning repository: %w", err)
+				return err
 			}
 
-			discovered, err := engine.DiscoverSkillsInRepo(repoDir)
-			discovered, err = discoveryResult(discovered, err, sourceKey)
+			discovered, err = discoveryResult(discovered, nil, sourceKey)
 			if err != nil {
 				return err
 			}

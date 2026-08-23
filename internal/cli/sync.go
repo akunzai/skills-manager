@@ -9,6 +9,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +48,17 @@ func newSyncCmd() *cobra.Command {
 			}
 
 			configuredSkills := make(map[string]struct{})
-			report, err := engine.SyncDeclared(cfg, skillsDir, cacheDir, flagForce, flagDryRun)
+			var progress *presentation.Progress
+			report, err := engine.SyncDeclared(cfg, skillsDir, cacheDir, flagForce, flagDryRun, func(ev engine.SyncEvent) {
+				switch ev.Kind {
+				case engine.SyncRefreshStart:
+					progress = presentation.StartProgress(cmd.ErrOrStderr(), "Fetching Source: "+ev.Source+"...")
+				case engine.SyncRefreshDone:
+					progress.Stop()
+					progress = nil
+				}
+			})
+			progress.Stop()
 			if err != nil {
 				printSyncEvents(out, report)
 				return err
