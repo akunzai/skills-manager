@@ -2,13 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/tui"
@@ -28,9 +26,8 @@ type sourceLabels struct {
 	unitNoun     string // "local skill(s)" / "skill(s)", for the final summary line
 }
 
-// installSource is the seam between the add command's shared selection and
-// bookkeeping pipeline and how a skill actually gets materialized: a symlink
-// for a local directory, a copy for a cloned repository, or a command.
+// installSource is add's selection and display adapter. Recording Config and
+// Materialize live in engine.AddDeclared.
 type installSource interface {
 	// rootDir is the source's own filesystem root, used to resolve --path
 	// against a subdirectory when it doesn't match anything discovery found.
@@ -42,9 +39,8 @@ type installSource interface {
 	// confirmReplacementArgs supplies confirmSkillReplacements' source-specific
 	// display arguments.
 	confirmReplacementArgs() replacementSource
-	install(name, subpath, skillsDir string) error
-	recordConfig(cfg *config.Config, name, subpath, skillsDir string)
 	progressLine(name, subpath string) string
+	addSource() engine.AddSource
 	// allowsSoleDiscoveredRename reports whether a single --skill flag against
 	// a single discovered skill renames it outright rather than requiring an
 	// exact/case-insensitive name match. Local-only: it predates this shared
@@ -86,13 +82,8 @@ func (s *localInstallSource) confirmReplacementArgs() replacementSource {
 	return replacementSource{kind: "symlink", path: s.absSourcePath}
 }
 
-func (s *localInstallSource) install(name, subpath, skillsDir string) error {
-	skillSource := s.resolvedPath(subpath)
-	return engine.MaterializeLocalSymlink(name, models.LocalSymlinkTarget(skillSource, skillsDir), skillsDir)
-}
-
-func (s *localInstallSource) recordConfig(cfg *config.Config, name, subpath, skillsDir string) {
-	config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(s.resolvedPath(subpath), skillsDir), s.description)
+func (s *localInstallSource) addSource() engine.AddSource {
+	return engine.AddSource{Kind: engine.AddSymlink, AbsSourcePath: s.absSourcePath, Description: s.description}
 }
 
 func (s *localInstallSource) progressLine(name, subpath string) string {
@@ -127,12 +118,8 @@ func (s *remoteInstallSource) confirmReplacementArgs() replacementSource {
 	return replacementSource{kind: "remote", key: s.sourceKey}
 }
 
-func (s *remoteInstallSource) install(name, subpath, skillsDir string) error {
-	return engine.MaterializeRemoteSkill(name, subpath, s.repoDir, skillsDir)
-}
-
-func (s *remoteInstallSource) recordConfig(cfg *config.Config, name, subpath, _ string) {
-	config.AddRemoteSkillEntry(cfg, s.sourceKey, name, subpath, s.repoType, s.storedURL)
+func (s *remoteInstallSource) addSource() engine.AddSource {
+	return engine.AddSource{Kind: engine.AddRemote, RepoDir: s.repoDir, SourceKey: s.sourceKey, RepoType: s.repoType, URL: s.storedURL}
 }
 
 func (s *remoteInstallSource) progressLine(name, subpath string) string {
@@ -143,7 +130,6 @@ type commandInstallSource struct {
 	command     string
 	check       string
 	description string
-	out         io.Writer
 }
 
 func (s *commandInstallSource) rootDir() string { return "." }
@@ -167,21 +153,12 @@ func (s *commandInstallSource) confirmReplacementArgs() replacementSource {
 	return replacementSource{kind: "command", key: s.command}
 }
 
-func (s *commandInstallSource) install(_, _, _ string) error {
-	fmt.Fprintf(s.out, "   Command: %s\n", s.command)
-	fmt.Fprintln(s.out, "   Executing installer command...")
-	if err := engine.MaterializeCommand(s.command); err != nil {
-		fmt.Fprintf(s.out, "%sWarning: Install command returned error: %s%s\n", colorYellow, err, colorReset)
-	}
-	return nil
-}
-
-func (s *commandInstallSource) recordConfig(cfg *config.Config, name, _, _ string) {
-	config.AddLocalCommandEntry(cfg, name, s.command, s.check, s.description)
+func (s *commandInstallSource) addSource() engine.AddSource {
+	return engine.AddSource{Kind: engine.AddCommand, Command: s.command, Check: s.check, Description: s.description}
 }
 
 func (s *commandInstallSource) progressLine(name, _ string) string {
-	return fmt.Sprintf("Configuring command skill: %s%s%s", colorBold, name, colorReset)
+	return fmt.Sprintf("Configuring command skill: %s%s%s\n   Command: %s\n   Executing installer command...", colorBold, name, colorReset, s.command)
 }
 
 func sortedDiscoveredNames(discovered map[string]string) []string {
@@ -355,31 +332,16 @@ func runAddPipeline(
 	}
 
 	labels := src.labels()
-	var installedNames []string
-	for name, subpath := range skillsToInstall {
-		src.recordConfig(cfg, name, subpath, skillsDir)
-		if len(flagAgents) > 0 {
-			if err := config.IncludeSkillAgents(cfg, name, flagAgents...); err != nil {
-				return err
-			}
-		}
-		installedNames = append(installedNames, name)
-	}
-
-	if err := config.SaveConfig(cfg, configPath); err != nil {
+	if err := engine.AddDeclared(cfg, configPath, skillsDir, src.addSource(), skillsToInstall, flagAgents, func(name, subpath string) {
+		fmt.Fprintf(out, "  %s\n", src.progressLine(name, subpath))
+	}); err != nil {
 		return err
 	}
-	for _, name := range installedNames {
-		subpath := skillsToInstall[name]
-		fmt.Fprintf(out, "  %s\n", src.progressLine(name, subpath))
-		if err := src.install(name, subpath, skillsDir); err != nil {
-			return fmt.Errorf("failed to %s skill %s: %w", labels.failVerb, name, err)
-		}
-		if err := engine.ApplyAvailability(name, cfg, skillsDir); err != nil {
-			return fmt.Errorf("saved config but failed to apply availability for %s: %w", name, err)
-		}
-	}
 
+	installedNames := make([]string, 0, len(skillsToInstall))
+	for name := range skillsToInstall {
+		installedNames = append(installedNames, name)
+	}
 	sort.Strings(installedNames)
 	fmt.Fprintf(out, "\n%s%s %d %s [%s] and updated %s.%s\n\n", colorGreen, labels.pastVerb, len(installedNames), labels.unitNoun, strings.Join(installedNames, ", "), filepath.Base(configPath), colorReset)
 	return nil

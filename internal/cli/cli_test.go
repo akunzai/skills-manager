@@ -1505,17 +1505,38 @@ func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
 	out, err := runCLI(t, "add", "--command", "exit 1", "--skill", "cmd-skill", "-y", "--config", configFile, "--skills-dir", skillsDir)
-	if err != nil {
-		t.Fatalf("add: %v\n%s", err, out)
+	if err == nil {
+		t.Fatalf("expected installer failure, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Warning: Install command returned error") {
-		t.Fatalf("expected installer warning, got:\n%s", out)
+	if !strings.Contains(err.Error(), "failed to materialize skill cmd-skill") {
+		t.Fatalf("got %v\n%s", err, out)
 	}
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Local["cmd-skill"].Command != "exit 1" {
+		t.Fatalf("command = %#v", cfg.Local)
+	}
+}
+
+func TestCLICommandAddCheckFailureStillSaves(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	out, err := runCLI(t, "add", "--command", "echo ok", "--check", "exit 1", "--skill", "cmd-skill", "-y", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil {
+		t.Fatalf("expected check failure, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "command check") {
+		t.Fatalf("got %v\n%s", err, out)
+	}
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Local["cmd-skill"].Command != "echo ok" {
 		t.Fatalf("command = %#v", cfg.Local)
 	}
 }

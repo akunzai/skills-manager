@@ -392,7 +392,6 @@ func newAddCmd() *cobra.Command {
 					command:     flagCommand,
 					check:       flagCheck,
 					description: flagDescription,
-					out:         cmd.OutOrStdout(),
 				}
 				return runAddPipeline(cmd, map[string]string{skillName: "."}, src, false, "", []string{skillName}, flagYes, flagAgents)
 			}

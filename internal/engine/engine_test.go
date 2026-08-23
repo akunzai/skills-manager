@@ -751,6 +751,48 @@ func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
 	}
 }
 
+func TestAddDeclaredCommandFailureSavesAndAppliesAvailability(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
+	for _, agent := range []string{"claude", "continue"} {
+		if _, err := EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := AddDeclared(cfg, configPath, skillsDir, AddSource{Kind: AddCommand, Command: "exit 1"}, map[string]string{"sample": "."}, nil, nil)
+	if err == nil {
+		t.Fatal("expected materialize error")
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Local["sample"].Command != "exit 1" {
+		t.Fatalf("saved %#v", loaded.Local)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
+		t.Fatal("excluded Claude link still exists")
+	}
+	if !IsManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
+		t.Fatal("declared Continue link missing")
+	}
+}
+
 func writeLocalGitSkill(t *testing.T, repo, skill string) {
 	t.Helper()
 	dir := filepath.Join(repo, skill)
