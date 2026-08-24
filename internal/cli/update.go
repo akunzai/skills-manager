@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var startUpdateProgress = presentation.StartProgress
+
 func newUpdateCmd() *cobra.Command {
 	var (
 		flagForce  bool
@@ -60,15 +62,15 @@ func newUpdateCmd() *cobra.Command {
 				}
 				switch ev.Kind {
 				case engine.UpdateCheckStart:
-					fmt.Fprintf(cmd.OutOrStdout(), "  Checking %d remote Sources in parallel...\n", ev.Total)
+					progress = startUpdateProgress(cmd.ErrOrStderr(), fmt.Sprintf("Checking %d remote Sources in parallel...", ev.Total))
 				case engine.UpdateCheckDone:
+					progress.Stop()
+					progress = nil
 					if ev.Outdated == 0 {
 						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d Source Caches are already up to date.%s\n\n", colorGreen, ev.UpToDate, colorReset)
 					} else {
 						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d Source Cache update(s) needed, %d already up to date.%s\n\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
 					}
-				case engine.UpdateRefreshStart:
-					progress = presentation.StartProgress(cmd.ErrOrStderr(), fmt.Sprintf("Refreshing remote Sources (%d)...", ev.Total))
 				case engine.UpdateRefreshDone:
 					progress.Stop()
 					progress = nil
@@ -76,15 +78,19 @@ func newUpdateCmd() *cobra.Command {
 					if ev.DryRun {
 						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] %s[Dry-run]%s Would refresh %s%s%s\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] Refreshing %s%s%s...\n", ev.Index, ev.Total, colorBold, ev.Source, colorReset)
+						progress = startUpdateProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Refreshing %s...", ev.Index, ev.Total, ev.Source))
 					}
 				case engine.UpdateRepoDone:
+					progress.Stop()
+					progress = nil
 					shaStr := ""
 					if len(ev.NewSHA) >= 7 {
 						shaStr = fmt.Sprintf(" (%s)", ev.NewSHA[:7])
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
 				case engine.UpdateRepoError:
+					progress.Stop()
+					progress = nil
 					fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
 				}
 			}

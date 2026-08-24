@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -557,6 +558,42 @@ func TestCheckRepoUpdateStatusSourceParsing(t *testing.T) {
 	}
 }
 
+func TestUpdateChecksRemoteSourcesInParallel(t *testing.T) {
+	oldCheck := checkRepoUpdateStatus
+	entered := make(chan string, 3)
+	release := make(chan struct{})
+	checkRepoUpdateStatus = func(source string, _ config.RemoteRepo, _ string) UpdateStatusResult {
+		entered <- source
+		<-release
+		return UpdateStatusResult{Source: source, Status: "up_to_date"}
+	}
+	t.Cleanup(func() { checkRepoUpdateStatus = oldCheck })
+
+	cfg := config.DefaultConfig()
+	for _, source := range []string{"owner/one", "owner/two", "owner/three"} {
+		cfg.Remote[source] = config.RemoteRepo{Skills: map[string]string{"sample": "sample"}}
+	}
+	cacheDir := t.TempDir()
+	done := make(chan error, 1)
+	go func() {
+		_, err := UpdateRemoteSkills(cfg, nil, false, true, "", cacheDir, nil)
+		done <- err
+	}()
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			close(release)
+			<-done
+			t.Fatal("Update checked remote Sources sequentially")
+		}
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestResolveCacheRepoDefaultsURLBranchAndDir(t *testing.T) {
 	cache := t.TempDir()
 	repo := resolveCacheRepo("https://github.com/owner/repo/tree/dev", "", "", cache)
@@ -611,24 +648,48 @@ func TestEnsureGitRepoRecordsResolvedDefaultBranchIdentity(t *testing.T) {
 	}
 }
 
+func TestGetRemoteDefaultBranchCommit(t *testing.T) {
+	origin := filepath.Join(t.TempDir(), "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	wantBranch, _, err := RunGit(origin, "branch", "--show-current")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	branch, commit, err := getRemoteDefaultBranchCommit("owner/repo", origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != wantBranch {
+		t.Fatalf("branch = %q; want %q", branch, wantBranch)
+	}
+	if want := GetLocalRepoCommit(origin); commit != want {
+		t.Fatalf("commit = %q; want %q", commit, want)
+	}
+}
+
 func TestGetRemoteRepoCommitMatchesExactBranch(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, "sample")
 	want := GetLocalRepoCommit(origin)
+	branch, _, err := RunGit(origin, "branch", "--show-current")
+	if err != nil {
+		t.Fatal(err)
+	}
 	decoy, _, err := RunGit(origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit-tree", "HEAD^{tree}", "-m", "decoy")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := RunGit(origin, "update-ref", "refs/for/main", decoy); err != nil {
+	if _, _, err := RunGit(origin, "update-ref", "refs/for/"+branch, decoy); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := GetRemoteRepoCommitResult("owner/repo", origin, "main")
+	got, err := GetRemoteRepoCommitResult("owner/repo", origin, branch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
-		t.Fatalf("commit = %q; want exact refs/heads/main commit %q", got, want)
+		t.Fatalf("commit = %q; want exact refs/heads/%s commit %q", got, branch, want)
 	}
 }
 

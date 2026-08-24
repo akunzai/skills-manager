@@ -34,7 +34,13 @@ func CheckRepoUpdateStatus(source string, repo config.RemoteRepo, cacheDir strin
 	return newRemoteSource(nil, source, repo, cacheDir).CheckStatus()
 }
 
+var checkRepoUpdateStatus = CheckRepoUpdateStatus
+
 func CheckAllRemoteSkillsOutdated(cfg *config.Config, cacheDir string, workers int) []UpdateStatusResult {
+	return checkRemoteSkillsOutdated(cfg.Remote, cacheDir, workers)
+}
+
+func checkRemoteSkillsOutdated(repositories map[string]config.RemoteRepo, cacheDir string, workers int) []UpdateStatusResult {
 	if workers <= 0 {
 		workers = 8
 	}
@@ -42,8 +48,8 @@ func CheckAllRemoteSkillsOutdated(cfg *config.Config, cacheDir string, workers i
 		source string
 		repo   config.RemoteRepo
 	}
-	tasks := make([]task, 0, len(cfg.Remote))
-	for source, repo := range cfg.Remote {
+	tasks := make([]task, 0, len(repositories))
+	for source, repo := range repositories {
 		tasks = append(tasks, task{source, repo})
 	}
 	results := make([]UpdateStatusResult, len(tasks))
@@ -54,7 +60,7 @@ func CheckAllRemoteSkillsOutdated(cfg *config.Config, cacheDir string, workers i
 		go func(index int, current task) {
 			defer wg.Done()
 			sem <- struct{}{}
-			results[index] = CheckRepoUpdateStatus(current.source, current.repo, cacheDir)
+			results[index] = checkRepoUpdateStatus(current.source, current.repo, cacheDir)
 			<-sem
 		}(i, current)
 	}
@@ -154,15 +160,11 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		return nil, err
 	}
 	result := &UpdateResult{UpdatedRepos: []UpdatedRepoInfo{}, SkippedRepos: []SkippedRepoInfo{}, Errors: []UpdateErrorInfo{}}
-	var sources []string
-	for source := range repositories {
-		sources = append(sources, source)
-	}
-	sort.Strings(sources)
-	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckStart, Total: len(sources)})
+	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckStart, Total: len(repositories)})
+	statuses := checkRemoteSkillsOutdated(repositories, cacheDir, 8)
 	var refresh []string
-	for _, source := range sources {
-		status := CheckRepoUpdateStatus(source, repositories[source], cacheDir)
+	for _, status := range statuses {
+		source := status.Source
 		if !force && status.Status == "up_to_date" {
 			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: "up_to_date", LocalSHA: status.LocalSHA})
 			continue
@@ -178,7 +180,7 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		}
 		refresh = append(refresh, source)
 	}
-	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckDone, Total: len(sources), UpToDate: len(result.SkippedRepos), Outdated: len(refresh)})
+	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckDone, Total: len(statuses), UpToDate: len(result.SkippedRepos), Outdated: len(refresh)})
 	if !dryRun && len(refresh) > 0 {
 		emitUpdate(progress, UpdateEvent{Kind: UpdateRefreshStart, Total: len(refresh)})
 	}

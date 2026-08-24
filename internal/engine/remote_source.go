@@ -60,12 +60,14 @@ func (s remoteSource) refresh(force bool) (string, error) {
 func (s remoteSource) CheckStatus() UpdateStatusResult {
 	repo := resolveCacheRepo(s.key, s.repo.URL, s.repo.Branch, s.cacheDir)
 	errorMessage := ""
+	defaultRemoteSHA := ""
 	if s.repo.Branch == "" && models.ParseRepoSource(s.key).Branch == "" {
-		resolvedBranch, err := GetRemoteDefaultBranch(s.key, repo.URL)
+		resolvedBranch, resolvedSHA, err := getRemoteDefaultBranchCommit(s.key, repo.URL)
 		if err != nil {
 			errorMessage = err.Error()
 		} else {
 			repo = resolveCacheRepo(s.key, s.repo.URL, resolvedBranch, s.cacheDir)
+			defaultRemoteSHA = resolvedSHA
 		}
 	}
 	targetBranch := repo.Branch
@@ -86,12 +88,16 @@ func (s remoteSource) CheckStatus() UpdateStatusResult {
 			status = "not_cached"
 		}
 	} else if status != "error" {
-		var remoteErr error
-		remoteSHA, remoteErr = GetRemoteRepoCommitResult(s.key, repo.URL, targetBranch)
-		if remoteErr != nil {
-			status = "error"
-			errorMessage = remoteErr.Error()
-		} else if localSHA != remoteSHA {
+		remoteSHA = defaultRemoteSHA
+		if remoteSHA == "" {
+			var remoteErr error
+			remoteSHA, remoteErr = GetRemoteRepoCommitResult(s.key, repo.URL, targetBranch)
+			if remoteErr != nil {
+				status = "error"
+				errorMessage = remoteErr.Error()
+			}
+		}
+		if status != "error" && localSHA != remoteSHA {
 			status = "update_available"
 		}
 	}

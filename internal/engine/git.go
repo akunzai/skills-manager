@@ -42,18 +42,34 @@ func recordDefaultBranch(source, url, cacheDir, branch string) error {
 }
 
 func GetRemoteDefaultBranch(source, url string) (string, error) {
+	branch, _, err := getRemoteDefaultBranchCommit(source, url)
+	return branch, err
+}
+
+func getRemoteDefaultBranchCommit(source, url string) (string, string, error) {
 	repo := resolveCacheRepo(source, url, "", "")
 	stdout, stderr, err := RunGit("", "ls-remote", "--symref", repo.URL, "HEAD")
 	if err != nil {
-		return "", gitOpErr("query default branch of", repo.URL, stdout, stderr, err)
+		return "", "", gitOpErr("query default branch of", repo.URL, stdout, stderr, err)
 	}
+	branch := ""
+	commit := ""
 	for _, line := range strings.Split(stdout, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 3 && fields[0] == "ref:" && fields[2] == "HEAD" {
-			return strings.TrimPrefix(fields[1], "refs/heads/"), nil
+			branch = strings.TrimPrefix(fields[1], "refs/heads/")
+		}
+		if len(fields) >= 2 && fields[1] == "HEAD" && fields[0] != "ref:" {
+			commit = fields[0]
 		}
 	}
-	return "", fmt.Errorf("default branch not found for %s", repo.URL)
+	if branch == "" {
+		return "", "", fmt.Errorf("default branch not found for %s", repo.URL)
+	}
+	if commit == "" {
+		return "", "", fmt.Errorf("default branch commit not found for %s", repo.URL)
+	}
+	return branch, commit, nil
 }
 
 // cacheRepo is one remote Source in the git Cache: key, clone URL, branch, dir.

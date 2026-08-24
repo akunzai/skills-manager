@@ -14,6 +14,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/pflag"
 )
@@ -794,6 +795,34 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	}
 	if _, err := runCLI(t, "update", "typo", "--dry-run", "--config", configFile, "--cache-dir", cacheDir); err == nil || !strings.Contains(err.Error(), "unknown update target") {
 		t.Fatalf("unknown target error = %v", err)
+	}
+}
+
+func TestCLIUpdateShowsProgressWhileCheckingAndRefreshing(t *testing.T) {
+	resetRootCmdFlags()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	configFile := filepath.Join(root, "skills.json")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	var messages []string
+	oldStartProgress := startUpdateProgress
+	startUpdateProgress = func(_ io.Writer, message string) *presentation.Progress {
+		messages = append(messages, message)
+		return &presentation.Progress{}
+	}
+	t.Cleanup(func() { startUpdateProgress = oldStartProgress })
+
+	if _, err := runCLI(t, "update", "--config", configFile, "--cache-dir", filepath.Join(root, "cache")); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Checking 1 remote Sources in parallel...", "[1/1] Refreshing owner/repo..."}; !reflect.DeepEqual(messages, want) {
+		t.Fatalf("progress messages = %q; want %q", messages, want)
 	}
 }
 
