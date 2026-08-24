@@ -36,12 +36,12 @@ func TestRemoteSourceSyncDryRunDoesNotRefreshCache(t *testing.T) {
 	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
 		t.Fatalf("dry-run created Cache: %v", err)
 	}
-	if want := []string{SyncRepoStart, SyncWouldSync, SyncWouldDrift}; !reflect.DeepEqual(kinds, want) {
+	if want := []string{SyncRepoStart, SyncFetchFailed}; !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
 	}
 }
 
-func TestRemoteSourceSyncReportsCacheFailure(t *testing.T) {
+func TestRemoteSourceSyncReportsMissingCacheWithoutFetching(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.DefaultConfig()
 	repo := config.RemoteRepo{URL: filepath.Join(project, "missing-origin"), Skills: map[string]string{"sample": "sample"}}
@@ -51,7 +51,7 @@ func TestRemoteSourceSyncReportsCacheFailure(t *testing.T) {
 	if err := remote.sync(false, false, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{SyncRepoStart, SyncRefreshStart, SyncRefreshDone, SyncFetchFailed}
+	want := []string{SyncRepoStart, SyncFetchFailed}
 	if !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
 	}

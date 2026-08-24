@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
@@ -22,13 +21,13 @@ func newUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "update [targets...]",
 		Aliases: []string{"upgrade"},
-		Short:   "Update remote skills to latest versions",
+		Short:   "Refresh remote Sources in the shared Cache",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
 			scope := ResolveScope()
-			configPath, skillsDir, cacheDir := scope.ConfigPath, scope.SkillsDir, scope.CacheDir
+			configPath, cacheDir := scope.ConfigPath, scope.CacheDir
 
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
@@ -37,9 +36,9 @@ func newUpdateCmd() *cobra.Command {
 
 			if len(cfg.Remote) == 0 {
 				if flagJSON {
-					fmt.Fprintln(cmd.OutOrStdout(), `{"updated_repos":[],"updated_skills":[],"skipped_repos":[],"errors":[]}`)
+					fmt.Fprintln(cmd.OutOrStdout(), `{"updated_repos":[],"skipped_repos":[],"errors":[]}`)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "%sNo remote repositories configured in %s.%s\n", colorYellow, filepath.Base(configPath), colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "%sNo remote Sources configured in %s.%s\n", colorYellow, filepath.Base(configPath), colorReset)
 				}
 				return nil
 			}
@@ -48,9 +47,9 @@ func newUpdateCmd() *cobra.Command {
 
 			if !flagJSON {
 				if flagDryRun {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s[Dry-run] Checking and previewing skills update...%s\n\n", colorBold, colorCyan, colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s[Dry-run] Checking Cache updates...%s\n\n", colorBold, colorCyan, colorReset)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sUpdating skills from remote repositories...%s\n\n", colorBold, colorCyan, colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sRefreshing remote Sources in the shared Cache...%s\n\n", colorBold, colorCyan, colorReset)
 				}
 			}
 
@@ -61,12 +60,12 @@ func newUpdateCmd() *cobra.Command {
 				}
 				switch ev.Kind {
 				case engine.UpdateCheckStart:
-					fmt.Fprintf(cmd.OutOrStdout(), "  Checking %d remote repositories in parallel...\n", ev.Total)
+					fmt.Fprintf(cmd.OutOrStdout(), "  Checking %d remote Sources in parallel...\n", ev.Total)
 				case engine.UpdateCheckDone:
 					if ev.Outdated == 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d repositories are already up to date.%s\n\n", colorGreen, ev.UpToDate, colorReset)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d Source Caches are already up to date.%s\n\n", colorGreen, ev.UpToDate, colorReset)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d repository update(s) needed, %d already up to date.%s\n\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d Source Cache update(s) needed, %d already up to date.%s\n\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
 					}
 				case engine.UpdateRefreshStart:
 					progress = presentation.StartProgress(cmd.ErrOrStderr(), fmt.Sprintf("Refreshing remote Sources (%d)...", ev.Total))
@@ -74,14 +73,11 @@ func newUpdateCmd() *cobra.Command {
 					progress.Stop()
 					progress = nil
 				case engine.UpdateStart:
-					skillsList := strings.Join(ev.Skills, ", ")
 					if ev.DryRun {
-						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] %s[Dry-run]%s Would update %s%s%s (%s)\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset, skillsList)
+						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] %s[Dry-run]%s Would refresh %s%s%s\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] Updating %s%s%s (%s)...\n", ev.Index, ev.Total, colorBold, ev.Source, colorReset, skillsList)
+						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] Refreshing %s%s%s...\n", ev.Index, ev.Total, colorBold, ev.Source, colorReset)
 					}
-				case engine.UpdateSkillRestored:
-					fmt.Fprintf(cmd.OutOrStdout(), "      Restored %s%s%s\n", colorBold, ev.Skill, colorReset)
 				case engine.UpdateRepoDone:
 					shaStr := ""
 					if len(ev.NewSHA) >= 7 {
@@ -90,17 +86,10 @@ func newUpdateCmd() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
 				case engine.UpdateRepoError:
 					fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
-				case engine.UpdateWouldDrift:
-					if len(ev.Missing) > 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "      [Dry-run] Would link %s to %s.\n", ev.Skill, strings.Join(ev.Missing, ", "))
-					}
-					if len(ev.Unexpected) > 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "      [Dry-run] Would unlink %s from %s.\n", ev.Skill, strings.Join(ev.Unexpected, ", "))
-					}
 				}
 			}
 
-			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, skillsDir, cacheDir, onProgress)
+			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, "", cacheDir, onProgress)
 			progress.Stop()
 			if err != nil {
 				return err
@@ -115,19 +104,19 @@ func newUpdateCmd() *cobra.Command {
 				return nil
 			}
 
-			totalUpdated := len(result.UpdatedSkills)
+			totalUpdated := len(result.UpdatedRepos)
 			totalSkipped := len(result.SkippedRepos)
 
 			skipMsg := ""
 			if totalSkipped > 0 {
-				skipMsg = fmt.Sprintf(" (%d repository/repositories were already up to date)", totalSkipped)
+				skipMsg = fmt.Sprintf(" (%d Source Cache(s) were already up to date)", totalSkipped)
 			}
 
 			if totalUpdated > 0 {
 				if flagDryRun {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sDry run complete: %d skill(s) would be updated.%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sDry run complete: %d Source Cache(s) would be refreshed.%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sUpdated %d skill(s).%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
+					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sRefreshed %d Source Cache(s).%s%s\nRun 'skills sync' to apply cached content to this Scope.\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
 				}
 			} else {
 				if len(result.Errors) == 0 {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/akunzai/skills-manager/internal/cli"
@@ -8,6 +9,10 @@ import (
 
 func main() {
 	if err := cli.Execute(); err != nil {
-		os.Exit(1)
+		code := cli.ExitCode(err)
+		if code != 1 {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+		}
+		os.Exit(code)
 	}
 }

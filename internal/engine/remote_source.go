@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // remoteSource owns one remote Source's Cache, Materialize, and Availability
@@ -58,6 +59,15 @@ func (s remoteSource) refresh(force bool) (string, error) {
 // CheckStatus queries local and remote git commit SHAs for freshness.
 func (s remoteSource) CheckStatus() UpdateStatusResult {
 	repo := resolveCacheRepo(s.key, s.repo.URL, s.repo.Branch, s.cacheDir)
+	errorMessage := ""
+	if s.repo.Branch == "" && models.ParseRepoSource(s.key).Branch == "" {
+		resolvedBranch, err := GetRemoteDefaultBranch(s.key, repo.URL)
+		if err != nil {
+			errorMessage = err.Error()
+		} else {
+			repo = resolveCacheRepo(s.key, s.repo.URL, resolvedBranch, s.cacheDir)
+		}
+	}
 	targetBranch := repo.Branch
 	if targetBranch == "" {
 		targetBranch = "HEAD"
@@ -68,12 +78,19 @@ func (s remoteSource) CheckStatus() UpdateStatusResult {
 	remoteSHA := ""
 
 	status := "up_to_date"
+	if errorMessage != "" {
+		status = "error"
+	}
 	if localSHA == "" {
-		status = "not_cached"
-	} else {
-		remoteSHA = GetRemoteRepoCommit(s.key, repo.URL, targetBranch)
-		if remoteSHA == "" {
+		if status != "error" {
+			status = "not_cached"
+		}
+	} else if status != "error" {
+		var remoteErr error
+		remoteSHA, remoteErr = GetRemoteRepoCommitResult(s.key, repo.URL, targetBranch)
+		if remoteErr != nil {
 			status = "error"
+			errorMessage = remoteErr.Error()
 		} else if localSHA != remoteSHA {
 			status = "update_available"
 		}
@@ -88,6 +105,7 @@ func (s remoteSource) CheckStatus() UpdateStatusResult {
 		RemoteSHA: remoteSHA,
 		Skills:    skillList,
 		CachePath: repo.Dir,
+		Error:     errorMessage,
 	}
 }
 
@@ -128,17 +146,14 @@ func (s remoteSource) sync(force, dryRun bool, emit func(SyncEvent)) error {
 	}
 
 	emit(SyncEvent{Kind: SyncRepoStart, Source: s.key, Skills: sortedSkillKeys(s.repo.Skills)})
+	repoDir := resolveCacheRepo(s.key, s.repo.URL, s.repo.Branch, s.cacheDir).Dir
+	if GetLocalRepoCommit(repoDir) == "" {
+		emit(SyncEvent{Kind: SyncFetchFailed, Source: s.key, Err: fmt.Sprintf("Cache missing for Source %s; run 'skills update' first", s.key)})
+		return nil
+	}
 	if dryRun {
 		emit(SyncEvent{Kind: SyncWouldSync, Source: s.key, Skills: sortedSkillKeys(missing)})
 		return s.reconcile("", true, nil, emit)
-	}
-
-	emit(SyncEvent{Kind: SyncRefreshStart, Source: s.key})
-	repoDir, err := s.refresh(force)
-	emit(SyncEvent{Kind: SyncRefreshDone, Source: s.key})
-	if err != nil {
-		emit(SyncEvent{Kind: SyncFetchFailed, Source: s.key, Err: err.Error()})
-		return nil
 	}
 	return s.reconcile(repoDir, false, missing, emit)
 }

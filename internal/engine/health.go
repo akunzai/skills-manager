@@ -49,6 +49,10 @@ type healthPlan struct {
 	Untracked      []string
 	Invalid        []string
 	UnknownAgents  []UnknownAgentReference
+	StateError     string
+	StaleState     []string
+	LegacyCache    []string
+	StaleScopes    []ScopeStateArtifact
 }
 
 type healthFixResult struct {
@@ -60,6 +64,12 @@ type healthFixResult struct {
 	FailedLeftover  []healthFix
 	FixedDrift      []string
 	FailedDrift     []healthFix
+	StateRepaired   bool
+	StateRepairErr  error
+	RemovedLegacy   []string
+	FailedLegacy    []healthFix
+	RemovedScopes   []string
+	FailedScopes    []healthFix
 }
 
 // Doctor diagnoses and optionally repairs one Scope's Skill, Agent directory,
@@ -69,6 +79,8 @@ type Doctor struct {
 	skillsDir    string
 	availability *Availability
 	links        AgentLinkManager
+	cacheDir     string
+	stateStore   *ScopeStateStore
 }
 
 // DoctorOutcome is the ordered report plus the issues that remain after Run.
@@ -79,12 +91,19 @@ type DoctorOutcome struct {
 }
 
 func NewDoctor(cfg *config.Config, skillsDir string) *Doctor {
+	return NewDoctorWithCache(cfg, skillsDir, "")
+}
+
+func NewDoctorWithCache(cfg *config.Config, skillsDir, cacheDir string) *Doctor {
 	availability := NewAvailability(cfg, skillsDir)
+	stateStore, _ := NewScopeStateStore(availability.skillsDir)
 	return &Doctor{
 		cfg:          availability.cfg,
 		skillsDir:    availability.skillsDir,
 		availability: availability,
 		links:        NewAgentLinkManager(availability.skillsDir),
+		cacheDir:     cacheDirOrDefault(cacheDir),
+		stateStore:   stateStore,
 	}
 }
 
@@ -120,6 +139,37 @@ func availabilitySource(item models.SkillItem) string {
 // folders are issues but are not repaired.
 func (d *Doctor) diagnose() (healthPlan, error) {
 	plan := healthPlan{SkillsDir: d.skillsDir}
+	if d.stateStore != nil {
+		state, err := d.stateStore.Load()
+		if err != nil {
+			plan.StateError = err.Error()
+		} else {
+			for name := range state.Skills {
+				if _, _, declared := config.FindSkillSource(d.cfg, name); !declared {
+					plan.StaleState = append(plan.StaleState, name)
+				}
+			}
+			sort.Strings(plan.StaleState)
+		}
+	}
+	artifacts, artifactErr := ListScopeStateArtifacts()
+	if artifactErr != nil {
+		return healthPlan{}, artifactErr
+	}
+	for _, artifact := range artifacts {
+		if artifact.Err == nil {
+			if _, err := os.Stat(artifact.ScopePath); os.IsNotExist(err) {
+				plan.StaleScopes = append(plan.StaleScopes, artifact)
+			}
+		}
+	}
+	for source := range d.cfg.Remote {
+		legacy := filepath.Join(d.cacheDir, filepath.FromSlash(models.ParseRepoSource(source).SourceKey))
+		if _, err := os.Stat(filepath.Join(legacy, ".git")); err == nil {
+			plan.LegacyCache = append(plan.LegacyCache, legacy)
+		}
+	}
+	sort.Strings(plan.LegacyCache)
 	if _, err := os.Stat(d.skillsDir); os.IsNotExist(err) {
 		plan.MasterMissing = true
 	}
@@ -222,6 +272,10 @@ func (p healthPlan) issueCount() int {
 	}
 	n += len(p.Missing) + len(p.Invalid)
 	n += len(p.UnknownAgents)
+	if p.StateError != "" {
+		n++
+	}
+	n += len(p.StaleState) + len(p.LegacyCache) + len(p.StaleScopes)
 	return n
 }
 
@@ -229,6 +283,36 @@ func (p healthPlan) issueCount() int {
 // invalid Skills unchanged. Independent repair failures do not stop the run.
 func (d *Doctor) repair(plan healthPlan) healthFixResult {
 	result := healthFixResult{}
+	if d.stateStore != nil {
+		if plan.StateError != "" {
+			result.StateRepairErr = d.stateStore.Prune()
+			result.StateRepaired = result.StateRepairErr == nil
+		} else if len(plan.StaleState) > 0 {
+			keep := make(map[string]struct{})
+			for source, repo := range d.cfg.Remote {
+				_ = source
+				for name := range repo.Skills {
+					keep[name] = struct{}{}
+				}
+			}
+			result.StateRepairErr = d.stateStore.PruneSkills(keep)
+			result.StateRepaired = result.StateRepairErr == nil
+		}
+	}
+	for _, legacy := range plan.LegacyCache {
+		if err := RemoveAll(legacy); err != nil {
+			result.FailedLegacy = append(result.FailedLegacy, healthFix{Name: legacy, Err: err})
+		} else {
+			result.RemovedLegacy = append(result.RemovedLegacy, legacy)
+		}
+	}
+	for _, artifact := range plan.StaleScopes {
+		if err := os.Remove(artifact.Path); err != nil && !os.IsNotExist(err) {
+			result.FailedScopes = append(result.FailedScopes, healthFix{Name: artifact.Path, Err: err})
+		} else {
+			result.RemovedScopes = append(result.RemovedScopes, artifact.ScopePath)
+		}
+	}
 	for _, agent := range plan.Agents {
 		for _, name := range agent.Broken {
 			path := filepath.Join(agent.Dir, name)

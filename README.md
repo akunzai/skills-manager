@@ -58,8 +58,11 @@ git add .agents/skills.json
 Teammates restore the declared state with:
 
 ```sh
+skills --project update
 skills --project sync
 ```
+
+`update` and `sync` are deliberately separate. Update uses the Project Config to refresh its declared remote Sources in the shared Cache; Sync then reconciles Project Skills from that Cache without network access. Materialized Project Skills are ordinary team-owned files—you decide whether to commit them.
 
 ## Control availability
 
@@ -82,16 +85,20 @@ Universal agents that read the central skills directory directly do not need lin
 | Intent | Command |
 | --- | --- |
 | See installed and configured skills | `skills ls` |
-| Restore configuration and availability | `skills sync` |
+| Reconcile the selected Scope from its existing Cache | `skills sync` |
 | Preview reconciliation | `skills sync --dry-run` |
-| Find available updates | `skills outdated` |
-| Update remote skills | `skills update` |
+| Inspect remote → Cache → Scope freshness | `skills outdated` |
+| Refresh remote Sources into the shared Cache | `skills update` |
 | Diagnose drift | `skills doctor` |
 | Repair drift | `skills doctor --fix` |
 | Remove undeclared managed items | `skills prune` |
 | Remove a skill | `skills rm <skill>` |
 
 Every operational command accepts `--project`. Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
+
+For remote Skills, the normal flow is `skills outdated`, `skills update`, then `skills sync`. Sync protects known local changes and unknown baselines; inspect them first, or explicitly overwrite with `skills sync --force`. `sync --dry-run` is a non-mutating freshness gate and exits non-zero when reconciliation is needed.
+
+`skills outdated` exits with `0` when everything is current, `1` when freshness differences are found, and `2` when the check cannot be completed. Freshness differences are reported as status and next actions, not as command errors.
 
 ## Configuration
 

@@ -2,362 +2,205 @@ package engine
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/akunzai/skills-manager/internal/config"
-	"github.com/akunzai/skills-manager/internal/models"
 )
 
 type UpdateStatusResult struct {
 	Source    string   `json:"source"`
 	URL       string   `json:"url"`
 	Branch    string   `json:"branch"`
-	Status    string   `json:"status"` // "up_to_date", "update_available", "not_installed", "error"
-	LocalSHA  string   `json:"localSha"`
-	RemoteSHA string   `json:"remoteSha"`
+	Status    string   `json:"status"`
+	LocalSHA  string   `json:"local_sha"`
+	RemoteSHA string   `json:"remote_sha"`
 	Skills    []string `json:"skills"`
-	CachePath string   `json:"cachePath,omitempty"`
+	CachePath string   `json:"cache_path"`
+	Error     string   `json:"error,omitempty"`
 }
 
 func sortedSkillKeys(skills map[string]string) []string {
 	keys := make([]string, 0, len(skills))
-	for k := range skills {
-		keys = append(keys, k)
+	for key := range skills {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	return keys
 }
 
-func CheckRepoUpdateStatus(source string, repoInfo config.RemoteRepo, cacheDir string) UpdateStatusResult {
-	return newRemoteSource(nil, source, repoInfo, cacheDir).CheckStatus()
+func CheckRepoUpdateStatus(source string, repo config.RemoteRepo, cacheDir string) UpdateStatusResult {
+	return newRemoteSource(nil, source, repo, cacheDir).CheckStatus()
 }
 
-func CheckAllRemoteSkillsOutdated(cfg *config.Config, cacheDir string, maxWorkers int) []UpdateStatusResult {
-	if len(cfg.Remote) == 0 {
-		return []UpdateStatusResult{}
+func CheckAllRemoteSkillsOutdated(cfg *config.Config, cacheDir string, workers int) []UpdateStatusResult {
+	if workers <= 0 {
+		workers = 8
 	}
-
-	if maxWorkers <= 0 {
-		maxWorkers = 8
-	}
-
 	type task struct {
-		source   string
-		repoInfo config.RemoteRepo
+		source string
+		repo   config.RemoteRepo
 	}
-
 	tasks := make([]task, 0, len(cfg.Remote))
-	for src, rInfo := range cfg.Remote {
-		tasks = append(tasks, task{source: src, repoInfo: rInfo})
+	for source, repo := range cfg.Remote {
+		tasks = append(tasks, task{source, repo})
 	}
-
 	results := make([]UpdateStatusResult, len(tasks))
+	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxWorkers)
-
-	for i, t := range tasks {
+	for i, current := range tasks {
 		wg.Add(1)
-		go func(idx int, tsk task) {
+		go func(index int, current task) {
 			defer wg.Done()
 			sem <- struct{}{}
-			results[idx] = newRemoteSource(nil, tsk.source, tsk.repoInfo, cacheDir).CheckStatus()
+			results[index] = CheckRepoUpdateStatus(current.source, current.repo, cacheDir)
 			<-sem
-		}(i, t)
+		}(i, current)
 	}
-
 	wg.Wait()
-
-	sort.Slice(results, func(i, j int) bool {
-		return strings.ToLower(results[i].Source) < strings.ToLower(results[j].Source)
-	})
-
+	sort.Slice(results, func(i, j int) bool { return strings.ToLower(results[i].Source) < strings.ToLower(results[j].Source) })
 	return results
 }
 
 type UpdatedRepoInfo struct {
-	Source string   `json:"source"`
-	Skills []string `json:"skills"`
-	NewSHA string   `json:"new_sha,omitempty"`
-	DryRun bool     `json:"dry_run,omitempty"`
+	Source string `json:"source"`
+	NewSHA string `json:"new_sha,omitempty"`
+	DryRun bool   `json:"dry_run,omitempty"`
 }
-
 type SkippedRepoInfo struct {
-	Source   string   `json:"source"`
-	Reason   string   `json:"reason"`
-	LocalSHA string   `json:"local_sha,omitempty"`
-	Skills   []string `json:"skills"`
+	Source   string `json:"source"`
+	Reason   string `json:"reason"`
+	LocalSHA string `json:"local_sha,omitempty"`
 }
-
 type UpdateErrorInfo struct {
 	Source string `json:"source"`
-	Skill  string `json:"skill,omitempty"`
 	Error  string `json:"error"`
 }
-
 type UpdateResult struct {
-	UpdatedRepos  []UpdatedRepoInfo `json:"updated_repos"`
-	UpdatedSkills []string          `json:"updated_skills"`
-	SkippedRepos  []SkippedRepoInfo `json:"skipped_repos"`
-	Errors        []UpdateErrorInfo `json:"errors"`
+	UpdatedRepos []UpdatedRepoInfo `json:"updated_repos"`
+	SkippedRepos []SkippedRepoInfo `json:"skipped_repos"`
+	Errors       []UpdateErrorInfo `json:"errors"`
 }
 
 const (
-	UpdateCheckStart    = "check_start"
-	UpdateCheckDone     = "check_done"
-	UpdateRefreshStart  = "refresh_start"
-	UpdateRefreshDone   = "refresh_done"
-	UpdateStart         = "update_start"
-	UpdateSkillRestored = "skill_restored"
-	UpdateRepoDone      = "repo_done"
-	UpdateRepoError     = "repo_error"
-	UpdateWouldDrift    = "would_drift"
+	UpdateCheckStart   = "check_start"
+	UpdateCheckDone    = "check_done"
+	UpdateRefreshStart = "refresh_start"
+	UpdateRefreshDone  = "refresh_done"
+	UpdateStart        = "update_start"
+	UpdateRepoDone     = "repo_done"
+	UpdateRepoError    = "repo_error"
 )
 
-// UpdateEvent is one step of UpdateRemoteSkills for the CLI to print.
 type UpdateEvent struct {
-	Kind       string
-	Source     string
-	Skill      string
-	Skills     []string
-	Index      int
-	Total      int
-	Outdated   int
-	UpToDate   int
-	DryRun     bool
-	NewSHA     string
-	Subpath    string
-	Err        string
-	Missing    []string
-	Unexpected []string
+	Kind, Source, NewSHA, Err        string
+	Skills                           []string
+	Index, Total, Outdated, UpToDate int
+	DryRun                           bool
 }
-
 type UpdateProgress func(UpdateEvent)
 
-func emitUpdate(onProgress UpdateProgress, ev UpdateEvent) {
-	if onProgress != nil {
-		onProgress(ev)
+func emitUpdate(progress UpdateProgress, event UpdateEvent) {
+	if progress != nil {
+		progress(event)
 	}
 }
 
-func updateReconcileEmit(onProgress UpdateProgress, result *UpdateResult, source string, restored *[]string) func(SyncEvent) {
-	return func(ev SyncEvent) {
-		switch ev.Kind {
-		case SyncMaterialized:
-			if restored != nil {
-				*restored = append(*restored, ev.Skill)
+func resolveUpdateSources(cfg *config.Config, targets []string) (map[string]config.RemoteRepo, error) {
+	if len(targets) == 0 {
+		return cfg.Remote, nil
+	}
+	selected := make(map[string]config.RemoteRepo)
+	for _, raw := range targets {
+		target := strings.ToLower(strings.TrimSpace(raw))
+		matches := make(map[string]struct{})
+		for source, repo := range cfg.Remote {
+			if strings.EqualFold(source, target) {
+				matches[source] = struct{}{}
 			}
-			emitUpdate(onProgress, UpdateEvent{Kind: UpdateSkillRestored, Source: source, Skill: ev.Skill, Subpath: ev.Path})
-		case SyncPathMissing:
-			errMsg := fmt.Sprintf("Path missing in repository: %s", ev.Path)
-			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Skill: ev.Skill, Error: errMsg})
-			emitUpdate(onProgress, UpdateEvent{Kind: UpdateRepoError, Source: source, Skill: ev.Skill, Err: errMsg})
-		case SyncCopyFailed:
-			errMsg := fmt.Sprintf("Failed to copy skill: %s", ev.Err)
-			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Skill: ev.Skill, Error: errMsg})
-			emitUpdate(onProgress, UpdateEvent{Kind: UpdateRepoError, Source: source, Skill: ev.Skill, Err: errMsg})
-		case SyncWouldDrift:
-			emitUpdate(onProgress, UpdateEvent{Kind: UpdateWouldDrift, Skill: ev.Skill, Missing: ev.Missing, Unexpected: ev.Unexpected})
-		}
-	}
-}
-
-func UpdateRemoteSkills(
-	cfg *config.Config,
-	targets []string,
-	force bool,
-	dryRun bool,
-	skillsDir string,
-	cacheDir string,
-	onProgress UpdateProgress,
-) (*UpdateResult, error) {
-	baseSkills := skillsDir
-	if baseSkills == "" {
-		baseSkills = models.DefaultSkillsDir()
-	}
-	baseCache := cacheDirOrDefault(cacheDir)
-	availability := NewAvailability(cfg, baseSkills)
-
-	if err := os.MkdirAll(baseSkills, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create skills dir: %w", err)
-	}
-
-	var targetSet map[string]struct{}
-	if len(targets) > 0 {
-		targetSet = make(map[string]struct{})
-		for _, t := range targets {
-			targetSet[strings.ToLower(strings.TrimSpace(t))] = struct{}{}
-		}
-	}
-
-	reposToProcess := make(map[string]config.RemoteRepo)
-	for source, repoInfo := range cfg.Remote {
-		if targetSet == nil {
-			reposToProcess[source] = repoInfo
-		} else {
-			sourceLower := strings.ToLower(source)
-			parts := strings.Split(sourceLower, "/")
-			repoName := parts[len(parts)-1]
-
-			matched := false
-			if _, ok := targetSet[sourceLower]; ok {
-				matched = true
-			} else if _, ok := targetSet[repoName]; ok {
-				matched = true
-			} else {
-				for sk := range repoInfo.Skills {
-					if _, ok := targetSet[strings.ToLower(sk)]; ok {
-						matched = true
-						break
-					}
+			parts := strings.Split(strings.ToLower(source), "/")
+			matched := parts[len(parts)-1] == target
+			for skill := range repo.Skills {
+				if strings.EqualFold(skill, target) {
+					matched = true
 				}
 			}
-
 			if matched {
-				reposToProcess[source] = repoInfo
+				matches[source] = struct{}{}
 			}
 		}
-	}
-
-	result := &UpdateResult{
-		UpdatedRepos:  make([]UpdatedRepoInfo, 0),
-		UpdatedSkills: make([]string, 0),
-		SkippedRepos:  make([]SkippedRepoInfo, 0),
-		Errors:        make([]UpdateErrorInfo, 0),
-	}
-
-	reposNeedingUpdate := make(map[string]config.RemoteRepo)
-
-	// 1. Fast parallel check if no targets specified and not forced
-	if !force && targetSet == nil && len(reposToProcess) > 0 {
-		emitUpdate(onProgress, UpdateEvent{Kind: UpdateCheckStart, Total: len(reposToProcess)})
-
-		statusResults := CheckAllRemoteSkillsOutdated(cfg, baseCache, 8)
-		statusMap := make(map[string]UpdateStatusResult)
-		for _, r := range statusResults {
-			statusMap[r.Source] = r
+		matchedSources := make([]string, 0, len(matches))
+		for source := range matches {
+			matchedSources = append(matchedSources, source)
 		}
-
-		for source, repoInfo := range reposToProcess {
-			statusInfo := statusMap[source]
-			if statusInfo.Status == "up_to_date" {
-				allExist := true
-				for sk := range repoInfo.Skills {
-					skPath := filepath.Join(baseSkills, sk)
-					if _, err := os.Stat(skPath); err != nil {
-						allExist = false
-						break
-					}
-				}
-
-				if allExist {
-					skillList := sortedSkillKeys(repoInfo.Skills)
-
-					result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{
-						Source:   source,
-						Reason:   "up_to_date",
-						LocalSHA: statusInfo.LocalSHA,
-						Skills:   skillList,
-					})
-
-					remote := newRemoteSource(availability, source, repoInfo, baseCache)
-					if err := remote.reconcile("", dryRun, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
-						return result, err
-					}
-					continue
-				}
-			}
-			reposNeedingUpdate[source] = repoInfo
+		sort.Strings(matchedSources)
+		if len(matchedSources) == 0 {
+			return nil, fmt.Errorf("unknown update target %q", raw)
 		}
-
-		emitUpdate(onProgress, UpdateEvent{
-			Kind:     UpdateCheckDone,
-			Total:    len(reposToProcess),
-			UpToDate: len(result.SkippedRepos),
-			Outdated: len(reposNeedingUpdate),
-		})
-	} else {
-		reposNeedingUpdate = reposToProcess
+		if len(matchedSources) > 1 {
+			return nil, fmt.Errorf("ambiguous update target %q matches Sources: %s", raw, strings.Join(matchedSources, ", "))
+		}
+		selected[matchedSources[0]] = cfg.Remote[matchedSources[0]]
 	}
+	return selected, nil
+}
 
-	// 2. Process updates for repos that need them. Cache refresh may run in
-	// parallel; Availability apply stays sequential.
-	sources := make([]string, 0, len(reposNeedingUpdate))
-	for src := range reposNeedingUpdate {
-		sources = append(sources, src)
+// UpdateRemoteSkills keeps its historical signature for callers; skillsDir is
+// intentionally ignored because Update now mutates only shared Cache data.
+func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool, _ string, cacheDir string, progress UpdateProgress) (*UpdateResult, error) {
+	repositories, err := resolveUpdateSources(cfg, targets)
+	if err != nil {
+		return nil, err
+	}
+	result := &UpdateResult{UpdatedRepos: []UpdatedRepoInfo{}, SkippedRepos: []SkippedRepoInfo{}, Errors: []UpdateErrorInfo{}}
+	var sources []string
+	for source := range repositories {
+		sources = append(sources, source)
 	}
 	sort.Strings(sources)
-
-	type fetchedRepo struct {
-		dir string
-		err error
-	}
-	fetched := make([]fetchedRepo, len(sources))
-	if !dryRun && len(sources) > 0 {
-		emitUpdate(onProgress, UpdateEvent{Kind: UpdateRefreshStart, Total: len(sources)})
-		jobs := make(chan int)
-		var wg sync.WaitGroup
-		workers := 8
-		if workers > len(sources) {
-			workers = len(sources)
+	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckStart, Total: len(sources)})
+	var refresh []string
+	for _, source := range sources {
+		status := CheckRepoUpdateStatus(source, repositories[source], cacheDir)
+		if !force && status.Status == "up_to_date" {
+			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: "up_to_date", LocalSHA: status.LocalSHA})
+			continue
 		}
-		for worker := 0; worker < workers; worker++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for i := range jobs {
-					source := sources[i]
-					repoInfo := reposNeedingUpdate[source]
-					remote := newRemoteSource(availability, source, repoInfo, baseCache)
-					dir, err := remote.refresh(true)
-					fetched[i] = fetchedRepo{dir: dir, err: err}
-				}
-			}()
-		}
-		for i := range sources {
-			jobs <- i
-		}
-		close(jobs)
-		wg.Wait()
-		emitUpdate(onProgress, UpdateEvent{Kind: UpdateRefreshDone, Total: len(sources)})
-	}
-
-	for i, source := range sources {
-		repoInfo := reposNeedingUpdate[source]
-		skillList := sortedSkillKeys(repoInfo.Skills)
-		emitUpdate(onProgress, UpdateEvent{Kind: UpdateStart, Source: source, Index: i + 1, Total: len(sources), Skills: skillList, DryRun: dryRun})
-		if dryRun {
-			result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, Skills: skillList, DryRun: true})
-			result.UpdatedSkills = append(result.UpdatedSkills, skillList...)
-			remote := newRemoteSource(availability, source, repoInfo, baseCache)
-			if err := remote.reconcile("", true, nil, updateReconcileEmit(onProgress, result, source, nil)); err != nil {
-				return result, err
+		if !force && status.Status == "error" {
+			message := status.Error
+			if message == "" {
+				message = "failed to query remote repository"
 			}
+			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})
+			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: message})
 			continue
 		}
-
-		if fetched[i].err != nil {
-			errMsg := fetched[i].err.Error()
-			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: errMsg})
-			emitUpdate(onProgress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: errMsg})
-			continue
-		}
-
-		repoDir := fetched[i].dir
-		repoUpdatedSkills := make([]string, 0)
-		remote := newRemoteSource(availability, source, repoInfo, baseCache)
-		if err := remote.reconcile(repoDir, false, repoInfo.Skills, updateReconcileEmit(onProgress, result, source, &repoUpdatedSkills)); err != nil {
-			return result, err
-		}
-
-		newSHA := GetLocalRepoCommit(repoDir)
-		result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, Skills: repoUpdatedSkills, NewSHA: newSHA})
-		result.UpdatedSkills = append(result.UpdatedSkills, repoUpdatedSkills...)
-		emitUpdate(onProgress, UpdateEvent{Kind: UpdateRepoDone, Source: source, NewSHA: newSHA, Skills: repoUpdatedSkills})
+		refresh = append(refresh, source)
 	}
-
+	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckDone, Total: len(sources), UpToDate: len(result.SkippedRepos), Outdated: len(refresh)})
+	if !dryRun && len(refresh) > 0 {
+		emitUpdate(progress, UpdateEvent{Kind: UpdateRefreshStart, Total: len(refresh)})
+	}
+	for i, source := range refresh {
+		emitUpdate(progress, UpdateEvent{Kind: UpdateStart, Source: source, Index: i + 1, Total: len(refresh), DryRun: dryRun})
+		if dryRun {
+			result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, DryRun: true})
+			continue
+		}
+		dir, refreshErr := newRemoteSource(nil, source, repositories[source], cacheDir).refresh(true)
+		if refreshErr != nil {
+			message := refreshErr.Error()
+			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})
+			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: message})
+			continue
+		}
+		sha := GetLocalRepoCommit(dir)
+		result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, NewSHA: sha})
+		emitUpdate(progress, UpdateEvent{Kind: UpdateRepoDone, Source: source, NewSHA: sha})
+	}
+	if !dryRun && len(refresh) > 0 {
+		emitUpdate(progress, UpdateEvent{Kind: UpdateRefreshDone, Total: len(refresh)})
+	}
 	return result, nil
 }

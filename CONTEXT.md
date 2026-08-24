@@ -45,7 +45,7 @@ A difference between declared Availability and filesystem state.
 _Avoid_: stale, orphan, leftover, mismatch (when you mean Availability vs disk)
 
 **Sync**:
-Reconciling filesystem state with declared Config: materialize missing Skills and apply Availability.
+Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability.
 _Avoid_: restore, install (when you mean the whole declared state)
 
 **Materialize**:
@@ -61,7 +61,7 @@ A coding harness that can load Skills (Claude Code, Copilot, Codex, …).
 _Avoid_: harness (in user-facing copy), tool, IDE
 
 **Update**:
-Refreshing remote Cache to a new commit, then Syncing those remote Skills. Does not Materialize local symlink or command Skills.
+Refreshing remote Sources into the shared Cache only. Does not Materialize Skills or apply Availability. This supersedes the pre-0.8.0 definition recorded in #60.
 _Avoid_: upgrade, pull (when you mean this command)
 
 **Doctor**:

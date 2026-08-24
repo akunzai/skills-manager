@@ -117,6 +117,39 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	if len(p.Invalid) > 0 {
 		add(Finding{Severity: SeverityError, Message: "Installed folders missing SKILL.md: " + strings.Join(p.Invalid, ", "), Blank: true})
 	}
+	if p.StateError != "" {
+		add(Finding{Severity: SeverityError, Message: "Corrupted Scope state: " + p.StateError, Blank: true})
+	}
+	if len(p.StaleState) > 0 {
+		add(Finding{Severity: SeverityWarning, Message: "Obsolete Scope state entries: " + strings.Join(p.StaleState, ", "), Blank: true})
+	}
+	if len(p.LegacyCache) > 0 {
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Legacy branchless Cache entries: %s", strings.Join(p.LegacyCache, ", ")), Blank: true})
+	}
+	for _, artifact := range p.StaleScopes {
+		add(Finding{Severity: SeverityWarning, Message: "Scope state references missing path: " + artifact.ScopePath, Blank: true})
+	}
+	if result != nil && (p.StateError != "" || len(p.StaleState) > 0) {
+		if result.StateRepairErr != nil {
+			add(Finding{Severity: SeverityError, Message: "Failed to repair Scope state: " + result.StateRepairErr.Error()})
+		} else {
+			add(Finding{Severity: SeverityOK, Message: "Repaired Scope state."})
+		}
+	}
+	if result != nil {
+		for _, path := range result.RemovedLegacy {
+			add(Finding{Severity: SeverityOK, Message: "Removed legacy Cache: " + path})
+		}
+		for _, failure := range result.FailedLegacy {
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to remove legacy Cache %s: %s", failure.Name, failure.Err)})
+		}
+		for _, path := range result.RemovedScopes {
+			add(Finding{Severity: SeverityOK, Message: "Removed state for missing Scope: " + path})
+		}
+		for _, failure := range result.FailedScopes {
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to remove stale Scope state %s: %s", failure.Name, failure.Err)})
+		}
+	}
 	for _, ref := range p.UnknownAgents {
 		where := "settings." + ref.Field
 		if ref.Skill != "" {

@@ -30,7 +30,7 @@ func newDoctorCmd() *cobra.Command {
 			}
 
 			fmt.Fprintf(out, "\n%s%sDiagnosing skills health...%s\n\n", colorBold, colorCyan, colorReset)
-			outcome, runErr := engine.NewDoctor(cfg, skillsDir).Run(flagFix)
+			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix)
 			printHealthReport(out, outcome.Findings)
 			if runErr != nil {
 				return runErr

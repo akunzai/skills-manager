@@ -8,128 +8,108 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/spf13/cobra"
 )
 
 func newOutdatedCmd() *cobra.Command {
 	var flagJSON bool
-
 	cmd := &cobra.Command{
 		Use:     "outdated",
 		Aliases: []string{"check", "check-update"},
-		Short:   "Check for new versions in remote skill repositories",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Past flag parsing, every failure below is a runtime problem rather
-			// than misuse, so reporting it with a usage dump would mislead.
+		Short:   "Inspect remote Source, shared Cache, and selected Scope freshness",
+		Long:    "Inspect remote Source, shared Cache, and selected Scope freshness.\n\nExit codes: 0 current, 1 differences found, 2 check failed.",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
-			out := cmd.OutOrStdout()
 			scope := ResolveScope()
-			configPath, cacheDir := scope.ConfigPath, scope.CacheDir
-
-			cfg, err := config.LoadConfig(configPath)
+			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
 			}
-
 			if len(cfg.Remote) == 0 {
 				if flagJSON {
-					fmt.Fprintln(out, "[]")
+					fmt.Fprintln(cmd.OutOrStdout(), `{"repositories":[]}`)
 				} else {
-					fmt.Fprintf(out, "%sNo remote repositories configured in %s.%s\n", colorYellow, filepath.Base(configPath), colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "%sNo remote Sources configured in %s.%s\n", colorYellow, filepath.Base(scope.ConfigPath), colorReset)
 				}
 				return nil
 			}
-
-			if !flagJSON {
-				fmt.Fprintf(out, "\n%s%sChecking remote repositories for updates...%s\n\n", colorBold, colorCyan, colorReset)
+			report, err := engine.InspectOutdated(cfg, scope.SkillsDir, scope.CacheDir, 8)
+			if err != nil {
+				return err
 			}
-
-			results := engine.CheckAllRemoteSkillsOutdated(cfg, cacheDir, 8)
-
 			if flagJSON {
-				data, _ := json.MarshalIndent(results, "", "  ")
-				fmt.Fprintln(out, string(data))
-				return nil
-			}
-
-			fmt.Fprintf(out, "%s%-40s %-12s %-12s %s%s\n", colorBold, "REPOSITORY / SKILL", "CURRENT", "LATEST", "STATUS", colorReset)
-			fmt.Fprintln(out, strings.Repeat(tableRule, 80))
-
-			outdatedCount := 0
-			upToDateCount := 0
-			errorCount := 0
-
-			for _, r := range results {
-				localRaw := "none"
-				if len(r.LocalSHA) >= 7 {
-					localRaw = r.LocalSHA[:7]
+				data, marshalErr := json.MarshalIndent(report, "", "  ")
+				if marshalErr != nil {
+					return marshalErr
 				}
-				remoteRaw := "none"
-				if len(r.RemoteSHA) >= 7 {
-					remoteRaw = r.RemoteSHA[:7]
-				}
-
-				localDisplay := fmt.Sprintf("%-12s", localRaw)
-				if r.LocalSHA == "" {
-					localDisplay = fmt.Sprintf("%s%-12s%s", colorDim, localRaw, colorReset)
-				}
-				remoteDisplay := fmt.Sprintf("%-12s", remoteRaw)
-				if r.RemoteSHA == "" {
-					remoteDisplay = fmt.Sprintf("%s%-12s%s", colorDim, remoteRaw, colorReset)
-				}
-
-				var statusDisplay string
-				switch r.Status {
-				case "update_available":
-					outdatedCount++
-					statusDisplay = fmt.Sprintf("%s%sUpdate available%s", colorYellow, colorBold, colorReset)
-				case "up_to_date":
-					upToDateCount++
-					statusDisplay = fmt.Sprintf("%sUp to date%s", colorGreen, colorReset)
-				case "not_cached", "not_installed":
-					outdatedCount++
-					statusDisplay = fmt.Sprintf("%sNot cached (Needs sync)%s", colorCyan, colorReset)
-				default:
-					errorCount++
-					statusDisplay = fmt.Sprintf("%sCheck failed%s", colorRed, colorReset)
-				}
-
-				fmt.Fprintf(out, "%s%-40s%s %s %s %s\n", colorBold, r.Source, colorReset, localDisplay, remoteDisplay, statusDisplay)
-
-				for i, sk := range r.Skills {
-					prefix := "  " + treeBranch + " "
-					if i == len(r.Skills)-1 {
-						prefix = "  " + treeLastBranch + " "
-					}
-					fmt.Fprintf(out, "%s%s%s%s\n", colorDim, prefix, sk, colorReset)
-				}
-			}
-
-			fmt.Fprintln(out, strings.Repeat(tableRule, 80))
-
-			var summaryParts []string
-			if outdatedCount > 0 {
-				summaryParts = append(summaryParts, fmt.Sprintf("%s%s%d update(s) available%s", colorYellow, colorBold, outdatedCount, colorReset))
-			}
-			if upToDateCount > 0 {
-				summaryParts = append(summaryParts, fmt.Sprintf("%s%d up to date%s", colorGreen, upToDateCount, colorReset))
-			}
-			if errorCount > 0 {
-				summaryParts = append(summaryParts, fmt.Sprintf("%s%d error(s)%s", colorRed, errorCount, colorReset))
-			}
-
-			fmt.Fprintf(out, "Summary: %s\n", strings.Join(summaryParts, ", "))
-			if outdatedCount > 0 {
-				fmt.Fprintf(out, "\nRun '%s%sskills update%s' to upgrade outdated skills.\n\n", colorBold, colorReset, colorReset)
+				fmt.Fprintln(cmd.OutOrStdout(), string(data))
 			} else {
-				fmt.Fprintf(out, "\n%sAll skills are up to date.%s\n\n", colorGreen, colorReset)
+				printOutdatedReport(cmd, report)
 			}
-
+			if !report.Fresh() {
+				return exitError{message: "remote Source, Cache, or Scope is not current", code: 1}
+			}
 			return nil
 		},
 	}
-
 	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON")
-
 	return cmd
+}
+
+func printOutdatedReport(cmd *cobra.Command, report *engine.OutdatedReport) {
+	out := cmd.OutOrStdout()
+	needUpdate, needSync, hasDrift := false, false, false
+	for _, repository := range report.Repositories {
+		fmt.Fprintf(out, "%s%s%s  %sCache:%s %s", colorBold, repository.Source, colorReset, colorDim, colorReset, styledStatus(repository.Status))
+		if repository.Error != "" {
+			fmt.Fprintf(out, " %s(%s)%s", colorDim, repository.Error, colorReset)
+		}
+		fmt.Fprintln(out)
+		if repository.Status != "up_to_date" {
+			needUpdate = true
+		}
+		for _, skill := range repository.Skills {
+			note := ""
+			if skill.Status == engine.SkillInSync && !skill.BaselineRecorded {
+				note = fmt.Sprintf(" %s(baseline not recorded)%s", colorDim, colorReset)
+			}
+			fmt.Fprintf(out, "  %s%s%s %s: %s%s %s[%s]%s\n", colorDim, treeBranch, colorReset, skill.Name, styledStatus(string(skill.Status)), note, colorDim, models.ToTildePath(skill.ScopePath), colorReset)
+			if skill.Status != engine.SkillInSync {
+				needSync = true
+			}
+			if skill.Status == engine.SkillLocalDrift {
+				hasDrift = true
+			}
+		}
+	}
+	var hints []string
+	if needUpdate {
+		hints = append(hints, "run 'skills update'")
+	}
+	if needSync {
+		hints = append(hints, "run 'skills sync'")
+	}
+	if hasDrift {
+		hints = append(hints, "review local changes, then use 'skills sync --force' if intended")
+	}
+	if len(hints) > 0 {
+		fmt.Fprintf(out, "\nNext: %s.\n", strings.Join(hints, "; "))
+	}
+}
+
+func humanStatus(status string) string {
+	return strings.ToUpper(status[:1]) + strings.ReplaceAll(status[1:], "_", " ")
+}
+
+func styledStatus(status string) string {
+	color := colorYellow
+	switch status {
+	case "up_to_date", string(engine.SkillInSync):
+		color = colorGreen
+	case string(engine.SkillError), string(engine.SkillMissing):
+		color = colorRed
+	}
+	return colorBold + color + humanStatus(status) + colorReset
 }

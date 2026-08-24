@@ -100,5 +100,14 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 		}
 		result.Skills[i].RemovedMaster = true
 	}
+	store, stateErr := NewScopeStateStore(skillsDir)
+	if stateErr != nil {
+		return result, errors.Join(result.Err(), stateErr)
+	}
+	for _, item := range plan.Skills {
+		if stateErr := store.DeleteSkill(item.Name); stateErr != nil {
+			return result, errors.Join(result.Err(), stateErr)
+		}
+	}
 	return result, result.Err()
 }

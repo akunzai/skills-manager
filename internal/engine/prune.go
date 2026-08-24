@@ -20,6 +20,7 @@ type PruneLink struct {
 type PrunePlan struct {
 	UntrackedSkills []string
 	Unconfigured    []PruneLink
+	StateSkills     []string
 }
 
 // PruneFailure identifies a planned path that could not be removed.
@@ -52,6 +53,19 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		return PrunePlan{}, err
 	}
 	plan := PrunePlan{}
+	store, err := NewScopeStateStore(skillsDir)
+	if err != nil {
+		return PrunePlan{}, err
+	}
+	state, err := store.Load()
+	if err != nil {
+		return PrunePlan{}, err
+	}
+	for name := range state.Skills {
+		if _, _, declared := config.FindSkillSource(cfg, name); !declared {
+			plan.StateSkills = append(plan.StateSkills, name)
+		}
+	}
 	orphans := make(map[string]struct{})
 	for _, item := range inv {
 		if !isUntracked(item) {
@@ -98,6 +112,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 	}
 
 	sort.Strings(plan.UntrackedSkills)
+	sort.Strings(plan.StateSkills)
 	sort.Slice(plan.Unconfigured, func(i, j int) bool { return plan.Unconfigured[i].Path < plan.Unconfigured[j].Path })
 	return plan, nil
 }
@@ -139,6 +154,16 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 			continue
 		}
 		result.RemovedSkills = append(result.RemovedSkills, skill)
+	}
+	store, stateErr := NewScopeStateStore(skillsDir)
+	if stateErr != nil {
+		errs = append(errs, stateErr)
+	} else {
+		for _, skill := range plan.StateSkills {
+			if err := store.DeleteSkill(skill); err != nil {
+				errs = append(errs, err)
+			}
+		}
 	}
 	return result, errors.Join(errs...)
 }

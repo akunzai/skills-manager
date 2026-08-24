@@ -1,12 +1,29 @@
 package cli
 
 import (
+	"errors"
 	"os"
 
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/cobra"
 )
+
+type exitError struct {
+	message string
+	code    int
+}
+
+func (err exitError) Error() string { return err.message }
+func (err exitError) ExitCode() int { return err.code }
+
+func ExitCode(err error) int {
+	var coded interface{ ExitCode() int }
+	if errors.As(err, &coded) {
+		return coded.ExitCode()
+	}
+	return 2
+}
 
 // Cobra-owned: bound to --config/--skills-dir/--cache-dir/--global/--project
 // in init() below. Never assign to these directly outside flag parsing — a
@@ -118,5 +135,6 @@ func init() {
 }
 
 func Execute() error {
+	RootCmd.SilenceErrors = true
 	return RootCmd.Execute()
 }
