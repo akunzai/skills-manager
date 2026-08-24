@@ -138,10 +138,10 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	}
 	if result != nil {
 		for _, path := range result.RemovedLegacy {
-			add(Finding{Severity: SeverityOK, Message: "Removed legacy Cache: " + path})
+			add(Finding{Severity: SeverityOK, Message: "Rebuilt branch-aware Cache and removed legacy Cache: " + path})
 		}
 		for _, failure := range result.FailedLegacy {
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to remove legacy Cache %s: %s", failure.Name, failure.Err)})
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to rebuild legacy Cache %s: %s", failure.Name, failure.Err)})
 		}
 		for _, path := range result.RemovedScopes {
 			add(Finding{Severity: SeverityOK, Message: "Removed state for missing Scope: " + path})

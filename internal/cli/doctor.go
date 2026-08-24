@@ -7,8 +7,11 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/spf13/cobra"
 )
+
+var startDoctorProgress = presentation.StartProgress
 
 func newDoctorCmd() *cobra.Command {
 	var flagFix bool
@@ -30,7 +33,12 @@ func newDoctorCmd() *cobra.Command {
 			}
 
 			fmt.Fprintf(out, "\n%s%sDiagnosing skills health...%s\n\n", colorBold, colorCyan, colorReset)
-			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix)
+			var progress *presentation.Progress
+			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).RunWithProgress(flagFix, func(event engine.DoctorEvent) {
+				progress.Stop()
+				progress = startDoctorProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Rebuilding %s Cache...", event.Index, event.Total, event.Source))
+			})
+			progress.Stop()
 			printHealthReport(out, outcome.Findings)
 			if runErr != nil {
 				return runErr

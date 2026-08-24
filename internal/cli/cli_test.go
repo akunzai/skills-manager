@@ -1267,6 +1267,45 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	}
 }
 
+func TestCLIDoctorFixShowsProgressWhileRebuildingLegacyCache(t *testing.T) {
+	resetRootCmdFlags()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(root, "cache")
+	if _, _, err := engine.RunGit("", "clone", origin, filepath.Join(cacheDir, "owner", "repo")); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	configFile := filepath.Join(root, "skills.json")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	var messages []string
+	oldStartProgress := startDoctorProgress
+	startDoctorProgress = func(_ io.Writer, message string) *presentation.Progress {
+		messages = append(messages, message)
+		return &presentation.Progress{}
+	}
+	t.Cleanup(func() { startDoctorProgress = oldStartProgress })
+
+	if _, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"[1/1] Rebuilding owner/repo Cache..."}; !reflect.DeepEqual(messages, want) {
+		t.Fatalf("progress messages = %q; want %q", messages, want)
+	}
+}
+
 // doctor --fix must still report what it could not repair.
 func TestCLIDoctorFixStillReportsUnrepairableIssues(t *testing.T) {
 	project := projectScope(t)
