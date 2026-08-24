@@ -90,13 +90,15 @@ Universal agents that read the central skills directory directly do not need lin
 | Inspect remote → Cache → Scope freshness | `skills outdated` |
 | Refresh remote Sources into the shared Cache | `skills update` |
 | Diagnose drift | `skills doctor` |
-| Repair drift | `skills doctor --fix` |
+| Repair diagnosed health issues | `skills doctor --fix` |
 | Remove undeclared managed items | `skills prune` |
 | Remove a skill | `skills rm <skill>` |
 
 Every operational command accepts `--project`. Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
 
 For remote Skills, the normal flow is `skills outdated`, `skills update`, then `skills sync`. Sync protects known local changes and unknown baselines; inspect them first, or explicitly overwrite with `skills sync --force`. `sync --dry-run` is a non-mutating freshness gate and exits non-zero when reconciliation is needed.
+
+When upgrading from a legacy branchless Cache layout, `skills doctor --fix` may access the network to rebuild affected Cache entries; it does not run Sync automatically.
 
 `skills outdated` exits with `0` when everything is current, `1` when freshness differences are found, and `2` when the check cannot be completed. Freshness differences are reported as status and next actions, not as command errors.
 
