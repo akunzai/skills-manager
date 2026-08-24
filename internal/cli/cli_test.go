@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/pflag"
 )
@@ -199,7 +202,7 @@ func TestCLIOutdatedNoRemoteReposPrintsThroughCapturedOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outdated failed: %v", err)
 	}
-	if !strings.Contains(out, "No remote repositories configured") {
+	if !strings.Contains(out, "No remote Sources configured") {
 		t.Fatalf("outdated output not captured through cmd.OutOrStdout():\n%s", out)
 	}
 }
@@ -253,8 +256,8 @@ func TestCLISyncPrintsCommandFailed(t *testing.T) {
 	}
 
 	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir)
-	if err != nil {
-		t.Fatalf("sync: %v\n%s", err, out)
+	if err == nil {
+		t.Fatalf("failed command should make Sync non-zero:\n%s", out)
 	}
 	if !strings.Contains(out, "Failed to run installer for sample") {
 		t.Fatalf("missing command failure output:\n%s", out)
@@ -266,6 +269,9 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	project := t.TempDir()
 	configFile := filepath.Join(project, ".agents", "skills.json")
 	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	writeCLIGitSkill(t, origin, "sample")
 	master := filepath.Join(skillsDir, "sample")
 	if err := os.MkdirAll(master, 0o755); err != nil {
 		t.Fatal(err)
@@ -275,9 +281,12 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
-	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "github", "")
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{"claude", "continue"} {
@@ -288,7 +297,7 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
 	continueLink := filepath.Join(project, ".continue", "skills", "sample")
 
-	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
@@ -301,10 +310,7 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	if _, err := engine.EnsureAgentSymlink("sample", "claude", skillsDir); err != nil {
 		t.Fatal(err)
 	}
-	dryRunOut, err := runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dryRunOut, _ := runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if !strings.Contains(dryRunOut, "Would unlink sample from claude-code") {
 		t.Fatalf("dry-run did not preview availability drift:\n%s", dryRunOut)
 	}
@@ -769,6 +775,9 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/test-repo", "skill-1", "skills/skill-1", "github", "")
+	repo := cfg.Remote["owner/test-repo"]
+	repo.Branch = "main"
+	cfg.Remote["owner/test-repo"] = repo
 	_ = config.SaveConfig(cfg, configFile)
 
 	var buf bytes.Buffer
@@ -780,6 +789,135 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 
 	if !strings.Contains(buf.String(), `"updated_repos"`) {
 		t.Fatalf("expected updated_repos in JSON output, got: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), `"updated_skills"`) {
+		t.Fatalf("Update JSON still describes updated Skills: %s", buf.String())
+	}
+	if _, err := runCLI(t, "update", "typo", "--dry-run", "--config", configFile, "--cache-dir", cacheDir); err == nil || !strings.Contains(err.Error(), "unknown update target") {
+		t.Fatalf("unknown target error = %v", err)
+	}
+}
+
+func TestCLIUpdateShowsProgressWhileCheckingAndRefreshing(t *testing.T) {
+	resetRootCmdFlags()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	configFile := filepath.Join(root, "skills.json")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	var messages []string
+	oldStartProgress := startUpdateProgress
+	startUpdateProgress = func(_ io.Writer, message string) *presentation.Progress {
+		messages = append(messages, message)
+		return &presentation.Progress{}
+	}
+	t.Cleanup(func() { startUpdateProgress = oldStartProgress })
+
+	if _, err := runCLI(t, "update", "--config", configFile, "--cache-dir", filepath.Join(root, "cache")); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Checking 1 remote Sources in parallel...", "[1/1] Refreshing owner/repo..."}; !reflect.DeepEqual(messages, want) {
+		t.Fatalf("progress messages = %q; want %q", messages, want)
+	}
+}
+
+func TestCLIOutdatedJSONNestsScopeStatusAndReturnsNonZero(t *testing.T) {
+	resetRootCmdFlags()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", filepath.Join(root, "missing-origin"))
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	RootCmd.SetOut(&output)
+	RootCmd.SetErr(&output)
+	RootCmd.SetArgs([]string{"outdated", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
+	oldSilenceErrors := RootCmd.SilenceErrors
+	t.Cleanup(func() { RootCmd.SilenceErrors = oldSilenceErrors })
+	err := Execute()
+	out := output.String()
+	if err == nil {
+		t.Fatal("Outdated should fail when Cache/Scope is not current")
+	}
+	if got := ExitCode(err); got != 1 {
+		t.Fatalf("outdated exit code = %d; want 1", got)
+	}
+	if strings.Contains(out, "Error:") {
+		t.Fatalf("freshness difference printed as an error:\n%s", out)
+	}
+	if !strings.Contains(out, `"repositories"`) || !strings.Contains(out, `"skills"`) || !strings.Contains(out, `"status": "unverified"`) {
+		t.Fatalf("unexpected nested JSON:\n%s", out)
+	}
+}
+
+func TestExitCodeDefaultsFailuresToTwo(t *testing.T) {
+	if got := ExitCode(errors.New("failed")); got != 2 {
+		t.Fatalf("exit code = %d; want 2", got)
+	}
+}
+
+func TestOutdatedStatusStyling(t *testing.T) {
+	oldGreen, oldYellow, oldRed, oldBold, oldReset := colorGreen, colorYellow, colorRed, colorBold, colorReset
+	colorGreen, colorYellow, colorRed, colorBold, colorReset = "<green>", "<yellow>", "<red>", "<bold>", "<reset>"
+	t.Cleanup(func() {
+		colorGreen, colorYellow, colorRed, colorBold, colorReset = oldGreen, oldYellow, oldRed, oldBold, oldReset
+	})
+
+	for status, want := range map[string]string{
+		"up_to_date":                             "<bold><green>Up to date<reset>",
+		string(engine.SkillInSync):               "<bold><green>In sync<reset>",
+		string(engine.SkillCacheUpdateAvailable): "<bold><yellow>Cache update available<reset>",
+		string(engine.SkillLocalDrift):           "<bold><yellow>Local drift<reset>",
+		string(engine.SkillMissing):              "<bold><red>Missing<reset>",
+		string(engine.SkillError):                "<bold><red>Error<reset>",
+	} {
+		if got := styledStatus(status); got != want {
+			t.Errorf("styledStatus(%q) = %q; want %q", status, got, want)
+		}
+	}
+}
+
+func TestCLISyncInteractiveUnknownBaselineCancelsBeforeWrites(t *testing.T) {
+	resetRootCmdFlags()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	cachePath, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.MaterializeRemoteSkill("sample", "sample", cachePath, skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	manualPath := filepath.Join(skillsDir, "sample", "SKILL.md")
+	if err := os.WriteFile(manualPath, []byte("manual\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldTerminal, oldPrompt := syncIsTerminal, syncPromptUnknown
+	syncIsTerminal = func() bool { return true }
+	syncPromptUnknown = func(io.Writer, []engine.SkillFreshness) (bool, error) { return false, nil }
+	t.Cleanup(func() { syncIsTerminal, syncPromptUnknown = oldTerminal, oldPrompt })
+	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err == nil {
+		t.Fatal("cancel should return non-zero")
+	}
+	got, _ := os.ReadFile(manualPath)
+	if string(got) != "manual\n" {
+		t.Fatalf("cancel wrote Scope content: %q", got)
 	}
 }
 
@@ -822,6 +960,21 @@ func runCLI(t *testing.T, args ...string) (string, error) {
 	RootCmd.SetArgs(args)
 	err := RootCmd.Execute()
 	return buf.String(), err
+}
+
+func writeCLIGitSkill(t *testing.T, repo, name string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(repo, name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, name, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"}} {
+		if _, stderr, err := engine.RunGit(repo, args...); err != nil {
+			t.Fatalf("git %v: %s: %v", args, stderr, err)
+		}
+	}
 }
 
 func TestCLIConfigSetGetAndClear(t *testing.T) {
@@ -1111,6 +1264,45 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	}
 	if !engine.IsManagedSkillLink(filepath.Join(claudeSkills, "alpha"), "alpha", skillsDir) {
 		t.Fatal("healthy managed link should remain")
+	}
+}
+
+func TestCLIDoctorFixShowsProgressWhileRebuildingLegacyCache(t *testing.T) {
+	resetRootCmdFlags()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(root, "cache")
+	if _, _, err := engine.RunGit("", "clone", origin, filepath.Join(cacheDir, "owner", "repo")); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	configFile := filepath.Join(root, "skills.json")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	var messages []string
+	oldStartProgress := startDoctorProgress
+	startDoctorProgress = func(_ io.Writer, message string) *presentation.Progress {
+		messages = append(messages, message)
+		return &presentation.Progress{}
+	}
+	t.Cleanup(func() { startDoctorProgress = oldStartProgress })
+
+	if _, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"[1/1] Rebuilding owner/repo Cache..."}; !reflect.DeepEqual(messages, want) {
+		t.Fatalf("progress messages = %q; want %q", messages, want)
 	}
 }
 

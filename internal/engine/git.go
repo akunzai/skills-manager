@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,66 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/models"
 )
+
+func cacheBranchKey(branch string) string {
+	if branch == "" {
+		branch = "HEAD"
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(branch)))[:16]
+}
+
+func defaultBranchMarkerPath(source, url, cacheDir string) string {
+	identity := models.ParseRepoSource(source).SourceKey + "\x00" + url
+	sum := sha256.Sum256([]byte(identity))
+	return filepath.Join(cacheDirOrDefault(cacheDir), ".branch-identities", fmt.Sprintf("%x", sum[:])[:24])
+}
+
+func cachedDefaultBranch(source, url, cacheDir string) string {
+	data, err := os.ReadFile(defaultBranchMarkerPath(source, url, cacheDir))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func recordDefaultBranch(source, url, cacheDir, branch string) error {
+	path := defaultBranchMarkerPath(source, url, cacheDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(branch+"\n"), 0o644)
+}
+
+func GetRemoteDefaultBranch(source, url string) (string, error) {
+	branch, _, err := getRemoteDefaultBranchCommit(source, url)
+	return branch, err
+}
+
+func getRemoteDefaultBranchCommit(source, url string) (string, string, error) {
+	repo := resolveCacheRepo(source, url, "", "")
+	stdout, stderr, err := RunGit("", "ls-remote", "--symref", repo.URL, "HEAD")
+	if err != nil {
+		return "", "", gitOpErr("query default branch of", repo.URL, stdout, stderr, err)
+	}
+	branch := ""
+	commit := ""
+	for _, line := range strings.Split(stdout, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "ref:" && fields[2] == "HEAD" {
+			branch = strings.TrimPrefix(fields[1], "refs/heads/")
+		}
+		if len(fields) >= 2 && fields[1] == "HEAD" && fields[0] != "ref:" {
+			commit = fields[0]
+		}
+	}
+	if branch == "" {
+		return "", "", fmt.Errorf("default branch not found for %s", repo.URL)
+	}
+	if commit == "" {
+		return "", "", fmt.Errorf("default branch commit not found for %s", repo.URL)
+	}
+	return branch, commit, nil
+}
 
 // cacheRepo is one remote Source in the git Cache: key, clone URL, branch, dir.
 type cacheRepo struct {
@@ -37,11 +98,14 @@ func resolveCacheRepo(source, url, branch, cacheDir string) cacheRepo {
 		targetBranch = parsed.Branch
 	}
 	baseCache := cacheDirOrDefault(cacheDir)
+	if targetBranch == "" {
+		targetBranch = cachedDefaultBranch(parsed.SourceKey, repoURL, baseCache)
+	}
 	return cacheRepo{
 		SourceKey: parsed.SourceKey,
 		URL:       repoURL,
 		Branch:    targetBranch,
-		Dir:       filepath.Join(baseCache, filepath.FromSlash(parsed.SourceKey)),
+		Dir:       filepath.Join(baseCache, filepath.FromSlash(parsed.SourceKey), cacheBranchKey(targetBranch)),
 	}
 }
 
@@ -78,7 +142,21 @@ func EnsureGitRepo(
 	forceUpdate bool,
 	cacheDir string,
 ) (string, error) {
-	repo := resolveCacheRepo(source, url, branch, cacheDir)
+	parsed := models.ParseRepoSource(source)
+	requestedBranch := branch
+	if requestedBranch == "" {
+		requestedBranch = parsed.Branch
+	}
+	resolvedDefault := false
+	if requestedBranch == "" {
+		var err error
+		requestedBranch, err = GetRemoteDefaultBranch(source, url)
+		if err != nil {
+			return "", err
+		}
+		resolvedDefault = true
+	}
+	repo := resolveCacheRepo(source, url, requestedBranch, cacheDir)
 
 	gitDir := filepath.Join(repo.Dir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
@@ -94,6 +172,11 @@ func EnsureGitRepo(
 			stdout, stderr, err = RunGit(repo.Dir, "reset", "--hard", "FETCH_HEAD")
 			if err != nil {
 				return "", gitOpErr("reset", repo.URL, stdout, stderr, err)
+			}
+		}
+		if resolvedDefault {
+			if err := recordDefaultBranch(source, repo.URL, cacheDir, requestedBranch); err != nil {
+				return "", fmt.Errorf("record default branch: %w", err)
 			}
 		}
 		return repo.Dir, nil
@@ -114,6 +197,11 @@ func EnsureGitRepo(
 	if err != nil {
 		return "", gitOpErr("clone", repo.URL, stdout, stderr, err)
 	}
+	if resolvedDefault {
+		if err := recordDefaultBranch(source, repo.URL, cacheDir, requestedBranch); err != nil {
+			return "", fmt.Errorf("record default branch: %w", err)
+		}
+	}
 
 	return repo.Dir, nil
 }
@@ -131,23 +219,33 @@ func GetLocalRepoCommit(repoDest string) string {
 }
 
 func GetRemoteRepoCommit(source, url, branch string) string {
+	commit, _ := GetRemoteRepoCommitResult(source, url, branch)
+	return commit
+}
+
+func GetRemoteRepoCommitResult(source, url, branch string) (string, error) {
 	repo := resolveCacheRepo(source, url, branch, "")
 	refTarget := repo.Branch
 	if refTarget == "" {
 		refTarget = "HEAD"
+	} else {
+		refTarget = "refs/heads/" + refTarget
 	}
 
-	stdout, _, err := RunGit("", "ls-remote", repo.URL, refTarget)
+	stdout, stderr, err := RunGit("", "ls-remote", repo.URL, refTarget)
 	if err != nil || stdout == "" {
-		return ""
+		if err != nil {
+			return "", gitOpErr("query", repo.URL, stdout, stderr, err)
+		}
+		return "", fmt.Errorf("remote ref %s not found in %s", refTarget, repo.URL)
 	}
 
 	lines := strings.Split(stdout, "\n")
 	if len(lines) > 0 {
 		parts := strings.Fields(lines[0])
 		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
+			return strings.TrimSpace(parts[0]), nil
 		}
 	}
-	return ""
+	return "", fmt.Errorf("invalid remote response from %s", repo.URL)
 }

@@ -3,15 +3,38 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/presentation"
+	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
+
+var syncIsTerminal = tui.IsTerminal
+
+var syncPromptUnknown = func(out io.Writer, skills []engine.SkillFreshness) (bool, error) {
+	for {
+		choice, err := tui.PromptSelect("Replace Project Skills without a local baseline?", []tui.SelectOption{
+			{Key: "overwrite", Title: "Overwrite"},
+			{Key: "details", Title: "Show details"},
+			{Key: "cancel", Title: "Cancel"},
+		}, 2)
+		if err != nil {
+			return false, err
+		}
+		switch choice {
+		case "overwrite":
+			return true, nil
+		case "details":
+			printUnknownDetails(out, skills)
+		default:
+			return false, nil
+		}
+	}
+}
 
 func newSyncCmd() *cobra.Command {
 	var (
@@ -26,6 +49,7 @@ func newSyncCmd() *cobra.Command {
 		Use:     "sync",
 		Aliases: []string{"restore"},
 		Short:   "Sync and restore all skills declared in skills.json",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
@@ -43,13 +67,34 @@ func newSyncCmd() *cobra.Command {
 			}
 			fmt.Fprintf(out, "\n%s%sSyncing skills from %s...%s\n\n", colorBold, colorCyan, models.ToTildePath(configPath), colorReset)
 
-			if err := os.MkdirAll(skillsDir, 0755); err != nil {
-				return err
+			allowUnknown := false
+			if !flagForce && !flagDryRun && syncIsTerminal() {
+				plan, planErr := engine.PlanScopeFreshness(cfg, skillsDir, cacheDir)
+				if planErr != nil {
+					return planErr
+				}
+				var unknown []engine.SkillFreshness
+				for _, repository := range plan.Repositories {
+					for _, skill := range repository.Skills {
+						if skill.Status == engine.SkillUnknownBaseline {
+							unknown = append(unknown, skill)
+						}
+					}
+				}
+				if len(unknown) > 0 {
+					allowUnknown, err = syncPromptUnknown(out, unknown)
+					if err != nil {
+						return err
+					}
+					if !allowUnknown {
+						return fmt.Errorf("Sync cancelled before making changes")
+					}
+				}
 			}
 
 			configuredSkills := make(map[string]struct{})
 			var progress *presentation.Progress
-			report, err := engine.SyncDeclared(cfg, skillsDir, cacheDir, flagForce, flagDryRun, func(ev engine.SyncEvent) {
+			report, err := engine.SyncDeclaredWithOptions(cfg, skillsDir, cacheDir, engine.SyncOptions{Force: flagForce, DryRun: flagDryRun, AllowUnknown: allowUnknown}, func(ev engine.SyncEvent) {
 				switch ev.Kind {
 				case engine.SyncRefreshStart:
 					progress = presentation.StartProgress(cmd.ErrOrStderr(), "Fetching Source: "+ev.Source+"...")
@@ -73,7 +118,7 @@ func newSyncCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&flagForce, "force", false, "Force re-clone and re-link all skills")
+	cmd.Flags().BoolVar(&flagForce, "force", false, "Overwrite local drift and unknown baselines from the existing Cache")
 	cmd.Flags().BoolVar(&flagPrune, "prune", false, "Remove untracked skills and broken symlinks")
 	cmd.Flags().BoolVar(&flagPruneOnly, "prune-only", false, "Remove untracked skills without restoring")
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompt when using deprecated prune flags")
@@ -84,6 +129,20 @@ func newSyncCmd() *cobra.Command {
 	return cmd
 }
 
+func printUnknownDetails(out io.Writer, skills []engine.SkillFreshness) {
+	for _, skill := range skills {
+		fmt.Fprintf(out, "\n%s (%s)\n  Scope: %s\n  Cache: %s\n", skill.Name, skill.Source, models.ToTildePath(skill.ScopePath), models.ToTildePath(skill.CachePath))
+		for _, group := range []struct {
+			label string
+			paths []string
+		}{{"added", skill.Changes.Added}, {"removed", skill.Changes.Removed}, {"modified", skill.Changes.Modified}} {
+			for _, path := range group.paths {
+				fmt.Fprintf(out, "  %s: %s\n", group.label, path)
+			}
+		}
+	}
+}
+
 func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 	if report == nil {
 		return
@@ -91,7 +150,7 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 	for _, ev := range report.Events {
 		switch ev.Kind {
 		case engine.SyncRepoStart:
-			fmt.Fprintf(out, "Syncing repo: %s%s%s (%d skills)...\n", colorBold, ev.Source, colorReset, len(ev.Skills))
+			fmt.Fprintf(out, "Syncing Source: %s%s%s (%d skills)...\n", colorBold, ev.Source, colorReset, len(ev.Skills))
 		case engine.SyncWouldSync:
 			fmt.Fprintf(out, "  [Dry-run] Would sync %s from %s\n", strings.Join(ev.Skills, ", "), ev.Source)
 		case engine.SyncWouldDrift:
@@ -104,7 +163,7 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 		case engine.SyncFetchFailed:
 			fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
 		case engine.SyncPathMissing:
-			fmt.Fprintf(out, "  %sSkill path missing in repo: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
+			fmt.Fprintf(out, "  %sSkill path missing in Source: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
 		case engine.SyncCopyFailed:
 			fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		case engine.SyncMaterialized:
@@ -125,6 +184,8 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 			fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
 		case engine.SyncCommandFailed:
 			fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		case engine.SyncSkipped:
+			fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
 		}
 	}
 }

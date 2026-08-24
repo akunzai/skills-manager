@@ -49,6 +49,10 @@ type healthPlan struct {
 	Untracked      []string
 	Invalid        []string
 	UnknownAgents  []UnknownAgentReference
+	StateError     string
+	StaleState     []string
+	LegacyCache    []string
+	StaleScopes    []ScopeStateArtifact
 }
 
 type healthFixResult struct {
@@ -60,6 +64,12 @@ type healthFixResult struct {
 	FailedLeftover  []healthFix
 	FixedDrift      []string
 	FailedDrift     []healthFix
+	StateRepaired   bool
+	StateRepairErr  error
+	RemovedLegacy   []string
+	FailedLegacy    []healthFix
+	RemovedScopes   []string
+	FailedScopes    []healthFix
 }
 
 // Doctor diagnoses and optionally repairs one Scope's Skill, Agent directory,
@@ -69,6 +79,8 @@ type Doctor struct {
 	skillsDir    string
 	availability *Availability
 	links        AgentLinkManager
+	cacheDir     string
+	stateStore   *ScopeStateStore
 }
 
 // DoctorOutcome is the ordered report plus the issues that remain after Run.
@@ -78,19 +90,37 @@ type DoctorOutcome struct {
 	Remaining int
 }
 
+type DoctorEvent struct {
+	Source       string
+	Index, Total int
+}
+
+type DoctorProgress func(DoctorEvent)
+
 func NewDoctor(cfg *config.Config, skillsDir string) *Doctor {
+	return NewDoctorWithCache(cfg, skillsDir, "")
+}
+
+func NewDoctorWithCache(cfg *config.Config, skillsDir, cacheDir string) *Doctor {
 	availability := NewAvailability(cfg, skillsDir)
+	stateStore, _ := NewScopeStateStore(availability.skillsDir)
 	return &Doctor{
 		cfg:          availability.cfg,
 		skillsDir:    availability.skillsDir,
 		availability: availability,
 		links:        NewAgentLinkManager(availability.skillsDir),
+		cacheDir:     cacheDirOrDefault(cacheDir),
+		stateStore:   stateStore,
 	}
 }
 
 // Run diagnoses the Scope. With fix, it repairs independent findings, keeps
 // their action report, then diagnoses again to count the actual remaining state.
 func (d *Doctor) Run(fix bool) (DoctorOutcome, error) {
+	return d.RunWithProgress(fix, nil)
+}
+
+func (d *Doctor) RunWithProgress(fix bool, progress DoctorProgress) (DoctorOutcome, error) {
 	plan, err := d.diagnose()
 	if err != nil {
 		return DoctorOutcome{}, err
@@ -99,7 +129,7 @@ func (d *Doctor) Run(fix bool) (DoctorOutcome, error) {
 		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount()}, nil
 	}
 
-	result := d.repair(plan)
+	result := d.repair(plan, progress)
 	outcome := DoctorOutcome{Findings: plan.findings(&result)}
 	after, err := d.diagnose()
 	if err != nil {
@@ -120,6 +150,41 @@ func availabilitySource(item models.SkillItem) string {
 // folders are issues but are not repaired.
 func (d *Doctor) diagnose() (healthPlan, error) {
 	plan := healthPlan{SkillsDir: d.skillsDir}
+	if d.stateStore != nil {
+		state, err := d.stateStore.Load()
+		if err != nil {
+			plan.StateError = err.Error()
+		} else {
+			for name := range state.Skills {
+				if _, _, declared := config.FindSkillSource(d.cfg, name); !declared {
+					plan.StaleState = append(plan.StaleState, name)
+				}
+			}
+			sort.Strings(plan.StaleState)
+		}
+	}
+	artifacts, artifactErr := ListScopeStateArtifacts()
+	if artifactErr != nil {
+		return healthPlan{}, artifactErr
+	}
+	for _, artifact := range artifacts {
+		if artifact.Err == nil {
+			if _, err := os.Stat(artifact.ScopePath); os.IsNotExist(err) {
+				plan.StaleScopes = append(plan.StaleScopes, artifact)
+			}
+		}
+	}
+	legacyCaches := make(map[string]struct{})
+	for source := range d.cfg.Remote {
+		legacy := filepath.Join(d.cacheDir, filepath.FromSlash(models.ParseRepoSource(source).SourceKey))
+		if _, err := os.Stat(filepath.Join(legacy, ".git")); err == nil {
+			legacyCaches[legacy] = struct{}{}
+		}
+	}
+	for legacy := range legacyCaches {
+		plan.LegacyCache = append(plan.LegacyCache, legacy)
+	}
+	sort.Strings(plan.LegacyCache)
 	if _, err := os.Stat(d.skillsDir); os.IsNotExist(err) {
 		plan.MasterMissing = true
 	}
@@ -222,13 +287,54 @@ func (p healthPlan) issueCount() int {
 	}
 	n += len(p.Missing) + len(p.Invalid)
 	n += len(p.UnknownAgents)
+	if p.StateError != "" {
+		n++
+	}
+	n += len(p.StaleState) + len(p.LegacyCache) + len(p.StaleScopes)
 	return n
 }
 
 // repair leaves physical dirs, unmanaged broken links, and missing/untracked/
 // invalid Skills unchanged. Independent repair failures do not stop the run.
-func (d *Doctor) repair(plan healthPlan) healthFixResult {
+func (d *Doctor) repair(plan healthPlan, progress DoctorProgress) healthFixResult {
 	result := healthFixResult{}
+	if d.stateStore != nil {
+		if plan.StateError != "" {
+			result.StateRepairErr = d.stateStore.Prune()
+			result.StateRepaired = result.StateRepairErr == nil
+		} else if len(plan.StaleState) > 0 {
+			keep := make(map[string]struct{})
+			for source, repo := range d.cfg.Remote {
+				_ = source
+				for name := range repo.Skills {
+					keep[name] = struct{}{}
+				}
+			}
+			result.StateRepairErr = d.stateStore.PruneSkills(keep)
+			result.StateRepaired = result.StateRepairErr == nil
+		}
+	}
+	total := d.legacySourceCount(plan.LegacyCache)
+	index := 0
+	for _, legacy := range plan.LegacyCache {
+		if err := d.rebuildLegacyCache(legacy, func(source string) {
+			index++
+			if progress != nil {
+				progress(DoctorEvent{Source: source, Index: index, Total: total})
+			}
+		}); err != nil {
+			result.FailedLegacy = append(result.FailedLegacy, healthFix{Name: legacy, Err: err})
+		} else {
+			result.RemovedLegacy = append(result.RemovedLegacy, legacy)
+		}
+	}
+	for _, artifact := range plan.StaleScopes {
+		if err := os.Remove(artifact.Path); err != nil && !os.IsNotExist(err) {
+			result.FailedScopes = append(result.FailedScopes, healthFix{Name: artifact.Path, Err: err})
+		} else {
+			result.RemovedScopes = append(result.RemovedScopes, artifact.ScopePath)
+		}
+	}
 	for _, agent := range plan.Agents {
 		for _, name := range agent.Broken {
 			path := filepath.Join(agent.Dir, name)
@@ -272,4 +378,97 @@ func (d *Doctor) repair(plan healthPlan) healthFixResult {
 		result.FixedDrift = append(result.FixedDrift, drift.Skill)
 	}
 	return result
+}
+
+func (d *Doctor) legacySourceCount(legacyCaches []string) int {
+	total := 0
+	for _, legacy := range legacyCaches {
+		total += len(d.configuredSourcesForLegacy(legacy))
+	}
+	return total
+}
+
+func (d *Doctor) configuredSourcesForLegacy(legacy string) []string {
+	var sources []string
+	for source := range d.cfg.Remote {
+		path := filepath.Join(d.cacheDir, filepath.FromSlash(models.ParseRepoSource(source).SourceKey))
+		if path == legacy {
+			sources = append(sources, source)
+		}
+	}
+	sort.Strings(sources)
+	return sources
+}
+
+func (d *Doctor) rebuildLegacyCache(legacy string, onSource func(string)) error {
+	staging, err := os.MkdirTemp(d.cacheDir, ".doctor-cache-")
+	if err != nil {
+		return err
+	}
+	defer RemoveAll(staging)
+
+	var defaultBranches []struct{ source, url, branch string }
+	stagedSource := ""
+	sources := d.configuredSourcesForLegacy(legacy)
+	for _, source := range sources {
+		repo := d.cfg.Remote[source]
+		sourceKey := models.ParseRepoSource(source).SourceKey
+		onSource(source)
+		stagedSource = filepath.Join(staging, filepath.FromSlash(sourceKey))
+		current := resolveCacheRepo(source, repo.URL, repo.Branch, d.cacheDir)
+		if GetLocalRepoCommit(current.Dir) != "" {
+			staged := resolveCacheRepo(source, repo.URL, current.Branch, staging)
+			if err := os.MkdirAll(filepath.Dir(staged.Dir), 0o755); err != nil {
+				return err
+			}
+			stdout, stderr, cloneErr := RunGit("", "clone", "--local", current.Dir, staged.Dir)
+			if cloneErr != nil {
+				return gitOpErr("stage existing Cache from", current.Dir, stdout, stderr, cloneErr)
+			}
+			if stdout, stderr, setURLErr := RunGit(staged.Dir, "remote", "set-url", "origin", current.URL); setURLErr != nil {
+				return gitOpErr("restore origin URL for", current.URL, stdout, stderr, setURLErr)
+			}
+			if repo.Branch == "" && models.ParseRepoSource(source).Branch == "" {
+				if err := recordDefaultBranch(source, current.URL, staging, current.Branch); err != nil {
+					return err
+				}
+			}
+		} else if _, err := EnsureGitRepo(source, repo.URL, repo.Branch, false, staging); err != nil {
+			return fmt.Errorf("rebuild Source %s: %w", source, err)
+		}
+		if repo.Branch == "" && models.ParseRepoSource(source).Branch == "" {
+			resolvedURL := resolveCacheRepo(source, repo.URL, repo.Branch, staging).URL
+			resolved := cachedDefaultBranch(source, resolvedURL, staging)
+			defaultBranches = append(defaultBranches, struct{ source, url, branch string }{source, resolvedURL, resolved})
+		}
+	}
+	if len(sources) == 0 {
+		return fmt.Errorf("no configured Source matches legacy Cache %s", legacy)
+	}
+	for _, identity := range defaultBranches {
+		if err := recordDefaultBranch(identity.source, identity.url, d.cacheDir, identity.branch); err != nil {
+			return err
+		}
+	}
+
+	backup, err := os.MkdirTemp(filepath.Dir(legacy), ".legacy-cache-")
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(backup); err != nil {
+		return err
+	}
+	if err := os.Rename(legacy, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(stagedSource, legacy); err != nil {
+		_ = os.Rename(backup, legacy)
+		return err
+	}
+	if err := RemoveAll(backup); err != nil {
+		_ = os.Rename(legacy, stagedSource)
+		_ = os.Rename(backup, legacy)
+		return err
+	}
+	return nil
 }

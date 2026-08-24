@@ -107,6 +107,216 @@ func TestDoctorRunFixesThenRediagnosesFilesystem(t *testing.T) {
 	}
 }
 
+func TestDoctorRunRebuildsLegacyCacheBeforeRemovingIt(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := filepath.Join(root, "cache")
+	legacy := filepath.Join(cacheDir, "owner", "repo")
+	if _, _, err := RunGit("", "clone", origin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Remaining != 0 {
+		t.Fatalf("Remaining = %d; want 0", outcome.Remaining)
+	}
+	if _, err := os.Stat(filepath.Join(legacy, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("legacy Cache still exists: %v", err)
+	}
+	branch, err := GetRemoteDefaultBranch("owner/repo", origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := resolveCacheRepo("owner/repo", origin, branch, cacheDir).Dir
+	if got := GetLocalRepoCommit(current); got == "" {
+		t.Fatal("doctor --fix removed the legacy Cache without rebuilding a branch-aware Cache")
+	}
+}
+
+func TestDoctorRunRecordsDefaultBranchForInferredSourceURL(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url.file://"+origin+".insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/owner/repo.git")
+
+	cacheDir := filepath.Join(root, "cache")
+	legacy := filepath.Join(cacheDir, "owner", "repo")
+	if _, _, err := RunGit("", "clone", origin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{Skills: map[string]string{}}
+
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Remaining != 0 {
+		t.Fatalf("Remaining = %d; want 0", outcome.Remaining)
+	}
+	if got := GetLocalRepoCommit(resolveCacheRepo("owner/repo", "", "", cacheDir).Dir); got == "" {
+		t.Fatal("default-branch identity was recorded under the unresolved empty URL")
+	}
+}
+
+func TestDoctorRunKeepsValidBranchAwareCacheWithoutRemoteAccess(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := filepath.Join(root, "cache")
+	legacy := filepath.Join(cacheDir, "owner", "repo")
+	if _, _, err := RunGit("", "clone", origin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	defaultBranch, err := GetRemoteDefaultBranch("owner/repo", origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := EnsureGitRepo("owner/repo", origin, defaultBranch, false, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommit := GetLocalRepoCommit(current)
+
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{
+		URL:    filepath.Join(root, "unavailable"),
+		Branch: defaultBranch,
+		Skills: map[string]string{"sample": "sample"},
+	}
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Remaining != 0 {
+		t.Fatalf("Remaining = %d; want 0", outcome.Remaining)
+	}
+	if got := GetLocalRepoCommit(resolveCacheRepo("owner/repo", cfg.Remote["owner/repo"].URL, defaultBranch, cacheDir).Dir); got != wantCommit {
+		t.Fatalf("preserved Cache commit = %q; want %q", got, wantCommit)
+	}
+}
+
+func TestDoctorRunPreservesLegacyCacheWhenRebuildFails(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := filepath.Join(root, "cache")
+	legacy := filepath.Join(cacheDir, "owner", "repo")
+	if _, _, err := RunGit("", "clone", origin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{
+		URL:    filepath.Join(root, "unavailable"),
+		Branch: "main",
+		Skills: map[string]string{"sample": "sample"},
+	}
+
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Remaining != 1 {
+		t.Fatalf("Remaining = %d; want failed legacy Cache repair to remain", outcome.Remaining)
+	}
+	if got := GetLocalRepoCommit(legacy); got == "" {
+		t.Fatal("doctor --fix removed the legacy Cache after its replacement failed")
+	}
+	if !containsMessage(outcome.Findings, "Failed to rebuild legacy Cache") {
+		t.Fatalf("missing rebuild failure finding: %#v", outcome.Findings)
+	}
+}
+
+func TestDoctorRunRebuildsEveryConfiguredBranchForLegacyCache(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	defaultBranch, err := GetRemoteDefaultBranch("owner/repo", origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := RunGit(origin, "checkout", "-b", "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(origin, "sample", "SKILL.md"), []byte("# Dev\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := RunGit(origin, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := RunGit(origin, "commit", "-m", "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := filepath.Join(root, "cache")
+	legacy := filepath.Join(cacheDir, "owner", "repo")
+	if _, _, err := RunGit("", "clone", origin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: origin, Branch: defaultBranch, Skills: map[string]string{}}
+	cfg.Remote["https://github.com/owner/repo/tree/dev"] = config.RemoteRepo{URL: origin, Branch: "dev", Skills: map[string]string{}}
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var rebuilt []string
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).RunWithProgress(true, func(event DoctorEvent) {
+		rebuilt = append(rebuilt, event.Source)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Remaining != 0 {
+		t.Fatalf("Remaining = %d; want 0", outcome.Remaining)
+	}
+	if len(rebuilt) != 2 {
+		t.Fatalf("rebuilt Sources = %q; want both configured branches", rebuilt)
+	}
+	for _, branch := range []string{defaultBranch, "dev"} {
+		if got := GetLocalRepoCommit(resolveCacheRepo("owner/repo", origin, branch, cacheDir).Dir); got == "" {
+			t.Fatalf("branch %s Cache was not rebuilt", branch)
+		}
+	}
+}
+
 func TestDoctorRunLeavesUnknownAgentReferencesForUser(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
