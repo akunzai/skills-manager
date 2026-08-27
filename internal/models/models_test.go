@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"testing"
 )
 
@@ -76,7 +75,7 @@ func TestGetAutomaticallyAvailableAgentsIsScopeAwareAndSorted(t *testing.T) {
 	if slices.Contains(project, "universal") {
 		t.Fatalf("filter alias must not be reported as an Agent: %#v", project)
 	}
-	if !sort.StringsAreSorted(project) {
+	if !slices.IsSorted(project) {
 		t.Fatalf("Agents are not sorted: %#v", project)
 	}
 }

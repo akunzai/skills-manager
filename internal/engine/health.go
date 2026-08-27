@@ -2,9 +2,10 @@ package engine
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -160,7 +161,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 					plan.StaleState = append(plan.StaleState, name)
 				}
 			}
-			sort.Strings(plan.StaleState)
+			slices.Sort(plan.StaleState)
 		}
 	}
 	artifacts, artifactErr := ListScopeStateArtifacts()
@@ -181,10 +182,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			legacyCaches[legacy] = struct{}{}
 		}
 	}
-	for legacy := range legacyCaches {
-		plan.LegacyCache = append(plan.LegacyCache, legacy)
-	}
-	sort.Strings(plan.LegacyCache)
+	plan.LegacyCache = slices.Sorted(maps.Keys(legacyCaches))
 	if _, err := os.Stat(d.skillsDir); os.IsNotExist(err) {
 		plan.MasterMissing = true
 	}
@@ -193,12 +191,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 	universalDirs := models.GetUniversalAgentSkillDirs(d.skillsDir)
 	configuredAgents := d.availability.ConfiguredAgentDirs()
 
-	configuredNames := make([]string, 0, len(configuredAgents))
-	for name := range configuredAgents {
-		configuredNames = append(configuredNames, name)
-	}
-	sort.Strings(configuredNames)
-	for _, agentName := range configuredNames {
+	for _, agentName := range slices.Sorted(maps.Keys(configuredAgents)) {
 		agentDir := configuredAgents[agentName]
 		if _, err := os.Stat(agentDir); os.IsNotExist(err) {
 			continue
@@ -213,12 +206,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 		})
 	}
 
-	universalNames := make([]string, 0, len(universalDirs))
-	for name := range universalDirs {
-		universalNames = append(universalNames, name)
-	}
-	sort.Strings(universalNames)
-	for _, agentName := range universalNames {
+	for _, agentName := range slices.Sorted(maps.Keys(universalDirs)) {
 		if _, ok := configuredAgents[agentName]; ok {
 			continue
 		}
@@ -396,7 +384,7 @@ func (d *Doctor) configuredSourcesForLegacy(legacy string) []string {
 			sources = append(sources, source)
 		}
 	}
-	sort.Strings(sources)
+	slices.Sort(sources)
 	return sources
 }
 

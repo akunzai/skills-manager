@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/engine"
@@ -37,12 +39,7 @@ type addRequest struct {
 }
 
 func sortedDiscoveredNames(discovered map[string]string) []string {
-	names := make([]string, 0, len(discovered))
-	for name := range discovered {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(discovered))
 }
 
 // resolveSkillsToAdd turns --all/--path/--skill or an interactive prompt
@@ -89,8 +86,8 @@ func resolveSkillsToAdd(
 				options = append(options, tui.SelectOption{Key: skName, Title: skName})
 			}
 			markInstalledSkills(options, selectionDirs)
-			sort.Slice(options, func(i, j int) bool {
-				return options[i].Key < options[j].Key
+			slices.SortFunc(options, func(a, b tui.SelectOption) int {
+				return cmp.Compare(a.Key, b.Key)
 			})
 			chosen, promptErr = tui.PromptMultiSelect(promptTitle, options)
 		}

@@ -3,10 +3,11 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
+	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
@@ -72,12 +73,7 @@ func PlanScopeFreshness(cfg *config.Config, skillsDir, cacheDir string) (*ScopeF
 	if stateErr != nil {
 		plan.StateError = stateErr.Error()
 	}
-	sources := make([]string, 0, len(cfg.Remote))
-	for source := range cfg.Remote {
-		sources = append(sources, source)
-	}
-	sort.Strings(sources)
-	for _, source := range sources {
+	for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
 		repoInfo := cfg.Remote[source]
 		cache := resolveCacheRepo(source, repoInfo.URL, repoInfo.Branch, cacheDir)
 		repository := RepositoryFreshness{Source: source, URL: cache.URL, Branch: cache.Branch, CachePath: cache.Dir, CacheSHA: GetLocalRepoCommit(cache.Dir)}
@@ -136,8 +132,7 @@ func classifyRemoteSkill(source, name, subpath, cacheDir, skillsDir string, appl
 
 func rootPathError(err error) error {
 	for err != nil {
-		var pathErr *os.PathError
-		if errors.As(err, &pathErr) {
+		if pathErr, ok := errors.AsType[*os.PathError](err); ok {
 			return pathErr.Err
 		}
 		err = errors.Unwrap(err)
@@ -160,9 +155,9 @@ func compareDigestMaps(current, desired map[string]string) ContentChanges {
 			changes.Removed = append(changes.Removed, path)
 		}
 	}
-	sort.Strings(changes.Added)
-	sort.Strings(changes.Removed)
-	sort.Strings(changes.Modified)
+	slices.Sort(changes.Added)
+	slices.Sort(changes.Removed)
+	slices.Sort(changes.Modified)
 	return changes
 }
 

@@ -1677,7 +1677,7 @@ func TestCLILsJSONTildePath(t *testing.T) {
 		t.Fatalf("ls --json failed: %v\n%s", err, out)
 	}
 
-	var items []map[string]interface{}
+	var items []map[string]any
 	if err := json.Unmarshal([]byte(out), &items); err != nil {
 		t.Fatalf("failed to parse JSON: %v\noutput: %s", err, out)
 	}

@@ -1,8 +1,10 @@
 package engine
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -22,12 +24,7 @@ type UpdateStatusResult struct {
 }
 
 func sortedSkillKeys(skills map[string]string) []string {
-	keys := make([]string, 0, len(skills))
-	for key := range skills {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(skills))
 }
 
 func CheckRepoUpdateStatus(source string, repo config.RemoteRepo, cacheDir string) UpdateStatusResult {
@@ -56,16 +53,16 @@ func checkRemoteSkillsOutdated(repositories map[string]config.RemoteRepo, cacheD
 	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
 	for i, current := range tasks {
-		wg.Add(1)
-		go func(index int, current task) {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
-			results[index] = checkRepoUpdateStatus(current.source, current.repo, cacheDir)
+			results[i] = checkRepoUpdateStatus(current.source, current.repo, cacheDir)
 			<-sem
-		}(i, current)
+		})
 	}
 	wg.Wait()
-	sort.Slice(results, func(i, j int) bool { return strings.ToLower(results[i].Source) < strings.ToLower(results[j].Source) })
+	slices.SortFunc(results, func(a, b UpdateStatusResult) int {
+		return cmp.Compare(strings.ToLower(a.Source), strings.ToLower(b.Source))
+	})
 	return results
 }
 
@@ -136,11 +133,7 @@ func resolveUpdateSources(cfg *config.Config, targets []string) (map[string]conf
 				matches[source] = struct{}{}
 			}
 		}
-		matchedSources := make([]string, 0, len(matches))
-		for source := range matches {
-			matchedSources = append(matchedSources, source)
-		}
-		sort.Strings(matchedSources)
+		matchedSources := slices.Sorted(maps.Keys(matches))
 		if len(matchedSources) == 0 {
 			return nil, fmt.Errorf("unknown update target %q", raw)
 		}

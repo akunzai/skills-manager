@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -45,25 +46,16 @@ func padRight(s string, width int) string {
 // Order of first appearance is preserved; duplicates are dropped.
 func agentDisplayLabels(agents []string) []string {
 	var labels []string
-	for _, a := range agents {
-		if a == "claude-code" || a == "claude" {
-			labels = append(labels, "claude")
-			break
-		}
+	isClaude := func(a string) bool { return a == "claude-code" || a == "claude" }
+	if slices.ContainsFunc(agents, isClaude) {
+		labels = append(labels, "claude")
 	}
 	for _, a := range agents {
-		if a == "claude-code" || a == "claude" || a == "agents" {
+		if isClaude(a) || a == "agents" {
 			continue
 		}
 		cleanA := strings.TrimSuffix(a, "-code")
-		found := false
-		for _, l := range labels {
-			if l == cleanA {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(labels, cleanA) {
 			labels = append(labels, cleanA)
 		}
 	}
@@ -131,7 +123,7 @@ func newLsCmd() *cobra.Command {
 			}
 
 			if flagJSON {
-				outList := make([]map[string]interface{}, 0, len(skills))
+				outList := make([]map[string]any, 0, len(skills))
 				for _, s := range skills {
 					installedP := s.InstalledPath
 					if installedP == "" {
@@ -144,7 +136,7 @@ func newLsCmd() *cobra.Command {
 					if resolvedScope.IsProject {
 						scopeLabel = "project"
 					}
-					outList = append(outList, map[string]interface{}{
+					outList = append(outList, map[string]any{
 						"name":       s.Name,
 						"path":       models.ToTildePath(installedP),
 						"scope":      scopeLabel,

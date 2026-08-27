@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"cmp"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -106,14 +108,12 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		for skill := range orphans {
 			addManagedLinks(skill, func(string) bool { return true })
 		}
-		for _, link := range links {
-			plan.Unconfigured = append(plan.Unconfigured, link)
-		}
+		plan.Unconfigured = append(plan.Unconfigured, slices.Collect(maps.Values(links))...)
 	}
 
-	sort.Strings(plan.UntrackedSkills)
-	sort.Strings(plan.StateSkills)
-	sort.Slice(plan.Unconfigured, func(i, j int) bool { return plan.Unconfigured[i].Path < plan.Unconfigured[j].Path })
+	slices.Sort(plan.UntrackedSkills)
+	slices.Sort(plan.StateSkills)
+	slices.SortFunc(plan.Unconfigured, func(a, b PruneLink) int { return cmp.Compare(a.Path, b.Path) })
 	return plan, nil
 }
 

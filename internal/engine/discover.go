@@ -2,10 +2,11 @@ package engine
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -95,15 +96,10 @@ func DiscoverSkillsInRepo(repoDir string) (map[string]string, error) {
 		return nil, err
 	}
 
-	names := make([]string, 0, len(foundPaths))
-	for name := range foundPaths {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(foundPaths)) {
 		paths := foundPaths[name]
 		if len(paths) > 1 {
-			sort.Strings(paths)
+			slices.Sort(paths)
 			return nil, fmt.Errorf("duplicate skill name %q found in %s", name, strings.Join(paths, ", "))
 		}
 		found[name] = paths[0]

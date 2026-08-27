@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/presentation"
@@ -499,7 +499,7 @@ func runGroupedMultiSelect(
 			remainingSources = append(remainingSources, source)
 		}
 	}
-	sort.Strings(remainingSources)
+	slices.Sort(remainingSources)
 	sources = append(sources, remainingSources...)
 	for _, source := range sources {
 		skills := groupedItems[source]

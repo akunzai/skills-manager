@@ -3,10 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -36,13 +37,8 @@ func newConfigCmd() *cobra.Command {
 			if len(cfg.Settings.Availability) == 0 {
 				fmt.Fprintln(out, "Availability overrides: none")
 			} else {
-				names := make([]string, 0, len(cfg.Settings.Availability))
-				for name := range cfg.Settings.Availability {
-					names = append(names, name)
-				}
-				sort.Strings(names)
 				fmt.Fprintln(out, "Availability overrides:")
-				for _, name := range names {
+				for _, name := range slices.Sorted(maps.Keys(cfg.Settings.Availability)) {
 					override := cfg.Settings.Availability[name]
 					fmt.Fprintf(out, "  %s: include [%s]; exclude [%s]\n", name, strings.Join(override.Include, ", "), strings.Join(override.Exclude, ", "))
 				}

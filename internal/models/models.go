@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -222,7 +222,7 @@ func GetAutomaticallyAvailableAgents(skillsDir string) []string {
 			agents = append(agents, agent)
 		}
 	}
-	sort.Strings(agents)
+	slices.Sort(agents)
 	return agents
 }
 

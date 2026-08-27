@@ -2,9 +2,10 @@ package engine
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -68,7 +69,7 @@ func (a *Availability) ManagedAgents(skill string) []string {
 	}
 	override := a.cfg.Settings.Availability[skill]
 	excluded := agentSet(override.Exclude)
-	candidates := append(append([]string{}, defaults...), override.Include...)
+	candidates := slices.Concat(defaults, override.Include)
 	seen := make(map[string]struct{}, len(candidates))
 	managed := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -84,21 +85,16 @@ func (a *Availability) ManagedAgents(skill string) []string {
 			managed = append(managed, norm)
 		}
 	}
-	sort.Strings(managed)
+	slices.Sort(managed)
 	return managed
 }
 
 func (a *Availability) AutomaticallyAvailable() []string {
-	return append([]string{}, a.automatic...)
+	return slices.Clone(a.automatic)
 }
 
 func (a *Availability) ManageableAgents() []string {
-	agents := make([]string, 0, len(a.known))
-	for agent := range a.known {
-		agents = append(agents, agent)
-	}
-	sort.Strings(agents)
-	return agents
+	return slices.Sorted(maps.Keys(a.known))
 }
 
 // ValidateManagedAgents normalizes a requested policy mutation and rejects
@@ -120,7 +116,7 @@ func (a *Availability) ValidateManagedAgents(agents []string) ([]string, error) 
 		seen[agent] = struct{}{}
 		normalized = append(normalized, agent)
 	}
-	sort.Strings(normalized)
+	slices.Sort(normalized)
 	return normalized, nil
 }
 
@@ -162,12 +158,7 @@ func (a *Availability) UnknownAgentReferences() []UnknownAgentReference {
 			refs = append(refs, UnknownAgentReference{Field: AgentRefDefaultAgents, Agent: models.NormalizeAgentName(agent)})
 		}
 	}
-	skills := make([]string, 0, len(a.cfg.Settings.Availability))
-	for skill := range a.cfg.Settings.Availability {
-		skills = append(skills, skill)
-	}
-	sort.Strings(skills)
-	for _, skill := range skills {
+	for _, skill := range slices.Sorted(maps.Keys(a.cfg.Settings.Availability)) {
 		override := a.cfg.Settings.Availability[skill]
 		for _, agent := range override.Include {
 			if !a.recognized(agent) {
@@ -254,11 +245,7 @@ func (a *Availability) SetManagedAgents(skill string, selected []string) error {
 	selectedSet := agentSet(selected)
 	a.FollowDefaults(skill)
 	defaults := agentSet(a.ManagedAgents(skill))
-	known := make([]string, 0, len(a.known))
-	for agent := range a.known {
-		known = append(known, agent)
-	}
-	sort.Strings(known)
+	known := slices.Sorted(maps.Keys(a.known))
 	var include, exclude []string
 	for _, agent := range known {
 		_, chosen := selectedSet[agent]
@@ -316,8 +303,8 @@ func (s availabilityState) drift() (missing, unexpected []string) {
 			unexpected = append(unexpected, agent)
 		}
 	}
-	sort.Strings(missing)
-	sort.Strings(unexpected)
+	slices.Sort(missing)
+	slices.Sort(unexpected)
 	return missing, unexpected
 }
 

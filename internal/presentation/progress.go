@@ -31,9 +31,7 @@ func startProgress(w io.Writer, message string, interactive bool) *Progress {
 
 	p.done = make(chan struct{})
 	fmt.Fprintf(w, "\r%s %s", progressFrames[0], message)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
+	p.wg.Go(func() {
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		frame := 1
@@ -46,7 +44,7 @@ func startProgress(w io.Writer, message string, interactive bool) *Progress {
 				return
 			}
 		}
-	}()
+	})
 	return p
 }
 
