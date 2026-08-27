@@ -1,9 +1,10 @@
 package engine
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/models"
@@ -152,7 +153,7 @@ func LeftoverEmptyAgentDirs(known, configured map[string]string) []AgentDir {
 		}
 		leftover = append(leftover, AgentDir{Name: name, Dir: dir})
 	}
-	sort.Slice(leftover, func(i, j int) bool { return leftover[i].Name < leftover[j].Name })
+	slices.SortFunc(leftover, func(a, b AgentDir) int { return cmp.Compare(a.Name, b.Name) })
 	return leftover
 }
 

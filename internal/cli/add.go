@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -88,18 +90,14 @@ func groupDiscoveredSkills(discovered map[string]string) (tui.GroupedItems, bool
 		return nil, false
 	}
 
-	directories := make([]string, 0, len(byDirectory))
-	for directory := range byDirectory {
-		directories = append(directories, directory)
-	}
-	sort.Strings(directories)
+	directories := slices.Sorted(maps.Keys(byDirectory))
 
 	labels := groupLabels(directories)
 	groups := make(tui.GroupedItems, len(directories))
 	for _, directory := range directories {
 		options := byDirectory[directory]
-		sort.Slice(options, func(i, j int) bool {
-			return options[i].Key < options[j].Key
+		slices.SortFunc(options, func(a, b tui.SelectOption) int {
+			return cmp.Compare(a.Key, b.Key)
 		})
 		groups[labels[directory]] = options
 	}
@@ -432,11 +430,7 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsD
 
 	availability := engine.NewAvailability(cfg, skillsDir)
 	agents := availability.ManageableAgents()
-	skillNames := make([]string, 0, len(skills))
-	for skill := range skills {
-		skillNames = append(skillNames, skill)
-	}
-	sort.Strings(skillNames)
+	skillNames := slices.Sorted(maps.Keys(skills))
 	baseline, ok := agentSelectionBaseline(availability, skillNames)
 	if !ok {
 		return fmt.Errorf("selected skills have different availability; configure them individually with skills agents")

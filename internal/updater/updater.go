@@ -83,7 +83,7 @@ func ParseSemver(v string) [3]int {
 func CompareSemver(v1, v2 string) int {
 	s1, pre1 := parseSemver(v1)
 	s2, pre2 := parseSemver(v2)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if s1[i] > s2[i] {
 			return 1
 		}

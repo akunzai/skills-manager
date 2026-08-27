@@ -3,9 +3,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/akunzai/skills-manager/internal/models"
 )
@@ -160,20 +161,12 @@ func NormalizeAvailability(cfg *Config) error {
 
 func normalizeAgents(agents []string) []string {
 	seen := make(map[string]struct{}, len(agents))
-	normalized := make([]string, 0, len(agents))
 	for _, agent := range agents {
-		norm := models.NormalizeAgentName(agent)
-		if norm == "" {
-			continue
+		if norm := models.NormalizeAgentName(agent); norm != "" {
+			seen[norm] = struct{}{}
 		}
-		if _, exists := seen[norm]; exists {
-			continue
-		}
-		seen[norm] = struct{}{}
-		normalized = append(normalized, norm)
 	}
-	sort.Strings(normalized)
-	return normalized
+	return slices.Sorted(maps.Keys(seen))
 }
 
 func FindSkillSource(cfg *Config, skillName string) (category string, sourceKey string, found bool) {
@@ -306,10 +299,5 @@ func GetConfiguredSkillNames(cfg *Config) []string {
 		names[sk] = struct{}{}
 	}
 
-	result := make([]string, 0, len(names))
-	for sk := range names {
-		result = append(result, sk)
-	}
-	sort.Strings(result)
-	return result
+	return slices.Sorted(maps.Keys(names))
 }

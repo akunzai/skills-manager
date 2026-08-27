@@ -2,9 +2,10 @@ package engine
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -215,11 +216,7 @@ func SyncDeclaredWithOptions(cfg *config.Config, skillsDir, cacheDir string, opt
 		}
 	}
 
-	localNames := make([]string, 0, len(cfg.Local))
-	for name := range cfg.Local {
-		localNames = append(localNames, name)
-	}
-	sort.Strings(localNames)
+	localNames := slices.Sorted(maps.Keys(cfg.Local))
 	if !options.DryRun && len(localNames) > 0 {
 		if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 			return report, fmt.Errorf("failed to create skills dir: %w", err)
@@ -248,12 +245,7 @@ func SyncDeclaredWithOptions(cfg *config.Config, skillsDir, cacheDir string, opt
 		}
 	}
 
-	names := make([]string, 0, len(configured))
-	for name := range configured {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	report.Configured = names
+	report.Configured = slices.Sorted(maps.Keys(configured))
 	if report.Failures > 0 || (options.DryRun && report.Changed) {
 		return report, fmt.Errorf("Sync did not converge: %d failure(s)", report.Failures)
 	}

@@ -1,9 +1,10 @@
 package engine
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -102,11 +103,11 @@ func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error)
 		result = append(result, *item)
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		if strings.ToLower(result[i].Source) != strings.ToLower(result[j].Source) {
-			return strings.ToLower(result[i].Source) < strings.ToLower(result[j].Source)
-		}
-		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	slices.SortFunc(result, func(a, b models.SkillItem) int {
+		return cmp.Or(
+			cmp.Compare(strings.ToLower(a.Source), strings.ToLower(b.Source)),
+			cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)),
+		)
 	})
 
 	return result, nil

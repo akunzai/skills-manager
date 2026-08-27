@@ -2,8 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -108,12 +109,7 @@ func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 		agents[link.Agent] = struct{}{}
 	}
 	if len(agents) > 0 {
-		names := make([]string, 0, len(agents))
-		for agent := range agents {
-			names = append(names, agent)
-		}
-		sort.Strings(names)
-		fmt.Fprintf(out, "Affected agents: %s\n", strings.Join(names, ", "))
+		fmt.Fprintf(out, "Affected agents: %s\n", strings.Join(slices.Sorted(maps.Keys(agents)), ", "))
 	}
 	for _, skill := range plan.UntrackedSkills {
 		fmt.Fprintf(out, "  master skill: %s\n", skill)
