@@ -242,15 +242,15 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			plan.Invalid = append(plan.Invalid, s.Name)
 		}
 		source := availabilitySource(s)
-		missing, unexpected := d.availability.Drift(s.Name)
-		if len(missing) == 0 && len(unexpected) == 0 {
+		drift := d.availability.ObserveAvailability(s.Name)
+		if drift.Empty() {
 			continue
 		}
 		plan.Drift = append(plan.Drift, driftFinding{
 			Skill:      s.Name,
 			Source:     source,
-			Missing:    missing,
-			Unexpected: unexpected,
+			Missing:    drift.Missing,
+			Unexpected: drift.Unexpected,
 		})
 	}
 	return plan, nil

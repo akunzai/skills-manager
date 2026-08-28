@@ -3,8 +3,6 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -36,20 +34,6 @@ func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir, scope str
 		return "", nil, fmt.Errorf("discover Skills in %s: %w", key, err)
 	}
 	return repoDir, discovered, nil
-}
-
-func (s remoteSource) missingSkills(force bool) map[string]string {
-	missing := make(map[string]string)
-	for name, subpath := range s.repo.Skills {
-		if force {
-			missing[name] = subpath
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(s.availability.skillsDir, name)); err != nil {
-			missing[name] = subpath
-		}
-	}
-	return missing
 }
 
 func (s remoteSource) refresh(force bool) (string, error) {
@@ -115,49 +99,27 @@ func (s remoteSource) ObserveFreshness() FreshnessRepository {
 
 // reconcile Materializes selected Skills, then applies Availability for every
 // Skill in the Source. Materialize failures are events and continue;
-// Availability failures fail closed. dryRun never writes.
-func (s remoteSource) reconcile(repoDir string, dryRun bool, toWrite map[string]string, emit func(SyncEvent)) error {
+// Availability failures fail closed.
+func (s remoteSource) reconcile(repoDir string, toWrite map[string]string, emit func(SyncEvent)) error {
 	if emit == nil {
 		emit = func(SyncEvent) {}
 	}
 	for _, name := range sortedSkillKeys(s.repo.Skills) {
 		subpath := s.repo.Skills[name]
-		if !dryRun && toWrite != nil {
-			if _, write := toWrite[name]; write {
-				if err := MaterializeRemoteSkill(name, subpath, repoDir, s.availability.skillsDir); err != nil {
-					if errors.Is(err, errRepoPathMissing) {
-						emit(SyncEvent{Kind: SyncPathMissing, Source: s.key, Skill: name, Path: subpath})
-					} else {
-						emit(SyncEvent{Kind: SyncCopyFailed, Source: s.key, Skill: name, Err: err.Error()})
-					}
-					continue
+		if _, write := toWrite[name]; write {
+			if err := MaterializeRemoteSkill(name, subpath, repoDir, s.availability.skillsDir); err != nil {
+				if errors.Is(err, errRepoPathMissing) {
+					emit(SyncEvent{Kind: SyncPathMissing, Source: s.key, Skill: name, Path: subpath})
+				} else {
+					emit(SyncEvent{Kind: SyncCopyFailed, Source: s.key, Skill: name, Err: err.Error()})
 				}
-				emit(SyncEvent{Kind: SyncMaterialized, Source: s.key, Skill: name, Path: subpath})
+				continue
 			}
+			emit(SyncEvent{Kind: SyncMaterialized, Source: s.key, Skill: name, Path: subpath})
 		}
-		if err := s.availability.applyDeclared(name, s.key, dryRun, emit); err != nil {
+		if err := s.availability.Apply(name); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// sync reconciles one declared remote Source end to end.
-func (s remoteSource) sync(force, dryRun bool, emit func(SyncEvent)) error {
-	missing := s.missingSkills(force)
-	if len(missing) == 0 && !force {
-		return s.reconcile("", dryRun, nil, emit)
-	}
-
-	emit(SyncEvent{Kind: SyncRepoStart, Source: s.key, Skills: sortedSkillKeys(s.repo.Skills)})
-	repoDir := resolveCacheRepo(s.key, s.repo.URL, s.repo.Branch, s.cacheDir).Dir
-	if GetLocalRepoCommit(repoDir) == "" {
-		emit(SyncEvent{Kind: SyncFetchFailed, Source: s.key, Err: fmt.Sprintf("Cache missing for Source %s; run 'skills update' first", s.key)})
-		return nil
-	}
-	if dryRun {
-		emit(SyncEvent{Kind: SyncWouldSync, Source: s.key, Skills: sortedSkillKeys(missing)})
-		return s.reconcile("", true, nil, emit)
-	}
-	return s.reconcile(repoDir, false, missing, emit)
 }

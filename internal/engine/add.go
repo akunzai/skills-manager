@@ -272,11 +272,9 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		switch plan.Source.Kind {
 		case AddSourceRemote:
 			one := map[string]string{name: subpath}
-			err = newRemoteSource(availability, plan.Source.Key, config.RemoteRepo{Skills: one}, "").reconcile(plan.Source.RepoDir, false, one, note)
-		case AddSourceSymlink:
-			err = reconcileLocalSymlink(availability, name, false, note)
-		case AddSourceCommand:
-			err = reconcileCommand(availability, name, false, note)
+			err = newRemoteSource(availability, plan.Source.Key, config.RemoteRepo{Skills: one}, "").reconcile(plan.Source.RepoDir, one, note)
+		case AddSourceSymlink, AddSourceCommand:
+			err = applyLocalItem(availability, planLocalItem(availability, name), note)
 		}
 		if err != nil {
 			return AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}, fmt.Errorf("saved config but failed to apply availability for %s: %w", name, err)
