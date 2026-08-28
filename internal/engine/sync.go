@@ -138,13 +138,29 @@ func SyncDeclaredWithOptions(cfg *config.Config, skillsDir, cacheDir string, opt
 	}
 	configured := make(map[string]struct{})
 
-	plan, err := PlanScopeFreshness(cfg, skillsDir, cacheDir)
+	plan, err := InspectFreshness(cfg, skillsDir, cacheDir, FreshnessOptions{ObserveScope: true})
 	if err != nil {
 		return report, err
 	}
 	if plan.StateError != "" {
 		emit(SyncEvent{Kind: SyncSkipped, Err: plan.StateError})
 		report.Failures++
+	}
+	var stateStore *ScopeStateStore
+	var state ScopeState
+	canSave := plan.StateError == ""
+	if canSave {
+		stateStore, err = NewScopeStateStore(skillsDir)
+		if err != nil {
+			canSave = false
+		} else {
+			state, err = stateStore.Load()
+			if err != nil {
+				canSave = false
+			} else if state.Skills == nil {
+				state.Skills = make(map[string]AppliedSkillState)
+			}
+		}
 	}
 	for _, repository := range plan.Repositories {
 		emit(SyncEvent{Kind: SyncRepoStart, Source: repository.Source, Skills: skillNames(repository.Skills)})
@@ -198,20 +214,18 @@ func SyncDeclaredWithOptions(cfg *config.Config, skillsDir, cacheDir string, opt
 				report.Failures++
 				continue
 			}
-			if plan.StateError == "" {
-				state := plan.State
+			if canSave {
 				digests, digestErr := DigestSkillContent(skill.ScopePath)
 				if digestErr != nil {
 					report.Failures++
 					continue
 				}
 				skill.CacheDigests = digests
-				state.Skills[skill.Name] = skill.appliedState(repository.CachePath, repository.CacheSHA)
-				if saveErr := plan.StateStore.Save(state); saveErr != nil {
+				state.Skills[skill.Name] = skill.appliedState(repository.CachePath, repository.LocalSHA)
+				if saveErr := stateStore.Save(state); saveErr != nil {
 					report.Failures++
 					continue
 				}
-				plan.State = state
 			}
 		}
 	}

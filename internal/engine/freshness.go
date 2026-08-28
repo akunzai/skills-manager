@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -8,11 +9,120 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
+	"sync"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
 
 type SkillFreshnessStatus string
+
+type RemoteFreshnessStatus string
+
+const (
+	RemoteUpToDate        RemoteFreshnessStatus = "up_to_date"
+	RemoteUpdateAvailable RemoteFreshnessStatus = "update_available"
+	RemoteNotCached       RemoteFreshnessStatus = "not_cached"
+	RemoteError           RemoteFreshnessStatus = "error"
+)
+
+type FreshnessDispositionKind string
+
+const (
+	FreshnessNone         FreshnessDispositionKind = "none"
+	FreshnessUpdate       FreshnessDispositionKind = "update"
+	FreshnessSync         FreshnessDispositionKind = "sync"
+	FreshnessProtectDrift FreshnessDispositionKind = "protect_drift"
+	FreshnessInvestigate  FreshnessDispositionKind = "investigate"
+)
+
+type FreshnessDisposition struct {
+	Kind   FreshnessDispositionKind `json:"kind"`
+	Reason string                   `json:"reason"`
+	Source string                   `json:"source,omitempty"`
+	Skill  string                   `json:"skill,omitempty"`
+}
+
+type FreshnessRepository struct {
+	Source       string                `json:"source"`
+	URL          string                `json:"url"`
+	Branch       string                `json:"branch"`
+	RemoteStatus RemoteFreshnessStatus `json:"status"`
+	LocalSHA     string                `json:"local_sha"`
+	RemoteSHA    string                `json:"remote_sha"`
+	CachePath    string                `json:"cache_path"`
+	Error        string                `json:"error,omitempty"`
+	Skills       []SkillFreshness      `json:"skills"`
+}
+
+type FreshnessSnapshot struct {
+	Repositories []FreshnessRepository `json:"repositories"`
+	StateError   string                `json:"state_error,omitempty"`
+}
+
+type FreshnessOptions struct {
+	ObserveRemote bool
+	ObserveScope  bool
+	Workers       int
+}
+
+func (s FreshnessSnapshot) Dispositions() []FreshnessDisposition {
+	byKind := make(map[FreshnessDispositionKind][]FreshnessDisposition)
+	add := func(kind FreshnessDispositionKind, reason, source, skill string) {
+		byKind[kind] = append(byKind[kind], FreshnessDisposition{Kind: kind, Reason: reason, Source: source, Skill: skill})
+	}
+	if s.StateError != "" {
+		add(FreshnessInvestigate, "scope_state_error", "", "")
+	}
+	for _, repository := range s.Repositories {
+		switch repository.RemoteStatus {
+		case RemoteUpdateAvailable, RemoteNotCached:
+			add(FreshnessUpdate, string(repository.RemoteStatus), repository.Source, "")
+		case RemoteError:
+			add(FreshnessUpdate, string(repository.RemoteStatus), repository.Source, "")
+			add(FreshnessInvestigate, "remote_error", repository.Source, "")
+		}
+		for _, skill := range repository.Skills {
+			switch skill.Status {
+			case SkillMissing, SkillCacheUpdateAvailable, SkillUnknownBaseline, SkillUnverified:
+				add(FreshnessSync, string(skill.Status), repository.Source, skill.Name)
+			case SkillLocalDrift:
+				add(FreshnessSync, string(skill.Status), repository.Source, skill.Name)
+				add(FreshnessProtectDrift, string(skill.Status), repository.Source, skill.Name)
+			case SkillError:
+				add(FreshnessSync, string(skill.Status), repository.Source, skill.Name)
+				add(FreshnessInvestigate, "skill_error", repository.Source, skill.Name)
+			}
+		}
+	}
+	if len(byKind) == 0 {
+		return []FreshnessDisposition{{Kind: FreshnessNone, Reason: "no_action"}}
+	}
+	var dispositions []FreshnessDisposition
+	for _, kind := range []FreshnessDispositionKind{FreshnessUpdate, FreshnessSync, FreshnessProtectDrift, FreshnessInvestigate} {
+		dispositions = append(dispositions, byKind[kind]...)
+	}
+	return dispositions
+}
+
+func (s FreshnessSnapshot) DispositionKinds() []FreshnessDispositionKind {
+	dispositions := s.Dispositions()
+	seen := make(map[FreshnessDispositionKind]bool)
+	kinds := make([]FreshnessDispositionKind, 0, len(dispositions))
+	for _, disposition := range dispositions {
+		if seen[disposition.Kind] {
+			continue
+		}
+		seen[disposition.Kind] = true
+		kinds = append(kinds, disposition.Kind)
+	}
+	return kinds
+}
+
+func (s FreshnessSnapshot) Fresh() bool {
+	kinds := s.DispositionKinds()
+	return len(kinds) == 1 && kinds[0] == FreshnessNone
+}
 
 const (
 	SkillInSync               SkillFreshnessStatus = "in_sync"
@@ -44,23 +154,25 @@ type SkillFreshness struct {
 	Error            string               `json:"error,omitempty"`
 }
 
-type RepositoryFreshness struct {
-	Source    string           `json:"source"`
-	URL       string           `json:"url"`
-	Branch    string           `json:"branch"`
-	CachePath string           `json:"cache_path"`
-	CacheSHA  string           `json:"cache_sha"`
-	Skills    []SkillFreshness `json:"skills"`
+func InspectFreshness(cfg *config.Config, skillsDir, cacheDir string, options FreshnessOptions) (*FreshnessSnapshot, error) {
+	snapshot := &FreshnessSnapshot{}
+	if options.ObserveRemote {
+		snapshot.Repositories = observeRemoteFreshness(cfg.Remote, cacheDir, options.Workers)
+	} else {
+		for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
+			cache := resolveCacheRepo(source, cfg.Remote[source].URL, cfg.Remote[source].Branch, cacheDir)
+			snapshot.Repositories = append(snapshot.Repositories, FreshnessRepository{
+				Source: source, URL: cache.URL, Branch: cache.Branch, CachePath: cache.Dir, LocalSHA: GetLocalRepoCommit(cache.Dir),
+			})
+		}
+	}
+	if !options.ObserveScope {
+		return snapshot, nil
+	}
+	return attachScopeObservations(snapshot, cfg, skillsDir)
 }
 
-type ScopeFreshnessPlan struct {
-	Repositories []RepositoryFreshness `json:"repositories"`
-	State        ScopeState            `json:"-"`
-	StateStore   *ScopeStateStore      `json:"-"`
-	StateError   string                `json:"state_error,omitempty"`
-}
-
-func PlanScopeFreshness(cfg *config.Config, skillsDir, cacheDir string) (*ScopeFreshnessPlan, error) {
+func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, skillsDir string) (*FreshnessSnapshot, error) {
 	store, err := NewScopeStateStore(skillsDir)
 	if err != nil {
 		return nil, err
@@ -68,18 +180,15 @@ func PlanScopeFreshness(cfg *config.Config, skillsDir, cacheDir string) (*ScopeF
 	state, stateErr := store.Load()
 	if stateErr != nil {
 		state = store.emptyState()
+		snapshot.StateError = stateErr.Error()
 	}
-	plan := &ScopeFreshnessPlan{State: state, StateStore: store}
-	if stateErr != nil {
-		plan.StateError = stateErr.Error()
-	}
-	for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
+	for i := range snapshot.Repositories {
+		source := snapshot.Repositories[i].Source
 		repoInfo := cfg.Remote[source]
-		cache := resolveCacheRepo(source, repoInfo.URL, repoInfo.Branch, cacheDir)
-		repository := RepositoryFreshness{Source: source, URL: cache.URL, Branch: cache.Branch, CachePath: cache.Dir, CacheSHA: GetLocalRepoCommit(cache.Dir)}
+		cachePath := snapshot.Repositories[i].CachePath
 		for _, name := range sortedSkillKeys(repoInfo.Skills) {
-			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cache.Dir, skillsDir, state.Skills[name])
-			if repository.CacheSHA == "" {
+			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cachePath, skillsDir, state.Skills[name])
+			if snapshot.Repositories[i].LocalSHA == "" {
 				skill.Status = SkillUnverified
 				skill.BaselineRecorded = false
 				skill.CacheDigests = nil
@@ -88,11 +197,43 @@ func PlanScopeFreshness(cfg *config.Config, skillsDir, cacheDir string) (*ScopeF
 				skill.Status = SkillUnknownBaseline
 				skill.BaselineRecorded = false
 			}
-			repository.Skills = append(repository.Skills, skill)
+			snapshot.Repositories[i].Skills = append(snapshot.Repositories[i].Skills, skill)
 		}
-		plan.Repositories = append(plan.Repositories, repository)
 	}
-	return plan, nil
+	return snapshot, nil
+}
+
+func observeRemoteFreshness(repositories map[string]config.RemoteRepo, cacheDir string, workers int) []FreshnessRepository {
+	if workers <= 0 {
+		workers = 8
+	}
+	type task struct {
+		source string
+		repo   config.RemoteRepo
+	}
+	tasks := make([]task, 0, len(repositories))
+	for source, repo := range repositories {
+		tasks = append(tasks, task{source, repo})
+	}
+	results := make([]FreshnessRepository, len(tasks))
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i, current := range tasks {
+		wg.Go(func() {
+			sem <- struct{}{}
+			results[i] = observeRemoteSource(current.source, current.repo, cacheDir)
+			<-sem
+		})
+	}
+	wg.Wait()
+	slices.SortFunc(results, func(a, b FreshnessRepository) int {
+		return cmp.Compare(strings.ToLower(a.Source), strings.ToLower(b.Source))
+	})
+	return results
+}
+
+var observeRemoteSource = func(source string, repo config.RemoteRepo, cacheDir string) FreshnessRepository {
+	return newRemoteSource(nil, source, repo, cacheDir).ObserveFreshness()
 }
 
 func classifyRemoteSkill(source, name, subpath, cacheDir, skillsDir string, applied AppliedSkillState) SkillFreshness {

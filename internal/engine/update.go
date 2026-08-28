@@ -1,69 +1,16 @@
 package engine
 
 import (
-	"cmp"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
 
-type UpdateStatusResult struct {
-	Source    string   `json:"source"`
-	URL       string   `json:"url"`
-	Branch    string   `json:"branch"`
-	Status    string   `json:"status"`
-	LocalSHA  string   `json:"local_sha"`
-	RemoteSHA string   `json:"remote_sha"`
-	Skills    []string `json:"skills"`
-	CachePath string   `json:"cache_path"`
-	Error     string   `json:"error,omitempty"`
-}
-
 func sortedSkillKeys(skills map[string]string) []string {
 	return slices.Sorted(maps.Keys(skills))
-}
-
-func CheckRepoUpdateStatus(source string, repo config.RemoteRepo, cacheDir string) UpdateStatusResult {
-	return newRemoteSource(nil, source, repo, cacheDir).CheckStatus()
-}
-
-var checkRepoUpdateStatus = CheckRepoUpdateStatus
-
-func CheckAllRemoteSkillsOutdated(cfg *config.Config, cacheDir string, workers int) []UpdateStatusResult {
-	return checkRemoteSkillsOutdated(cfg.Remote, cacheDir, workers)
-}
-
-func checkRemoteSkillsOutdated(repositories map[string]config.RemoteRepo, cacheDir string, workers int) []UpdateStatusResult {
-	if workers <= 0 {
-		workers = 8
-	}
-	type task struct {
-		source string
-		repo   config.RemoteRepo
-	}
-	tasks := make([]task, 0, len(repositories))
-	for source, repo := range repositories {
-		tasks = append(tasks, task{source, repo})
-	}
-	results := make([]UpdateStatusResult, len(tasks))
-	sem := make(chan struct{}, workers)
-	var wg sync.WaitGroup
-	for i, current := range tasks {
-		wg.Go(func() {
-			sem <- struct{}{}
-			results[i] = checkRepoUpdateStatus(current.source, current.repo, cacheDir)
-			<-sem
-		})
-	}
-	wg.Wait()
-	slices.SortFunc(results, func(a, b UpdateStatusResult) int {
-		return cmp.Compare(strings.ToLower(a.Source), strings.ToLower(b.Source))
-	})
-	return results
 }
 
 type UpdatedRepoInfo struct {
@@ -152,15 +99,20 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 	}
 	result := &UpdateResult{UpdatedRepos: []UpdatedRepoInfo{}, SkippedRepos: []SkippedRepoInfo{}, Errors: []UpdateErrorInfo{}}
 	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckStart, Total: len(repositories)})
-	statuses := checkRemoteSkillsOutdated(repositories, cacheDir, 8)
+	selected := *config.DefaultConfig()
+	selected.Remote = repositories
+	snapshot, err := InspectFreshness(&selected, "", cacheDir, FreshnessOptions{ObserveRemote: true, Workers: 8})
+	if err != nil {
+		return nil, err
+	}
 	var refresh []string
-	for _, status := range statuses {
+	for _, status := range snapshot.Repositories {
 		source := status.Source
-		if !force && status.Status == "up_to_date" {
+		if !force && status.RemoteStatus == RemoteUpToDate {
 			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: "up_to_date", LocalSHA: status.LocalSHA})
 			continue
 		}
-		if !force && status.Status == "error" {
+		if !force && status.RemoteStatus == RemoteError {
 			message := status.Error
 			if message == "" {
 				message = "failed to query remote repository"
@@ -171,7 +123,7 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		}
 		refresh = append(refresh, source)
 	}
-	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckDone, Total: len(statuses), UpToDate: len(result.SkippedRepos), Outdated: len(refresh)})
+	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckDone, Total: len(snapshot.Repositories), UpToDate: len(result.SkippedRepos), Outdated: len(refresh)})
 	if !dryRun && len(refresh) > 0 {
 		emitUpdate(progress, UpdateEvent{Kind: UpdateRefreshStart, Total: len(refresh)})
 	}

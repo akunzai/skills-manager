@@ -738,7 +738,7 @@ func TestApplyPrunePlanLeavesLinkReplacedAfterPlanning(t *testing.T) {
 	}
 }
 
-func TestCheckRepoUpdateStatusSourceParsing(t *testing.T) {
+func TestObserveRemoteFreshnessSourceParsing(t *testing.T) {
 	tmpCache := t.TempDir()
 
 	tests := []struct {
@@ -764,26 +764,26 @@ func TestCheckRepoUpdateStatusSourceParsing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		res := CheckRepoUpdateStatus(tt.source, config.RemoteRepo{
+		res := newRemoteSource(nil, tt.source, config.RemoteRepo{
 			Skills: map[string]string{"foo": "skills/foo"},
-		}, tmpCache)
+		}, tmpCache).ObserveFreshness()
 
 		if filepath.Dir(res.CachePath) != tt.expectedDest {
-			t.Errorf("CheckRepoUpdateStatus(%q).CachePath parent = %q; want %q", tt.source, filepath.Dir(res.CachePath), tt.expectedDest)
+			t.Errorf("ObserveFreshness(%q).CachePath parent = %q; want %q", tt.source, filepath.Dir(res.CachePath), tt.expectedDest)
 		}
 	}
 }
 
 func TestUpdateChecksRemoteSourcesInParallel(t *testing.T) {
-	oldCheck := checkRepoUpdateStatus
+	oldCheck := observeRemoteSource
 	entered := make(chan string, 3)
 	release := make(chan struct{})
-	checkRepoUpdateStatus = func(source string, _ config.RemoteRepo, _ string) UpdateStatusResult {
+	observeRemoteSource = func(source string, _ config.RemoteRepo, _ string) FreshnessRepository {
 		entered <- source
 		<-release
-		return UpdateStatusResult{Source: source, Status: "up_to_date"}
+		return FreshnessRepository{Source: source, RemoteStatus: RemoteUpToDate}
 	}
-	t.Cleanup(func() { checkRepoUpdateStatus = oldCheck })
+	t.Cleanup(func() { observeRemoteSource = oldCheck })
 
 	cfg := config.DefaultConfig()
 	for _, source := range []string{"owner/one", "owner/two", "owner/three"} {
@@ -933,8 +933,8 @@ func TestUpdateDetectsChangedRemoteDefaultBranch(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	status := CheckRepoUpdateStatus("owner/repo", cfg.Remote["owner/repo"], cacheDir)
-	if status.Status != "not_cached" || status.Branch != "next" {
+	status := newRemoteSource(nil, "owner/repo", cfg.Remote["owner/repo"], cacheDir).ObserveFreshness()
+	if status.RemoteStatus != RemoteNotCached || status.Branch != "next" {
 		t.Fatalf("status = %#v", status)
 	}
 	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
