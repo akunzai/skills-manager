@@ -31,6 +31,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Product UI, CLI output, and README design: @docs/design.md
 - Release SOP: @docs/release.md
 - Lessons learned: @docs/lessons-learned.md
+- Exit-code contract: @docs/adr/0002-exit-codes-express-state.md
 
 ## Claude Code Compatibility
 

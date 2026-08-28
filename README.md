@@ -116,11 +116,11 @@ Universal agents that read the central skills directory directly do not need lin
 
 Every operational command accepts `--project`. Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
 
-For remote Skills, the normal flow is `skills outdated`, `skills update`, then `skills sync`. Sync protects known local changes and unknown baselines; inspect them first, or explicitly overwrite with `skills sync --force`. `sync --dry-run` is a non-mutating freshness gate and exits non-zero when reconciliation is needed.
+For remote Skills, the normal flow is `skills outdated`, `skills update`, then `skills sync`. Sync protects known local changes and unknown baselines; inspect them first, or explicitly overwrite with `skills sync --force`. `sync --dry-run` is a non-mutating freshness gate: it reports what Sync would do without writing anything, and without running a skill's own commands.
 
 When upgrading from a legacy branchless Cache layout, `skills doctor --fix` may access the network to rebuild affected Cache entries; it does not run Sync automatically.
 
-`skills outdated` exits with `0` when everything is current, `1` when freshness differences are found, and `2` when the check cannot be completed. Freshness differences are reported as status and next actions, not as command errors.
+`skills sync` and `skills outdated` share one set of exit codes: `0` when the Scope matches its Config, `1` when it does not, and `2` when the work could not be completed. A skill Sync deliberately left alone — protected local changes, an unknown baseline, an uncached Source — is reported as a blocked skill with a next action, and exits `1`. Only a genuine failure, such as a copy that did not complete or an agent path Sync does not manage, exits `2`. Both commands report state and next actions rather than command errors.
 
 ## Configuration
 

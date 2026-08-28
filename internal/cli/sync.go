@@ -45,7 +45,12 @@ func newSyncCmd() *cobra.Command {
 		Use:     "sync",
 		Aliases: []string{"restore"},
 		Short:   "Sync and restore all skills declared in skills.json",
-		Args:    cobra.NoArgs,
+		Long: `Reconcile the selected Scope from skills.json and the existing Cache.
+
+Exits 0 when the Scope matches its Config, 1 when it does not — a blocked skill
+or, with --dry-run, work still to do — and 2 when the work could not be
+completed.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
