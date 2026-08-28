@@ -233,8 +233,8 @@ func TestSyncUsesCacheBaselineAndProtectsLocalDrift(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err == nil {
-		t.Fatal("local drift should fail normal Sync")
+	if report, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err != nil || report.Blocked != 1 {
+		t.Fatalf("local drift should block a normal Sync: err=%v blocked=%d", err, report.Blocked)
 	}
 	got, _ = os.ReadFile(filepath.Join(skillsDir, "sample", "SKILL.md"))
 	if string(got) != "manual\n" {
@@ -254,8 +254,8 @@ func TestSyncMissingCacheFailsWithoutNetworkAndContinues(t *testing.T) {
 	mustWriteScopeStateTestFile(t, filepath.Join(local, "SKILL.md"), []byte("# Local\n"))
 	config.AddLocalSymlinkEntry(cfg, "local", local, "")
 	report, err := applyPlan(t, cfg, filepath.Join(root, "skills"), filepath.Join(root, "cache"), SyncDecision{}, nil)
-	if err == nil || report.Failures == 0 {
-		t.Fatal("missing Cache should make Sync fail")
+	if err != nil || report.Blocked != 1 || report.Failed != 0 {
+		t.Fatalf("missing Cache should block, not fail: err=%v blocked=%d failed=%d", err, report.Blocked, report.Failed)
 	}
 	if _, statErr := os.Lstat(filepath.Join(root, "skills", "local")); statErr != nil {
 		t.Fatalf("unrelated local Skill did not converge: %v", statErr)

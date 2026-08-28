@@ -40,6 +40,7 @@ const (
 	SyncBlockLocalDrift      SyncBlock = SyncBlock(SkillLocalDrift)
 	SyncBlockUnknownBaseline SyncBlock = SyncBlock(SkillUnknownBaseline)
 	SyncBlockSourceMissing   SyncBlock = "source_missing"
+	SyncBlockCacheMissing    SyncBlock = "cache_missing"
 )
 
 // SyncDecision is the user's answer to the blocks a plan reports. It reaches
@@ -59,8 +60,9 @@ type SyncPlanItem struct {
 	Source string
 
 	// Block is what was observed to stand in the way. Resolve decides whether
-	// the decision lifts it.
-	Block SyncBlock
+	// the decision lifts it; BlockReason carries any detail worth printing.
+	Block       SyncBlock
+	BlockReason string
 	// Err is an observation that leaves the Skill unactionable regardless of
 	// the decision, such as a Cache that cannot be read.
 	Err string
@@ -82,15 +84,18 @@ type SyncPlanItem struct {
 	LinkTarget  string
 	LinkCurrent bool
 
-	// Command Skills.
-	Command string
-	Check   string
+	// Command Skills. Installed records whether the Skill is already present
+	// in the Scope; an installer's own state is not observable without
+	// running its check, which planning must not do.
+	Command   string
+	Check     string
+	Installed bool
 }
 
 // Resolve is what this item does under decision.
 func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) {
 	switch item.Block {
-	case SyncBlockSourceMissing:
+	case SyncBlockSourceMissing, SyncBlockCacheMissing:
 		return SyncActionSkip, item.Block
 	case SyncBlockLocalDrift:
 		if !decision.Force {
@@ -113,11 +118,16 @@ func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) 
 	return SyncActionNone, SyncBlockNone
 }
 
-// changes reports whether acting on this item would alter the Scope.
+// changes reports whether acting on this item would alter the Scope. A
+// command Skill already present in the Scope does not count: its installer is
+// guarded by its own check, and running that check to find out is exactly what
+// planning must not do.
 func (item SyncPlanItem) changes(action SyncAction) bool {
 	switch action {
-	case SyncActionMaterialize, SyncActionCommand:
+	case SyncActionMaterialize:
 		return true
+	case SyncActionCommand:
+		return !item.Installed
 	case SyncActionSymlink:
 		return !item.LinkCurrent
 	}
@@ -173,8 +183,16 @@ func PlanSync(cfg *config.Config, skillsDir, cacheDir string) (*SyncPlan, error)
 			case SkillUnknownBaseline:
 				item.Block = SyncBlockUnknownBaseline
 			}
+			// A Cache that was never fetched is a Block: Update is the way
+			// out, and no decision here can substitute for it. A Cache that
+			// cannot be read is a genuine failure.
 			if err := skill.validateCache(); err != nil {
-				item.Err = err.Error()
+				if skill.Status == SkillUnverified {
+					item.Block = SyncBlockCacheMissing
+					item.BlockReason = err.Error()
+				} else {
+					item.Err = err.Error()
+				}
 			}
 			plan.Items = append(plan.Items, item)
 		}
@@ -207,6 +225,8 @@ func planLocalItem(availability *Availability, name string) SyncPlanItem {
 		item.Kind = SyncItemCommand
 		item.Command = info.Command
 		item.Check = info.Check
+		_, err := os.Stat(filepath.Join(availability.skillsDir, name))
+		item.Installed = err == nil
 		return item
 	}
 	absSource := models.ResolveLocalSourcePath(info.Source, availability.skillsDir)
@@ -250,28 +270,42 @@ func (plan *SyncPlan) Pending(decision SyncDecision) []SyncPlanItem {
 	return pending
 }
 
-// Blocked is the Skills Apply would refuse to act on under decision.
+// Blocked is the Skills Apply would refuse to act on under decision, and that
+// a decision or another command could still unblock.
 func (plan *SyncPlan) Blocked(decision SyncDecision) []SyncPlanItem {
 	var blocked []SyncPlanItem
 	for _, item := range plan.Items {
-		action, _ := item.Resolve(decision)
-		if item.Err != "" || action == SyncActionSkip {
+		if item.Err != "" {
+			continue
+		}
+		if action, _ := item.Resolve(decision); action == SyncActionSkip {
 			blocked = append(blocked, item)
 		}
 	}
 	return blocked
 }
 
-// Fresh reports whether the Scope already matches its Config under decision:
-// nothing to change and nothing refused.
-func (plan *SyncPlan) Fresh(decision SyncDecision) bool {
-	return plan.StateError == "" && len(plan.Pending(decision)) == 0 && len(plan.Blocked(decision)) == 0
+// Failed is the Skills whose observation itself did not succeed, plus a Scope
+// baseline that could not be read. Nothing the user answers changes these.
+func (plan *SyncPlan) Failed() []SyncPlanItem {
+	var failed []SyncPlanItem
+	for _, item := range plan.Items {
+		if item.Err != "" {
+			failed = append(failed, item)
+		}
+	}
+	return failed
 }
 
-// Unresolved counts everything standing between this plan and a converged
-// Scope: a Scope state that could not be read, plus every refused Skill.
-func (plan *SyncPlan) Unresolved(decision SyncDecision) int {
-	count := len(plan.Blocked(decision))
+// Fresh reports whether the Scope already matches its Config under decision:
+// nothing to change, nothing refused, nothing broken.
+func (plan *SyncPlan) Fresh(decision SyncDecision) bool {
+	return plan.FailedCount() == 0 && len(plan.Pending(decision)) == 0 && len(plan.Blocked(decision)) == 0
+}
+
+// FailedCount counts the failures observable before anything is applied.
+func (plan *SyncPlan) FailedCount() int {
+	count := len(plan.Failed())
 	if plan.StateError != "" {
 		count++
 	}

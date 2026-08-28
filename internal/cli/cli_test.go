@@ -869,6 +869,72 @@ func TestOutdatedStatusStyling(t *testing.T) {
 	}
 }
 
+func TestCLISyncExitCodes(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1: the Cache was never fetched, so Sync cannot converge on its own.
+	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("uncached Source should exit 1, got err=%v:\n%s", err, out)
+	}
+
+	// 0: everything declared is in place.
+	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatalf("converged Sync should exit 0: %v\n%s", err, out)
+	}
+	if out, err = runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatalf("converged dry-run should exit 0: %v\n%s", err, out)
+	}
+	resetSubcommandFlags()
+
+	// 1 again: a local edit is protected rather than overwritten.
+	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("local drift should exit 1, got err=%v:\n%s", err, out)
+	}
+	if !strings.Contains(out, "1 blocked skill") || !strings.Contains(out, "--force") {
+		t.Fatalf("blocked Sync must say what is blocked and what to do:\n%s", out)
+	}
+
+	// 2: something is actually broken — an Agent path Sync does not manage.
+	if out, err = runCLI(t, "sync", "--force", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatalf("force Sync should converge: %v\n%s", err, out)
+	}
+	resetSubcommandFlags()
+	// A custom --skills-dir is Project-scoped, so the Agent directory lives
+	// beside it rather than under the user's home.
+	foreign := filepath.Join(root, ".claude", "skills", "sample")
+	if err := os.RemoveAll(foreign); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err == nil || ExitCode(err) != 2 {
+		t.Fatalf("an unmanaged Agent path should exit 2, got err=%v:\n%s", err, out)
+	}
+	if !strings.Contains(out, "Failed to apply availability for sample") {
+		t.Fatalf("failure must name the Skill:\n%s", out)
+	}
+}
+
 func TestCLISyncDryRunNeverEntersApply(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()

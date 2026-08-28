@@ -188,10 +188,38 @@ func TestSyncApplyNamesTheSkillWhoseAvailabilityFailed(t *testing.T) {
 			failures = append(failures, ev)
 		}
 	})
-	if err == nil || report.Failures != 1 {
-		t.Fatalf("expected one failure, got err=%v failures=%d", err, report.Failures)
+	if err != nil || report.Failed != 1 || report.Blocked != 0 {
+		t.Fatalf("expected one failure, got err=%v failed=%d blocked=%d", err, report.Failed, report.Blocked)
 	}
 	if len(failures) != 1 || failures[0].Skill != "local" || failures[0].Err == "" {
 		t.Fatalf("failure must name the Skill and say why: %#v", failures)
+	}
+}
+
+func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, "skills")
+	cfg := config.DefaultConfig()
+	// Codex is Automatically available, so no Availability link is managed and
+	// the command Skill is the only thing the plan can call work.
+	cfg.Settings.DefaultAgents = []string{"codex"}
+	config.AddLocalCommandEntry(cfg, "tool", "install-tool", "which tool", "")
+
+	plan, err := PlanSync(cfg, skillsDir, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Pending(SyncDecision{})) != 1 {
+		t.Fatal("a command Skill missing from the Scope is work to do")
+	}
+
+	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "tool", "SKILL.md"), []byte("# Tool\n"))
+	plan, err = PlanSync(cfg, skillsDir, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fresh(SyncDecision{}) {
+		t.Fatalf("an installed command Skill must not keep the gate red: %#v", plan.Pending(SyncDecision{}))
 	}
 }

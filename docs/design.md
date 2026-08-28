@@ -49,6 +49,8 @@ supporting availability or scope, when relevant
 next action, only when required
 ```
 
+Commands that report on the state of a Scope express that state through their exit code rather than through an error: `0` when the Scope matches its Config, `1` when it does not, `2` when the work could not be completed. `1` prints what stands in the way and the next action, and is not styled as an error. See ADR-0002.
+
 Errors use the smallest useful subset:
 
 ```text
