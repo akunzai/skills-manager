@@ -7,24 +7,17 @@ import (
 
 const (
 	SyncRepoStart     = "repo_start"
-	SyncRefreshStart  = "refresh_start"
-	SyncRefreshDone   = "refresh_done"
 	SyncFetchFailed   = "fetch_failed"
 	SyncPathMissing   = "path_missing"
 	SyncCopyFailed    = "copy_failed"
 	SyncMaterialized  = "materialized"
-	SyncWouldSync     = "would_sync"
-	SyncWouldDrift    = "would_drift"
 	SyncSourceMissing = "source_missing"
-	SyncWouldSymlink  = "would_symlink"
 	SyncSymlinkFailed = "symlink_failed"
 	SyncSymlinked     = "symlinked"
 	SyncCheckFailed   = "check_failed"
-	SyncWouldCommand  = "would_command"
 	SyncCommandStart  = "command_start"
 	SyncCommandFailed = "command_failed"
 	SyncSkipped       = "skipped"
-	SyncInSync        = "in_sync"
 )
 
 // SyncEvent is one step of applying a SyncPlan for the CLI to print.
@@ -44,7 +37,6 @@ type SyncEvent struct {
 type SyncReport struct {
 	Configured []string
 	Events     []SyncEvent
-	Changed    bool
 	Failures   int
 	Unknown    []SkillFreshness
 }
@@ -107,9 +99,6 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 					continue
 				}
 				emit(SyncEvent{Kind: SyncMaterialized, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath})
-				report.Changed = true
-			} else {
-				emit(SyncEvent{Kind: SyncInSync, Source: item.Source, Skill: item.Name})
 			}
 			if err := plan.availability.applyDeclared(item.Name); err != nil {
 				emit(SyncEvent{Kind: SyncCopyFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})

@@ -8,7 +8,6 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
-	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -89,17 +88,7 @@ func newSyncCmd() *cobra.Command {
 				}
 			}
 
-			var progress *presentation.Progress
-			report, err := plan.Apply(decision, func(ev engine.SyncEvent) {
-				switch ev.Kind {
-				case engine.SyncRefreshStart:
-					progress = presentation.StartProgress(cmd.ErrOrStderr(), "Fetching Source: "+ev.Source+"...")
-				case engine.SyncRefreshDone:
-					progress.Stop()
-					progress = nil
-				}
-			})
-			progress.Stop()
+			report, err := plan.Apply(decision, nil)
 			printSyncEvents(out, report)
 			if err != nil {
 				return err
@@ -184,15 +173,6 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 		switch ev.Kind {
 		case engine.SyncRepoStart:
 			fmt.Fprintf(out, "Syncing Source: %s%s%s (%d skills)...\n", colorBold, ev.Source, colorReset, len(ev.Skills))
-		case engine.SyncWouldSync:
-			fmt.Fprintf(out, "  [Dry-run] Would sync %s from %s\n", strings.Join(ev.Skills, ", "), ev.Source)
-		case engine.SyncWouldDrift:
-			if len(ev.Missing) > 0 {
-				fmt.Fprintf(out, "  [Dry-run] Would link %s to %s.\n", ev.Skill, strings.Join(ev.Missing, ", "))
-			}
-			if len(ev.Unexpected) > 0 {
-				fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", ev.Skill, strings.Join(ev.Unexpected, ", "))
-			}
 		case engine.SyncFetchFailed:
 			fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
 		case engine.SyncPathMissing:
@@ -203,16 +183,12 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 			fmt.Fprintf(out, "  %sRestored %s%s%s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, colorReset)
 		case engine.SyncSourceMissing:
 			fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
-		case engine.SyncWouldSymlink:
-			fmt.Fprintf(out, "  [Dry-run] Would symlink %s -> %s\n", models.ToTildePath(ev.Path), models.ToTildePath(ev.Target))
 		case engine.SyncSymlinkFailed:
 			fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		case engine.SyncSymlinked:
 			fmt.Fprintf(out, "  %sLinked local skill %s%s%s -> %s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, models.ToTildePath(ev.Target), colorReset)
 		case engine.SyncCheckFailed:
 			fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
-		case engine.SyncWouldCommand:
-			fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", ev.Target)
 		case engine.SyncCommandStart:
 			fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
 		case engine.SyncCommandFailed:

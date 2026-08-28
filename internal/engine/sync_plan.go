@@ -67,7 +67,9 @@ type SyncPlanItem struct {
 	// Drift is declared Availability measured against the filesystem.
 	Drift AvailabilityDrift
 
-	// Remote Skills.
+	// Remote Skills. CachePath is the Source's Cache working copy, the root
+	// the Skill's Subpath is resolved against; Freshness carries the Skill's
+	// own path inside it.
 	Freshness SkillFreshness
 	CachePath string
 	LocalSHA  string
