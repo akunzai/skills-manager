@@ -13,11 +13,11 @@ func TestPrepareRemoteSourceRefreshesCacheAndDiscoversSkills(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, "sample")
 
-	repoDir, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir())
+	repoDir, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repoDir == "" || !reflect.DeepEqual(discovered, map[string]string{"sample": "sample"}) {
+	if repoDir == "" || !reflect.DeepEqual(discovered, DiscoveredSkills{"sample": {"sample"}}) {
 		t.Fatalf("repoDir = %q, discovered = %#v", repoDir, discovered)
 	}
 }

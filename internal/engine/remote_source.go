@@ -25,13 +25,13 @@ func newRemoteSource(availability *Availability, key string, repo config.RemoteR
 
 // PrepareRemoteSource refreshes one Source's Cache and discovers its Skills.
 // Add uses this before it knows which Skills the user will declare.
-func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir string) (string, map[string]string, error) {
+func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir, scope string) (string, DiscoveredSkills, error) {
 	remote := newRemoteSource(nil, key, repo, cacheDir)
 	repoDir, err := remote.refresh(true)
 	if err != nil {
 		return "", nil, fmt.Errorf("refresh Source %s: %w", key, err)
 	}
-	discovered, err := DiscoverSkillsInRepo(repoDir)
+	discovered, err := DiscoverSkillsInRepo(repoDir, scope)
 	if err != nil {
 		return "", nil, fmt.Errorf("discover Skills in %s: %w", key, err)
 	}

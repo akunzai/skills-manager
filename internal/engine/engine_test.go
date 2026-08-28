@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -56,7 +57,7 @@ func TestDiscoverSkillsInRepo(t *testing.T) {
 	_ = os.MkdirAll(deepDir, 0755)
 	_ = os.WriteFile(filepath.Join(deepDir, "SKILL.md"), []byte("---\nname: deep-skill\n---\n"), 0644)
 
-	discovered, err := DiscoverSkillsInRepo(tmpRepo)
+	discovered, err := DiscoverSkillsInRepo(tmpRepo, "")
 	if err != nil {
 		t.Fatalf("DiscoverSkillsInRepo failed: %v", err)
 	}
@@ -64,11 +65,11 @@ func TestDiscoverSkillsInRepo(t *testing.T) {
 	if len(discovered) != 2 {
 		t.Fatalf("expected 2 skills, got %d (discovered: %+v)", len(discovered), discovered)
 	}
-	if discovered["skill-one"] != "skills/skill-one" {
-		t.Errorf("unexpected skill-one path: %s", discovered["skill-one"])
+	if !reflect.DeepEqual(discovered["skill-one"], []string{"skills/skill-one"}) {
+		t.Errorf("unexpected skill-one paths: %v", discovered["skill-one"])
 	}
-	if discovered["skill-two"] != "plugins/sub/skill-two" {
-		t.Errorf("unexpected skill-two path: %s", discovered["skill-two"])
+	if !reflect.DeepEqual(discovered["skill-two"], []string{"plugins/sub/skill-two"}) {
+		t.Errorf("unexpected skill-two paths: %v", discovered["skill-two"])
 	}
 	if _, ok := discovered["ignored-skill"]; ok {
 		t.Errorf("expected node_modules skill to be ignored")
@@ -78,9 +79,9 @@ func TestDiscoverSkillsInRepo(t *testing.T) {
 	}
 }
 
-func TestDiscoverSkillsInRepoRejectsDuplicateSkillNames(t *testing.T) {
+func TestDiscoverSkillsInRepoCanonicalizesEquivalentMirrors(t *testing.T) {
 	tmpRepo := t.TempDir()
-	for _, path := range []string{"skills/first/SKILL.md", "skills/second/SKILL.md"} {
+	for _, path := range []string{"skills/duplicate/SKILL.md", ".github/plugins/example/skills/duplicate/SKILL.md"} {
 		fullPath := filepath.Join(tmpRepo, path)
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 			t.Fatal(err)
@@ -90,12 +91,227 @@ func TestDiscoverSkillsInRepoRejectsDuplicateSkillNames(t *testing.T) {
 		}
 	}
 
-	_, err := DiscoverSkillsInRepo(tmpRepo)
-	if err == nil {
-		t.Fatal("DiscoverSkillsInRepo succeeded; want duplicate-name error")
+	discovered, err := DiscoverSkillsInRepo(tmpRepo, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), "skills/first") || !strings.Contains(err.Error(), "skills/second") {
-		t.Fatalf("duplicate-name error = %q; want both conflicting paths", err)
+	if want := []string{"skills/duplicate"}; !reflect.DeepEqual(discovered["duplicate"], want) {
+		t.Fatalf("duplicate paths = %v, want %v", discovered["duplicate"], want)
+	}
+}
+
+func TestDiscoverSkillsInRepoPreservesDivergentDuplicateCandidates(t *testing.T) {
+	tmpRepo := t.TempDir()
+	for path, content := range map[string]string{
+		"skills/duplicate/SKILL.md":          "---\nname: duplicate\n---\nfirst\n",
+		"plugins/example/duplicate/SKILL.md": "---\nname: duplicate\n---\nsecond\n",
+	} {
+		fullPath := filepath.Join(tmpRepo, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	discovered, err := DiscoverSkillsInRepo(tmpRepo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"plugins/example/duplicate", "skills/duplicate"}
+	if !reflect.DeepEqual(discovered["duplicate"], want) {
+		t.Fatalf("duplicate paths = %v, want %v", discovered["duplicate"], want)
+	}
+}
+
+func TestDiscoverSkillsInRepoCanonicalizesEquivalentGroupsIndependently(t *testing.T) {
+	repo := t.TempDir()
+	for path, body := range map[string]string{
+		"skills/duplicate/SKILL.md":       "---\nname: duplicate\n---\nmirror\n",
+		"plugins/a/duplicate/SKILL.md":    "---\nname: duplicate\n---\nmirror\n",
+		"experimental/duplicate/SKILL.md": "---\nname: duplicate\n---\ndifferent\n",
+	} {
+		fullPath := filepath.Join(repo, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	discovered, err := DiscoverSkillsInRepo(repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"experimental/duplicate", "skills/duplicate"}
+	if !reflect.DeepEqual(discovered["duplicate"], want) {
+		t.Fatalf("paths = %v, want independently canonicalized groups %v", discovered["duplicate"], want)
+	}
+}
+
+func TestDiscoverSkillsInRepoAcceptsDirectSkillScope(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, "skills", "sample")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: sample\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	discovered, err := DiscoverSkillsInRepo(repo, "skills/sample")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := DiscoveredSkills{"sample": {"skills/sample"}}
+	if !reflect.DeepEqual(discovered, want) {
+		t.Fatalf("discovered = %v, want %v", discovered, want)
+	}
+}
+
+func TestDiscoverSkillsInRepoScopesTraversalAndKeepsRepositoryPaths(t *testing.T) {
+	tmpRepo := t.TempDir()
+	for _, path := range []string{"skills/one/SKILL.md", "plugins/two/SKILL.md"} {
+		fullPath := filepath.Join(tmpRepo, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte("# Skill\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	discovered, err := DiscoverSkillsInRepo(tmpRepo, "skills")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := DiscoveredSkills{"one": {"skills/one"}}
+	if !reflect.DeepEqual(discovered, want) {
+		t.Fatalf("discovered = %#v, want %#v", discovered, want)
+	}
+}
+
+func TestDiscoverSkillsInRepoMeasuresDepthFromScope(t *testing.T) {
+	tmpRepo := t.TempDir()
+	scope := filepath.Join("very", "deep", "collection", "skills")
+	skillDir := filepath.Join(tmpRepo, scope, "nested", "sample")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	discovered, err := DiscoverSkillsInRepo(tmpRepo, filepath.ToSlash(scope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.ToSlash(filepath.Join(scope, "nested", "sample"))}
+	if !reflect.DeepEqual(discovered["sample"], want) {
+		t.Fatalf("sample paths = %v, want %v", discovered["sample"], want)
+	}
+}
+
+func TestDiscoverSkillsInRepoRejectsEscapingScope(t *testing.T) {
+	_, err := DiscoverSkillsInRepo(t.TempDir(), "../outside")
+	if err == nil || !strings.Contains(err.Error(), "escapes repository") {
+		t.Fatalf("error = %v; want repository escape rejection", err)
+	}
+}
+
+func TestDiscoverSkillsInRepoPreservesExecutableAndSymlinkDifferences(t *testing.T) {
+	t.Run("executable bit", func(t *testing.T) {
+		repo := t.TempDir()
+		for _, root := range []string{"skills/duplicate", "mirror/duplicate"} {
+			dir := filepath.Join(repo, root)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: duplicate\n---\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			mode := os.FileMode(0o644)
+			if strings.HasPrefix(root, "skills/") {
+				mode = 0o755
+			}
+			if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte("exit 0\n"), mode); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		discovered, err := DiscoverSkillsInRepo(repo, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(discovered["duplicate"]) != 2 {
+			t.Fatalf("paths = %v; executable difference was collapsed", discovered["duplicate"])
+		}
+	})
+
+	t.Run("symlink target", func(t *testing.T) {
+		repo := t.TempDir()
+		for _, root := range []string{"skills/duplicate", "mirror/duplicate"} {
+			dir := filepath.Join(repo, root)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: duplicate\n---\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			target := "first"
+			if strings.HasPrefix(root, "mirror/") {
+				target = "second"
+			}
+			if err := os.Symlink(target, filepath.Join(dir, "reference")); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+		}
+
+		discovered, err := DiscoverSkillsInRepo(repo, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(discovered["duplicate"]) != 2 {
+			t.Fatalf("paths = %v; symlink difference was collapsed", discovered["duplicate"])
+		}
+	})
+}
+
+func TestDiscoverSkillsInRepoFailsClosedForUnsupportedBundleEntries(t *testing.T) {
+	repo, err := os.MkdirTemp("/tmp", "skill-bundle-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
+	var listeners []net.Listener
+	for _, root := range []string{"skills/duplicate", "mirror/duplicate"} {
+		dir := filepath.Join(repo, root)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: duplicate\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		listener, err := net.Listen("unix", filepath.Join(dir, "socket"))
+		if err != nil {
+			t.Skipf("Unix sockets unavailable: %v", err)
+		}
+		listeners = append(listeners, listener)
+	}
+	t.Cleanup(func() {
+		for _, listener := range listeners {
+			_ = listener.Close()
+		}
+	})
+
+	discovered, err := DiscoverSkillsInRepo(repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(discovered["duplicate"]) != 2 {
+		t.Fatalf("paths = %v; unsupported entries must not auto-deduplicate", discovered["duplicate"])
 	}
 }
 
