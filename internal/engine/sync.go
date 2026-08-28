@@ -6,18 +6,19 @@ import (
 )
 
 const (
-	SyncRepoStart     = "repo_start"
-	SyncFetchFailed   = "fetch_failed"
-	SyncPathMissing   = "path_missing"
-	SyncCopyFailed    = "copy_failed"
-	SyncMaterialized  = "materialized"
-	SyncSourceMissing = "source_missing"
-	SyncSymlinkFailed = "symlink_failed"
-	SyncSymlinked     = "symlinked"
-	SyncCheckFailed   = "check_failed"
-	SyncCommandStart  = "command_start"
-	SyncCommandFailed = "command_failed"
-	SyncSkipped       = "skipped"
+	SyncRepoStart          = "repo_start"
+	SyncFetchFailed        = "fetch_failed"
+	SyncPathMissing        = "path_missing"
+	SyncCopyFailed         = "copy_failed"
+	SyncAvailabilityFailed = "availability_failed"
+	SyncMaterialized       = "materialized"
+	SyncSourceMissing      = "source_missing"
+	SyncSymlinkFailed      = "symlink_failed"
+	SyncSymlinked          = "symlinked"
+	SyncCheckFailed        = "check_failed"
+	SyncCommandStart       = "command_start"
+	SyncCommandFailed      = "command_failed"
+	SyncSkipped            = "skipped"
 )
 
 // SyncEvent is one step of applying a SyncPlan for the CLI to print.
@@ -100,8 +101,8 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 				}
 				emit(SyncEvent{Kind: SyncMaterialized, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath})
 			}
-			if err := plan.availability.applyDeclared(item.Name); err != nil {
-				emit(SyncEvent{Kind: SyncCopyFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
+			if err := plan.availability.Apply(item.Name); err != nil {
+				emit(SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
 				report.Failures++
 				continue
 			}
@@ -130,6 +131,7 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 	}
 	for _, item := range local {
 		if err := applyLocalItem(plan.availability, item, emit); err != nil {
+			emit(SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
 			report.Failures++
 		}
 	}
@@ -180,14 +182,14 @@ func applyLocalItem(availability *Availability, item SyncPlanItem, emit func(Syn
 		if err := MaterializeCommand(item.Command); err != nil {
 			emit(SyncEvent{Kind: SyncCommandFailed, Skill: item.Name, Err: err.Error()})
 		}
-		return availability.applyDeclared(item.Name)
+		return availability.Apply(item.Name)
 	}
 	if err := MaterializeLocalSymlink(item.Name, item.LinkTarget, availability.skillsDir); err != nil {
 		emit(SyncEvent{Kind: SyncSymlinkFailed, Skill: item.Name, Err: err.Error()})
 		return nil
 	}
 	emit(SyncEvent{Kind: SyncSymlinked, Skill: item.Name, Target: item.SourcePath})
-	return availability.applyDeclared(item.Name)
+	return availability.Apply(item.Name)
 }
 
 func itemNames(items []SyncPlanItem) []string {

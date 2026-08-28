@@ -162,3 +162,36 @@ func TestSyncPlanResolvesEachDecision(t *testing.T) {
 		t.Fatalf("plan.Unknown() = %#v", unknown)
 	}
 }
+
+func TestSyncApplyNamesTheSkillWhoseAvailabilityFailed(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".agents", "skills")
+	local := filepath.Join(root, "local")
+	mustWriteScopeStateTestFile(t, filepath.Join(local, "SKILL.md"), []byte("# Local\n"))
+	// An unrelated tool left its own link where the Agent's Availability link
+	// belongs, so applying Availability has to fail closed.
+	unmanaged := filepath.Join(root, ".claude", "skills", "local")
+	if err := os.MkdirAll(filepath.Dir(unmanaged), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(local, unmanaged); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "local", local, "")
+
+	var failures []SyncEvent
+	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, func(ev SyncEvent) {
+		if ev.Kind == SyncAvailabilityFailed {
+			failures = append(failures, ev)
+		}
+	})
+	if err == nil || report.Failures != 1 {
+		t.Fatalf("expected one failure, got err=%v failures=%d", err, report.Failures)
+	}
+	if len(failures) != 1 || failures[0].Skill != "local" || failures[0].Err == "" {
+		t.Fatalf("failure must name the Skill and say why: %#v", failures)
+	}
+}

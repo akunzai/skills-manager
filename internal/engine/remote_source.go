@@ -117,7 +117,7 @@ func (s remoteSource) reconcile(repoDir string, toWrite map[string]string, emit 
 			}
 			emit(SyncEvent{Kind: SyncMaterialized, Source: s.key, Skill: name, Path: subpath})
 		}
-		if err := s.availability.applyDeclared(name); err != nil {
+		if err := s.availability.Apply(name); err != nil {
 			return err
 		}
 	}

@@ -177,6 +177,8 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 			fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
 		case engine.SyncPathMissing:
 			fmt.Fprintf(out, "  %sSkill path missing in Source: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
+		case engine.SyncAvailabilityFailed:
+			fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		case engine.SyncCopyFailed:
 			fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		case engine.SyncMaterialized:

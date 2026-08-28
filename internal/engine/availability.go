@@ -317,7 +317,7 @@ func (s availabilityState) apply() error {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		_, err := os.Lstat(linkPath)
 		if err == nil && !s.isManagedPath(linkPath) {
-			return fmt.Errorf("agent path already exists and is not managed by skills: %s", linkPath)
+			return fmt.Errorf("agent path already exists and is not managed by skills: %s", models.ToTildePath(linkPath))
 		}
 	}
 	for agent, agentDir := range s.known {
@@ -364,12 +364,4 @@ func (d AvailabilityDrift) Empty() bool {
 func (a *Availability) ObserveAvailability(skill string) AvailabilityDrift {
 	missing, unexpected := a.state(skill).drift()
 	return AvailabilityDrift{Skill: skill, Missing: missing, Unexpected: unexpected}
-}
-
-// applyDeclared reconciles one Skill's Availability with its declared policy.
-func (a *Availability) applyDeclared(name string) error {
-	if err := a.Apply(name); err != nil {
-		return fmt.Errorf("failed to apply availability for %s: %w", name, err)
-	}
-	return nil
 }
