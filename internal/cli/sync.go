@@ -128,6 +128,10 @@ func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, 
 		}
 		return exitError{message: "Scope does not match its Config", code: 1}
 	}
+	if dryRun {
+		fmt.Fprintf(out, "\n%s%sScope already matches its Config. %d skills declared.%s\n\n", colorBold, colorGreen, configured, colorReset)
+		return nil
+	}
 	fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, configured, colorReset)
 	return nil
 }
@@ -188,7 +192,7 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 		fmt.Fprintf(out, "  [Dry-run] Would sync %s from %s\n", item.Name, item.Source)
 	case action == engine.SyncActionSymlink && !item.LinkCurrent:
 		fmt.Fprintf(out, "  [Dry-run] Would symlink %s -> %s\n", models.ToTildePath(item.LinkPath), models.ToTildePath(item.SourcePath))
-	case action == engine.SyncActionCommand:
+	case action == engine.SyncActionCommand && !item.Installed:
 		fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", item.Command)
 	}
 	if len(item.Drift.Missing) > 0 {

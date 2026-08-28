@@ -84,9 +84,12 @@ type SyncPlanItem struct {
 	LinkTarget  string
 	LinkCurrent bool
 
-	// Command Skills.
-	Command string
-	Check   string
+	// Command Skills. Installed records whether the Skill is already present
+	// in the Scope; an installer's own state is not observable without
+	// running its check, which planning must not do.
+	Command   string
+	Check     string
+	Installed bool
 }
 
 // Resolve is what this item does under decision.
@@ -115,11 +118,16 @@ func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) 
 	return SyncActionNone, SyncBlockNone
 }
 
-// changes reports whether acting on this item would alter the Scope.
+// changes reports whether acting on this item would alter the Scope. A
+// command Skill already present in the Scope does not count: its installer is
+// guarded by its own check, and running that check to find out is exactly what
+// planning must not do.
 func (item SyncPlanItem) changes(action SyncAction) bool {
 	switch action {
-	case SyncActionMaterialize, SyncActionCommand:
+	case SyncActionMaterialize:
 		return true
+	case SyncActionCommand:
+		return !item.Installed
 	case SyncActionSymlink:
 		return !item.LinkCurrent
 	}
@@ -217,6 +225,8 @@ func planLocalItem(availability *Availability, name string) SyncPlanItem {
 		item.Kind = SyncItemCommand
 		item.Command = info.Command
 		item.Check = info.Check
+		_, err := os.Stat(filepath.Join(availability.skillsDir, name))
+		item.Installed = err == nil
 		return item
 	}
 	absSource := models.ResolveLocalSourcePath(info.Source, availability.skillsDir)
