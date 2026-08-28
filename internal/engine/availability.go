@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -288,14 +289,16 @@ func (s availabilityState) isManagedPath(path string) bool {
 	return s.links.IsManagedLink(path, s.skillName) || s.links.IsManagedCopy(path, s.skillName)
 }
 
-func (s availabilityState) drift() (missing, unexpected []string) {
+func (s availabilityState) drift() (missing, unexpected []string, foreign []ForeignAvailabilityPath) {
 	for agent, agentDir := range s.known {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		_, want := s.desired[agent]
 		if want {
 			_, err := os.Lstat(linkPath)
-			if os.IsNotExist(err) || (err == nil && !s.isManagedPath(linkPath)) {
+			if os.IsNotExist(err) {
 				missing = append(missing, agent)
+			} else if err == nil && !s.isManagedPath(linkPath) {
+				foreign = append(foreign, describeForeignAvailabilityPath(agent, linkPath))
 			}
 			continue
 		}
@@ -305,7 +308,8 @@ func (s availabilityState) drift() (missing, unexpected []string) {
 	}
 	slices.Sort(missing)
 	slices.Sort(unexpected)
-	return missing, unexpected
+	slices.SortFunc(foreign, func(a, b ForeignAvailabilityPath) int { return strings.Compare(a.Path, b.Path) })
+	return missing, unexpected, foreign
 }
 
 func (s availabilityState) apply() error {
@@ -345,6 +349,66 @@ func (a *Availability) Apply(skill string) error {
 	return a.state(skill).apply()
 }
 
+// ForeignAvailabilityPath is an existing Agent path that does not belong to
+// this Scope. Target is populated for symlinks so a repair prompt can show
+// exactly what would be replaced.
+type ForeignAvailabilityPath struct {
+	Agent  string
+	Path   string
+	Kind   ForeignAvailabilityPathKind
+	Target string
+}
+
+type ForeignAvailabilityPathKind string
+
+const (
+	ForeignAvailabilityFile      ForeignAvailabilityPathKind = "file"
+	ForeignAvailabilityDirectory ForeignAvailabilityPathKind = "directory"
+	ForeignAvailabilitySymlink   ForeignAvailabilityPathKind = "symlink"
+)
+
+func (p ForeignAvailabilityPath) Detail() string {
+	detail := string(p.Kind)
+	if p.Target != "" {
+		detail += " -> " + models.ToTildePath(p.Target)
+	}
+	return detail
+}
+
+func describeForeignAvailabilityPath(agent, path string) ForeignAvailabilityPath {
+	foreign := ForeignAvailabilityPath{Agent: agent, Path: path, Kind: ForeignAvailabilityFile}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return foreign
+	}
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		foreign.Kind = ForeignAvailabilitySymlink
+		foreign.Target, _ = os.Readlink(path)
+	case info.IsDir():
+		foreign.Kind = ForeignAvailabilityDirectory
+	}
+	return foreign
+}
+
+// ReplaceForeign removes only paths that still match the diagnosed values,
+// then applies declared Availability. It is reserved for Doctor after an
+// interactive confirmation; ordinary Apply remains fail-closed.
+func (a *Availability) ReplaceForeign(skill string, diagnosed []ForeignAvailabilityPath) error {
+	for _, expected := range diagnosed {
+		current := describeForeignAvailabilityPath(expected.Agent, expected.Path)
+		if current != expected {
+			return fmt.Errorf("agent path changed after confirmation: %s", models.ToTildePath(expected.Path))
+		}
+	}
+	for _, foreign := range diagnosed {
+		if err := os.RemoveAll(foreign.Path); err != nil {
+			return fmt.Errorf("remove unmanaged agent path %s: %w", models.ToTildePath(foreign.Path), err)
+		}
+	}
+	return a.Apply(skill)
+}
+
 // AvailabilityDrift is declared Availability for one Skill measured against
 // the filesystem: the managed Agents that should hold a link but do not, and
 // the managed paths that exist but are no longer declared.
@@ -352,16 +416,17 @@ type AvailabilityDrift struct {
 	Skill      string
 	Missing    []string
 	Unexpected []string
+	Foreign    []ForeignAvailabilityPath
 }
 
 func (d AvailabilityDrift) Empty() bool {
-	return len(d.Missing) == 0 && len(d.Unexpected) == 0
+	return len(d.Missing) == 0 && len(d.Unexpected) == 0 && len(d.Foreign) == 0
 }
 
 // ObserveAvailability reports Drift for one Skill without touching the
 // filesystem. It is the single comparison behind every caller that needs to
 // know about Drift before deciding whether to act on it.
 func (a *Availability) ObserveAvailability(skill string) AvailabilityDrift {
-	missing, unexpected := a.state(skill).drift()
-	return AvailabilityDrift{Skill: skill, Missing: missing, Unexpected: unexpected}
+	missing, unexpected, foreign := a.state(skill).drift()
+	return AvailabilityDrift{Skill: skill, Missing: missing, Unexpected: unexpected, Foreign: foreign}
 }

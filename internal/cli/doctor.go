@@ -7,11 +7,24 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/presentation"
+	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 var startDoctorProgress = presentation.StartProgress
+var doctorIsTerminal = tui.IsTerminal
+var doctorConfirm = tui.PromptConfirm
+
+func promptReplaceForeignAvailability(out io.Writer, paths []engine.ForeignAvailabilityPath) (bool, error) {
+	fmt.Fprintf(out, "\n%sWarning: Doctor found %d unmanaged Agent path(s) that must be removed:%s\n", colorYellow, len(paths), colorReset)
+	for _, path := range paths {
+		fmt.Fprintf(out, "  %s (%s)\n", models.ToTildePath(path.Path), path.Detail())
+	}
+	fmt.Fprintln(out)
+	return doctorConfirm("Replace these paths with managed Availability?", false)
+}
 
 func newDoctorCmd() *cobra.Command {
 	var flagFix bool
@@ -34,10 +47,16 @@ func newDoctorCmd() *cobra.Command {
 
 			fmt.Fprintf(out, "\n%s%sDiagnosing skills health...%s\n\n", colorBold, colorCyan, colorReset)
 			var progress *presentation.Progress
-			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).RunWithProgress(flagFix, func(event engine.DoctorEvent) {
+			var approve engine.DoctorReplaceForeign
+			if flagFix && doctorIsTerminal() {
+				approve = func(paths []engine.ForeignAvailabilityPath) (bool, error) {
+					return promptReplaceForeignAvailability(out, paths)
+				}
+			}
+			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).RunWithRepairApproval(flagFix, func(event engine.DoctorEvent) {
 				progress.Stop()
 				progress = startDoctorProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Rebuilding %s Cache...", event.Index, event.Total, event.Source))
-			})
+			}, approve)
 			progress.Stop()
 			printHealthReport(out, outcome.Findings)
 			if runErr != nil {
