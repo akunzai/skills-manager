@@ -147,7 +147,7 @@ func groupLabels(directories []string) map[string]string {
 	}
 }
 
-func discoveryResult(discovered map[string]string, err error, sourceKey string) (map[string]string, error) {
+func discoveryResult(discovered engine.DiscoveredSkills, err error, sourceKey string) (engine.DiscoveredSkills, error) {
 	if err != nil {
 		return nil, fmt.Errorf("discover skills in %s: %w", sourceKey, err)
 	}
@@ -208,7 +208,7 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%sScanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
-	discovered, err := engine.DiscoverSkillsInRepo(absSourcePath)
+	discovered, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
 	if err != nil {
 		return nil, fmt.Errorf("discover skills in %s: %w", models.ToTildePath(sourcePath), err)
 	}
@@ -221,7 +221,7 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 		if skillName == "" {
 			skillName = filepath.Base(absSourcePath)
 		}
-		discovered[skillName] = "."
+		discovered[skillName] = []string{"."}
 	}
 
 	resolvedPath := func(subpath string) string {
@@ -234,7 +234,7 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 		source:        engine.NewSymlinkAddSource(absSourcePath, description, true),
 		rootDir:       absSourcePath,
 		discovered:    discovered,
-		selectionPath: selectionPath,
+		selectionPath: "",
 		labels: sourceLabels{
 			displayName:  models.ToTildePath(absSourcePath),
 			resourceNoun: "Local directory",
@@ -249,7 +249,7 @@ func newCommandIntake(skillName, command, check, description string) *addIntake 
 	return &addIntake{
 		source:     engine.NewCommandAddSource(command, check, description),
 		rootDir:    ".",
-		discovered: map[string]string{skillName: "."},
+		discovered: engine.DiscoveredSkills{skillName: {"."}},
 		labels: sourceLabels{
 			displayName:  "command",
 			resourceNoun: "Command",
@@ -281,7 +281,7 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 		fmt.Fprintf(out, "%sFetching Source: %s%s%s...\n", colorCyan, colorBold, parsed.SourceKey, colorReset)
 	}
 	progress := presentation.StartProgress(errOut, "Fetching Source: "+parsed.SourceKey+"...")
-	repoDir, discovered, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir)
+	repoDir, discovered, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir, selectionPath)
 	progress.Stop()
 	if err != nil {
 		return nil, err
@@ -299,7 +299,7 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 		source:        engine.NewRemoteAddSource(parsed.SourceKey, parsed.RepoType, storedURL, repoDir),
 		rootDir:       repoDir,
 		discovered:    discovered,
-		selectionPath: selectionPath,
+		selectionPath: "",
 		labels: sourceLabels{
 			displayName:  parsed.SourceKey,
 			resourceNoun: "Repository",
@@ -393,7 +393,7 @@ func newAddCmd() *cobra.Command {
 
 	cmd.Flags().StringSliceVarP(&flagSkills, "skill", "s", nil, "Specific skill name(s)")
 	cmd.Flags().BoolVar(&flagAll, "all", false, "Add all Skills found in the repository")
-	cmd.Flags().StringVar(&flagPath, "path", "", "Relative path within repo")
+	cmd.Flags().StringVar(&flagPath, "path", "", "Limit discovery to a relative path within the repository")
 	cmd.Flags().StringVar(&flagURL, "url", "", "Custom Git clone URL")
 	cmd.Flags().StringVar(&flagBranch, "branch", "", "Git branch or tag")
 	cmd.Flags().StringSliceVarP(&flagAgents, "agent", "a", nil, "Persistently include agents for added skills")

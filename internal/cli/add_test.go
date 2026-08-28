@@ -117,12 +117,12 @@ func TestGroupDiscoveredSkillsSkipsSingleDirectoryAndDisambiguatesNames(t *testi
 	})
 }
 
-func TestDiscoveryResultPreservesDuplicateNameError(t *testing.T) {
-	duplicate := errors.New("duplicate skill name \"duplicate\" found in skills/first, skills/second")
+func TestDiscoveryResultPreservesDiscoveryError(t *testing.T) {
+	discoveryErr := errors.New("discovery scope escapes repository")
 
-	_, err := discoveryResult(nil, duplicate, "owner/repo")
-	if err == nil || !strings.Contains(err.Error(), "skills/first") || !strings.Contains(err.Error(), "skills/second") {
-		t.Fatalf("discovery result error = %v; want duplicate paths", err)
+	_, err := discoveryResult(nil, discoveryErr, "owner/repo")
+	if err == nil || !strings.Contains(err.Error(), "owner/repo") || !strings.Contains(err.Error(), discoveryErr.Error()) {
+		t.Fatalf("discovery result error = %v; want Source and cause", err)
 	}
 }
 

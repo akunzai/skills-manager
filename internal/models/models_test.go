@@ -217,6 +217,13 @@ func TestParseRepoSource(t *testing.T) {
 			wantType: "github",
 		},
 		{
+			raw:         "microsoft/azure-skills/skills",
+			wantKey:     "microsoft/azure-skills",
+			wantURL:     "https://github.com/microsoft/azure-skills.git",
+			wantType:    "github",
+			wantSubpath: "skills",
+		},
+		{
 			raw:      "gitlab:group/project",
 			wantKey:  "gitlab.com/group/project",
 			wantURL:  "https://gitlab.com/group/project.git",

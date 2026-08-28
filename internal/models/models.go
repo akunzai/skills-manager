@@ -619,6 +619,19 @@ func ParseRepoSource(raw string) ParsedRepoSource {
 				RepoType:  repoType,
 			}
 		}
+		if len(parts) >= 2 {
+			sourceKey := strings.Join(parts[:2], "/")
+			subpath := ""
+			if len(parts) > 2 {
+				subpath = strings.Join(parts[2:], "/")
+			}
+			return ParsedRepoSource{
+				SourceKey: sourceKey,
+				URL:       "https://github.com/" + sourceKey + ".git",
+				RepoType:  "github",
+				Subpath:   subpath,
+			}
+		}
 		return ParsedRepoSource{
 			SourceKey: cleanRaw,
 			URL:       "https://github.com/" + cleanRaw + ".git",

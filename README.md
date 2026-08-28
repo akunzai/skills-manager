@@ -40,6 +40,26 @@ skills add akunzai/agent-skills --skill agents-md --agent claude --yes
 
 `--agent` is persistent policy, not a one-time link. A later `skills sync` restores the same availability.
 
+## Discovery scopes
+
+Add the repository root by default. Equivalent copies of a Skill are collapsed
+and the conventional `skills/<name>` path is preferred:
+
+```sh
+skills add microsoft/azure-skills
+```
+
+For precise discovery or automation, append a collection path or pass `--path`:
+
+```sh
+skills add microsoft/azure-skills/skills
+skills add microsoft/azure-skills --path skills
+```
+
+GitHub tree URLs also set the branch and discovery scope. If same-name Skills
+have different contents, interactive Add asks which Source path to use;
+non-interactive Add requires an explicit scope.
+
 ## Global or project-local
 
 Global is the default. Project mode keeps the declaration beside the code so a team can reproduce it after cloning.
