@@ -510,9 +510,9 @@ func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	missing, unexpected := availability.Drift("sample")
-	if len(missing) != 0 || !reflect.DeepEqual(unexpected, []string{"claude-code"}) {
-		t.Fatalf("drift = missing %#v, unexpected %#v", missing, unexpected)
+	drift := availability.ObserveAvailability("sample")
+	if len(drift.Missing) != 0 || !reflect.DeepEqual(drift.Unexpected, []string{"claude-code"}) {
+		t.Fatalf("drift = %#v", drift)
 	}
 	if err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)

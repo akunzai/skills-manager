@@ -345,19 +345,36 @@ func (a *Availability) Apply(skill string) error {
 	return a.state(skill).apply()
 }
 
-func (a *Availability) Drift(skill string) (missing, unexpected []string) {
-	return a.state(skill).drift()
+// AvailabilityDrift is declared Availability for one Skill measured against
+// the filesystem: the managed Agents that should hold a link but do not, and
+// the managed paths that exist but are no longer declared.
+type AvailabilityDrift struct {
+	Skill      string
+	Missing    []string
+	Unexpected []string
+}
+
+func (d AvailabilityDrift) Empty() bool {
+	return len(d.Missing) == 0 && len(d.Unexpected) == 0
+}
+
+// ObserveAvailability reports Drift for one Skill without touching the
+// filesystem. It is the single comparison behind every caller that needs to
+// know about Drift before deciding whether to act on it.
+func (a *Availability) ObserveAvailability(skill string) AvailabilityDrift {
+	missing, unexpected := a.state(skill).drift()
+	return AvailabilityDrift{Skill: skill, Missing: missing, Unexpected: unexpected}
 }
 
 // applyDeclaredAvailability applies Availability, or emits Drift when dry-run.
 func (a *Availability) applyDeclared(name, source string, dryRun bool, emit func(SyncEvent)) error {
 	if dryRun {
-		missing, unexpected := a.Drift(name)
-		if len(missing) == 0 && len(unexpected) == 0 {
+		drift := a.ObserveAvailability(name)
+		if drift.Empty() {
 			return nil
 		}
 		if emit != nil {
-			emit(SyncEvent{Kind: SyncWouldDrift, Source: source, Skill: name, Missing: missing, Unexpected: unexpected})
+			emit(SyncEvent{Kind: SyncWouldDrift, Source: source, Skill: name, Missing: drift.Missing, Unexpected: drift.Unexpected})
 		}
 		return nil
 	}
