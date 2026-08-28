@@ -95,6 +95,9 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 			if len(d.Missing) > 0 {
 				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; missing links: %s", d.Skill, strings.Join(d.Missing, ", ")), Blank: true})
 			}
+			for _, foreign := range d.Foreign {
+				add(Finding{Severity: SeverityWarning, Message: foreignAvailabilityFinding(d.Skill, foreign), Blank: true})
+			}
 			if len(d.Unexpected) > 0 {
 				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; unexpected links: %s", d.Skill, strings.Join(d.Unexpected, ", ")), Blank: true})
 			}
@@ -105,6 +108,19 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 		}
 		for _, fix := range result.FailedDrift {
 			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to reconcile availability for %s: %s", fix.Name, fix.Err), Blank: true})
+			for _, drift := range p.Drift {
+				if drift.Skill != fix.Name {
+					continue
+				}
+				for _, foreign := range drift.Foreign {
+					add(Finding{Severity: SeverityWarning, Message: foreignAvailabilityFinding(drift.Skill, foreign)})
+					remove := "rm -- "
+					if foreign.Kind == ForeignAvailabilityDirectory {
+						remove = "rm -rf -- "
+					}
+					add(Finding{Severity: SeverityInfo, Message: "  Remove it manually: " + remove + shellQuotePath(foreign.Path)})
+				}
+			}
 		}
 	}
 
@@ -159,6 +175,22 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	}
 
 	return findings
+}
+
+func foreignAvailabilityFinding(skill string, foreign ForeignAvailabilityPath) string {
+	return fmt.Sprintf("Availability drift for %s; occupied path for %s: %s (%s)", skill, foreign.Agent, models.ToTildePath(foreign.Path), foreign.Detail())
+}
+
+func shellQuotePath(path string) string {
+	path = models.ToTildePath(path)
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		return "$HOME/" + shellQuote(rest)
+	}
+	return shellQuote(path)
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 // agentFixFindings renders one agent's Fixed/Failed sub-lines for a repair

@@ -31,6 +31,7 @@ type driftFinding struct {
 	Source     string
 	Missing    []string
 	Unexpected []string
+	Foreign    []ForeignAvailabilityPath
 }
 
 type healthFix struct {
@@ -98,6 +99,8 @@ type DoctorEvent struct {
 
 type DoctorProgress func(DoctorEvent)
 
+type DoctorReplaceForeign func([]ForeignAvailabilityPath) (bool, error)
+
 func NewDoctor(cfg *config.Config, skillsDir string) *Doctor {
 	return NewDoctorWithCache(cfg, skillsDir, "")
 }
@@ -122,6 +125,10 @@ func (d *Doctor) Run(fix bool) (DoctorOutcome, error) {
 }
 
 func (d *Doctor) RunWithProgress(fix bool, progress DoctorProgress) (DoctorOutcome, error) {
+	return d.RunWithRepairApproval(fix, progress, nil)
+}
+
+func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approve DoctorReplaceForeign) (DoctorOutcome, error) {
 	plan, err := d.diagnose()
 	if err != nil {
 		return DoctorOutcome{}, err
@@ -130,7 +137,14 @@ func (d *Doctor) RunWithProgress(fix bool, progress DoctorProgress) (DoctorOutco
 		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount()}, nil
 	}
 
-	result := d.repair(plan, progress)
+	replaceForeign := false
+	if foreign := plan.foreignAvailabilityPaths(); len(foreign) > 0 && approve != nil {
+		replaceForeign, err = approve(foreign)
+		if err != nil {
+			return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount()}, err
+		}
+	}
+	result := d.repair(plan, progress, replaceForeign)
 	outcome := DoctorOutcome{Findings: plan.findings(&result)}
 	after, err := d.diagnose()
 	if err != nil {
@@ -138,6 +152,14 @@ func (d *Doctor) RunWithProgress(fix bool, progress DoctorProgress) (DoctorOutco
 	}
 	outcome.Remaining = after.issueCount()
 	return outcome, nil
+}
+
+func (p healthPlan) foreignAvailabilityPaths() []ForeignAvailabilityPath {
+	var paths []ForeignAvailabilityPath
+	for _, drift := range p.Drift {
+		paths = append(paths, drift.Foreign...)
+	}
+	return paths
 }
 
 func availabilitySource(item models.SkillItem) string {
@@ -251,6 +273,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			Source:     source,
 			Missing:    drift.Missing,
 			Unexpected: drift.Unexpected,
+			Foreign:    drift.Foreign,
 		})
 	}
 	return plan, nil
@@ -271,7 +294,7 @@ func (p healthPlan) issueCount() int {
 	}
 	n += len(p.LeftoverEmpty)
 	for _, d := range p.Drift {
-		n += len(d.Missing) + len(d.Unexpected)
+		n += len(d.Missing) + len(d.Unexpected) + len(d.Foreign)
 	}
 	n += len(p.Missing) + len(p.Invalid)
 	n += len(p.UnknownAgents)
@@ -284,7 +307,7 @@ func (p healthPlan) issueCount() int {
 
 // repair leaves physical dirs, unmanaged broken links, and missing/untracked/
 // invalid Skills unchanged. Independent repair failures do not stop the run.
-func (d *Doctor) repair(plan healthPlan, progress DoctorProgress) healthFixResult {
+func (d *Doctor) repair(plan healthPlan, progress DoctorProgress, replaceForeign bool) healthFixResult {
 	result := healthFixResult{}
 	if d.stateStore != nil {
 		if plan.StateError != "" {
@@ -359,7 +382,13 @@ func (d *Doctor) repair(plan healthPlan, progress DoctorProgress) healthFixResul
 		result.RemovedLeftover = append(result.RemovedLeftover, leftover)
 	}
 	for _, drift := range plan.Drift {
-		if err := d.availability.Apply(drift.Skill); err != nil {
+		var err error
+		if len(drift.Foreign) > 0 && replaceForeign {
+			err = d.availability.ReplaceForeign(drift.Skill, drift.Foreign)
+		} else {
+			err = d.availability.Apply(drift.Skill)
+		}
+		if err != nil {
 			result.FailedDrift = append(result.FailedDrift, healthFix{Name: drift.Skill, Err: err})
 			continue
 		}

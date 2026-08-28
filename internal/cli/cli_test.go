@@ -1421,6 +1421,112 @@ func TestCLIDoctorFixStillReportsUnrepairableIssues(t *testing.T) {
 	}
 }
 
+func TestCLIDoctorFixExplainsForeignAvailabilityPathWithoutTerminal(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	claudeDir := filepath.Join(home, ".claude with space")
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "sample", master, "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	foreignTarget := filepath.Join(home, "terminal-browser", "sample")
+	if err := os.MkdirAll(foreignTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreignPath := filepath.Join(claudeDir, "skills", "sample")
+	if err := os.MkdirAll(filepath.Dir(foreignPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(foreignTarget, foreignPath); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil {
+		t.Fatalf("doctor --fix should leave foreign Availability unchanged without a terminal:\n%s", out)
+	}
+	for _, want := range []string{"occupied path", "~/.claude with space/skills/sample", "~/terminal-browser/sample", "Remove it manually: rm -- $HOME/'.claude with space/skills/sample'"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, out)
+		}
+	}
+	gotTarget, readErr := os.Readlink(foreignPath)
+	if readErr != nil || gotTarget != foreignTarget {
+		t.Fatalf("foreign path changed: target=%q err=%v", gotTarget, readErr)
+	}
+}
+
+func TestCLIDoctorFixReplacesConfirmedForeignAvailabilityPath(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	master := filepath.Join(skillsDir, "sample")
+	if err := os.MkdirAll(master, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "sample", master, "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	foreignTarget := filepath.Join(home, "terminal-browser", "sample")
+	if err := os.MkdirAll(foreignTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreignPath := filepath.Join(home, ".claude", "skills", "sample")
+	if err := os.MkdirAll(filepath.Dir(foreignPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(foreignTarget, foreignPath); err != nil {
+		t.Fatal(err)
+	}
+
+	oldTerminal, oldConfirm := doctorIsTerminal, doctorConfirm
+	doctorIsTerminal = func() bool { return true }
+	var prompt string
+	doctorConfirm = func(message string, defaultYes bool) (bool, error) {
+		prompt = message
+		if defaultYes {
+			t.Fatal("replacement confirmation must default to No")
+		}
+		return true, nil
+	}
+	t.Cleanup(func() { doctorIsTerminal, doctorConfirm = oldTerminal, oldConfirm })
+
+	out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("doctor --fix: %v\n%s", err, out)
+	}
+	if prompt != "Replace these paths with managed Availability?" {
+		t.Fatalf("replacement prompt = %q", prompt)
+	}
+	for _, want := range []string{"~/.claude/skills/sample", "~/terminal-browser/sample", "symlink"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("interactive prompt output missing %q:\n%s", want, out)
+		}
+	}
+	if !engine.IsManagedSkillLink(foreignPath, "sample", skillsDir) {
+		t.Fatalf("doctor --fix did not replace %s with managed Availability", foreignPath)
+	}
+}
+
 // Cobra prints usage for any error out of RunE; a runtime failure is not misuse.
 func TestCLIRuntimeErrorDoesNotPrintUsage(t *testing.T) {
 	project := projectScope(t)
