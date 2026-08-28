@@ -206,7 +206,7 @@ func TestSyncUsesCacheBaselineAndProtectsLocalDrift(t *testing.T) {
 	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SyncDeclared(cfg, skillsDir, cacheDir, false, false, nil); err != nil {
+	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -222,7 +222,7 @@ func TestSyncUsesCacheBaselineAndProtectsLocalDrift(t *testing.T) {
 	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SyncDeclared(cfg, skillsDir, cacheDir, false, false, nil); err != nil {
+	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(skillsDir, "sample", "SKILL.md"))
@@ -233,14 +233,14 @@ func TestSyncUsesCacheBaselineAndProtectsLocalDrift(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SyncDeclared(cfg, skillsDir, cacheDir, false, false, nil); err == nil {
+	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err == nil {
 		t.Fatal("local drift should fail normal Sync")
 	}
 	got, _ = os.ReadFile(filepath.Join(skillsDir, "sample", "SKILL.md"))
 	if string(got) != "manual\n" {
 		t.Fatalf("local drift was overwritten: %q", got)
 	}
-	if _, err := SyncDeclared(cfg, skillsDir, cacheDir, true, false, nil); err != nil {
+	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{Force: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -253,7 +253,7 @@ func TestSyncMissingCacheFailsWithoutNetworkAndContinues(t *testing.T) {
 	local := filepath.Join(root, "local")
 	mustWriteScopeStateTestFile(t, filepath.Join(local, "SKILL.md"), []byte("# Local\n"))
 	config.AddLocalSymlinkEntry(cfg, "local", local, "")
-	report, err := SyncDeclared(cfg, filepath.Join(root, "skills"), filepath.Join(root, "cache"), false, false, nil)
+	report, err := applyPlan(t, cfg, filepath.Join(root, "skills"), filepath.Join(root, "cache"), SyncDecision{}, nil)
 	if err == nil || report.Failures == 0 {
 		t.Fatal("missing Cache should make Sync fail")
 	}

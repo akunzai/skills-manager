@@ -1158,7 +1158,18 @@ func TestUpdateRemoteSkillsReportsAggregateRefreshLifecycle(t *testing.T) {
 	}
 }
 
-func TestSyncDeclaredReportsLiveRemoteSourceLifecycle(t *testing.T) {
+// applyPlan plans and applies in one step for tests that are about what Sync
+// does, not about the seam between the two phases.
+func applyPlan(t *testing.T, cfg *config.Config, skillsDir, cacheDir string, decision SyncDecision, onProgress func(SyncEvent)) (*SyncReport, error) {
+	t.Helper()
+	plan, err := PlanSync(cfg, skillsDir, cacheDir)
+	if err != nil {
+		t.Fatalf("PlanSync: %v", err)
+	}
+	return plan.Apply(decision, onProgress)
+}
+
+func TestSyncPlanApplyReportsLiveRemoteSourceLifecycle(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cacheDir := filepath.Join(project, "cache")
@@ -1171,7 +1182,7 @@ func TestSyncDeclaredReportsLiveRemoteSourceLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var live []SyncEvent
-	report, err := SyncDeclared(cfg, skillsDir, cacheDir, false, false, func(ev SyncEvent) {
+	report, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, func(ev SyncEvent) {
 		live = append(live, ev)
 	})
 	if err != nil {
@@ -1191,7 +1202,7 @@ func TestSyncDeclaredReportsLiveRemoteSourceLifecycle(t *testing.T) {
 	}
 }
 
-func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
+func TestSyncPlanApplyLocalSymlinkAppliesAvailability(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	src := filepath.Join(project, "skill-src")
@@ -1206,7 +1217,7 @@ func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "sample", src, "")
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false, nil)
+	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1225,14 +1236,14 @@ func TestSyncDeclaredLocalSymlinkAppliesAvailability(t *testing.T) {
 	}
 }
 
-func TestSyncDeclaredCommandCheckSkipsMaterialize(t *testing.T) {
+func TestSyncPlanApplyCommandCheckSkipsMaterialize(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddLocalCommandEntry(cfg, "sample", "echo install", "exit 1", "")
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false, nil)
+	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, nil)
 	if err == nil {
 		t.Fatal("failed command must make Sync non-zero")
 	}
@@ -1244,7 +1255,7 @@ func TestSyncDeclaredCommandCheckSkipsMaterialize(t *testing.T) {
 	}
 }
 
-func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
+func TestSyncPlanApplyCommandFailureStillAppliesAvailability(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	master := filepath.Join(skillsDir, "sample")
@@ -1264,7 +1275,7 @@ func TestSyncDeclaredCommandFailureStillAppliesAvailability(t *testing.T) {
 		}
 	}
 
-	report, err := SyncDeclared(cfg, skillsDir, t.TempDir(), false, false, nil)
+	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, nil)
 	if err == nil {
 		t.Fatal("failed command must make Sync non-zero")
 	}

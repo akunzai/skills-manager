@@ -869,6 +869,32 @@ func TestOutdatedStatusStyling(t *testing.T) {
 	}
 }
 
+func TestCLISyncDryRunNeverEntersApply(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	configFile, skillsDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills")
+	marker := filepath.Join(root, "check-ran")
+
+	cfg := config.DefaultConfig()
+	config.AddLocalCommandEntry(cfg, "tool", "touch "+filepath.Join(root, "installed"), "touch "+marker, "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil {
+		t.Fatalf("dry-run with pending work should exit non-zero:\n%s", out)
+	}
+	if !strings.Contains(out, "[Dry-run] Would execute:") {
+		t.Fatalf("dry-run did not preview the installer:\n%s", out)
+	}
+	for _, path := range []string{marker, filepath.Join(root, "installed"), skillsDir} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("dry-run reached apply: %s exists (%v)", path, statErr)
+		}
+	}
+}
+
 func TestCLISyncInteractiveUnknownBaselineCancelsBeforeWrites(t *testing.T) {
 	resetRootCmdFlags()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

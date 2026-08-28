@@ -22,37 +22,29 @@ func TestPrepareRemoteSourceRefreshesCacheAndDiscoversSkills(t *testing.T) {
 	}
 }
 
-func TestRemoteSourceSyncDryRunDoesNotRefreshCache(t *testing.T) {
+func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 	project := t.TempDir()
 	cacheDir := filepath.Join(project, "cache")
 	cfg := config.DefaultConfig()
-	repo := config.RemoteRepo{URL: filepath.Join(project, "missing-origin"), Skills: map[string]string{"sample": "sample"}}
-	remote := newRemoteSource(NewAvailability(cfg, filepath.Join(project, ".agents", "skills")), "owner/repo", repo, cacheDir)
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: filepath.Join(project, "missing-origin"), Skills: map[string]string{"sample": "sample"}}
+	skillsDir := filepath.Join(project, ".agents", "skills")
 
-	var kinds []string
-	if err := remote.sync(false, true, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err != nil {
+	plan, err := PlanSync(cfg, skillsDir, cacheDir)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
-		t.Fatalf("dry-run created Cache: %v", err)
+		t.Fatalf("planning created Cache: %v", err)
 	}
-	if want := []string{SyncRepoStart, SyncFetchFailed}; !reflect.DeepEqual(kinds, want) {
-		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
+	if len(plan.Items) != 1 || plan.Items[0].Err == "" {
+		t.Fatalf("plan items = %#v", plan.Items)
 	}
-}
-
-func TestRemoteSourceSyncReportsMissingCacheWithoutFetching(t *testing.T) {
-	project := t.TempDir()
-	cfg := config.DefaultConfig()
-	repo := config.RemoteRepo{URL: filepath.Join(project, "missing-origin"), Skills: map[string]string{"sample": "sample"}}
-	remote := newRemoteSource(NewAvailability(cfg, filepath.Join(project, ".agents", "skills")), "owner/repo", repo, filepath.Join(project, "cache"))
 
 	var kinds []string
-	if err := remote.sync(false, false, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err != nil {
-		t.Fatal(err)
+	if _, err := plan.Apply(SyncDecision{}, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err == nil {
+		t.Fatal("expected an unusable Cache to be reported as a failure")
 	}
-	want := []string{SyncRepoStart, SyncFetchFailed}
-	if !reflect.DeepEqual(kinds, want) {
+	if want := []string{SyncRepoStart, SyncFetchFailed}; !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
 	}
 }
@@ -72,7 +64,7 @@ func TestRemoteSourceReconcileContinuesAfterMaterializeFailure(t *testing.T) {
 	skills := map[string]string{"bad": "missing", "good": "good"}
 	remote := newRemoteSource(NewAvailability(cfg, filepath.Join(project, ".agents", "skills")), "owner/repo", config.RemoteRepo{Skills: skills}, "")
 	var kinds []string
-	if err := remote.reconcile(repoDir, false, skills, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err != nil {
+	if err := remote.reconcile(repoDir, skills, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{SyncPathMissing, SyncMaterialized}; !reflect.DeepEqual(kinds, want) {
@@ -101,7 +93,7 @@ func TestRemoteSourceReconcileAvailabilityFailsClosed(t *testing.T) {
 	cfg := config.DefaultConfig()
 	skills := map[string]string{"sample": "sample"}
 	remote := newRemoteSource(NewAvailability(cfg, filepath.Join(project, ".agents", "skills")), "owner/repo", config.RemoteRepo{Skills: skills}, "")
-	if err := remote.reconcile(repoDir, false, skills, nil); err == nil {
+	if err := remote.reconcile(repoDir, skills, nil); err == nil {
 		t.Fatal("expected unmanaged Availability path to fail closed")
 	}
 }

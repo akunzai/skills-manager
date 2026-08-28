@@ -366,18 +366,8 @@ func (a *Availability) ObserveAvailability(skill string) AvailabilityDrift {
 	return AvailabilityDrift{Skill: skill, Missing: missing, Unexpected: unexpected}
 }
 
-// applyDeclaredAvailability applies Availability, or emits Drift when dry-run.
-func (a *Availability) applyDeclared(name, source string, dryRun bool, emit func(SyncEvent)) error {
-	if dryRun {
-		drift := a.ObserveAvailability(name)
-		if drift.Empty() {
-			return nil
-		}
-		if emit != nil {
-			emit(SyncEvent{Kind: SyncWouldDrift, Source: source, Skill: name, Missing: drift.Missing, Unexpected: drift.Unexpected})
-		}
-		return nil
-	}
+// applyDeclared reconciles one Skill's Availability with its declared policy.
+func (a *Availability) applyDeclared(name string) error {
 	if err := a.Apply(name); err != nil {
 		return fmt.Errorf("failed to apply availability for %s: %w", name, err)
 	}

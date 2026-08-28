@@ -61,34 +61,36 @@ func newSyncCmd() *cobra.Command {
 			}
 			fmt.Fprintf(out, "\n%s%sSyncing skills from %s...%s\n\n", colorBold, colorCyan, models.ToTildePath(configPath), colorReset)
 
-			allowUnknown := false
-			if !flagForce && !flagDryRun && syncIsTerminal() {
-				plan, planErr := engine.InspectFreshness(cfg, skillsDir, cacheDir, engine.FreshnessOptions{ObserveScope: true})
-				if planErr != nil {
-					return planErr
+			plan, err := engine.PlanSync(cfg, skillsDir, cacheDir)
+			if err != nil {
+				return err
+			}
+			decision := engine.SyncDecision{Force: flagForce}
+
+			if flagDryRun {
+				printSyncPlan(out, plan, decision)
+				if !plan.Fresh(decision) {
+					return fmt.Errorf("Sync did not converge: %d failure(s)", plan.Unresolved(decision))
 				}
-				var unknown []engine.SkillFreshness
-				for _, repository := range plan.Repositories {
-					for _, skill := range repository.Skills {
-						if skill.Status == engine.SkillUnknownBaseline {
-							unknown = append(unknown, skill)
-						}
-					}
-				}
-				if len(unknown) > 0 {
-					allowUnknown, err = syncPromptUnknown(out, unknown)
-					if err != nil {
-						return err
+				fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, len(plan.Names()), colorReset)
+				return nil
+			}
+
+			if !flagForce && syncIsTerminal() {
+				if unknown := plan.Unknown(); len(unknown) > 0 {
+					allowUnknown, promptErr := syncPromptUnknown(out, unknown)
+					if promptErr != nil {
+						return promptErr
 					}
 					if !allowUnknown {
 						return fmt.Errorf("Sync cancelled before making changes")
 					}
+					decision.AllowUnknown = true
 				}
 			}
 
-			configuredSkills := make(map[string]struct{})
 			var progress *presentation.Progress
-			report, err := engine.SyncDeclaredWithOptions(cfg, skillsDir, cacheDir, engine.SyncOptions{Force: flagForce, DryRun: flagDryRun, AllowUnknown: allowUnknown}, func(ev engine.SyncEvent) {
+			report, err := plan.Apply(decision, func(ev engine.SyncEvent) {
 				switch ev.Kind {
 				case engine.SyncRefreshStart:
 					progress = presentation.StartProgress(cmd.ErrOrStderr(), "Fetching Source: "+ev.Source+"...")
@@ -98,16 +100,12 @@ func newSyncCmd() *cobra.Command {
 				}
 			})
 			progress.Stop()
+			printSyncEvents(out, report)
 			if err != nil {
-				printSyncEvents(out, report)
 				return err
 			}
-			printSyncEvents(out, report)
-			for _, name := range report.Configured {
-				configuredSkills[name] = struct{}{}
-			}
 
-			fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, len(configuredSkills), colorReset)
+			fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, len(report.Configured), colorReset)
 			return nil
 		},
 	}
@@ -129,6 +127,52 @@ func printUnknownDetails(out io.Writer, skills []engine.SkillFreshness) {
 				fmt.Fprintf(out, "  %s: %s\n", group.label, path)
 			}
 		}
+	}
+}
+
+// printSyncPlan renders what Sync would do, straight from the plan. Nothing
+// here touches the filesystem or runs a Skill-supplied command.
+func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDecision) {
+	if plan.StateError != "" {
+		fmt.Fprintf(out, "  %sSkipped : %s%s\n", colorYellow, plan.StateError, colorReset)
+	}
+	for _, source := range plan.Sources {
+		items := plan.SourceItems(source)
+		fmt.Fprintf(out, "Syncing Source: %s%s%s (%d skills)...\n", colorBold, source, colorReset, len(items))
+		for _, item := range items {
+			printSyncPlanItem(out, item, decision)
+		}
+	}
+	for _, item := range plan.LocalItems() {
+		printSyncPlanItem(out, item, decision)
+	}
+}
+
+func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.SyncDecision) {
+	if item.Err != "" {
+		fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, item.Source, item.Err, colorReset)
+		return
+	}
+	action, block := item.Resolve(decision)
+	switch {
+	case block == engine.SyncBlockSourceMissing:
+		fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(item.SourcePath), item.Name, colorReset)
+		return
+	case action == engine.SyncActionSkip:
+		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, item.Name, block, colorReset)
+		return
+	case action == engine.SyncActionMaterialize:
+		fmt.Fprintf(out, "  [Dry-run] Would sync %s from %s\n", item.Name, item.Source)
+	case action == engine.SyncActionSymlink && !item.LinkCurrent:
+		fmt.Fprintf(out, "  [Dry-run] Would symlink %s -> %s\n", models.ToTildePath(item.LinkPath), models.ToTildePath(item.SourcePath))
+	case action == engine.SyncActionCommand:
+		fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", item.Command)
+	}
+	if len(item.Drift.Missing) > 0 {
+		fmt.Fprintf(out, "  [Dry-run] Would link %s to %s.\n", item.Name, strings.Join(item.Drift.Missing, ", "))
+	}
+	if len(item.Drift.Unexpected) > 0 {
+		fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", item.Name, strings.Join(item.Drift.Unexpected, ", "))
 	}
 }
 
