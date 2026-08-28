@@ -329,22 +329,6 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	}
 }
 
-func TestCLIDeprecatedPruneAliasPrintsOneMigrationWarning(t *testing.T) {
-	resetRootCmdFlags()
-	configFile := filepath.Join(t.TempDir(), "skills.json")
-	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := runCLI(t, "sync", "--prune-only", "--dry-run", "--config", configFile, "--skills-dir", t.TempDir())
-	if err != nil {
-		t.Fatalf("deprecated prune alias failed: %v\n%s", err, out)
-	}
-	if got := strings.Count(out, "use `skills prune` instead"); got != 1 {
-		t.Fatalf("migration warning count = %d; want 1\n%s", got, out)
-	}
-}
-
 func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
 	resetRootCmdFlags()
 	home := isolateHome(t)

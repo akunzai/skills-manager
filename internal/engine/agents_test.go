@@ -452,13 +452,6 @@ func TestAgentLinkManager(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
 	manager := NewAgentLinkManager(skillsDir)
 
-	if manager.SkillsDir() != skillsDir {
-		t.Errorf("SkillsDir() = %q, want %q", manager.SkillsDir(), skillsDir)
-	}
-	if manager.StopAt() != home {
-		t.Errorf("StopAt() = %q, want %q", manager.StopAt(), home)
-	}
-
 	linked, err := manager.EnsureLink("alpha", "claude")
 	if err != nil || !linked {
 		t.Fatalf("EnsureLink() = %v, %v; want true, nil", linked, err)

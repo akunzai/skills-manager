@@ -40,10 +40,6 @@ var (
 	flagProject    bool
 )
 
-func getProjectPaths(cwd string) (configPath, skillsDir string) {
-	return models.GetProjectPaths(cwd)
-}
-
 // Scope is the resolved Global or Project configuration for one command
 // invocation: its Config path, skills directory, and git Cache directory.
 // Every command decides its Scope once, at the top of RunE via ResolveScope;

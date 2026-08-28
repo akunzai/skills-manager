@@ -81,48 +81,6 @@ func ResolveScope(isProject bool, cwd, configOverride, skillsDirOverride, cacheD
 	return NewGlobalScope(configOverride, skillsDirOverride, cacheDirOverride)
 }
 
-// Root returns the directory parent cleanup must not escape: the project
-// checkout in project Scope, the user's home when skillsDir is the global
-// skills directory.
-func (s Scope) Root() string {
-	return ScopeRoot(s.SkillsDir)
-}
-
-// StoreLocalSource renders a local Skill Source for skills.json.
-func (s Scope) StoreLocalSource(absSource string) string {
-	return StoreLocalSourcePath(absSource, s.SkillsDir)
-}
-
-// LocalSymlinkTarget returns what the skills-dir symlink should point at.
-func (s Scope) LocalSymlinkTarget(absSource string) string {
-	return LocalSymlinkTarget(absSource, s.SkillsDir)
-}
-
-// ResolveLocalSource turns a skills.json Source back into a usable path.
-func (s Scope) ResolveLocalSource(source string) string {
-	return ResolveLocalSourcePath(source, s.SkillsDir)
-}
-
-// KnownAgents returns the mapping of non-universal agent names to their skills directory in this Scope.
-func (s Scope) KnownAgents() map[string]string {
-	return GetAgentsForSkillsDir(s.SkillsDir)
-}
-
-// UniversalAgentDirs returns skills directories that Automatically available agents may have had materialized.
-func (s Scope) UniversalAgentDirs() map[string]string {
-	return GetUniversalAgentSkillDirs(s.SkillsDir)
-}
-
-// AutomaticallyAvailable returns the agents that read this Scope's central skills directory directly.
-func (s Scope) AutomaticallyAvailable() []string {
-	return GetAutomaticallyAvailableAgents(s.SkillsDir)
-}
-
-// IsUniversalAgent reports whether the named agent is Automatically available in this Scope.
-func (s Scope) IsUniversalAgent(name string) bool {
-	return IsUniversalAgent(name, s.SkillsDir)
-}
-
 // IsProjectScope reports whether skillsDir is project-scoped rather than the
 // global skills directory.
 func IsProjectScope(skillsDir string) bool {

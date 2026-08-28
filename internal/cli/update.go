@@ -95,7 +95,7 @@ func newUpdateCmd() *cobra.Command {
 				}
 			}
 
-			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, "", cacheDir, onProgress)
+			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, cacheDir, onProgress)
 			progress.Stop()
 			if err != nil {
 				return err

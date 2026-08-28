@@ -38,11 +38,8 @@ var syncPromptUnknown = func(out io.Writer, skills []engine.SkillFreshness) (boo
 
 func newSyncCmd() *cobra.Command {
 	var (
-		flagForce     bool
-		flagPrune     bool
-		flagPruneOnly bool
-		flagDryRun    bool
-		flagYes       bool
+		flagForce  bool
+		flagDryRun bool
 	)
 
 	cmd := &cobra.Command{
@@ -61,9 +58,6 @@ func newSyncCmd() *cobra.Command {
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
 				return err
-			}
-			if flagPrune || flagPruneOnly {
-				return runPrune(cmd, pruneOptions{yes: flagYes, dryRun: flagDryRun})
 			}
 			fmt.Fprintf(out, "\n%s%sSyncing skills from %s...%s\n\n", colorBold, colorCyan, models.ToTildePath(configPath), colorReset)
 
@@ -119,11 +113,6 @@ func newSyncCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&flagForce, "force", false, "Overwrite local drift and unknown baselines from the existing Cache")
-	cmd.Flags().BoolVar(&flagPrune, "prune", false, "Remove untracked skills and broken symlinks")
-	cmd.Flags().BoolVar(&flagPruneOnly, "prune-only", false, "Remove untracked skills without restoring")
-	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompt when using deprecated prune flags")
-	_ = cmd.Flags().MarkDeprecated("prune", "use `skills prune` instead")
-	_ = cmd.Flags().MarkDeprecated("prune-only", "use `skills prune` instead")
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview actions without making changes")
 
 	return cmd

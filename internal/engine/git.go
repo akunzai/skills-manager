@@ -218,11 +218,6 @@ func GetLocalRepoCommit(repoDest string) string {
 	return strings.TrimSpace(stdout)
 }
 
-func GetRemoteRepoCommit(source, url, branch string) string {
-	commit, _ := GetRemoteRepoCommitResult(source, url, branch)
-	return commit
-}
-
 func GetRemoteRepoCommitResult(source, url, branch string) (string, error) {
 	repo := resolveCacheRepo(source, url, branch, "")
 	refTarget := repo.Branch

@@ -126,36 +126,3 @@ func TestScopeRootGlobalIsHome(t *testing.T) {
 		t.Errorf("ScopeRoot(global) = %q; want %q", got, home)
 	}
 }
-
-func TestScopeMethods(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("AGENTS_HOME", filepath.Join(home, ".agents"))
-
-	globalScope := NewGlobalScope("", "", "")
-	if globalScope.IsProject {
-		t.Error("expected globalScope.IsProject to be false")
-	}
-	if got := globalScope.Root(); got != home {
-		t.Errorf("globalScope.Root() = %q, want %q", got, home)
-	}
-	if !globalScope.IsUniversalAgent("gemini") {
-		t.Error("expected gemini to be universal agent in global scope")
-	}
-	if globalScope.IsUniversalAgent("claude") {
-		t.Error("expected claude to not be universal agent in global scope")
-	}
-
-	projectDir := filepath.Join(home, "workspace", "my-project")
-	projectScope := NewProjectScope(projectDir, "", "", "")
-	if !projectScope.IsProject {
-		t.Error("expected projectScope.IsProject to be true")
-	}
-	if got := projectScope.Root(); got != projectDir {
-		t.Errorf("projectScope.Root() = %q, want %q", got, projectDir)
-	}
-	if got := projectScope.StoreLocalSource(filepath.Join(projectDir, "my-skill")); got != "my-skill" {
-		t.Errorf("projectScope.StoreLocalSource() = %q, want %q", got, "my-skill")
-	}
-}
