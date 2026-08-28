@@ -36,13 +36,14 @@ func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
 		t.Fatalf("planning created Cache: %v", err)
 	}
-	if len(plan.Items) != 1 || plan.Items[0].Err == "" {
+	if len(plan.Items) != 1 || plan.Items[0].Block != SyncBlockCacheMissing {
 		t.Fatalf("plan items = %#v", plan.Items)
 	}
 
 	var kinds []string
-	if _, err := plan.Apply(SyncDecision{}, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) }); err == nil {
-		t.Fatal("expected an unusable Cache to be reported as a failure")
+	report, err := plan.Apply(SyncDecision{}, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) })
+	if err != nil || report.Blocked != 1 {
+		t.Fatalf("a Cache that was never fetched should block: err=%v blocked=%d", err, report.Blocked)
 	}
 	if want := []string{SyncRepoStart, SyncFetchFailed}; !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("event kinds = %#v, want %#v", kinds, want)

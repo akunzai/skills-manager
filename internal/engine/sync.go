@@ -11,6 +11,7 @@ const (
 	SyncPathMissing        = "path_missing"
 	SyncCopyFailed         = "copy_failed"
 	SyncAvailabilityFailed = "availability_failed"
+	SyncStateFailed        = "state_failed"
 	SyncMaterialized       = "materialized"
 	SyncSourceMissing      = "source_missing"
 	SyncSymlinkFailed      = "symlink_failed"
@@ -19,6 +20,17 @@ const (
 	SyncCommandStart       = "command_start"
 	SyncCommandFailed      = "command_failed"
 	SyncSkipped            = "skipped"
+)
+
+// SyncOutcome is what became of one declared Skill. Blocked and Failed ask
+// different things of the user — decide whether to overwrite, versus find out
+// what broke — so Sync counts and reports them apart.
+type SyncOutcome string
+
+const (
+	SyncDone    SyncOutcome = "done"
+	SyncBlocked SyncOutcome = "blocked"
+	SyncFailed  SyncOutcome = "failed"
 )
 
 // SyncEvent is one step of applying a SyncPlan for the CLI to print.
@@ -38,12 +50,27 @@ type SyncEvent struct {
 type SyncReport struct {
 	Configured []string
 	Events     []SyncEvent
-	Failures   int
+	Blocked    int
+	Failed     int
 	Unknown    []SkillFreshness
 }
 
 func (r *SyncReport) add(ev SyncEvent) {
 	r.Events = append(r.Events, ev)
+}
+
+func (r *SyncReport) tally(outcome SyncOutcome) {
+	switch outcome {
+	case SyncBlocked:
+		r.Blocked++
+	case SyncFailed:
+		r.Failed++
+	}
+}
+
+// Converged reports whether every declared Skill reached its declared state.
+func (r *SyncReport) Converged() bool {
+	return r.Blocked == 0 && r.Failed == 0
 }
 
 // Apply materializes the planned Skills and applies Availability. The plan is
@@ -55,17 +82,20 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 	report := &SyncReport{}
 	emit := func(ev SyncEvent) {
 		report.add(ev)
-		switch ev.Kind {
-		case SyncSourceMissing, SyncSymlinkFailed, SyncCheckFailed, SyncCommandFailed:
-			report.Failures++
-		}
 		if onProgress != nil {
 			onProgress(ev)
 		}
 	}
+	// Scope-level preconditions once, up front: without a skills directory
+	// every Skill below would fail for the same reason.
+	if len(plan.Items) > 0 {
+		if err := os.MkdirAll(plan.skillsDir, 0o755); err != nil {
+			return report, fmt.Errorf("failed to create skills dir: %w", err)
+		}
+	}
 	if plan.StateError != "" {
-		emit(SyncEvent{Kind: SyncSkipped, Err: plan.StateError})
-		report.Failures++
+		emit(SyncEvent{Kind: SyncStateFailed, Err: plan.StateError})
+		report.tally(SyncFailed)
 	}
 	state, stateStore := plan.openState()
 	report.Configured = plan.Names()
@@ -77,69 +107,59 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 			if item.Block == SyncBlockUnknownBaseline {
 				report.Unknown = append(report.Unknown, item.Freshness)
 			}
-			if item.Err != "" {
-				emit(SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.Err})
-				report.Failures++
-				continue
-			}
-			action, block := item.Resolve(decision)
-			if action == SyncActionSkip {
-				emit(SyncEvent{Kind: SyncSkipped, Source: item.Source, Skill: item.Name, Err: string(block)})
-				report.Failures++
-				continue
-			}
-			if err := os.MkdirAll(plan.skillsDir, 0o755); err != nil {
-				emit(SyncEvent{Kind: SyncCopyFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
-				report.Failures++
-				continue
-			}
-			if action == SyncActionMaterialize {
-				if err := MaterializeRemoteSkill(item.Name, item.Freshness.Subpath, item.CachePath, plan.skillsDir); err != nil {
-					emit(SyncEvent{Kind: SyncCopyFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
-					report.Failures++
-					continue
-				}
-				emit(SyncEvent{Kind: SyncMaterialized, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath})
-			}
-			if err := plan.availability.Apply(item.Name); err != nil {
-				emit(SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
-				report.Failures++
-				continue
-			}
-			if stateStore == nil {
-				continue
-			}
-			skill := item.Freshness
-			digests, digestErr := DigestSkillContent(skill.ScopePath)
-			if digestErr != nil {
-				report.Failures++
-				continue
-			}
-			skill.CacheDigests = digests
-			state.Skills[item.Name] = skill.appliedState(item.CachePath, item.LocalSHA)
-			if saveErr := stateStore.Save(state); saveErr != nil {
-				report.Failures++
-			}
+			report.tally(plan.applyRemoteItem(item, decision, state, stateStore, emit))
 		}
 	}
 
-	local := plan.LocalItems()
-	if len(local) > 0 {
-		if err := os.MkdirAll(plan.skillsDir, 0o755); err != nil {
-			return report, fmt.Errorf("failed to create skills dir: %w", err)
-		}
-	}
-	for _, item := range local {
-		if err := applyLocalItem(plan.availability, item, emit); err != nil {
-			emit(SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
-			report.Failures++
-		}
-	}
-
-	if report.Failures > 0 {
-		return report, fmt.Errorf("Sync did not converge: %d failure(s)", report.Failures)
+	for _, item := range plan.LocalItems() {
+		report.tally(applyLocalItem(plan.availability, item, emit))
 	}
 	return report, nil
+}
+
+// applyRemoteItem Materializes one remote Skill, applies its Availability, and
+// records the baseline it was applied from.
+func (plan *SyncPlan) applyRemoteItem(item SyncPlanItem, decision SyncDecision, state ScopeState, stateStore *ScopeStateStore, emit func(SyncEvent)) SyncOutcome {
+	if item.Block == SyncBlockCacheMissing {
+		emit(SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.BlockReason})
+		return SyncBlocked
+	}
+	if item.Err != "" {
+		emit(SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.Err})
+		return SyncFailed
+	}
+	action, block := item.Resolve(decision)
+	if action == SyncActionSkip {
+		emit(SyncEvent{Kind: SyncSkipped, Source: item.Source, Skill: item.Name, Err: string(block)})
+		return SyncBlocked
+	}
+	if action == SyncActionMaterialize {
+		if err := MaterializeRemoteSkill(item.Name, item.Freshness.Subpath, item.CachePath, plan.skillsDir); err != nil {
+			emit(SyncEvent{Kind: SyncCopyFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
+			return SyncFailed
+		}
+		emit(SyncEvent{Kind: SyncMaterialized, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath})
+	}
+	if err := plan.availability.Apply(item.Name); err != nil {
+		emit(SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
+		return SyncFailed
+	}
+	if stateStore == nil {
+		return SyncDone
+	}
+	skill := item.Freshness
+	digests, err := DigestSkillContent(skill.ScopePath)
+	if err != nil {
+		emit(SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
+		return SyncFailed
+	}
+	skill.CacheDigests = digests
+	state.Skills[item.Name] = skill.appliedState(item.CachePath, item.LocalSHA)
+	if err := stateStore.Save(state); err != nil {
+		emit(SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
+		return SyncFailed
+	}
+	return SyncDone
 }
 
 // openState prepares the Scope state for recording applied baselines. A Scope
@@ -164,32 +184,38 @@ func (plan *SyncPlan) openState() (ScopeState, *ScopeStateStore) {
 }
 
 // applyLocalItem Materializes one local Skill and applies its Availability. A
-// missing Source is an event and leaves the Skill alone; a failed installer is
-// an event and Availability is still applied.
-func applyLocalItem(availability *Availability, item SyncPlanItem, emit func(SyncEvent)) error {
+// missing Source or a check that does not pass blocks the Skill; a failed
+// installer is a failure, and Availability is still applied.
+func applyLocalItem(availability *Availability, item SyncPlanItem, emit func(SyncEvent)) SyncOutcome {
 	if item.Block == SyncBlockSourceMissing {
 		emit(SyncEvent{Kind: SyncSourceMissing, Skill: item.Name, Path: item.SourcePath})
-		return nil
+		return SyncBlocked
 	}
+	outcome := SyncDone
 	if item.Kind == SyncItemCommand {
 		if item.Check != "" {
 			if _, _, err := RunCmd(item.Check, ""); err != nil {
 				emit(SyncEvent{Kind: SyncCheckFailed, Skill: item.Name, Path: item.Check})
-				return nil
+				return SyncBlocked
 			}
 		}
 		emit(SyncEvent{Kind: SyncCommandStart, Skill: item.Name})
 		if err := MaterializeCommand(item.Command); err != nil {
 			emit(SyncEvent{Kind: SyncCommandFailed, Skill: item.Name, Err: err.Error()})
+			outcome = SyncFailed
 		}
-		return availability.Apply(item.Name)
+	} else {
+		if err := MaterializeLocalSymlink(item.Name, item.LinkTarget, availability.skillsDir); err != nil {
+			emit(SyncEvent{Kind: SyncSymlinkFailed, Skill: item.Name, Err: err.Error()})
+			return SyncFailed
+		}
+		emit(SyncEvent{Kind: SyncSymlinked, Skill: item.Name, Target: item.SourcePath})
 	}
-	if err := MaterializeLocalSymlink(item.Name, item.LinkTarget, availability.skillsDir); err != nil {
-		emit(SyncEvent{Kind: SyncSymlinkFailed, Skill: item.Name, Err: err.Error()})
-		return nil
+	if err := availability.Apply(item.Name); err != nil {
+		emit(SyncEvent{Kind: SyncAvailabilityFailed, Skill: item.Name, Err: err.Error()})
+		return SyncFailed
 	}
-	emit(SyncEvent{Kind: SyncSymlinked, Skill: item.Name, Target: item.SourcePath})
-	return availability.Apply(item.Name)
+	return outcome
 }
 
 func itemNames(items []SyncPlanItem) []string {

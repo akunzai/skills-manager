@@ -236,9 +236,11 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		return AddResult{}, err
 	}
 
-	var stepErr error
+	var stepErr, availabilityErr error
 	note := func(ev SyncEvent) {
 		switch ev.Kind {
+		case SyncAvailabilityFailed:
+			availabilityErr = fmt.Errorf("%s", ev.Err)
 		case SyncCheckFailed:
 			stepErr = fmt.Errorf("command check %q failed, skipping %s", ev.Path, ev.Skill)
 		case SyncCommandFailed, SyncSymlinkFailed, SyncCopyFailed:
@@ -267,14 +269,15 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 				Target:  target,
 			})
 		}
-		stepErr = nil
+		stepErr, availabilityErr = nil, nil
 		var err error
 		switch plan.Source.Kind {
 		case AddSourceRemote:
 			one := map[string]string{name: subpath}
 			err = newRemoteSource(availability, plan.Source.Key, config.RemoteRepo{Skills: one}, "").reconcile(plan.Source.RepoDir, one, note)
 		case AddSourceSymlink, AddSourceCommand:
-			err = applyLocalItem(availability, planLocalItem(availability, name), note)
+			applyLocalItem(availability, planLocalItem(availability, name), note)
+			err = availabilityErr
 		}
 		if err != nil {
 			return AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}, fmt.Errorf("saved config but failed to apply availability for %s: %w", name, err)

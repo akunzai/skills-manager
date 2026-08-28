@@ -188,8 +188,8 @@ func TestSyncApplyNamesTheSkillWhoseAvailabilityFailed(t *testing.T) {
 			failures = append(failures, ev)
 		}
 	})
-	if err == nil || report.Failures != 1 {
-		t.Fatalf("expected one failure, got err=%v failures=%d", err, report.Failures)
+	if err != nil || report.Failed != 1 || report.Blocked != 0 {
+		t.Fatalf("expected one failure, got err=%v failed=%d blocked=%d", err, report.Failed, report.Blocked)
 	}
 	if len(failures) != 1 || failures[0].Skill != "local" || failures[0].Err == "" {
 		t.Fatalf("failure must name the Skill and say why: %#v", failures)

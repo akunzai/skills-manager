@@ -68,11 +68,7 @@ func newSyncCmd() *cobra.Command {
 
 			if flagDryRun {
 				printSyncPlan(out, plan, decision)
-				if !plan.Fresh(decision) {
-					return fmt.Errorf("Sync did not converge: %d failure(s)", plan.Unresolved(decision))
-				}
-				fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, len(plan.Names()), colorReset)
-				return nil
+				return reportSyncOutcome(out, plan.FailedCount(), len(plan.Blocked(decision)), len(plan.Pending(decision)), len(plan.Names()), true)
 			}
 
 			if !flagForce && syncIsTerminal() {
@@ -93,9 +89,7 @@ func newSyncCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
-			fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, len(report.Configured), colorReset)
-			return nil
+			return reportSyncOutcome(out, report.Failed, report.Blocked, 0, len(report.Configured), false)
 		},
 	}
 
@@ -103,6 +97,41 @@ func newSyncCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview actions without making changes")
 
 	return cmd
+}
+
+// reportSyncOutcome states where the Scope stands and picks the exit code.
+// Sync speaks the same three codes as outdated: 0 converged, 1 not converged,
+// 2 the work could not be completed. A blocked Skill is a state to decide on,
+// not an error, so it never reads as a failure.
+func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, dryRun bool) error {
+	if failed > 0 {
+		return exitError{message: fmt.Sprintf("Sync did not converge: %s, %s", countOf(failed, "failure"), countOf(blocked, "blocked skill")), code: 2}
+	}
+	if blocked > 0 || pending > 0 {
+		parts := make([]string, 0, 2)
+		if pending > 0 {
+			parts = append(parts, countOf(pending, "skill")+" to reconcile")
+		}
+		if blocked > 0 {
+			parts = append(parts, countOf(blocked, "blocked skill"))
+		}
+		fmt.Fprintf(out, "\n%s%sSync did not converge. %s.%s\n", colorBold, colorYellow, strings.Join(parts, ", "), colorReset)
+		if blocked > 0 {
+			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n\n")
+		} else {
+			fmt.Fprintf(out, "Next: run 'skills sync'.\n\n")
+		}
+		return exitError{message: "Scope does not match its Config", code: 1}
+	}
+	fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, configured, colorReset)
+	return nil
+}
+
+func countOf(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func printUnknownDetails(out io.Writer, skills []engine.SkillFreshness) {
@@ -197,6 +226,12 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 			fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		case engine.SyncSkipped:
 			fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
+		case engine.SyncStateFailed:
+			if ev.Skill == "" {
+				fmt.Fprintf(out, "  %sFailed to read the Scope baseline: %s%s\n", colorRed, ev.Err, colorReset)
+				break
+			}
+			fmt.Fprintf(out, "  %sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		}
 	}
 }

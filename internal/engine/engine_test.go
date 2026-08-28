@@ -1244,8 +1244,8 @@ func TestSyncPlanApplyCommandCheckSkipsMaterialize(t *testing.T) {
 	config.AddLocalCommandEntry(cfg, "sample", "echo install", "exit 1", "")
 
 	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, nil)
-	if err == nil {
-		t.Fatal("failed command must make Sync non-zero")
+	if err != nil || report.Blocked != 1 {
+		t.Fatalf("a check that does not pass blocks the Skill: err=%v blocked=%d", err, report.Blocked)
 	}
 	if len(report.Events) != 1 || report.Events[0].Kind != SyncCheckFailed {
 		t.Fatalf("events = %#v", report.Events)
@@ -1276,8 +1276,8 @@ func TestSyncPlanApplyCommandFailureStillAppliesAvailability(t *testing.T) {
 	}
 
 	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, nil)
-	if err == nil {
-		t.Fatal("failed command must make Sync non-zero")
+	if err != nil || report.Failed != 1 {
+		t.Fatalf("a failed installer is a failure: err=%v failed=%d", err, report.Failed)
 	}
 	var failed bool
 	for _, ev := range report.Events {
