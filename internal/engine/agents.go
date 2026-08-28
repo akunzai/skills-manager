@@ -33,14 +33,6 @@ func NewAgentLinkManager(skillsDir string) AgentLinkManager {
 	}
 }
 
-func (m AgentLinkManager) SkillsDir() string {
-	return m.skillsDir
-}
-
-func (m AgentLinkManager) StopAt() string {
-	return m.stopAt
-}
-
 func (m AgentLinkManager) EnsureLink(skillName, agentName string) (bool, error) {
 	return EnsureAgentSymlink(skillName, agentName, m.skillsDir)
 }

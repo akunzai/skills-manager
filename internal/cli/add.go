@@ -34,7 +34,7 @@ func selectionSkillsDirs(cmd *cobra.Command) []string {
 	if err != nil {
 		return dirs
 	}
-	_, projectDir := getProjectPaths(cwd)
+	_, projectDir := models.GetProjectPaths(cwd)
 	return append(dirs, projectDir)
 }
 

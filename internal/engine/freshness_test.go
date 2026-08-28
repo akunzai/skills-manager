@@ -115,7 +115,7 @@ func TestSyncUsesCacheBaselineAndProtectsLocalDrift(t *testing.T) {
 	if _, _, err := RunGit(origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "v2"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UpdateRemoteSkills(cfg, nil, false, false, skillsDir, cacheDir, nil); err != nil {
+	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := SyncDeclared(cfg, skillsDir, cacheDir, false, false, nil); err != nil {

@@ -145,9 +145,7 @@ func resolveUpdateSources(cfg *config.Config, targets []string) (map[string]conf
 	return selected, nil
 }
 
-// UpdateRemoteSkills keeps its historical signature for callers; skillsDir is
-// intentionally ignored because Update now mutates only shared Cache data.
-func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool, _ string, cacheDir string, progress UpdateProgress) (*UpdateResult, error) {
+func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool, cacheDir string, progress UpdateProgress) (*UpdateResult, error) {
 	repositories, err := resolveUpdateSources(cfg, targets)
 	if err != nil {
 		return nil, err

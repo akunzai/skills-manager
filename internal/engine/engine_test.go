@@ -792,7 +792,7 @@ func TestUpdateChecksRemoteSourcesInParallel(t *testing.T) {
 	cacheDir := t.TempDir()
 	done := make(chan error, 1)
 	go func() {
-		_, err := UpdateRemoteSkills(cfg, nil, false, true, "", cacheDir, nil)
+		_, err := UpdateRemoteSkills(cfg, nil, false, true, cacheDir, nil)
 		done <- err
 	}()
 	for range 2 {
@@ -937,7 +937,7 @@ func TestUpdateDetectsChangedRemoteDefaultBranch(t *testing.T) {
 	if status.Status != "not_cached" || status.Branch != "next" {
 		t.Fatalf("status = %#v", status)
 	}
-	if _, err := UpdateRemoteSkills(cfg, nil, false, false, "", cacheDir, nil); err != nil {
+	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
 		t.Fatal(err)
 	}
 	second := resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir
@@ -991,9 +991,7 @@ func TestCopySkillFolderWithReadOnlyFilesAndRemoveAll(t *testing.T) {
 }
 
 func TestUpdateRemoteSkillsDryRun(t *testing.T) {
-	tmpDir := t.TempDir()
-	skillsDir := filepath.Join(tmpDir, "skills")
-	cacheDir := filepath.Join(tmpDir, "cache")
+	cacheDir := filepath.Join(t.TempDir(), "cache")
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo1", "skill-1", "skills/skill-1", "github", "")
@@ -1003,7 +1001,7 @@ func TestUpdateRemoteSkillsDryRun(t *testing.T) {
 		cfg.Remote[source] = repo
 	}
 
-	result, err := UpdateRemoteSkills(cfg, []string{"skill-1", "skill-2"}, false, true, skillsDir, cacheDir, nil)
+	result, err := UpdateRemoteSkills(cfg, []string{"skill-1", "skill-2"}, false, true, cacheDir, nil)
 	if err != nil {
 		t.Fatalf("UpdateRemoteSkills dry-run failed: %v", err)
 	}
@@ -1058,7 +1056,7 @@ func TestUpdateRemoteSkillsDoesNotReconcileAvailability(t *testing.T) {
 		}
 	}
 
-	result, err := UpdateRemoteSkills(cfg, nil, false, false, skillsDir, cacheDir, nil)
+	result, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1099,7 +1097,7 @@ func TestUpdateRemoteSkillsDryRunDoesNotApplyAvailabilityDrift(t *testing.T) {
 		}
 	}
 
-	_, err := UpdateRemoteSkills(cfg, nil, false, true, skillsDir, cacheDir, nil)
+	_, err := UpdateRemoteSkills(cfg, nil, false, true, cacheDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1130,7 +1128,7 @@ func TestUpdateRemoteSkillsIgnoresUnmanagedAvailabilityPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := UpdateRemoteSkills(cfg, nil, false, false, skillsDir, cacheDir, nil); err != nil {
+	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(unmanaged); err != nil {
@@ -1140,7 +1138,6 @@ func TestUpdateRemoteSkillsIgnoresUnmanagedAvailabilityPath(t *testing.T) {
 
 func TestUpdateRemoteSkillsReportsAggregateRefreshLifecycle(t *testing.T) {
 	project := t.TempDir()
-	skillsDir := filepath.Join(project, ".agents", "skills")
 	cacheDir := filepath.Join(project, "cache")
 	origin := filepath.Join(project, "origin")
 	writeLocalGitSkill(t, origin, "sample")
@@ -1148,7 +1145,7 @@ func TestUpdateRemoteSkillsReportsAggregateRefreshLifecycle(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	var kinds []string
-	_, err := UpdateRemoteSkills(cfg, []string{"sample"}, true, false, skillsDir, cacheDir, func(ev UpdateEvent) {
+	_, err := UpdateRemoteSkills(cfg, []string{"sample"}, true, false, cacheDir, func(ev UpdateEvent) {
 		kinds = append(kinds, ev.Kind)
 	})
 	if err != nil {
