@@ -35,7 +35,7 @@ func newOutdatedCmd() *cobra.Command {
 				}
 				return nil
 			}
-			report, err := engine.InspectOutdated(cfg, scope.SkillsDir, scope.CacheDir, 8)
+			report, err := engine.InspectFreshness(cfg, scope.SkillsDir, scope.CacheDir, engine.FreshnessOptions{ObserveRemote: true, ObserveScope: true, Workers: 8})
 			if err != nil {
 				return err
 			}
@@ -58,41 +58,32 @@ func newOutdatedCmd() *cobra.Command {
 	return cmd
 }
 
-func printOutdatedReport(cmd *cobra.Command, report *engine.OutdatedReport) {
+func printOutdatedReport(cmd *cobra.Command, report *engine.FreshnessSnapshot) {
 	out := cmd.OutOrStdout()
-	needUpdate, needSync, hasDrift := false, false, false
 	for _, repository := range report.Repositories {
-		fmt.Fprintf(out, "%s%s%s  %sCache:%s %s", colorBold, repository.Source, colorReset, colorDim, colorReset, styledStatus(repository.Status))
+		fmt.Fprintf(out, "%s%s%s  %sCache:%s %s", colorBold, repository.Source, colorReset, colorDim, colorReset, styledStatus(string(repository.RemoteStatus)))
 		if repository.Error != "" {
 			fmt.Fprintf(out, " %s(%s)%s", colorDim, repository.Error, colorReset)
 		}
 		fmt.Fprintln(out)
-		if repository.Status != "up_to_date" {
-			needUpdate = true
-		}
 		for _, skill := range repository.Skills {
 			note := ""
 			if skill.Status == engine.SkillInSync && !skill.BaselineRecorded {
 				note = fmt.Sprintf(" %s(baseline not recorded)%s", colorDim, colorReset)
 			}
 			fmt.Fprintf(out, "  %s%s%s %s: %s%s %s[%s]%s\n", colorDim, treeBranch, colorReset, skill.Name, styledStatus(string(skill.Status)), note, colorDim, models.ToTildePath(skill.ScopePath), colorReset)
-			if skill.Status != engine.SkillInSync {
-				needSync = true
-			}
-			if skill.Status == engine.SkillLocalDrift {
-				hasDrift = true
-			}
 		}
 	}
 	var hints []string
-	if needUpdate {
-		hints = append(hints, "run 'skills update'")
-	}
-	if needSync {
-		hints = append(hints, "run 'skills sync'")
-	}
-	if hasDrift {
-		hints = append(hints, "review local changes, then use 'skills sync --force' if intended")
+	for _, disposition := range report.DispositionKinds() {
+		switch disposition {
+		case engine.FreshnessUpdate:
+			hints = append(hints, "run 'skills update'")
+		case engine.FreshnessSync:
+			hints = append(hints, "run 'skills sync'")
+		case engine.FreshnessProtectDrift:
+			hints = append(hints, "review local changes, then use 'skills sync --force' if intended")
+		}
 	}
 	if len(hints) > 0 {
 		fmt.Fprintf(out, "\nNext: %s.\n", strings.Join(hints, "; "))

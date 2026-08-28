@@ -56,8 +56,8 @@ func (s remoteSource) refresh(force bool) (string, error) {
 	return EnsureGitRepo(s.key, s.repo.URL, s.repo.Branch, force, s.cacheDir)
 }
 
-// CheckStatus queries local and remote git commit SHAs for freshness.
-func (s remoteSource) CheckStatus() UpdateStatusResult {
+// ObserveFreshness queries local and remote git commit SHAs.
+func (s remoteSource) ObserveFreshness() FreshnessRepository {
 	repo := resolveCacheRepo(s.key, s.repo.URL, s.repo.Branch, s.cacheDir)
 	errorMessage := ""
 	defaultRemoteSHA := ""
@@ -75,43 +75,41 @@ func (s remoteSource) CheckStatus() UpdateStatusResult {
 		targetBranch = "HEAD"
 	}
 
-	skillList := sortedSkillKeys(s.repo.Skills)
 	localSHA := GetLocalRepoCommit(repo.Dir)
 	remoteSHA := ""
 
-	status := "up_to_date"
+	status := RemoteUpToDate
 	if errorMessage != "" {
-		status = "error"
+		status = RemoteError
 	}
 	if localSHA == "" {
-		if status != "error" {
-			status = "not_cached"
+		if status != RemoteError {
+			status = RemoteNotCached
 		}
-	} else if status != "error" {
+	} else if status != RemoteError {
 		remoteSHA = defaultRemoteSHA
 		if remoteSHA == "" {
 			var remoteErr error
 			remoteSHA, remoteErr = GetRemoteRepoCommitResult(s.key, repo.URL, targetBranch)
 			if remoteErr != nil {
-				status = "error"
+				status = RemoteError
 				errorMessage = remoteErr.Error()
 			}
 		}
-		if status != "error" && localSHA != remoteSHA {
-			status = "update_available"
+		if status != RemoteError && localSHA != remoteSHA {
+			status = RemoteUpdateAvailable
 		}
 	}
 
-	return UpdateStatusResult{
-		Source:    s.key,
-		URL:       repo.URL,
-		Branch:    targetBranch,
-		Status:    status,
-		LocalSHA:  localSHA,
-		RemoteSHA: remoteSHA,
-		Skills:    skillList,
-		CachePath: repo.Dir,
-		Error:     errorMessage,
+	return FreshnessRepository{
+		Source:       s.key,
+		URL:          repo.URL,
+		Branch:       targetBranch,
+		RemoteStatus: status,
+		LocalSHA:     localSHA,
+		RemoteSHA:    remoteSHA,
+		CachePath:    repo.Dir,
+		Error:        errorMessage,
 	}
 }
 

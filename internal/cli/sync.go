@@ -63,7 +63,7 @@ func newSyncCmd() *cobra.Command {
 
 			allowUnknown := false
 			if !flagForce && !flagDryRun && syncIsTerminal() {
-				plan, planErr := engine.PlanScopeFreshness(cfg, skillsDir, cacheDir)
+				plan, planErr := engine.InspectFreshness(cfg, skillsDir, cacheDir, engine.FreshnessOptions{ObserveScope: true})
 				if planErr != nil {
 					return planErr
 				}

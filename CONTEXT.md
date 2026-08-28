@@ -56,6 +56,14 @@ _Avoid_: install (when you mean the disk write only), checkout, restore
 The cloned git working copy used to Materialize remote Skills.
 _Avoid_: vendor, tmp clone
 
+**Freshness**:
+The observed relationship between a remote Source, its Cache, and the Materialized Skill in a Scope. Remote Source observation is optional so Freshness can be evaluated without network access.
+_Avoid_: update status, sync status, currentness
+
+**Freshness disposition**:
+Recommended next actions derived from one Freshness snapshot. Dispositions are ordered and may coexist: no action, Update, Sync, protect Drift, and investigate an incomplete observation. Each includes a structured reason but does not perform the action or own its presentation.
+_Avoid_: command, operation, side effect
+
 **Agent**:
 A coding harness that can load Skills (Claude Code, Copilot, Codex, …).
 _Avoid_: harness (in user-facing copy), tool, IDE
