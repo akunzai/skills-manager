@@ -1975,3 +1975,37 @@ func TestCLIDoctorSaysUntrackedNeedsDecisionWhileStayingClean(t *testing.T) {
 		t.Fatalf("doctor --fix removed an untracked skill: %v", err)
 	}
 }
+
+// The summary line used to promise that --fix or Sync would repair every
+// counted issue. An invalid folder is counted and neither repairs it, so the
+// line now points at the per-finding next actions instead.
+func TestCLIDoctorSummaryPointsAtPerFindingNextActions(t *testing.T) {
+	project := projectScope(t)
+
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "broken"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "broken", "broken", "github", "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "-p")
+	if err == nil {
+		t.Fatalf("doctor found an invalid folder but exited 0:\n%s", out)
+	}
+	if strings.Contains(out, "Run with --fix or 'skills sync' to repair") {
+		t.Fatalf("doctor still promised a repair it cannot deliver:\n%s", out)
+	}
+	if !strings.Contains(out, "See the next action for each, or run with --fix.") {
+		t.Fatalf("doctor did not point at the per-finding next actions:\n%s", out)
+	}
+	if !strings.Contains(out, "then run 'skills sync -p' to re-materialize it.") {
+		t.Fatalf("doctor did not name the way out for the invalid folder:\n%s", out)
+	}
+}

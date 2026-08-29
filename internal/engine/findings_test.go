@@ -217,3 +217,43 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 	})
 }
+
+// An invalid folder's remedy depends on how the Skill was declared: removing a
+// remote one lets a bare Sync re-Materialize it, while a symlinked one is only
+// as valid as its Source and a command installer is not re-run by Sync. One
+// shared sentence would be wrong for two of the three.
+func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	source := filepath.Join(project, "src", "linked")
+	for _, dir := range []string{
+		filepath.Join(skillsDir, "remoted"),
+		filepath.Join(skillsDir, "linked"),
+		filepath.Join(skillsDir, "installed"),
+		source,
+	} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "remoted", "remoted", "github", "")
+	config.AddLocalSymlinkEntry(cfg, "linked", source, "")
+	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "")
+
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"Next: remove " + models.ToTildePath(filepath.Join(skillsDir, "remoted")) + ", then run 'skills sync -p' to re-materialize it.",
+		"Next: its source " + models.ToTildePath(source) + " has no SKILL.md; fix the source, or undeclare it with 'skills rm -p linked'.",
+		"Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm -p installed'.",
+	}
+	for _, message := range want {
+		if !containsMessage(outcome.Findings, message) {
+			t.Errorf("missing next action %q in %#v", message, outcome.Findings)
+		}
+	}
+}

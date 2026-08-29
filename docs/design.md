@@ -51,6 +51,8 @@ next action, only when required
 
 Commands that report on the state of a Scope express that state through their exit code rather than through an error: `0` when the Scope matches its Config, `1` when it does not, `2` when the work could not be completed. `1` prints what stands in the way and the next action, and is not styled as an error. See ADR-0002.
 
+A diagnosing command repairs a Scope only back to its declared state; discarding data the user never declared belongs to a command that says so. Any finding outside that repair set carries its own next action, worded for the Scope being diagnosed and for how the skill was declared, because one shared sentence is wrong for someone. A summary line then points at those next actions rather than promising a blanket repair it cannot deliver, and never reports a clean bill above a warning it left standing.
+
 Errors use the smallest useful subset:
 
 ```text

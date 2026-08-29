@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/models"
@@ -136,8 +137,9 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 			"  Declare %s with 'skills add%s', or remove %s with 'skills prune%s --skills-only'.",
 			objectPronoun(len(p.Untracked)), p.scopeFlag(), objectPronoun(len(p.Untracked)), p.scopeFlag())})
 	}
-	if len(p.Invalid) > 0 {
-		add(Finding{Severity: SeverityError, Message: "Installed folders missing SKILL.md: " + strings.Join(p.Invalid, ", "), Blank: true})
+	for _, invalid := range p.Invalid {
+		add(Finding{Severity: SeverityError, Message: "Installed folder missing SKILL.md: " + invalid.Name, Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: "  " + p.invalidNextAction(invalid)})
 	}
 	if p.StateError != "" {
 		add(Finding{Severity: SeverityError, Message: "Corrupted Scope state: " + p.StateError, Blank: true})
@@ -194,6 +196,26 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	}
 
 	return findings
+}
+
+// invalidNextAction names the way out for one invalid Skill. The remedies do
+// not generalize: removing the folder of a remote Skill turns it back into a
+// plain Missing one that a bare Sync re-Materializes, but doing the same to a
+// symlinked Skill only rebuilds the same link at the same broken Source, and
+// a command installer is never re-run by Sync when its check does not pass.
+// One shared sentence would therefore be wrong for someone.
+func (p healthPlan) invalidNextAction(invalid invalidSkill) string {
+	flag := p.scopeFlag()
+	switch invalid.SourceType {
+	case "local_symlink":
+		source := models.ToTildePath(models.ResolveLocalSourcePath(invalid.Source, p.SkillsDir))
+		return fmt.Sprintf("Next: its source %s has no SKILL.md; fix the source, or undeclare it with 'skills rm%s %s'.", source, flag, invalid.Name)
+	case "local_command":
+		return fmt.Sprintf("Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm%s %s'.", flag, invalid.Name)
+	default:
+		path := models.ToTildePath(filepath.Join(p.SkillsDir, invalid.Name))
+		return fmt.Sprintf("Next: remove %s, then run 'skills sync%s' to re-materialize it.", path, flag)
+	}
 }
 
 // scopeFlag is the flag a suggested command needs to act on the Scope doctor

@@ -80,7 +80,11 @@ func newDoctorCmd() *cobra.Command {
 			if outcome.RecoveryNeeded {
 				fmt.Fprintf(out, "%s%sFound %d issue(s). Resolve the reported Cache recovery artifacts, then run 'skills doctor' again.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
 			} else {
-				fmt.Fprintf(out, "%s%sFound %d issue(s). Run with --fix or 'skills sync' to repair.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+				// Not every issue is repairable by --fix or Sync — an invalid
+				// folder and an untracked Skill are not — so this line points
+				// at the per-finding next actions instead of promising a
+				// blanket repair it cannot deliver.
+				fmt.Fprintf(out, "%s%sFound %d issue(s). See the next action for each, or run with --fix.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
 			}
 			return fmt.Errorf("doctor detected %d issue(s)", outcome.Remaining)
 		},

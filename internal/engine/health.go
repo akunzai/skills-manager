@@ -40,6 +40,16 @@ type healthFix struct {
 	Err   error
 }
 
+// invalidSkill is a declared Skill whose folder is on the skills directory but
+// has no SKILL.md. The way out depends on how it was declared — a remote Skill
+// can be re-Materialized, a symlinked one is only as valid as its Source — so
+// the finding carries the declaration, not just the name.
+type invalidSkill struct {
+	Name       string
+	SourceType string
+	Source     string
+}
+
 type healthPlan struct {
 	SkillsDir      string
 	MasterMissing  bool
@@ -49,7 +59,7 @@ type healthPlan struct {
 	Drift          []driftFinding
 	Missing        []string
 	Untracked      []string
-	Invalid        []string
+	Invalid        []invalidSkill
 	UnknownAgents  []UnknownAgentReference
 	StateError     string
 	StaleState     []string
@@ -279,7 +289,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			continue
 		}
 		if !s.IsValidSkill {
-			plan.Invalid = append(plan.Invalid, s.Name)
+			plan.Invalid = append(plan.Invalid, invalidSkill{Name: s.Name, SourceType: s.SourceType, Source: s.Source})
 		}
 		source := availabilitySource(s)
 		drift := d.availability.ObserveAvailability(s.Name)
