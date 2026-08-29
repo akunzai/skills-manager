@@ -69,7 +69,11 @@ func newDoctorCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Fprintf(out, "%s%sFound %d issue(s). Run with --fix or 'skills sync' to repair.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+			if outcome.RecoveryNeeded {
+				fmt.Fprintf(out, "%s%sFound %d issue(s). Resolve the reported Cache recovery artifacts, then run 'skills doctor' again.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+			} else {
+				fmt.Fprintf(out, "%s%sFound %d issue(s). Run with --fix or 'skills sync' to repair.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+			}
 			return fmt.Errorf("doctor detected %d issue(s)", outcome.Remaining)
 		},
 	}

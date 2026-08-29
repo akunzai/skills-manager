@@ -140,7 +140,15 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 		add(Finding{Severity: SeverityWarning, Message: "Obsolete Scope state entries: " + strings.Join(p.StaleState, ", "), Blank: true})
 	}
 	if len(p.LegacyCache) > 0 {
-		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Legacy branchless Cache entries: %s", strings.Join(p.LegacyCache, ", ")), Blank: true})
+		paths := make([]string, 0, len(p.LegacyCache))
+		for _, migration := range p.LegacyCache {
+			paths = append(paths, migration.Root)
+		}
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Legacy branchless Cache entries: %s", strings.Join(paths, ", ")), Blank: true})
+	}
+	for _, artifact := range p.CacheRecovery {
+		add(Finding{Severity: SeverityError, Message: "Manual Cache recovery required; preserved artifact: " + artifact, Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: "  Inspect the preserved Cache, restore it to the intended Cache path if needed, then remove the artifact."})
 	}
 	for _, artifact := range p.StaleScopes {
 		add(Finding{Severity: SeverityWarning, Message: "Scope state references missing path: " + artifact.ScopePath, Blank: true})
@@ -153,11 +161,16 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 		}
 	}
 	if result != nil {
-		for _, path := range result.RemovedLegacy {
-			add(Finding{Severity: SeverityOK, Message: "Rebuilt branch-aware Cache and removed legacy Cache: " + path})
-		}
-		for _, failure := range result.FailedLegacy {
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to rebuild legacy Cache %s: %s", failure.Name, failure.Err)})
+		for _, migration := range result.LegacyResults {
+			switch migration.Status {
+			case legacyCacheRebuilt:
+				add(Finding{Severity: SeverityOK, Message: "Rebuilt branch-aware Cache and removed legacy Cache: " + migration.Plan.Root})
+			case legacyCacheRecoveryNeeded:
+				add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Manual Cache recovery required after rebuilding %s: %s; preserved artifacts: %s", migration.Plan.Root, migration.Err, strings.Join(migration.Artifacts, ", "))})
+				add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Inspect the preserved Cache trees, restore the desired tree to %s if needed, then remove the artifacts.", migration.Plan.Root)})
+			case legacyCacheFailed:
+				add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to rebuild legacy Cache %s: %s", migration.Plan.Root, migration.Err)})
+			}
 		}
 		for _, path := range result.RemovedScopes {
 			add(Finding{Severity: SeverityOK, Message: "Removed state for missing Scope: " + path})
