@@ -102,6 +102,11 @@ type DoctorOutcome struct {
 	Findings       []Finding
 	Remaining      int
 	RecoveryNeeded bool
+	// Failed is how many repair actions --fix attempted and could not
+	// complete. It is kept apart from Remaining because ADR-0002 keeps the
+	// two apart: a finding is a state to act on, a failed repair is work
+	// that broke.
+	Failed int
 	// Untracked is how many undeclared Skills sit on the skills directory.
 	// They are not counted in Remaining (see issueCount) because they are a
 	// decision the user has not made, not Drift to reconcile — but the CLI
@@ -164,7 +169,7 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 		}
 	}
 	result := d.repair(plan, progress, replaceForeign)
-	outcome := DoctorOutcome{Findings: plan.findings(&result), RecoveryNeeded: result.cacheRecoveryNeeded()}
+	outcome := DoctorOutcome{Findings: plan.findings(&result), RecoveryNeeded: result.cacheRecoveryNeeded(), Failed: result.repairFailures()}
 	after, err := d.diagnose()
 	if err != nil {
 		return outcome, err
@@ -173,6 +178,22 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 	outcome.Untracked = len(after.Untracked)
 	outcome.RecoveryNeeded = outcome.RecoveryNeeded || len(after.CacheRecovery) > 0
 	return outcome, nil
+}
+
+// repairFailures counts the repair actions that broke. Every category doctor
+// attempts is listed here, so a new one that forgets to report itself shows up
+// as a Scope that reports a clean-ish 1 while a repair silently failed.
+func (r healthFixResult) repairFailures() int {
+	failures := len(r.FailedBroken) + len(r.FailedStale) + len(r.FailedLeftover) + len(r.FailedDrift) + len(r.FailedScopes)
+	if r.StateRepairErr != nil {
+		failures++
+	}
+	for _, migration := range r.LegacyResults {
+		if migration.Status == legacyCacheFailed {
+			failures++
+		}
+	}
+	return failures
 }
 
 func (r healthFixResult) cacheRecoveryNeeded() bool {
