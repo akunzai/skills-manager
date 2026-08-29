@@ -18,6 +18,11 @@ type agentHealth struct {
 	Broken          []string
 	UnmanagedBroken []string
 	Physical        []string
+	// Unusable is why the directory could not be scanned, when it exists but
+	// is not a directory. DiagnoseHealth reads it with ReadDir, which fails
+	// with ENOTDIR and returns nothing — indistinguishable from an empty,
+	// healthy directory unless it is recorded here.
+	Unusable string
 }
 
 type staleUniversalLinks struct {
@@ -27,11 +32,12 @@ type staleUniversalLinks struct {
 }
 
 type driftFinding struct {
-	Skill      string
-	Source     string
-	Missing    []string
-	Unexpected []string
-	Foreign    []ForeignAvailabilityPath
+	Skill        string
+	Source       string
+	Missing      []string
+	Unexpected   []string
+	Foreign      []ForeignAvailabilityPath
+	Unobservable []UnobservableAvailabilityPath
 }
 
 type healthFix struct {
@@ -264,7 +270,12 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 
 	for _, agentName := range slices.Sorted(maps.Keys(configuredAgents)) {
 		agentDir := configuredAgents[agentName]
-		if _, err := os.Stat(agentDir); os.IsNotExist(err) {
+		info, err := os.Stat(agentDir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err == nil && !info.IsDir() {
+			plan.Agents = append(plan.Agents, agentHealth{Name: agentName, Dir: agentDir, Unusable: "not a directory"})
 			continue
 		}
 		broken, unmanaged, physical := d.links.DiagnoseHealth(agentDir)
@@ -318,11 +329,12 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			continue
 		}
 		plan.Drift = append(plan.Drift, driftFinding{
-			Skill:      s.Name,
-			Source:     source,
-			Missing:    drift.Missing,
-			Unexpected: drift.Unexpected,
-			Foreign:    drift.Foreign,
+			Skill:        s.Name,
+			Source:       source,
+			Missing:      drift.Missing,
+			Unexpected:   drift.Unexpected,
+			Foreign:      drift.Foreign,
+			Unobservable: drift.Unobservable,
 		})
 	}
 	return plan, nil
@@ -337,13 +349,16 @@ func (p healthPlan) issueCount() int {
 	}
 	for _, a := range p.Agents {
 		n += len(a.Broken) + len(a.UnmanagedBroken) + len(a.Physical)
+		if a.Unusable != "" {
+			n++
+		}
 	}
 	for _, s := range p.StaleUniversal {
 		n += len(s.Names)
 	}
 	n += len(p.LeftoverEmpty)
 	for _, d := range p.Drift {
-		n += len(d.Missing) + len(d.Unexpected) + len(d.Foreign)
+		n += len(d.Missing) + len(d.Unexpected) + len(d.Foreign) + len(d.Unobservable)
 	}
 	n += len(p.Missing) + len(p.Invalid)
 	n += len(p.UnknownAgents)

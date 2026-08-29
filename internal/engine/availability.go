@@ -289,27 +289,36 @@ func (s availabilityState) isManagedPath(path string) bool {
 	return s.links.IsManagedLink(path, s.skillName) || s.links.IsManagedCopy(path, s.skillName)
 }
 
-func (s availabilityState) drift() (missing, unexpected []string, foreign []ForeignAvailabilityPath) {
+func (s availabilityState) drift() AvailabilityDrift {
+	var observation AvailabilityDrift
 	for agent, agentDir := range s.known {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		_, want := s.desired[agent]
 		if want {
 			_, err := os.Lstat(linkPath)
-			if os.IsNotExist(err) {
-				missing = append(missing, agent)
-			} else if err == nil && !s.isManagedPath(linkPath) {
-				foreign = append(foreign, describeForeignAvailabilityPath(agent, linkPath))
+			switch {
+			case os.IsNotExist(err):
+				observation.Missing = append(observation.Missing, agent)
+			case err != nil:
+				// Anything but ENOENT means the answer is unknown, not "no
+				// Drift". Silently dropping it let a Scope whose Agent
+				// directory was a regular file — Lstat returns ENOTDIR —
+				// report as healthy while nothing was linked at all.
+				observation.Unobservable = append(observation.Unobservable, describeUnobservableAvailabilityPath(agent, agentDir, linkPath, err))
+			case !s.isManagedPath(linkPath):
+				observation.Foreign = append(observation.Foreign, describeForeignAvailabilityPath(agent, linkPath))
 			}
 			continue
 		}
 		if s.isManagedPath(linkPath) {
-			unexpected = append(unexpected, agent)
+			observation.Unexpected = append(observation.Unexpected, agent)
 		}
 	}
-	slices.Sort(missing)
-	slices.Sort(unexpected)
-	slices.SortFunc(foreign, func(a, b ForeignAvailabilityPath) int { return strings.Compare(a.Path, b.Path) })
-	return missing, unexpected, foreign
+	slices.Sort(observation.Missing)
+	slices.Sort(observation.Unexpected)
+	slices.SortFunc(observation.Foreign, func(a, b ForeignAvailabilityPath) int { return strings.Compare(a.Path, b.Path) })
+	slices.SortFunc(observation.Unobservable, func(a, b UnobservableAvailabilityPath) int { return strings.Compare(a.Path, b.Path) })
+	return observation
 }
 
 func (s availabilityState) apply() error {
@@ -375,6 +384,26 @@ func (p ForeignAvailabilityPath) Detail() string {
 	return detail
 }
 
+// UnobservableAvailabilityPath is an Availability path whose state could not
+// be read at all. It is deliberately not a ForeignAvailabilityPath: doctor
+// offers to replace a foreign path, and offering to replace something it
+// cannot even stat would propose a repair that is bound to fail. Dir is the
+// Agent directory the path lives in, which is usually what is actually wrong.
+type UnobservableAvailabilityPath struct {
+	Agent string
+	Dir   string
+	Path  string
+	Err   string
+}
+
+func describeUnobservableAvailabilityPath(agent, agentDir, path string, err error) UnobservableAvailabilityPath {
+	reason := err.Error()
+	if root := rootPathError(err); root != nil {
+		reason = root.Error()
+	}
+	return UnobservableAvailabilityPath{Agent: agent, Dir: agentDir, Path: path, Err: reason}
+}
+
 func describeForeignAvailabilityPath(agent, path string) ForeignAvailabilityPath {
 	foreign := ForeignAvailabilityPath{Agent: agent, Path: path, Kind: ForeignAvailabilityFile}
 	info, err := os.Lstat(path)
@@ -413,20 +442,22 @@ func (a *Availability) ReplaceForeign(skill string, diagnosed []ForeignAvailabil
 // the filesystem: the managed Agents that should hold a link but do not, and
 // the managed paths that exist but are no longer declared.
 type AvailabilityDrift struct {
-	Skill      string
-	Missing    []string
-	Unexpected []string
-	Foreign    []ForeignAvailabilityPath
+	Skill        string
+	Missing      []string
+	Unexpected   []string
+	Foreign      []ForeignAvailabilityPath
+	Unobservable []UnobservableAvailabilityPath
 }
 
 func (d AvailabilityDrift) Empty() bool {
-	return len(d.Missing) == 0 && len(d.Unexpected) == 0 && len(d.Foreign) == 0
+	return len(d.Missing) == 0 && len(d.Unexpected) == 0 && len(d.Foreign) == 0 && len(d.Unobservable) == 0
 }
 
 // ObserveAvailability reports Drift for one Skill without touching the
 // filesystem. It is the single comparison behind every caller that needs to
 // know about Drift before deciding whether to act on it.
 func (a *Availability) ObserveAvailability(skill string) AvailabilityDrift {
-	missing, unexpected, foreign := a.state(skill).drift()
-	return AvailabilityDrift{Skill: skill, Missing: missing, Unexpected: unexpected, Foreign: foreign}
+	observation := a.state(skill).drift()
+	observation.Skill = skill
+	return observation
 }

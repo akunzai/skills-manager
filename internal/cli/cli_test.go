@@ -2075,3 +2075,46 @@ func TestCLIDoctorExitCodes(t *testing.T) {
 		t.Fatalf("the failure must name what broke:\n%s", out)
 	}
 }
+
+// The end-to-end shape of the same defect: doctor used to exit 0 on a Scope
+// where nothing was actually available, while sync failed loudly on it.
+func TestCLIDoctorDoesNotPassAScopeWithNoUsableAgentDir(t *testing.T) {
+	project := projectScope(t)
+
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	alpha := filepath.Join(skillsDir, "alpha")
+	if err := os.MkdirAll(alpha, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(alpha, "SKILL.md"), []byte("# Alpha\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "alpha", alpha, "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(project, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".claude", "skills"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "-p")
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("an unobservable availability path should exit 1, got err=%v:\n%s", err, out)
+	}
+	if strings.Contains(out, "Everything is in top condition") {
+		t.Fatalf("doctor passed a Scope where nothing is available:\n%s", out)
+	}
+	if !strings.Contains(out, "Cannot observe availability for alpha") {
+		t.Fatalf("doctor did not name what it could not observe:\n%s", out)
+	}
+}

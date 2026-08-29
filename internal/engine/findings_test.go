@@ -257,3 +257,65 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 		}
 	}
 }
+
+// An Availability path that cannot be read at all is neither present nor
+// missing. Dropping that observation is what let a Scope whose Agent directory
+// was a regular file — Lstat returns ENOTDIR, not ENOENT — report as healthy
+// while nothing was linked.
+func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	alpha := filepath.Join(skillsDir, "alpha")
+	if err := os.MkdirAll(alpha, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(alpha, "SKILL.md"), []byte("# Alpha\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	claudeDir := filepath.Join(project, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// The Agent's skills directory exists, but as a regular file.
+	if err := os.WriteFile(filepath.Join(claudeDir, "skills"), []byte("not a directory\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "alpha", alpha, "")
+
+	availability := NewAvailability(cfg, skillsDir)
+	drift := availability.ObserveAvailability("alpha")
+	if drift.Empty() {
+		t.Fatal("an unreadable availability path must not observe as no drift")
+	}
+	if len(drift.Unobservable) != 1 {
+		t.Fatalf("Unobservable = %#v; want exactly one entry", drift.Unobservable)
+	}
+	if got := drift.Unobservable[0]; got.Agent != "claude-code" || got.Err != "not a directory" {
+		t.Errorf("unobservable path = %#v; want claude-code / not a directory", got)
+	}
+	if len(drift.Missing) > 0 || len(drift.Foreign) > 0 {
+		t.Errorf("an unreadable path is neither missing nor foreign: %#v", drift)
+	}
+
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsMessage(outcome.Findings, "Symlinks healthy") {
+		t.Fatalf("doctor called a non-directory Agent path healthy: %#v", outcome.Findings)
+	}
+	if !containsMessage(outcome.Findings, "[claude-code] Agent directory is not usable") {
+		t.Fatalf("doctor did not report the unusable Agent directory: %#v", outcome.Findings)
+	}
+	if !containsMessage(outcome.Findings, "Cannot observe availability for alpha") {
+		t.Fatalf("doctor did not report the unreadable availability path: %#v", outcome.Findings)
+	}
+	if !containsMessage(outcome.Findings, "Next: inspect "+models.ToTildePath(filepath.Join(claudeDir, "skills"))) {
+		t.Fatalf("the finding names no next action: %#v", outcome.Findings)
+	}
+	if outcome.Remaining == 0 {
+		t.Fatal("a Scope with no working availability must not report as clean")
+	}
+}
