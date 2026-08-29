@@ -26,8 +26,8 @@ func TestMarkInstalledSkillsAcrossUndecidedScopes(t *testing.T) {
 
 	markInstalledSkills(options, []string{globalDir, projectDir})
 
-	if !options[0].Installed || !options[0].Selected {
-		t.Fatalf("installed option = %#v; want installed and selected", options[0])
+	if !options[0].Installed || options[0].Selected {
+		t.Fatalf("installed option = %#v; want installed but unselected", options[0])
 	}
 	if options[1].Installed || options[1].Selected {
 		t.Fatalf("new option = %#v; want unselected", options[1])
@@ -126,15 +126,17 @@ func TestDiscoveryResultPreservesDiscoveryError(t *testing.T) {
 	}
 }
 
-func TestShouldPromptForDiscoveredSkills(t *testing.T) {
-	if !shouldPromptForDiscoveredSkills(1, true, false) {
-		t.Fatal("an interactive single-skill add must ask for confirmation")
-	}
-	if shouldPromptForDiscoveredSkills(1, false, false) {
-		t.Fatal("a non-interactive add cannot prompt")
-	}
-	if shouldPromptForDiscoveredSkills(1, true, true) {
-		t.Fatal("--yes must skip confirmation")
+func TestAddRejectsAllWithNamedSkillsBeforeDiscovery(t *testing.T) {
+	for _, args := range [][]string{
+		{"--symlink", filepath.Join(t.TempDir(), "missing"), "--all", "--skill", "one"},
+		{"command-skill", "--command", "echo ok", "--all"},
+	} {
+		cmd := newAddCmd()
+		cmd.SetArgs(args)
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--all cannot be combined") {
+			t.Fatalf("args %v: error = %v; want conflicting selection request", args, err)
+		}
 	}
 }
 

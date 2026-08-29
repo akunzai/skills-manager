@@ -20,10 +20,6 @@ import (
 
 const repositoryRootGroup = "Repository root"
 
-func shouldPromptForDiscoveredSkills(skillCount int, interactive, skipConfirmation bool) bool {
-	return skillCount > 0 && interactive && !skipConfirmation
-}
-
 func selectionSkillsDirs(cmd *cobra.Command) []string {
 	if cmd.Flags().Changed("global") || cmd.Flags().Changed("project") || cmd.Flags().Changed("skills-dir") {
 		return []string{ResolveScope().SkillsDir}
@@ -43,7 +39,6 @@ func markInstalledSkills(options []tui.SelectOption, skillsDirs []string) {
 		for _, skillsDir := range skillsDirs {
 			if _, err := os.Stat(filepath.Join(skillsDir, options[i].Key)); err == nil {
 				options[i].Installed = true
-				options[i].Selected = true
 				break
 			}
 		}
@@ -231,10 +226,8 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 		return absSourcePath
 	}
 	return &addIntake{
-		source:        engine.NewSymlinkAddSource(absSourcePath, description, true),
-		rootDir:       absSourcePath,
-		discovered:    discovered,
-		selectionPath: "",
+		source:     engine.NewSymlinkAddSource(absSourcePath, description),
+		discovered: discovered,
 		labels: sourceLabels{
 			displayName:  models.ToTildePath(absSourcePath),
 			resourceNoun: "Local directory",
@@ -248,7 +241,6 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 func newCommandIntake(skillName, command, check, description string) *addIntake {
 	return &addIntake{
 		source:     engine.NewCommandAddSource(command, check, description),
-		rootDir:    ".",
 		discovered: engine.DiscoveredSkills{skillName: {"."}},
 		labels: sourceLabels{
 			displayName:  "command",
@@ -296,10 +288,8 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 		storedURL = cloneURL
 	}
 	return &addIntake{
-		source:        engine.NewRemoteAddSource(parsed.SourceKey, parsed.RepoType, storedURL, repoDir),
-		rootDir:       repoDir,
-		discovered:    discovered,
-		selectionPath: "",
+		source:     engine.NewRemoteAddSource(parsed.SourceKey, parsed.RepoType, storedURL, repoDir),
+		discovered: discovered,
 		labels: sourceLabels{
 			displayName:  parsed.SourceKey,
 			resourceNoun: "Repository",
@@ -347,6 +337,10 @@ func newAddCmd() *cobra.Command {
 			// Positional skills arguments override or append to --skill
 			if len(args) > 1 {
 				flagSkills = append(flagSkills, args[1:]...)
+			}
+			commandHasPositionalSkill := flagCommand != "" && len(args) > 0
+			if flagAll && (len(flagSkills) > 0 || commandHasPositionalSkill) {
+				return fmt.Errorf("--all cannot be combined with named Skills")
 			}
 
 			// 1. Local Symlink Mode (via --symlink flag or positional local path)

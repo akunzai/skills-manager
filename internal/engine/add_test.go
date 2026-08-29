@@ -3,7 +3,6 @@ package engine
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -36,7 +35,7 @@ func TestBuildAddPlanDetectsUntrackedDiskConflicts(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	source := NewSymlinkAddSource("/tmp/local-source", "local test", false)
+	source := NewSymlinkAddSource("/tmp/local-source", "local test")
 	plan := BuildAddPlan(cfg, "/tmp/skills.json", skillsDir, source, map[string]string{"existing-skill": "."}, nil)
 
 	if len(plan.Conflicts) != 1 {
@@ -48,27 +47,5 @@ func TestBuildAddPlanDetectsUntrackedDiskConflicts(t *testing.T) {
 	}
 	if conflict.CurrentSrc != "[untracked directory]" {
 		t.Errorf("expected [untracked directory], got %s", conflict.CurrentSrc)
-	}
-}
-
-func TestResolveDiscoveredSkillsAllFlag(t *testing.T) {
-	discovered := map[string]string{"a": "skills/a", "b": "skills/b"}
-	got, unmatched, err := ResolveDiscoveredSkills(discovered, "/tmp", true, "", nil, false)
-	if err != nil || len(unmatched) > 0 {
-		t.Fatalf("unexpected error or unmatched: err=%v, unmatched=%v", err, unmatched)
-	}
-	if !reflect.DeepEqual(got, discovered) {
-		t.Errorf("got %v, want %v", got, discovered)
-	}
-}
-
-func TestResolveDiscoveredSkillsCaseInsensitiveMatching(t *testing.T) {
-	discovered := map[string]string{"AwesomeSkill": "skills/awesome"}
-	got, unmatched, err := ResolveDiscoveredSkills(discovered, "/tmp", false, "", []string{"awesomeskill"}, false)
-	if err != nil || len(unmatched) > 0 {
-		t.Fatalf("unexpected error or unmatched: err=%v, unmatched=%v", err, unmatched)
-	}
-	if got["AwesomeSkill"] != "skills/awesome" {
-		t.Errorf("expected case-insensitive match for AwesomeSkill, got %v", got)
 	}
 }
