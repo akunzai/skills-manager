@@ -90,7 +90,7 @@
           },
           "check": {
             "type": "string",
-            "description": "Command to check if tool is available (for command type)"
+            "description": "Prerequisite command that must succeed before the install command runs; the skill is skipped when it fails (for command type)"
           },
           "command": {
             "type": "string",
