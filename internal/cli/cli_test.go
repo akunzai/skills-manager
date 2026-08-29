@@ -1939,3 +1939,73 @@ func TestCLICommandAddCheckFailureStillSaves(t *testing.T) {
 		t.Fatalf("command = %#v", cfg.Local)
 	}
 }
+
+// A Scope whose only finding is an untracked Skill used to print a yellow
+// warning and then claim everything was in top condition, which is what made
+// `doctor --fix` read as unable to handle it. The exit code stays 0 —
+// untracked is a decision the user has not made, not Drift (ADR-0002).
+func TestCLIDoctorSaysUntrackedNeedsDecisionWhileStayingClean(t *testing.T) {
+	project := projectScope(t)
+
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	orphan := filepath.Join(project, ".agents", "skills", "orphan")
+	if err := os.MkdirAll(orphan, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphan, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "--fix", "-p")
+	if err != nil {
+		t.Fatalf("doctor --fix must stay clean for an untracked skill: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Everything is in top condition") {
+		t.Fatalf("doctor claimed top condition above an untracked warning:\n%s", out)
+	}
+	if !strings.Contains(out, "No issues detected. 1 untracked skill needs your decision.") {
+		t.Fatalf("doctor did not say the untracked skill is waiting:\n%s", out)
+	}
+	if !strings.Contains(out, "skills prune -p --skills-only") {
+		t.Fatalf("doctor did not name the way out:\n%s", out)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("doctor --fix removed an untracked skill: %v", err)
+	}
+}
+
+// The summary line used to promise that --fix or Sync would repair every
+// counted issue. An invalid folder is counted and neither repairs it, so the
+// line now points at the per-finding next actions instead.
+func TestCLIDoctorSummaryPointsAtPerFindingNextActions(t *testing.T) {
+	project := projectScope(t)
+
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "broken"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "broken", "broken", "github", "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "-p")
+	if err == nil {
+		t.Fatalf("doctor found an invalid folder but exited 0:\n%s", out)
+	}
+	if strings.Contains(out, "Run with --fix or 'skills sync' to repair") {
+		t.Fatalf("doctor still promised a repair it cannot deliver:\n%s", out)
+	}
+	if !strings.Contains(out, "See the next action for each, or run with --fix.") {
+		t.Fatalf("doctor did not point at the per-finding next actions:\n%s", out)
+	}
+	if !strings.Contains(out, "then run 'skills sync -p' to re-materialize it.") {
+		t.Fatalf("doctor did not name the way out for the invalid folder:\n%s", out)
+	}
+}

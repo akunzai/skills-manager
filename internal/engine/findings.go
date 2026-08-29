@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/models"
@@ -129,9 +130,16 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	}
 	if len(p.Untracked) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Warning: Untracked skills in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.Untracked, ", ")), Blank: true})
+		// Untracked Skills are the one finding --fix deliberately never acts
+		// on, so the way out has to be spelled here: doctor restores declared
+		// state, discarding undeclared data belongs to prune.
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
+			"  Declare %s with 'skills add%s', or remove %s with 'skills prune%s --skills-only'.",
+			objectPronoun(len(p.Untracked)), p.scopeFlag(), objectPronoun(len(p.Untracked)), p.scopeFlag())})
 	}
-	if len(p.Invalid) > 0 {
-		add(Finding{Severity: SeverityError, Message: "Installed folders missing SKILL.md: " + strings.Join(p.Invalid, ", "), Blank: true})
+	for _, invalid := range p.Invalid {
+		add(Finding{Severity: SeverityError, Message: "Installed folder missing SKILL.md: " + invalid.Name, Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: "  " + p.invalidNextAction(invalid)})
 	}
 	if p.StateError != "" {
 		add(Finding{Severity: SeverityError, Message: "Corrupted Scope state: " + p.StateError, Blank: true})
@@ -188,6 +196,43 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	}
 
 	return findings
+}
+
+// invalidNextAction names the way out for one invalid Skill. The remedies do
+// not generalize: removing the folder of a remote Skill turns it back into a
+// plain Missing one that a bare Sync re-Materializes, but doing the same to a
+// symlinked Skill only rebuilds the same link at the same broken Source, and
+// a command installer is never re-run by Sync when its check does not pass.
+// One shared sentence would therefore be wrong for someone.
+func (p healthPlan) invalidNextAction(invalid invalidSkill) string {
+	flag := p.scopeFlag()
+	switch invalid.SourceType {
+	case "local_symlink":
+		source := models.ToTildePath(models.ResolveLocalSourcePath(invalid.Source, p.SkillsDir))
+		return fmt.Sprintf("Next: its source %s has no SKILL.md; fix the source, or undeclare it with 'skills rm%s %s'.", source, flag, invalid.Name)
+	case "local_command":
+		return fmt.Sprintf("Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm%s %s'.", flag, invalid.Name)
+	default:
+		path := models.ToTildePath(filepath.Join(p.SkillsDir, invalid.Name))
+		return fmt.Sprintf("Next: remove %s, then run 'skills sync%s' to re-materialize it.", path, flag)
+	}
+}
+
+// scopeFlag is the flag a suggested command needs to act on the Scope doctor
+// just diagnosed. Printing a Global command while diagnosing a Project would
+// send the user at the wrong skills directory.
+func (p healthPlan) scopeFlag() string {
+	if models.IsProjectScope(p.SkillsDir) {
+		return " -p"
+	}
+	return ""
+}
+
+func objectPronoun(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
 }
 
 func foreignAvailabilityFinding(skill string, foreign ForeignAvailabilityPath) string {

@@ -40,6 +40,16 @@ type healthFix struct {
 	Err   error
 }
 
+// invalidSkill is a declared Skill whose folder is on the skills directory but
+// has no SKILL.md. The way out depends on how it was declared — a remote Skill
+// can be re-Materialized, a symlinked one is only as valid as its Source — so
+// the finding carries the declaration, not just the name.
+type invalidSkill struct {
+	Name       string
+	SourceType string
+	Source     string
+}
+
 type healthPlan struct {
 	SkillsDir      string
 	MasterMissing  bool
@@ -49,7 +59,7 @@ type healthPlan struct {
 	Drift          []driftFinding
 	Missing        []string
 	Untracked      []string
-	Invalid        []string
+	Invalid        []invalidSkill
 	UnknownAgents  []UnknownAgentReference
 	StateError     string
 	StaleState     []string
@@ -92,6 +102,11 @@ type DoctorOutcome struct {
 	Findings       []Finding
 	Remaining      int
 	RecoveryNeeded bool
+	// Untracked is how many undeclared Skills sit on the skills directory.
+	// They are not counted in Remaining (see issueCount) because they are a
+	// decision the user has not made, not Drift to reconcile — but the CLI
+	// still has to say they are waiting.
+	Untracked int
 }
 
 type DoctorEvent struct {
@@ -138,14 +153,14 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 		return DoctorOutcome{}, err
 	}
 	if !fix {
-		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0}, nil
+		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked)}, nil
 	}
 
 	replaceForeign := false
 	if foreign := plan.foreignAvailabilityPaths(); len(foreign) > 0 && approve != nil {
 		replaceForeign, err = approve(foreign)
 		if err != nil {
-			return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount()}, err
+			return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), Untracked: len(plan.Untracked)}, err
 		}
 	}
 	result := d.repair(plan, progress, replaceForeign)
@@ -155,6 +170,7 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 		return outcome, err
 	}
 	outcome.Remaining = after.issueCount()
+	outcome.Untracked = len(after.Untracked)
 	outcome.RecoveryNeeded = outcome.RecoveryNeeded || len(after.CacheRecovery) > 0
 	return outcome, nil
 }
@@ -273,7 +289,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			continue
 		}
 		if !s.IsValidSkill {
-			plan.Invalid = append(plan.Invalid, s.Name)
+			plan.Invalid = append(plan.Invalid, invalidSkill{Name: s.Name, SourceType: s.SourceType, Source: s.Source})
 		}
 		source := availabilitySource(s)
 		drift := d.availability.ObserveAvailability(s.Name)

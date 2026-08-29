@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // The wording bug the "findings as the interface" refactor was meant to
@@ -156,4 +157,103 @@ func containsMessage(findings []Finding, substr string) bool {
 		}
 	}
 	return false
+}
+
+// Untracked Skills are the one finding --fix never acts on, so the report has
+// to name the way out — and name it for the Scope actually being diagnosed. A
+// Global command printed while diagnosing a Project sends the user at the
+// wrong skills directory.
+func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
+	writeUntracked := func(t *testing.T, skillsDir string) {
+		t.Helper()
+		orphan := filepath.Join(skillsDir, "orphan")
+		if err := os.MkdirAll(orphan, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(orphan, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("project", func(t *testing.T) {
+		skillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
+		if err := os.MkdirAll(skillsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		writeUntracked(t, skillsDir)
+
+		outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsMessage(outcome.Findings, "Declare it with 'skills add -p', or remove it with 'skills prune -p --skills-only'.") {
+			t.Fatalf("untracked finding has no Project-scoped next action: %#v", outcome.Findings)
+		}
+		if outcome.Untracked != 1 {
+			t.Errorf("Untracked = %d; want 1", outcome.Untracked)
+		}
+		if outcome.Remaining != 0 {
+			t.Errorf("Remaining = %d; want 0 (untracked must not count)", outcome.Remaining)
+		}
+	})
+
+	t.Run("global", func(t *testing.T) {
+		t.Setenv("AGENTS_HOME", t.TempDir())
+		skillsDir := models.DefaultSkillsDir()
+		if err := os.MkdirAll(skillsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		writeUntracked(t, skillsDir)
+
+		outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsMessage(outcome.Findings, "Declare it with 'skills add', or remove it with 'skills prune --skills-only'.") {
+			t.Fatalf("untracked finding has no Global-scoped next action: %#v", outcome.Findings)
+		}
+		if containsMessage(outcome.Findings, "skills prune -p") {
+			t.Errorf("Global finding suggested a Project command: %#v", outcome.Findings)
+		}
+	})
+}
+
+// An invalid folder's remedy depends on how the Skill was declared: removing a
+// remote one lets a bare Sync re-Materialize it, while a symlinked one is only
+// as valid as its Source and a command installer is not re-run by Sync. One
+// shared sentence would be wrong for two of the three.
+func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	source := filepath.Join(project, "src", "linked")
+	for _, dir := range []string{
+		filepath.Join(skillsDir, "remoted"),
+		filepath.Join(skillsDir, "linked"),
+		filepath.Join(skillsDir, "installed"),
+		source,
+	} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "remoted", "remoted", "github", "")
+	config.AddLocalSymlinkEntry(cfg, "linked", source, "")
+	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "")
+
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"Next: remove " + models.ToTildePath(filepath.Join(skillsDir, "remoted")) + ", then run 'skills sync -p' to re-materialize it.",
+		"Next: its source " + models.ToTildePath(source) + " has no SKILL.md; fix the source, or undeclare it with 'skills rm -p linked'.",
+		"Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm -p installed'.",
+	}
+	for _, message := range want {
+		if !containsMessage(outcome.Findings, message) {
+			t.Errorf("missing next action %q in %#v", message, outcome.Findings)
+		}
+	}
 }

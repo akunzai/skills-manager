@@ -71,7 +71,7 @@ func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	if !containsMessage(outcome.Findings, "Configured but missing skills: missing") {
 		t.Fatalf("missing inventory finding: %#v", outcome.Findings)
 	}
-	if !containsMessage(outcome.Findings, "Installed folders missing SKILL.md: broken") {
+	if !containsMessage(outcome.Findings, "Installed folder missing SKILL.md: broken") {
 		t.Fatalf("missing invalid finding: %#v", outcome.Findings)
 	}
 }
