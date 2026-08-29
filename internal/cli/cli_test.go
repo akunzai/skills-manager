@@ -2009,3 +2009,69 @@ func TestCLIDoctorSummaryPointsAtPerFindingNextActions(t *testing.T) {
 		t.Fatalf("doctor did not name the way out for the invalid folder:\n%s", out)
 	}
 }
+
+// doctor is ADR-0002's third adopter. A finding it can name a next action for
+// is a state (1), not a command that failed; 2 stays reserved for work that
+// genuinely broke, so CI can tell "this Scope needs reconciling" from "this
+// Scope is broken".
+func TestCLIDoctorExitCodes(t *testing.T) {
+	project := projectScope(t)
+
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "alpha"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "alpha", "SKILL.md"), []byte("# Alpha\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1: alpha is declared but has no Availability link yet — drift doctor
+	// reports with a next action, not a command failure. Routed through
+	// Execute, like the outdated test, so SilenceErrors matches the binary
+	// and the absence of an Error: line means something.
+	var output bytes.Buffer
+	RootCmd.SetOut(&output)
+	RootCmd.SetErr(&output)
+	RootCmd.SetArgs([]string{"doctor", "-p"})
+	oldSilenceErrors := RootCmd.SilenceErrors
+	t.Cleanup(func() { RootCmd.SilenceErrors = oldSilenceErrors })
+	err := Execute()
+	out := output.String()
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("availability drift should exit 1, got err=%v:\n%s", err, out)
+	}
+	if strings.Contains(out, "Error:") {
+		t.Fatalf("a state report must not be styled as an error:\n%s", out)
+	}
+
+	// 0: --fix reconciles it.
+	if out, err = runCLI(t, "doctor", "--fix", "-p"); err != nil {
+		t.Fatalf("doctor --fix should converge and exit 0: %v\n%s", err, out)
+	}
+
+	// 2: an unmanaged directory squats the Availability path, so the repair
+	// itself cannot complete. Without a terminal there is no one to approve
+	// replacing it, and doctor never removes an unmanaged path unasked.
+	foreign := filepath.Join(project, ".claude", "skills", "alpha")
+	if err := os.RemoveAll(foreign); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(foreign, 0755); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runCLI(t, "doctor", "--fix", "-p")
+	if err == nil || ExitCode(err) != 2 {
+		t.Fatalf("a failed repair should exit 2, got err=%v:\n%s", err, out)
+	}
+	if !strings.Contains(out, "Failed to reconcile availability for alpha") {
+		t.Fatalf("the failure must name what broke:\n%s", out)
+	}
+}

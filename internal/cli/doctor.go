@@ -86,7 +86,17 @@ func newDoctorCmd() *cobra.Command {
 				// blanket repair it cannot deliver.
 				fmt.Fprintf(out, "%s%sFound %d issue(s). See the next action for each, or run with --fix.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
 			}
-			return fmt.Errorf("doctor detected %d issue(s)", outcome.Remaining)
+			// doctor is ADR-0002's third adopter: findings are a state to act
+			// on, not a command failure, so they exit 1 without the Error:
+			// prefix. 2 stays reserved for work that genuinely broke, and wins
+			// when both are present.
+			if outcome.RecoveryNeeded {
+				return exitError{message: "Cache recovery could not be completed", code: 2}
+			}
+			if outcome.Failed > 0 {
+				return exitError{message: fmt.Sprintf("doctor could not complete %s", countOf(outcome.Failed, "repair")), code: 2}
+			}
+			return exitError{message: "Scope does not match its Config", code: 1}
 		},
 	}
 
