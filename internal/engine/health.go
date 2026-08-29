@@ -89,8 +89,9 @@ type Doctor struct {
 // DoctorOutcome is the ordered report plus the issues that remain after Run.
 // Remaining is unavailable when Run returns an execution error.
 type DoctorOutcome struct {
-	Findings  []Finding
-	Remaining int
+	Findings       []Finding
+	Remaining      int
+	RecoveryNeeded bool
 }
 
 type DoctorEvent struct {
@@ -137,7 +138,7 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 		return DoctorOutcome{}, err
 	}
 	if !fix {
-		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount()}, nil
+		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0}, nil
 	}
 
 	replaceForeign := false
@@ -148,13 +149,23 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 		}
 	}
 	result := d.repair(plan, progress, replaceForeign)
-	outcome := DoctorOutcome{Findings: plan.findings(&result)}
+	outcome := DoctorOutcome{Findings: plan.findings(&result), RecoveryNeeded: result.cacheRecoveryNeeded()}
 	after, err := d.diagnose()
 	if err != nil {
 		return outcome, err
 	}
 	outcome.Remaining = after.issueCount()
+	outcome.RecoveryNeeded = outcome.RecoveryNeeded || len(after.CacheRecovery) > 0
 	return outcome, nil
+}
+
+func (r healthFixResult) cacheRecoveryNeeded() bool {
+	for _, migration := range r.LegacyResults {
+		if migration.Status == legacyCacheRecoveryNeeded {
+			return true
+		}
+	}
+	return false
 }
 
 func (p healthPlan) foreignAvailabilityPaths() []ForeignAvailabilityPath {

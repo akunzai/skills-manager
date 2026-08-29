@@ -332,12 +332,6 @@ func TestLegacyCacheMigrationRejectsPlanWhenLegacyCacheChanged(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(legacy, "changed"), []byte("new state\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := RunGit(legacy, "add", "."); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := RunGit(legacy, "commit", "-m", "changed after plan"); err != nil {
-		t.Fatal(err)
-	}
 	wantCommit := GetLocalRepoCommit(legacy)
 
 	results := migrator.apply(plans, nil)
@@ -347,6 +341,84 @@ func TestLegacyCacheMigrationRejectsPlanWhenLegacyCacheChanged(t *testing.T) {
 	if got := GetLocalRepoCommit(legacy); got != wantCommit {
 		t.Fatalf("legacy commit = %q; want changed commit %q preserved", got, wantCommit)
 	}
+	if _, err := os.Stat(filepath.Join(legacy, "changed")); err != nil {
+		t.Fatalf("uncommitted change was not preserved: %v", err)
+	}
+}
+
+func TestDoctorRunRestoresLegacyCacheWhenReplacementRenameFails(t *testing.T) {
+	doctor, legacy := newLegacyMigrationTestDoctor(t)
+	realRename := doctor.cacheMigration.ops.rename
+	renameCalls := 0
+	doctor.cacheMigration.ops.rename = func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls == 2 {
+			return fmt.Errorf("injected replacement rename failure")
+		}
+		return realRename(oldPath, newPath)
+	}
+
+	outcome, err := doctor.Run(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Remaining != 1 {
+		t.Fatalf("Remaining = %d; want restored legacy Cache to remain", outcome.Remaining)
+	}
+	if GetLocalRepoCommit(legacy) == "" {
+		t.Fatal("legacy Cache was not restored after replacement rename failed")
+	}
+	if !containsMessage(outcome.Findings, "Failed to rebuild legacy Cache") {
+		t.Fatalf("missing migration failure finding: %#v", outcome.Findings)
+	}
+	if containsMessage(outcome.Findings, "Manual Cache recovery required") {
+		t.Fatalf("successful rollback must not require manual recovery: %#v", outcome.Findings)
+	}
+}
+
+func TestDoctorRunPreservesArtifactsWhenReplacementAndRollbackRenameFail(t *testing.T) {
+	doctor, _ := newLegacyMigrationTestDoctor(t)
+	realRename := doctor.cacheMigration.ops.rename
+	renameCalls := 0
+	doctor.cacheMigration.ops.rename = func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls >= 2 {
+			return fmt.Errorf("injected rename failure %d", renameCalls)
+		}
+		return realRename(oldPath, newPath)
+	}
+
+	outcome, err := doctor.Run(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Remaining != 2 {
+		t.Fatalf("Remaining = %d; want backup and staging recovery artifacts", outcome.Remaining)
+	}
+	if !containsMessage(outcome.Findings, "Manual Cache recovery required") ||
+		!containsMessage(outcome.Findings, ".legacy-cache-") ||
+		!containsMessage(outcome.Findings, ".doctor-cache-") {
+		t.Fatalf("missing preserved recovery artifacts: %#v", outcome.Findings)
+	}
+}
+
+func newLegacyMigrationTestDoctor(t *testing.T) (*Doctor, string) {
+	t.Helper()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	cacheDir := filepath.Join(root, "cache")
+	legacy := filepath.Join(cacheDir, "owner", "repo")
+	if _, _, err := RunGit("", "clone", origin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: origin, Skills: map[string]string{}}
+	return NewDoctorWithCache(cfg, skillsDir, cacheDir), legacy
 }
 
 func TestDoctorRunRebuildsEveryConfiguredBranchForLegacyCache(t *testing.T) {

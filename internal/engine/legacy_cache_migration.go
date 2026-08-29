@@ -22,9 +22,9 @@ const (
 )
 
 type legacyCacheMigrationPlan struct {
-	Root         string
-	Sources      []string
-	LegacyCommit string
+	Root              string
+	Sources           []string
+	LegacyFingerprint string
 }
 
 type legacyCacheMigrationResult struct {
@@ -64,6 +64,7 @@ type legacyCacheMigrationOps struct {
 	runGit          func(string, ...string) (string, string, error)
 	ensureGitRepo   func(string, string, string, bool, string) (string, error)
 	localRepoCommit func(string) string
+	repoFingerprint func(string) string
 }
 
 type legacyCacheMigrator struct {
@@ -85,6 +86,7 @@ func newLegacyCacheMigrator(cfg *config.Config, cacheDir string) *legacyCacheMig
 			runGit:          RunGit,
 			ensureGitRepo:   EnsureGitRepo,
 			localRepoCommit: GetLocalRepoCommit,
+			repoFingerprint: legacyCacheFingerprint,
 		},
 	}
 }
@@ -100,7 +102,7 @@ func (m *legacyCacheMigrator) detect() ([]legacyCacheMigrationPlan, []string, er
 	plans := make([]legacyCacheMigrationPlan, 0, len(byRoot))
 	for root, sources := range byRoot {
 		slices.Sort(sources)
-		plans = append(plans, legacyCacheMigrationPlan{Root: root, Sources: sources, LegacyCommit: m.ops.localRepoCommit(root)})
+		plans = append(plans, legacyCacheMigrationPlan{Root: root, Sources: sources, LegacyFingerprint: m.ops.repoFingerprint(root)})
 	}
 	slices.SortFunc(plans, func(a, b legacyCacheMigrationPlan) int { return strings.Compare(a.Root, b.Root) })
 
@@ -204,7 +206,7 @@ func (m *legacyCacheMigrator) applyOne(plan legacyCacheMigrationPlan, onEvent fu
 		result.Err = fmt.Errorf("no configured Source matches legacy Cache %s", plan.Root)
 		return result
 	}
-	if got := m.ops.localRepoCommit(plan.Root); got != plan.LegacyCommit {
+	if got := m.ops.repoFingerprint(plan.Root); got != plan.LegacyFingerprint {
 		result.Err = fmt.Errorf("legacy Cache changed after planning: %s", plan.Root)
 		return result
 	}
@@ -249,4 +251,13 @@ func (m *legacyCacheMigrator) applyOne(plan legacyCacheMigrationPlan, onEvent fu
 	}
 	result.Status = legacyCacheRebuilt
 	return result
+}
+
+func legacyCacheFingerprint(dir string) string {
+	commit := GetLocalRepoCommit(dir)
+	status, _, err := RunGit(dir, "status", "--porcelain=v1", "--untracked-files=all")
+	if err != nil {
+		return commit + "\x00unreadable"
+	}
+	return commit + "\x00" + status
 }
