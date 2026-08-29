@@ -48,6 +48,10 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 
 	add(Finding{Severity: SeverityInfo, Message: "Checking Agent Directories & Symlinks:", Blank: true})
 	for _, agent := range p.Agents {
+		if agent.Unusable != "" {
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Agent directory is not usable: %s (%s)", agent.Name, models.ToTildePath(agent.Dir), agent.Unusable)})
+			continue
+		}
 		if len(agent.Broken) > 0 {
 			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Broken symlinks: %s", agent.Name, strings.Join(agent.Broken, ", "))})
 			if result != nil {
@@ -98,6 +102,10 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 			}
 			for _, foreign := range d.Foreign {
 				add(Finding{Severity: SeverityWarning, Message: foreignAvailabilityFinding(d.Skill, foreign), Blank: true})
+			}
+			for _, unobservable := range d.Unobservable {
+				add(Finding{Severity: SeverityError, Message: unobservableAvailabilityFinding(d.Skill, unobservable), Blank: true})
+				add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: inspect %s, then re-run 'skills doctor%s'.", models.ToTildePath(unobservable.Dir), p.scopeFlag())})
 			}
 			if len(d.Unexpected) > 0 {
 				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; unexpected links: %s", d.Skill, strings.Join(d.Unexpected, ", ")), Blank: true})
@@ -233,6 +241,14 @@ func objectPronoun(n int) string {
 		return "it"
 	}
 	return "them"
+}
+
+// unobservableAvailabilityFinding reports a path doctor could not read at all.
+// It is an error rather than a warning: doctor cannot say whether the Skill is
+// available for that Agent, and reporting nothing is what let a broken Scope
+// pass as healthy.
+func unobservableAvailabilityFinding(skill string, unobservable UnobservableAvailabilityPath) string {
+	return fmt.Sprintf("Cannot observe availability for %s; unreadable %s path: %s (%s)", skill, unobservable.Agent, models.ToTildePath(unobservable.Path), unobservable.Err)
 }
 
 func foreignAvailabilityFinding(skill string, foreign ForeignAvailabilityPath) string {
