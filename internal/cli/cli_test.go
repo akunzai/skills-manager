@@ -1939,3 +1939,39 @@ func TestCLICommandAddCheckFailureStillSaves(t *testing.T) {
 		t.Fatalf("command = %#v", cfg.Local)
 	}
 }
+
+// A Scope whose only finding is an untracked Skill used to print a yellow
+// warning and then claim everything was in top condition, which is what made
+// `doctor --fix` read as unable to handle it. The exit code stays 0 —
+// untracked is a decision the user has not made, not Drift (ADR-0002).
+func TestCLIDoctorSaysUntrackedNeedsDecisionWhileStayingClean(t *testing.T) {
+	project := projectScope(t)
+
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	orphan := filepath.Join(project, ".agents", "skills", "orphan")
+	if err := os.MkdirAll(orphan, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphan, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "--fix", "-p")
+	if err != nil {
+		t.Fatalf("doctor --fix must stay clean for an untracked skill: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Everything is in top condition") {
+		t.Fatalf("doctor claimed top condition above an untracked warning:\n%s", out)
+	}
+	if !strings.Contains(out, "No issues detected. 1 untracked skill needs your decision.") {
+		t.Fatalf("doctor did not say the untracked skill is waiting:\n%s", out)
+	}
+	if !strings.Contains(out, "skills prune -p --skills-only") {
+		t.Fatalf("doctor did not name the way out:\n%s", out)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("doctor --fix removed an untracked skill: %v", err)
+	}
+}

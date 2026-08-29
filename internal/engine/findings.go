@@ -129,6 +129,12 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	}
 	if len(p.Untracked) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Warning: Untracked skills in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.Untracked, ", ")), Blank: true})
+		// Untracked Skills are the one finding --fix deliberately never acts
+		// on, so the way out has to be spelled here: doctor restores declared
+		// state, discarding undeclared data belongs to prune.
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
+			"  Declare %s with 'skills add%s', or remove %s with 'skills prune%s --skills-only'.",
+			objectPronoun(len(p.Untracked)), p.scopeFlag(), objectPronoun(len(p.Untracked)), p.scopeFlag())})
 	}
 	if len(p.Invalid) > 0 {
 		add(Finding{Severity: SeverityError, Message: "Installed folders missing SKILL.md: " + strings.Join(p.Invalid, ", "), Blank: true})
@@ -188,6 +194,23 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	}
 
 	return findings
+}
+
+// scopeFlag is the flag a suggested command needs to act on the Scope doctor
+// just diagnosed. Printing a Global command while diagnosing a Project would
+// send the user at the wrong skills directory.
+func (p healthPlan) scopeFlag() string {
+	if models.IsProjectScope(p.SkillsDir) {
+		return " -p"
+	}
+	return ""
+}
+
+func objectPronoun(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
 }
 
 func foreignAvailabilityFinding(skill string, foreign ForeignAvailabilityPath) string {

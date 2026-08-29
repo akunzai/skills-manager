@@ -92,6 +92,11 @@ type DoctorOutcome struct {
 	Findings       []Finding
 	Remaining      int
 	RecoveryNeeded bool
+	// Untracked is how many undeclared Skills sit on the skills directory.
+	// They are not counted in Remaining (see issueCount) because they are a
+	// decision the user has not made, not Drift to reconcile — but the CLI
+	// still has to say they are waiting.
+	Untracked int
 }
 
 type DoctorEvent struct {
@@ -138,14 +143,14 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 		return DoctorOutcome{}, err
 	}
 	if !fix {
-		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0}, nil
+		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked)}, nil
 	}
 
 	replaceForeign := false
 	if foreign := plan.foreignAvailabilityPaths(); len(foreign) > 0 && approve != nil {
 		replaceForeign, err = approve(foreign)
 		if err != nil {
-			return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount()}, err
+			return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), Untracked: len(plan.Untracked)}, err
 		}
 	}
 	result := d.repair(plan, progress, replaceForeign)
@@ -155,6 +160,7 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 		return outcome, err
 	}
 	outcome.Remaining = after.issueCount()
+	outcome.Untracked = len(after.Untracked)
 	outcome.RecoveryNeeded = outcome.RecoveryNeeded || len(after.CacheRecovery) > 0
 	return outcome, nil
 }
