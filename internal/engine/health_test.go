@@ -1,8 +1,10 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -260,6 +262,90 @@ func TestDoctorRunPreservesLegacyCacheWhenRebuildFails(t *testing.T) {
 	}
 	if !containsMessage(outcome.Findings, "Failed to rebuild legacy Cache") {
 		t.Fatalf("missing rebuild failure finding: %#v", outcome.Findings)
+	}
+}
+
+func TestDoctorRunKeepsInstalledCacheAndReportsRecoveryWhenBackupCleanupFails(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(root, "cache")
+	legacy := filepath.Join(cacheDir, "owner", "repo")
+	if _, _, err := RunGit("", "clone", origin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: origin, Skills: map[string]string{}}
+
+	doctor := NewDoctorWithCache(cfg, skillsDir, cacheDir)
+	realRemoveAll := doctor.cacheMigration.ops.removeAll
+	doctor.cacheMigration.ops.removeAll = func(path string) error {
+		if strings.HasPrefix(filepath.Base(path), ".legacy-cache-") {
+			return fmt.Errorf("injected backup cleanup failure")
+		}
+		return realRemoveAll(path)
+	}
+
+	outcome, err := doctor.Run(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Remaining != 1 {
+		t.Fatalf("Remaining = %d; want recovery artifact to remain an issue", outcome.Remaining)
+	}
+	branch, branchErr := GetRemoteDefaultBranch("owner/repo", origin)
+	if branchErr != nil {
+		t.Fatal(branchErr)
+	}
+	if GetLocalRepoCommit(resolveCacheRepo("owner/repo", origin, branch, cacheDir).Dir) == "" {
+		t.Fatal("installed branch-aware Cache must stay in place")
+	}
+	if !containsMessage(outcome.Findings, "Manual Cache recovery required") {
+		t.Fatalf("missing recovery finding: %#v", outcome.Findings)
+	}
+}
+
+func TestLegacyCacheMigrationRejectsPlanWhenLegacyCacheChanged(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	cacheDir := filepath.Join(root, "cache")
+	legacy := filepath.Join(cacheDir, "owner", "repo")
+	if _, _, err := RunGit("", "clone", origin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: origin, Skills: map[string]string{}}
+	migrator := newLegacyCacheMigrator(cfg, cacheDir)
+	plans, _, err := migrator.detect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v; want one legacy Cache migration", plans)
+	}
+
+	if err := os.WriteFile(filepath.Join(legacy, "changed"), []byte("new state\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := RunGit(legacy, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := RunGit(legacy, "commit", "-m", "changed after plan"); err != nil {
+		t.Fatal(err)
+	}
+	wantCommit := GetLocalRepoCommit(legacy)
+
+	results := migrator.apply(plans, nil)
+	if len(results) != 1 || results[0].Status != legacyCacheFailed {
+		t.Fatalf("results = %#v; want one failed stale migration", results)
+	}
+	if got := GetLocalRepoCommit(legacy); got != wantCommit {
+		t.Fatalf("legacy commit = %q; want changed commit %q preserved", got, wantCommit)
 	}
 }
 
