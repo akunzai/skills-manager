@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -30,7 +29,6 @@ type AddSource struct {
 	Command     string // installer command
 	Check       string // command pre-check
 	Description string // description of the skill
-	AllowRename bool   // whether a single discovered skill can be renamed by --skill
 }
 
 func NewRemoteAddSource(key, repoType, url, repoDir string) AddSource {
@@ -43,13 +41,12 @@ func NewRemoteAddSource(key, repoType, url, repoDir string) AddSource {
 	}
 }
 
-func NewSymlinkAddSource(absPath, description string, allowRename bool) AddSource {
+func NewSymlinkAddSource(absPath, description string) AddSource {
 	return AddSource{
 		Kind:        AddSourceSymlink,
 		Key:         absPath,
 		LocalPath:   absPath,
 		Description: description,
-		AllowRename: allowRename,
 	}
 }
 
@@ -288,76 +285,4 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	}
 
 	return AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}, nil
-}
-
-// ResolveDiscoveredSkills filters discovered Skills according to --all, --path,
-// and --skill flags. It is completely deterministic and pure.
-// When no selection flag is set, it returns (nil, nil, nil), signaling that
-// interactive selection or sole-skill defaulting is required.
-func ResolveDiscoveredSkills(
-	discovered map[string]string,
-	rootDir string,
-	all bool,
-	pathOverride string,
-	skills []string,
-	allowRename bool,
-) (skillsToAdd map[string]string, unmatched []string, err error) {
-	if all {
-		skillsToAdd = make(map[string]string, len(discovered))
-		for k, v := range discovered {
-			skillsToAdd[k] = v
-		}
-		return skillsToAdd, nil, nil
-	}
-
-	if pathOverride != "" && len(skills) == 0 {
-		skillsToAdd = make(map[string]string)
-		cleanSub := filepath.ToSlash(strings.Trim(pathOverride, "/"))
-		for k, v := range discovered {
-			if filepath.ToSlash(strings.Trim(v, "/")) == cleanSub {
-				skillsToAdd[k] = v
-			}
-		}
-		if len(skillsToAdd) == 0 {
-			subDir := filepath.Join(rootDir, filepath.FromSlash(pathOverride))
-			if _, statErr := os.Stat(filepath.Join(subDir, "SKILL.md")); statErr == nil {
-				skillsToAdd[filepath.Base(subDir)] = pathOverride
-			} else {
-				return nil, nil, fmt.Errorf("specified path '%s' does not contain SKILL.md", pathOverride)
-			}
-		}
-		return skillsToAdd, nil, nil
-	}
-
-	if len(skills) > 0 {
-		skillsToAdd = make(map[string]string)
-		if len(discovered) == 1 && len(skills) == 1 && allowRename {
-			for _, sub := range discovered {
-				skillsToAdd[skills[0]] = sub
-			}
-			return skillsToAdd, nil, nil
-		}
-		for _, sk := range skills {
-			if sub, ok := discovered[sk]; ok {
-				skillsToAdd[sk] = sub
-			} else if pathOverride != "" {
-				skillsToAdd[sk] = pathOverride
-			} else {
-				matched := false
-				for k, v := range discovered {
-					if strings.EqualFold(k, sk) {
-						skillsToAdd[k] = v
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					unmatched = append(unmatched, sk)
-				}
-			}
-		}
-		return skillsToAdd, unmatched, nil
-	}
-
-	return nil, nil, nil
 }

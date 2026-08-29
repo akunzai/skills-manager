@@ -3,7 +3,6 @@ package cli
 import (
 	"cmp"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,12 +22,10 @@ type sourceLabels struct {
 // addIntake owns one acquired Source from discovery through selection and
 // confirmation. Source-specific constructors are the only way to create it.
 type addIntake struct {
-	source        engine.AddSource
-	rootDir       string
-	discovered    engine.DiscoveredSkills
-	labels        sourceLabels
-	selectionPath string
-	progressLine  func(name, subpath string) string
+	source       engine.AddSource
+	discovered   engine.DiscoveredSkills
+	labels       sourceLabels
+	progressLine func(name, subpath string) string
 }
 
 type addRequest struct {
@@ -41,147 +38,115 @@ type addRequest struct {
 var addSelectionIsTerminal = tui.IsTerminal
 
 var addPromptSourcePath = func(name string, paths []string) (string, error) {
-	options := make([]tui.SelectOption, 0, len(paths))
+	options := make([]tui.SelectOption, 0, len(paths)+1)
+	options = append(options, tui.SelectOption{Title: "Select a Source path"})
 	for _, candidate := range paths {
 		options = append(options, tui.SelectOption{Key: candidate, Title: candidate})
 	}
 	return tui.PromptSelect(fmt.Sprintf("Select a Source path for %s:", name), options, -1)
 }
 
-func sortedDiscoveredNames(discovered engine.DiscoveredSkills) []string {
-	return slices.Sorted(maps.Keys(discovered))
-}
-
-func flattenedDiscoveredSkills(discovered engine.DiscoveredSkills) map[string]string {
-	flat := make(map[string]string, len(discovered))
-	for name, paths := range discovered {
-		if len(paths) == 1 {
-			flat[name] = paths[0]
-		} else {
-			flat[name] = ""
-		}
-	}
-	return flat
-}
-
-// resolveSkillsToAdd turns --all/--path/--skill or an interactive prompt
+// resolveSkillsToAdd turns --all/--skill or an interactive prompt
 // into the set of Skills to Add. cancelled reports a user-cancelled
-// selection, which the caller must treat as a silent success, not an error.
+// selection, which the caller must treat as a successful outcome, not an error.
 func resolveSkillsToAdd(
 	cmd *cobra.Command,
 	discovered engine.DiscoveredSkills,
 	intake *addIntake,
 	flagAll bool,
-	pathOverride string,
 	flagSkills []string,
 	flagYes bool,
 ) (skillsToAdd map[string]string, cancelled bool, err error) {
 	out := cmd.OutOrStdout()
 	labels := intake.labels
+	interactive := addSelectionIsTerminal() && !flagYes
+	request := engine.AddSelectionRequest{All: flagAll, Skills: flagSkills}
+	answers := engine.AddSelectionAnswers{Paths: make(map[string]string)}
 
-	flat := flattenedDiscoveredSkills(discovered)
-	resolved, unmatched, err := engine.ResolveDiscoveredSkills(flat, intake.rootDir, flagAll, pathOverride, flagSkills, intake.source.AllowRename)
-	if err != nil {
-		return nil, false, err
-	}
-	for _, sk := range unmatched {
-		fmt.Fprintf(out, "%sWarning: Skill '%s' not found in discovered list (%s)%s\n", colorYellow, sk, strings.Join(sortedDiscoveredNames(discovered), ", "), colorReset)
-	}
-	if resolved != nil {
-		return resolveCandidatePaths(resolved, discovered, addSelectionIsTerminal() && !flagYes)
-	}
-
-	if shouldPromptForDiscoveredSkills(len(discovered), addSelectionIsTerminal(), flagYes) {
-		groups, shouldGroup := groupDiscoveredSkills(flat)
-		for _, paths := range discovered {
-			if len(paths) > 1 {
-				shouldGroup = false
-				break
-			}
+	for {
+		outcome, resolveErr := engine.ResolveAddSelection(discovered, request, answers)
+		if resolveErr != nil {
+			return nil, false, resolveErr
 		}
-		selectionDirs := selectionSkillsDirs(cmd)
-
-		var chosen []string
-		var promptErr error
-		promptTitle := fmt.Sprintf("Select skills to add from %s:", labels.displayName)
-		if shouldGroup {
-			for _, options := range groups {
-				markInstalledSkills(options, selectionDirs)
+		switch outcome.Kind {
+		case engine.AddSelectionResolved:
+			return outcome.Skills, false, nil
+		case engine.AddSelectionCancelled:
+			if outcome.CancelReason == engine.AddSelectionEmpty {
+				fmt.Fprintf(out, "%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
+			} else {
+				fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
 			}
-			chosen, promptErr = tui.PromptGroupedMultiSelect(promptTitle, groups)
-		} else {
-			options := make([]tui.SelectOption, 0, len(discovered))
-			for skName, paths := range discovered {
-				extra := ""
-				if len(paths) > 1 {
-					extra = fmt.Sprintf("(%d source paths)", len(paths))
+			return nil, true, nil
+		case engine.AddSelectionNeedsPath:
+			if !interactive {
+				return nil, false, fmt.Errorf("duplicate Skill %q requires a Source path: %s; specify a discovery scope with --path <directory> or a repository tree URL", outcome.Skill, strings.Join(outcome.Options, ", "))
+			}
+			chosen, promptErr := addPromptSourcePath(outcome.Skill, outcome.Options)
+			if promptErr != nil {
+				return nil, false, promptErr
+			}
+			if chosen == "" {
+				answers.CancelReason = engine.AddSelectionUserCancelled
+			} else {
+				answers.Paths[outcome.Skill] = chosen
+			}
+		case engine.AddSelectionNeedsSkills:
+			if !interactive {
+				fmt.Fprintf(out, "%s%s contains multiple skills:%s %s\n", colorYellow, labels.resourceNoun, colorReset, strings.Join(outcome.Options, ", "))
+				fmt.Fprintln(out, "Please specify --skill <name> or --all")
+				return nil, false, fmt.Errorf("multiple skills found without selection")
+			}
+
+			displayPaths := make(map[string]string, len(discovered))
+			shouldGroup := true
+			for name, paths := range discovered {
+				if len(paths) != 1 {
+					shouldGroup = false
+					break
 				}
-				options = append(options, tui.SelectOption{Key: skName, Title: skName, Extra: extra})
+				displayPaths[name] = paths[0]
 			}
-			markInstalledSkills(options, selectionDirs)
-			slices.SortFunc(options, func(a, b tui.SelectOption) int {
-				return cmp.Compare(a.Key, b.Key)
-			})
-			chosen, promptErr = tui.PromptMultiSelect(promptTitle, options)
-		}
-		if promptErr != nil {
-			return nil, false, promptErr
-		}
-		if chosen == nil {
-			fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
-			return nil, true, nil
-		}
-		if len(chosen) == 0 {
-			fmt.Fprintf(out, "%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
-			return nil, true, nil
-		}
-		skillsToAdd = make(map[string]string, len(chosen))
-		for _, ch := range chosen {
-			skillsToAdd[ch] = flat[ch]
-		}
-	} else if len(discovered) == 1 {
-		skillsToAdd = flat
-	} else {
-		fmt.Fprintf(out, "%s%s contains multiple skills:%s %s\n", colorYellow, labels.resourceNoun, colorReset, strings.Join(sortedDiscoveredNames(discovered), ", "))
-		fmt.Fprintf(out, "Please specify --skill <name> or --all\n")
-		return nil, false, fmt.Errorf("multiple skills found without selection")
-	}
-
-	return resolveCandidatePaths(skillsToAdd, discovered, addSelectionIsTerminal() && !flagYes)
-}
-
-func resolveCandidatePaths(selected map[string]string, discovered engine.DiscoveredSkills, interactive bool) (map[string]string, bool, error) {
-	return resolveCandidatePathsWith(selected, discovered, interactive, addPromptSourcePath)
-}
-
-func resolveCandidatePathsWith(selected map[string]string, discovered engine.DiscoveredSkills, interactive bool, choose func(string, []string) (string, error)) (map[string]string, bool, error) {
-	for _, name := range slices.Sorted(maps.Keys(selected)) {
-		path := selected[name]
-		if path != "" {
-			continue
-		}
-		paths := discovered[name]
-		if len(paths) == 0 && len(discovered) == 1 {
-			for _, solePaths := range discovered {
-				paths = solePaths
+			groups := tui.GroupedItems(nil)
+			if shouldGroup {
+				groups, shouldGroup = groupDiscoveredSkills(displayPaths)
 			}
+			selectionDirs := selectionSkillsDirs(cmd)
+
+			var chosen []string
+			var promptErr error
+			promptTitle := fmt.Sprintf("Select skills to add from %s:", labels.displayName)
+			if shouldGroup {
+				for _, options := range groups {
+					markInstalledSkills(options, selectionDirs)
+				}
+				chosen, promptErr = tui.PromptGroupedMultiSelect(promptTitle, groups)
+			} else {
+				options := make([]tui.SelectOption, 0, len(outcome.Options))
+				for _, skName := range outcome.Options {
+					paths := discovered[skName]
+					extra := ""
+					if len(paths) > 1 {
+						extra = fmt.Sprintf("(%d source paths)", len(paths))
+					}
+					options = append(options, tui.SelectOption{Key: skName, Title: skName, Extra: extra})
+				}
+				markInstalledSkills(options, selectionDirs)
+				slices.SortFunc(options, func(a, b tui.SelectOption) int {
+					return cmp.Compare(a.Key, b.Key)
+				})
+				chosen, promptErr = tui.PromptMultiSelect(promptTitle, options)
+			}
+			if promptErr != nil {
+				return nil, false, promptErr
+			}
+			if chosen == nil {
+				answers.CancelReason = engine.AddSelectionUserCancelled
+				continue
+			}
+			answers.Skills = chosen
 		}
-		if len(paths) < 2 {
-			return nil, false, fmt.Errorf("no Source path found for Skill %q", name)
-		}
-		if !interactive {
-			return nil, false, fmt.Errorf("duplicate Skill %q requires a Source path: %s; specify a discovery scope with --path <directory> or a repository tree URL", name, strings.Join(paths, ", "))
-		}
-		chosen, err := choose(name, paths)
-		if err != nil {
-			return nil, false, err
-		}
-		if chosen == "" {
-			return nil, true, nil
-		}
-		selected[name] = chosen
 	}
-	return selected, false, nil
 }
 
 // run selects Skills, confirms replacements, then declares, Materializes,
@@ -189,7 +154,7 @@ func resolveCandidatePathsWith(selected map[string]string, discovered engine.Dis
 func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
 	out := cmd.OutOrStdout()
 
-	skillsToAdd, cancelled, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, intake.selectionPath, req.skills, req.yes)
+	skillsToAdd, cancelled, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, req.yes)
 	if err != nil {
 		return err
 	}

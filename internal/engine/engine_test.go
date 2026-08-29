@@ -1350,7 +1350,7 @@ func TestAddPlanSymlinkDeclaresAndMaterializes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, "local sample", false), map[string]string{"sample": "sample"}, nil)
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, "local sample"), map[string]string{"sample": "sample"}, nil)
 	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)

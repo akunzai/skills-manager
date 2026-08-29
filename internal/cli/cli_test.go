@@ -480,7 +480,7 @@ func TestCLILsJSONAgentsAreDeclaredAvailability(t *testing.T) {
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: sample\n---\n# Sample\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
@@ -1086,7 +1086,7 @@ func TestCLIConfigAgentDefaultsReconcileInstalledSkills(t *testing.T) {
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: sample\n---\n# Sample\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runCLI(t, "add", "--symlink", source, "--skill", "sample", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
@@ -1113,7 +1113,7 @@ func TestCLIAgentsMutationsPersistAndReconcile(t *testing.T) {
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: sample\n---\n# Sample\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runCLI(t, "add", "--symlink", source, "--skill", "sample", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
@@ -1161,7 +1161,7 @@ func TestCLIAddAgentPersistsAndRmAgentIsRemoved(t *testing.T) {
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: sample\n---\n# Sample\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runCLI(t, "add", "--symlink", source, "--skill", "sample", "--agent", "continue", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
@@ -1188,7 +1188,7 @@ func TestCLIProjectSymlinkSourceIsRelativeToProject(t *testing.T) {
 	if err := os.MkdirAll(inRepo, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(inRepo, "SKILL.md"), []byte("# In repo"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(inRepo, "SKILL.md"), []byte("---\nname: inrepo\n---\n# In repo"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1230,7 +1230,7 @@ func TestCLIProjectSymlinkSourceOutsideProjectStaysAbsolute(t *testing.T) {
 	if err := os.MkdirAll(outside, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(outside, "SKILL.md"), []byte("# External"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(outside, "SKILL.md"), []byte("---\nname: external\n---\n# External"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
