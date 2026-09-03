@@ -113,6 +113,7 @@ Universal agents that read the central skills directory directly do not need lin
 | Repair diagnosed health issues | `skills doctor --fix` |
 | Remove undeclared managed items | `skills prune` |
 | Remove a skill | `skills rm <skill>` |
+| Print or install AI agent guide | `skills guide [--install]` |
 
 Every operational command accepts `--project`. Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
 
