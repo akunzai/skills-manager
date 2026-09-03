@@ -32,6 +32,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Release SOP: @docs/release.md
 - Lessons learned: @docs/lessons-learned.md
 - Exit-code contract: @docs/adr/0002-exit-codes-express-state.md
+- Agent skill & guide: @skills-manager/SKILL.md
 
 ## Claude Code Compatibility
 

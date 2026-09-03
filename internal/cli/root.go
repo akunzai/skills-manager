@@ -128,6 +128,7 @@ func init() {
 	RootCmd.AddCommand(newVersionCmd())
 	RootCmd.AddCommand(newConfigCmd())
 	RootCmd.AddCommand(newAgentsCmd())
+	RootCmd.AddCommand(newGuideCmd())
 }
 
 func Execute() error {
