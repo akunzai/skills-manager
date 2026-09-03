@@ -117,6 +117,6 @@ func TestGuideCmd_SingleSourceOfTruth(t *testing.T) {
 	}
 
 	if string(repoSkill) != embeddedGuideSkill {
-		t.Errorf("embedded_skill.md and skills-manager/SKILL.md differ; they must be identical")
+		t.Errorf("embeddedGuideSkill and skills-manager/SKILL.md differ; they must be identical")
 	}
 }

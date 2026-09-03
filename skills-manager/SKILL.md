@@ -1,6 +1,6 @@
 ---
 name: skills-manager
-description: Manage skills across AI coding agents (Claude Code, Antigravity, Copilot, Codex) using the skills CLI. Triggers when discovering or adding skills to a project or global scope, reconciling drift with sync, refreshing remote sources with outdated or update, diagnosing or fixing health with doctor or prune, or configuring agent availability.
+description: Manage skills across AI coding agents (Claude Code, Antigravity, Copilot, Codex) using the skills CLI. Triggers when discovering or adding skills to a project or global scope, migrating skill sources, changing install methods, reconciling drift with sync, refreshing remote sources with outdated or update, diagnosing or fixing health with doctor or prune, or configuring agent availability.
 ---
 
 # Skills Manager
@@ -36,6 +36,14 @@ When calling `skills` in automated scripts or tool calls:
 - **Specify skills explicitly on `add`**: Use `--skill <name>` (or `--all`).
 - **Resolve ambiguous repository paths**: If a repository contains duplicate skill names across subdirectories, pass `--path <subpath>` or append the path (e.g. `owner/repo/skills`).
 - **Use `--json` for inspection**: `skills ls --json` outputs structured inventory.
+- **Non-interactive Source Replacement**: When overwriting or migrating an existing skill (e.g. from a remote Git repository to a local CLI command), pass `--yes` (`-y`) to automatically accept the replacement plan.
+
+## Configuration Structure (`skills.json`)
+
+`skills.json` maintains three top-level sections:
+- `settings`: Agent availability policies (`defaultAgents`, `availability` per-skill overrides).
+- `remote`: Map of Git repositories (`<owner>/<repo>`), each with its `type` ("github", "gitlab", "git") and `skills` map (`<skill-name>: <subpath>`).
+- `local`: Map of local skills (`<skill-name>`), with `type: "symlink"` (`source` path) or `type: "command"` (`command`, optional `check` command).
 
 ---
 
@@ -61,9 +69,17 @@ skills add ./my-local-skill --yes
 # Add with custom agent availability overrides
 skills add akunzai/agent-skills --skill agents-md --agent claude,antigravity --yes
 
+# Add from CLI command installer (with optional pre-check)
+skills add --command "playwright-cli install --skills=agents" --check "which playwright-cli" playwright-cli --yes
+
+# Overwrite or migrate an existing skill to a new source (e.g., remote -> CLI command)
+skills add --command "playwright-cli install --skills=agents" playwright-cli --yes
+
 # Add to Project scope
 skills -p add akunzai/agent-skills --skill agents-md --yes
 ```
+
+**Source Replacement & Migration**: If a skill with the same name already exists in Config (or Scope), `skills add` plans a replacement. Pass `--yes` to accept the conflict non-interactively; `skills-manager` automatically cleans up the old registration (e.g. from `remote`), records the new entry under `local` (or `remote`), and reconciles agent availability.
 
 **Completion criterion**: Run `skills ls` and verify the skill appears in Inventory with state `Current` and matching availability.
 
