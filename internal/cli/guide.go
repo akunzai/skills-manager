@@ -9,11 +9,11 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
+	skillsmanager "github.com/akunzai/skills-manager/skills-manager"
 	"github.com/spf13/cobra"
 )
 
-//go:embed embedded_skill.md
-var embeddedGuideSkill string
+var embeddedGuideSkill = skillsmanager.Content
 
 func newGuideCmd() *cobra.Command {
 	var flagInstall bool
