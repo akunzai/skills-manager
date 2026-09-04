@@ -9,7 +9,7 @@ import (
 )
 
 // Severity is how prominently doctor renders one Finding. It carries no
-// presentation: color is a CLI concern (docs/design.md). An int rather than
+// presentation: color is a CLI concern (docs/agents/design.md). An int rather than
 // SyncEvent-style string constants (sync.go) because ordering is part of its
 // meaning — OK < Warning < Error — even though nothing compares severities
 // today.
