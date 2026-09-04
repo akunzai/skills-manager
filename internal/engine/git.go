@@ -126,6 +126,12 @@ func RunGit(cwd string, args ...string) (string, string, error) {
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
+	// Disable terminal and Git Credential Manager GUI prompts so remote
+	// queries fail cleanly rather than blocking or popping dialog windows.
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=never",
+	)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
