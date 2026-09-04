@@ -69,14 +69,15 @@ skills add ./my-local-skill --yes
 # Add with custom agent availability overrides
 skills add akunzai/agent-skills --skill agents-md --agent claude,antigravity --yes
 
-# Add from CLI command installer (with optional pre-check)
-skills add --command "playwright-cli install --skills=agents" --check "which playwright-cli" playwright-cli --yes
+# Add from CLI command installer (playwright-cli defaults to workspace unless --global is set)
+skills add --command "playwright-cli install --skills=agents --global" --check "which playwright-cli" playwright-cli --yes
 
 # Overwrite or migrate an existing skill to a new source (e.g., remote -> CLI command)
-skills add --command "playwright-cli install --skills=agents" playwright-cli --yes
+skills add --command "playwright-cli install --skills=agents --global" playwright-cli --yes
 
-# Add to Project scope
+# Add to Project scope (workspace installation)
 skills -p add akunzai/agent-skills --skill agents-md --yes
+skills -p add --command "playwright-cli install --skills=agents" playwright-cli --yes
 ```
 
 **Source Replacement & Migration**: If a skill with the same name already exists in Config (or Scope), `skills add` plans a replacement. Pass `--yes` to accept the conflict non-interactively; `skills-manager` automatically cleans up the old registration (e.g. from `remote`), records the new entry under `local` (or `remote`), and reconciles agent availability.
