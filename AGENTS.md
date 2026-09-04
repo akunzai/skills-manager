@@ -28,9 +28,9 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Domain glossary: @CONTEXT.md
 - Domain docs: @docs/agents/domain.md
 - Engine Sync: @internal/engine/sync.go
-- Product UI, CLI output, and README design: @docs/design.md
-- Release SOP: @docs/release.md
-- Lessons learned: @docs/lessons-learned.md
+- Product UI, CLI output, and README design: @docs/agents/design.md
+- Release SOP: @docs/agents/release.md
+- Lessons learned: @docs/agents/lessons-learned.md
 - Exit-code contract: @docs/adr/0002-exit-codes-express-state.md
 - Agent skill & guide: @skills-manager/SKILL.md
 
@@ -41,5 +41,5 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 ## Self-Reflection
 
 - **Candidate**: Distill a non-obvious gotcha into ≤ 2 context-tagged bullets. Propose it before writing.
-- **Promote**: On confirmation, write it to a dedicated file — merge an existing topic doc, else `docs/<topic>.md`, else `docs/lessons-learned.md`. Add or update one `@path` line under Pointers.
+- **Promote**: On confirmation, put it where whoever would break it must already pass — enforce it (assert/type/test) when the fix is in hand, else a comment at that site, else an agent-facing doc (`docs/agents/<topic>.md`, else `docs/agents/lessons-learned.md`) with one `@path` line under Pointers. Never both.
 - **Prune**: Drop entries once stale (obsolete version, now enforced, duplicated, or a transcript) — not by a fixed count.
