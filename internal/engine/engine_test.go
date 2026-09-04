@@ -765,6 +765,7 @@ func TestObserveRemoteFreshnessSourceParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		res := newRemoteSource(nil, tt.source, config.RemoteRepo{
+			Branch: "main",
 			Skills: map[string]string{"foo": "skills/foo"},
 		}, tmpCache).ObserveFreshness()
 
