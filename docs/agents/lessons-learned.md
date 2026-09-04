@@ -4,9 +4,10 @@ Key development insights, architectural gotchas, and environment nuances discove
 
 ## CLI & Testing
 
-- **`[cobra/flag-isolation]`**: In Cobra CLI test suites, Persistent Flags (e.g. `--config`, `--global`, `--project`) retain their parsed state across multiple `RootCmd.Execute()` calls within the same test process. Test cases must explicitly reset flag variables and invoke `RootCmd.PersistentFlags().Set(name, "")` to prevent cross-test state leakage.
-- **`[cobra/flag-isolation]`**: Subcommand flags leak the same way and are easier to miss: commands are built once in `init()`, so their flag targets are closure variables that survive every `Execute()`. A `--skill` left over from an earlier test silently renamed the skill a later one installed. Reset by walking `RootCmd.Commands()` and, per flag, calling `SliceValue.Replace(nil)` or `Value.Set(f.DefValue)` and clearing `f.Changed`.
+- **`[cobra/flag-isolation]`**: In Cobra test suites, both persistent flags and subcommand closure targets leak across `RootCmd.Execute()` calls within the same process. Test cases must call `resetRootCmdFlags()` (`cli_test.go`), which walks commands to restore default values and clear `f.Changed`.
 - **`[cobra/silence-usage]`**: Cobra prints the usage block for *any* error returned from `RunE`, so a runtime failure reads as if the user mistyped the command — `doctor` reported its findings and then dumped every flag. Flag parsing and arg validation both finish before `RunE`, so set `cmd.SilenceUsage = true` at the top of `RunE` and clear it again only in genuine misuse checks. Setting it on the root command instead would also swallow usage for real flag errors, which share the same error path (`command.go`, `if !cmd.SilenceUsage && !c.SilenceUsage`).
+- **`[git/non-interactive-prompts]`**: Invoking `git` subprocesses without `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never` allows Git Credential Manager (GCM) to spawn modal GUI authentication windows on macOS/Windows, hanging background CLI runs and test suites.
+- **`[testing/network-isolation]`**: Calling `ObserveFreshness()` on unmocked remote source keys without an explicit branch triggers `git ls-remote` to detect the default branch, leaking live network requests into unit tests. Always specify a branch in test fixtures when asserting local cache path logic.
 
 ## Terminal & UI
 
