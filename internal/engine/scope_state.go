@@ -167,6 +167,32 @@ func (s *ScopeStateStore) Save(state ScopeState) error {
 	return nil
 }
 
+// RecordApplied records what Materializing one remote Skill put on the Scope.
+// Every command that Materializes a remote Skill must call it: without a
+// baseline, classifyRemoteSkill (freshness.go) cannot tell a freshly applied
+// Skill from one the user hand-edited, so the next Update reads as
+// SkillUnknownBaseline and Sync blocks it instead of applying the update.
+func (s *ScopeStateStore) RecordApplied(name, source, cacheIdentity, commit, scopePath string) error {
+	digests, err := DigestSkillContent(scopePath)
+	if err != nil {
+		return err
+	}
+	state, err := s.Load()
+	if err != nil {
+		return err
+	}
+	if state.Skills == nil {
+		state.Skills = make(map[string]AppliedSkillState)
+	}
+	state.Skills[name] = AppliedSkillState{
+		Source:         source,
+		CacheIdentity:  cacheIdentity,
+		AppliedCommit:  commit,
+		ContentDigests: digests,
+	}
+	return s.Save(state)
+}
+
 // DeleteSkill removes one Skill's applied baseline while retaining the Scope
 // artifact. Corrupt state is preserved and returned as an error.
 func (s *ScopeStateStore) DeleteSkill(name string) error {

@@ -49,3 +49,48 @@ func TestBuildAddPlanDetectsUntrackedDiskConflicts(t *testing.T) {
 		t.Errorf("expected [untracked directory], got %s", conflict.CurrentSrc)
 	}
 }
+
+// Add must record the same applied baseline Sync does. Without it a Skill
+// added today is classified SkillUnknownBaseline after the next Update, so
+// Sync blocks a routine upstream change instead of applying it.
+func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	origin := filepath.Join(project, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+
+	cfg := config.DefaultConfig()
+	repoDir, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := BuildAddPlan(cfg, configPath, skillsDir,
+		NewRemoteAddSource("owner/repo", "git", origin, repoDir),
+		map[string]string{"sample": "sample"}, nil)
+	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(origin, "sample", "SKILL.md"), []byte("# Sample v2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "."}, {"commit", "-m", "v2"}} {
+		if _, _, err := RunGit(origin, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := UpdateRemoteSkills(cfg, nil, true, false, cacheDir, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := InspectFreshness(cfg, skillsDir, cacheDir, FreshnessOptions{ObserveScope: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := snapshot.Repositories[0].Skills[0]
+	if got.Status != SkillCacheUpdateAvailable {
+		t.Errorf("status after add then update = %q; want %q", got.Status, SkillCacheUpdateAvailable)
+	}
+}

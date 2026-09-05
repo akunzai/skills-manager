@@ -207,6 +207,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	}
 	availability := NewAvailability(cfg, plan.SkillsDir)
 	names := sortedSkillKeys(plan.Skills)
+	stateStore, _ := NewScopeStateStore(plan.SkillsDir)
 
 	for _, name := range names {
 		subpath := plan.Skills[name]
@@ -281,6 +282,14 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		}
 		if stepErr != nil {
 			return AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}, fmt.Errorf("failed to materialize skill %s: %w", name, stepErr)
+		}
+		if plan.Source.Kind == AddSourceRemote && stateStore != nil {
+			// Best effort: an unrecordable baseline costs the next Update its
+			// Cache-update classification, but the Skill itself is on disk and
+			// declared. Sync reports the Scope state failure with its own next
+			// action.
+			_ = stateStore.RecordApplied(name, plan.Source.Key, plan.Source.RepoDir,
+				GetLocalRepoCommit(plan.Source.RepoDir), filepath.Join(plan.SkillsDir, name))
 		}
 	}
 
