@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 )
 
 func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -35,11 +37,11 @@ func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsMessage(outcome.Findings, "Untracked skills") || !containsMessage(outcome.Findings, ": orphan") {
-		t.Fatalf("missing untracked finding: %#v", outcome.Findings)
+	if !slices.Contains(outcome.Report.Untracked, "orphan") {
+		t.Fatalf("Untracked = %#v; want orphan", outcome.Report.Untracked)
 	}
-	if !containsMessage(outcome.Findings, "leftover empty agent director") {
-		t.Fatalf("missing leftover finding: %#v", outcome.Findings)
+	if len(outcome.Report.LeftoverEmpty) == 0 {
+		t.Fatal("diagnosis did not report the leftover empty agent directory")
 	}
 	if outcome.Remaining != 1 {
 		t.Fatalf("Remaining = %d; want 1 (untracked must not count)", outcome.Remaining)
@@ -50,6 +52,7 @@ func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
 }
 
 func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -68,15 +71,16 @@ func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsMessage(outcome.Findings, "Configured but missing skills: missing") {
-		t.Fatalf("missing inventory finding: %#v", outcome.Findings)
+	if !slices.Contains(outcome.Report.Missing, "missing") {
+		t.Fatalf("Missing = %#v; want the declared but unmaterialized Skill", outcome.Report.Missing)
 	}
-	if !containsMessage(outcome.Findings, "Installed folder missing SKILL.md: broken") {
-		t.Fatalf("missing invalid finding: %#v", outcome.Findings)
+	if len(outcome.Report.Invalid) != 1 || outcome.Report.Invalid[0].Name != "broken" {
+		t.Fatalf("Invalid = %#v; want the SKILL.md-less folder", outcome.Report.Invalid)
 	}
 }
 
 func TestDoctorRunFixesThenRediagnosesFilesystem(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -95,8 +99,8 @@ func TestDoctorRunFixesThenRediagnosesFilesystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsMessage(outcome.Findings, "Removed") {
-		t.Fatalf("expected leftover removal finding: %#v", outcome.Findings)
+	if outcome.Repair == nil || len(outcome.Repair.RemovedLeftover) == 0 {
+		t.Fatalf("Repair = %#v; want a removed leftover directory", outcome.Repair)
 	}
 	if outcome.Remaining != 0 {
 		t.Fatalf("Remaining = %d; want actual post-fix state to be healthy", outcome.Remaining)
@@ -110,6 +114,7 @@ func TestDoctorRunFixesThenRediagnosesFilesystem(t *testing.T) {
 }
 
 func TestDoctorRunRebuildsLegacyCacheBeforeRemovingIt(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
@@ -150,6 +155,7 @@ func TestDoctorRunRebuildsLegacyCacheBeforeRemovingIt(t *testing.T) {
 }
 
 func TestDoctorRunRecordsDefaultBranchForInferredSourceURL(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
@@ -182,6 +188,7 @@ func TestDoctorRunRecordsDefaultBranchForInferredSourceURL(t *testing.T) {
 }
 
 func TestDoctorRunKeepsValidBranchAwareCacheWithoutRemoteAccess(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
@@ -227,6 +234,7 @@ func TestDoctorRunKeepsValidBranchAwareCacheWithoutRemoteAccess(t *testing.T) {
 }
 
 func TestDoctorRunPreservesLegacyCacheWhenRebuildFails(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
@@ -260,12 +268,13 @@ func TestDoctorRunPreservesLegacyCacheWhenRebuildFails(t *testing.T) {
 	if got := GetLocalRepoCommit(legacy); got == "" {
 		t.Fatal("doctor --fix removed the legacy Cache after its replacement failed")
 	}
-	if !containsMessage(outcome.Findings, "Failed to rebuild legacy Cache") {
-		t.Fatalf("missing rebuild failure finding: %#v", outcome.Findings)
+	if !hasCacheMigration(outcome.Repair, CacheMigrationFailed) {
+		t.Fatalf("Repair = %#v; want a failed Cache migration", outcome.Repair)
 	}
 }
 
 func TestDoctorRunKeepsInstalledCacheAndReportsRecoveryWhenBackupCleanupFails(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
@@ -304,8 +313,8 @@ func TestDoctorRunKeepsInstalledCacheAndReportsRecoveryWhenBackupCleanupFails(t 
 	if GetLocalRepoCommit(resolveCacheRepo("owner/repo", origin, branch, cacheDir).Dir) == "" {
 		t.Fatal("installed branch-aware Cache must stay in place")
 	}
-	if !containsMessage(outcome.Findings, "Manual Cache recovery required") {
-		t.Fatalf("missing recovery finding: %#v", outcome.Findings)
+	if !hasCacheMigration(outcome.Repair, CacheMigrationRecoveryNeeded) {
+		t.Fatalf("Repair = %#v; want a Cache migration needing manual recovery", outcome.Repair)
 	}
 }
 
@@ -347,6 +356,7 @@ func TestLegacyCacheMigrationRejectsPlanWhenLegacyCacheChanged(t *testing.T) {
 }
 
 func TestDoctorRunRestoresLegacyCacheWhenReplacementRenameFails(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	doctor, legacy := newLegacyMigrationTestDoctor(t)
 	realRename := doctor.cacheMigration.ops.rename
 	renameCalls := 0
@@ -368,15 +378,16 @@ func TestDoctorRunRestoresLegacyCacheWhenReplacementRenameFails(t *testing.T) {
 	if GetLocalRepoCommit(legacy) == "" {
 		t.Fatal("legacy Cache was not restored after replacement rename failed")
 	}
-	if !containsMessage(outcome.Findings, "Failed to rebuild legacy Cache") {
-		t.Fatalf("missing migration failure finding: %#v", outcome.Findings)
+	if !hasCacheMigration(outcome.Repair, CacheMigrationFailed) {
+		t.Fatalf("Repair = %#v; want a failed Cache migration", outcome.Repair)
 	}
-	if containsMessage(outcome.Findings, "Manual Cache recovery required") {
-		t.Fatalf("successful rollback must not require manual recovery: %#v", outcome.Findings)
+	if hasCacheMigration(outcome.Repair, CacheMigrationRecoveryNeeded) {
+		t.Fatalf("successful rollback must not require manual recovery: %#v", outcome.Repair)
 	}
 }
 
 func TestDoctorRunPreservesArtifactsWhenReplacementAndRollbackRenameFail(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	doctor, _ := newLegacyMigrationTestDoctor(t)
 	realRename := doctor.cacheMigration.ops.rename
 	renameCalls := 0
@@ -395,10 +406,11 @@ func TestDoctorRunPreservesArtifactsWhenReplacementAndRollbackRenameFail(t *test
 	if outcome.Remaining != 2 {
 		t.Fatalf("Remaining = %d; want backup and staging recovery artifacts", outcome.Remaining)
 	}
-	if !containsMessage(outcome.Findings, "Manual Cache recovery required") ||
-		!containsMessage(outcome.Findings, ".legacy-cache-") ||
-		!containsMessage(outcome.Findings, ".doctor-cache-") {
-		t.Fatalf("missing preserved recovery artifacts: %#v", outcome.Findings)
+	artifacts := strings.Join(cacheMigrationArtifacts(outcome.Repair, CacheMigrationRecoveryNeeded), " ")
+	if artifacts == "" ||
+		!strings.Contains(artifacts, ".legacy-cache-") ||
+		!strings.Contains(artifacts, ".doctor-cache-") {
+		t.Fatalf("preserved recovery artifacts = %q; want both the legacy and doctor Cache trees", artifacts)
 	}
 }
 
@@ -422,6 +434,7 @@ func newLegacyMigrationTestDoctor(t *testing.T) (*Doctor, string) {
 }
 
 func TestDoctorRunRebuildsEveryConfiguredBranchForLegacyCache(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
@@ -476,6 +489,7 @@ func TestDoctorRunRebuildsEveryConfiguredBranchForLegacyCache(t *testing.T) {
 }
 
 func TestDoctorRunLeavesUnknownAgentReferencesForUser(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -496,9 +510,9 @@ func TestDoctorRunLeavesUnknownAgentReferencesForUser(t *testing.T) {
 	if before.Remaining != 2 {
 		t.Fatalf("Remaining = %d; want 2", before.Remaining)
 	}
-	if !containsMessage(before.Findings, `unknown agent "not-a-real-agent" in settings.defaultAgents`) ||
-		!containsMessage(before.Findings, `unknown agent "also-fake" in settings.availability.some-skill.include`) {
-		t.Fatalf("missing unknown-agent findings: %#v", before.Findings)
+	if !hasUnknownAgent(before.Report.UnknownAgents, "", AgentRefDefaultAgents, "not-a-real-agent") ||
+		!hasUnknownAgent(before.Report.UnknownAgents, "some-skill", AgentRefInclude, "also-fake") {
+		t.Fatalf("UnknownAgents = %#v; want both policy references", before.Report.UnknownAgents)
 	}
 
 	after, err := doctor.Run(true)
@@ -511,6 +525,7 @@ func TestDoctorRunLeavesUnknownAgentReferencesForUser(t *testing.T) {
 }
 
 func TestDoctorRunPropagatesInventoryErrors(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(filepath.Dir(skillsDir), 0755); err != nil {
@@ -524,7 +539,41 @@ func TestDoctorRunPropagatesInventoryErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected inventory error")
 	}
-	if len(outcome.Findings) != 0 {
-		t.Fatalf("Findings = %#v; want no partial healthy report", outcome.Findings)
+	if outcome.Report.SkillsDir != "" || outcome.Repair != nil {
+		t.Fatalf("outcome = %#v; want no partial report when Run fails", outcome)
 	}
+}
+
+func hasUnknownAgent(refs []UnknownAgentReference, skill, field, agent string) bool {
+	for _, ref := range refs {
+		if ref.Skill == skill && ref.Field == field && ref.Agent == agent {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCacheMigration(repair *RepairOutcome, status CacheMigrationStatus) bool {
+	if repair == nil {
+		return false
+	}
+	for _, migration := range repair.CacheMigrations {
+		if migration.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func cacheMigrationArtifacts(repair *RepairOutcome, status CacheMigrationStatus) []string {
+	if repair == nil {
+		return nil
+	}
+	var artifacts []string
+	for _, migration := range repair.CacheMigrations {
+		if migration.Status == status {
+			artifacts = append(artifacts, migration.Artifacts...)
+		}
+	}
+	return artifacts
 }

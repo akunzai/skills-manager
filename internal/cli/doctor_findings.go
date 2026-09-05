@@ -1,18 +1,18 @@
-package engine
+package cli
 
 import (
 	"fmt"
 	"path/filepath"
 	"strings"
 
+	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-// Severity is how prominently doctor renders one Finding. It carries no
-// presentation: color is a CLI concern (docs/agents/design.md). An int rather than
-// SyncEvent-style string constants (sync.go) because ordering is part of its
-// meaning — OK < Warning < Error — even though nothing compares severities
-// today.
+// Severity is how prominently doctor renders one Finding. An int rather than
+// SyncEvent-style string constants (engine/sync.go) because ordering is part
+// of its meaning — OK < Warning < Error — even though nothing compares
+// severities today.
 type Severity int
 
 const (
@@ -31,12 +31,12 @@ type Finding struct {
 	Blank    bool
 }
 
-// findings renders the plan as an ordered list doctor prints as-is. With
-// result nil this is the diagnosis; with result set, entries that
-// repair touched report its outcome instead. This is the one place that
-// interprets a health plan for display, so a new finding is added here
-// once rather than in a second, hand-synced printer.
-func (p healthPlan) findings(result *healthFixResult) []Finding {
+// doctorFindings renders one DoctorOutcome as the ordered list doctor prints.
+// With result nil this is the diagnosis; with result set, entries that repair
+// touched report its outcome instead. Every doctor sentence is assembled here
+// and nowhere else — the engine reports facts, this file turns them into
+// English (see engine.DoctorOutcome).
+func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Finding {
 	var findings []Finding
 	add := func(f Finding) { findings = append(findings, f) }
 
@@ -105,7 +105,7 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 			}
 			for _, unobservable := range d.Unobservable {
 				add(Finding{Severity: SeverityError, Message: unobservableAvailabilityFinding(d.Skill, unobservable), Blank: true})
-				add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: inspect %s, then re-run 'skills doctor%s'.", models.ToTildePath(unobservable.Dir), p.scopeFlag())})
+				add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: inspect %s, then re-run 'skills doctor%s'.", models.ToTildePath(unobservable.Dir), scopeFlag(p))})
 			}
 			if len(d.Unexpected) > 0 {
 				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; unexpected links: %s", d.Skill, strings.Join(d.Unexpected, ", ")), Blank: true})
@@ -124,7 +124,7 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 				for _, foreign := range drift.Foreign {
 					add(Finding{Severity: SeverityWarning, Message: foreignAvailabilityFinding(drift.Skill, foreign)})
 					remove := "rm -- "
-					if foreign.Kind == ForeignAvailabilityDirectory {
+					if foreign.Kind == engine.ForeignAvailabilityDirectory {
 						remove = "rm -rf -- "
 					}
 					add(Finding{Severity: SeverityInfo, Message: "  Remove it manually: " + remove + shellQuotePath(foreign.Path)})
@@ -143,11 +143,11 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 		// state, discarding undeclared data belongs to prune.
 		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
 			"  Declare %s with 'skills add%s', or remove %s with 'skills prune%s --skills-only'.",
-			objectPronoun(len(p.Untracked)), p.scopeFlag(), objectPronoun(len(p.Untracked)), p.scopeFlag())})
+			objectPronoun(len(p.Untracked)), scopeFlag(p), objectPronoun(len(p.Untracked)), scopeFlag(p))})
 	}
 	for _, invalid := range p.Invalid {
 		add(Finding{Severity: SeverityError, Message: "Installed folder missing SKILL.md: " + invalid.Name, Blank: true})
-		add(Finding{Severity: SeverityInfo, Message: "  " + p.invalidNextAction(invalid)})
+		add(Finding{Severity: SeverityInfo, Message: "  " + invalidNextAction(p, invalid)})
 	}
 	if p.StateError != "" {
 		add(Finding{Severity: SeverityError, Message: "Corrupted Scope state: " + p.StateError, Blank: true})
@@ -155,12 +155,8 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 	if len(p.StaleState) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: "Obsolete Scope state entries: " + strings.Join(p.StaleState, ", "), Blank: true})
 	}
-	if len(p.LegacyCache) > 0 {
-		paths := make([]string, 0, len(p.LegacyCache))
-		for _, migration := range p.LegacyCache {
-			paths = append(paths, migration.Root)
-		}
-		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Legacy branchless Cache entries: %s", strings.Join(paths, ", ")), Blank: true})
+	if roots := p.LegacyCacheRoots(); len(roots) > 0 {
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Legacy branchless Cache entries: %s", strings.Join(roots, ", ")), Blank: true})
 	}
 	for _, artifact := range p.CacheRecovery {
 		add(Finding{Severity: SeverityError, Message: "Manual Cache recovery required; preserved artifact: " + artifact, Blank: true})
@@ -177,15 +173,15 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 		}
 	}
 	if result != nil {
-		for _, migration := range result.LegacyResults {
+		for _, migration := range result.CacheMigrations {
 			switch migration.Status {
-			case legacyCacheRebuilt:
-				add(Finding{Severity: SeverityOK, Message: "Rebuilt branch-aware Cache and removed legacy Cache: " + migration.Plan.Root})
-			case legacyCacheRecoveryNeeded:
-				add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Manual Cache recovery required after rebuilding %s: %s; preserved artifacts: %s", migration.Plan.Root, migration.Err, strings.Join(migration.Artifacts, ", "))})
-				add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Inspect the preserved Cache trees, restore the desired tree to %s if needed, then remove the artifacts.", migration.Plan.Root)})
-			case legacyCacheFailed:
-				add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to rebuild legacy Cache %s: %s", migration.Plan.Root, migration.Err)})
+			case engine.CacheMigrationRebuilt:
+				add(Finding{Severity: SeverityOK, Message: "Rebuilt branch-aware Cache and removed legacy Cache: " + migration.Root})
+			case engine.CacheMigrationRecoveryNeeded:
+				add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Manual Cache recovery required after rebuilding %s: %s; preserved artifacts: %s", migration.Root, migration.Err, strings.Join(migration.Artifacts, ", "))})
+				add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Inspect the preserved Cache trees, restore the desired tree to %s if needed, then remove the artifacts.", migration.Root)})
+			case engine.CacheMigrationFailed:
+				add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to rebuild legacy Cache %s: %s", migration.Root, migration.Err)})
 			}
 		}
 		for _, path := range result.RemovedScopes {
@@ -212,8 +208,8 @@ func (p healthPlan) findings(result *healthFixResult) []Finding {
 // symlinked Skill only rebuilds the same link at the same broken Source, and
 // a command installer is never re-run by Sync when its check does not pass.
 // One shared sentence would therefore be wrong for someone.
-func (p healthPlan) invalidNextAction(invalid invalidSkill) string {
-	flag := p.scopeFlag()
+func invalidNextAction(p engine.DoctorReport, invalid engine.InvalidSkill) string {
+	flag := scopeFlag(p)
 	switch invalid.SourceType {
 	case "local_symlink":
 		source := models.ToTildePath(models.ResolveLocalSourcePath(invalid.Source, p.SkillsDir))
@@ -229,7 +225,7 @@ func (p healthPlan) invalidNextAction(invalid invalidSkill) string {
 // scopeFlag is the flag a suggested command needs to act on the Scope doctor
 // just diagnosed. Printing a Global command while diagnosing a Project would
 // send the user at the wrong skills directory.
-func (p healthPlan) scopeFlag() string {
+func scopeFlag(p engine.DoctorReport) string {
 	if models.IsProjectScope(p.SkillsDir) {
 		return " -p"
 	}
@@ -247,11 +243,11 @@ func objectPronoun(n int) string {
 // It is an error rather than a warning: doctor cannot say whether the Skill is
 // available for that Agent, and reporting nothing is what let a broken Scope
 // pass as healthy.
-func unobservableAvailabilityFinding(skill string, unobservable UnobservableAvailabilityPath) string {
+func unobservableAvailabilityFinding(skill string, unobservable engine.UnobservableAvailabilityPath) string {
 	return fmt.Sprintf("Cannot observe availability for %s; unreadable %s path: %s (%s)", skill, unobservable.Agent, models.ToTildePath(unobservable.Path), unobservable.Err)
 }
 
-func foreignAvailabilityFinding(skill string, foreign ForeignAvailabilityPath) string {
+func foreignAvailabilityFinding(skill string, foreign engine.ForeignAvailabilityPath) string {
 	return fmt.Sprintf("Availability drift for %s; occupied path for %s: %s (%s)", skill, foreign.Agent, models.ToTildePath(foreign.Path), foreign.Detail())
 }
 
@@ -269,7 +265,7 @@ func shellQuote(value string) string {
 
 // agentFixFindings renders one agent's Fixed/Failed sub-lines for a repair
 // category (broken symlinks or stale links) — the shape shared by both.
-func agentFixFindings(removed, failed []healthFix, agent, noun string, includeErr bool) []Finding {
+func agentFixFindings(removed, failed []engine.HealthFix, agent, noun string, includeErr bool) []Finding {
 	var findings []Finding
 	for _, fix := range removed {
 		if fix.Agent == agent {
@@ -289,7 +285,7 @@ func agentFixFindings(removed, failed []healthFix, agent, noun string, includeEr
 	return findings
 }
 
-func leftoverAgentNames(dirs []AgentDir) []string {
+func leftoverAgentNames(dirs []engine.AgentDir) []string {
 	names := make([]string, 0, len(dirs))
 	for _, leftover := range dirs {
 		names = append(names, leftover.Name)

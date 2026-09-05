@@ -12,7 +12,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-type agentHealth struct {
+type AgentHealth struct {
 	Name            string
 	Dir             string
 	Broken          []string
@@ -25,13 +25,13 @@ type agentHealth struct {
 	Unusable string
 }
 
-type staleUniversalLinks struct {
+type StaleUniversalLinks struct {
 	Agent string
 	Dir   string
 	Names []string
 }
 
-type driftFinding struct {
+type SkillDrift struct {
 	Skill        string
 	Source       string
 	Missing      []string
@@ -40,54 +40,57 @@ type driftFinding struct {
 	Unobservable []UnobservableAvailabilityPath
 }
 
-type healthFix struct {
+type HealthFix struct {
 	Agent string
 	Name  string
 	Err   error
 }
 
-// invalidSkill is a declared Skill whose folder is on the skills directory but
+// InvalidSkill is a declared Skill whose folder is on the skills directory but
 // has no SKILL.md. The way out depends on how it was declared — a remote Skill
 // can be re-Materialized, a symlinked one is only as valid as its Source — so
 // the finding carries the declaration, not just the name.
-type invalidSkill struct {
+type InvalidSkill struct {
 	Name       string
 	SourceType string
 	Source     string
 }
 
-type healthPlan struct {
+type DoctorReport struct {
 	SkillsDir      string
 	MasterMissing  bool
-	Agents         []agentHealth
-	StaleUniversal []staleUniversalLinks
+	Agents         []AgentHealth
+	StaleUniversal []StaleUniversalLinks
 	LeftoverEmpty  []AgentDir
-	Drift          []driftFinding
+	Drift          []SkillDrift
 	Missing        []string
 	Untracked      []string
-	Invalid        []invalidSkill
+	Invalid        []InvalidSkill
 	UnknownAgents  []UnknownAgentReference
 	StateError     string
 	StaleState     []string
-	LegacyCache    []legacyCacheMigrationPlan
 	CacheRecovery  []string
-	StaleScopes    []ScopeStateArtifact
+	// legacyCache holds the migration plans repair executes. Only their
+	// roots are reportable (LegacyCacheRoots); the migration machinery is
+	// an engine concern and stays unexported.
+	legacyCache []legacyCacheMigrationPlan
+	StaleScopes []ScopeStateArtifact
 }
 
-type healthFixResult struct {
-	RemovedBroken   []healthFix
-	FailedBroken    []healthFix
-	RemovedStale    []healthFix
-	FailedStale     []healthFix
+type RepairOutcome struct {
+	RemovedBroken   []HealthFix
+	FailedBroken    []HealthFix
+	RemovedStale    []HealthFix
+	FailedStale     []HealthFix
 	RemovedLeftover []AgentDir
-	FailedLeftover  []healthFix
+	FailedLeftover  []HealthFix
 	FixedDrift      []string
-	FailedDrift     []healthFix
+	FailedDrift     []HealthFix
 	StateRepaired   bool
 	StateRepairErr  error
-	LegacyResults   []legacyCacheMigrationResult
+	CacheMigrations []CacheMigrationOutcome
 	RemovedScopes   []string
-	FailedScopes    []healthFix
+	FailedScopes    []HealthFix
 }
 
 // Doctor diagnoses and optionally repairs one Scope's Skill, Agent directory,
@@ -102,10 +105,20 @@ type Doctor struct {
 	cacheMigration *legacyCacheMigrator
 }
 
-// DoctorOutcome is the ordered report plus the issues that remain after Run.
-// Remaining is unavailable when Run returns an execution error.
+// DoctorOutcome is what Doctor diagnosed and repaired, plus the issues that
+// remain after Run. Remaining is unavailable when Run returns an execution
+// error.
+//
+// It carries facts, never sentences. Assembling those — wording, indentation,
+// suggested commands, shell quoting — is the CLI's job (docs/agents/design.md:
+// machine-readable output carries no presentation formatting). Exporting the
+// seven diagnosis types this costs buys a Doctor that a second frontend, or a
+// --json flag, can report without re-deriving anything; a Message string here
+// would be cheaper today and unusable for either.
 type DoctorOutcome struct {
-	Findings       []Finding
+	// Report is the diagnosis. Repair is nil unless Run was asked to fix.
+	Report         DoctorReport
+	Repair         *RepairOutcome
 	Remaining      int
 	RecoveryNeeded bool
 	// Failed is how many repair actions --fix attempted and could not
@@ -164,18 +177,18 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 		return DoctorOutcome{}, err
 	}
 	if !fix {
-		return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked)}, nil
+		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked)}, nil
 	}
 
 	replaceForeign := false
 	if foreign := plan.foreignAvailabilityPaths(); len(foreign) > 0 && approve != nil {
 		replaceForeign, err = approve(foreign)
 		if err != nil {
-			return DoctorOutcome{Findings: plan.findings(nil), Remaining: plan.issueCount(), Untracked: len(plan.Untracked)}, err
+			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Untracked: len(plan.Untracked)}, err
 		}
 	}
 	result := d.repair(plan, progress, replaceForeign)
-	outcome := DoctorOutcome{Findings: plan.findings(&result), RecoveryNeeded: result.cacheRecoveryNeeded(), Failed: result.repairFailures()}
+	outcome := DoctorOutcome{Report: plan, Repair: &result, RecoveryNeeded: result.cacheRecoveryNeeded(), Failed: result.repairFailures()}
 	after, err := d.diagnose()
 	if err != nil {
 		return outcome, err
@@ -189,29 +202,29 @@ func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approv
 // repairFailures counts the repair actions that broke. Every category doctor
 // attempts is listed here, so a new one that forgets to report itself shows up
 // as a Scope that reports a clean-ish 1 while a repair silently failed.
-func (r healthFixResult) repairFailures() int {
+func (r RepairOutcome) repairFailures() int {
 	failures := len(r.FailedBroken) + len(r.FailedStale) + len(r.FailedLeftover) + len(r.FailedDrift) + len(r.FailedScopes)
 	if r.StateRepairErr != nil {
 		failures++
 	}
-	for _, migration := range r.LegacyResults {
-		if migration.Status == legacyCacheFailed {
+	for _, migration := range r.CacheMigrations {
+		if migration.Status == CacheMigrationFailed {
 			failures++
 		}
 	}
 	return failures
 }
 
-func (r healthFixResult) cacheRecoveryNeeded() bool {
-	for _, migration := range r.LegacyResults {
-		if migration.Status == legacyCacheRecoveryNeeded {
+func (r RepairOutcome) cacheRecoveryNeeded() bool {
+	for _, migration := range r.CacheMigrations {
+		if migration.Status == CacheMigrationRecoveryNeeded {
 			return true
 		}
 	}
 	return false
 }
 
-func (p healthPlan) foreignAvailabilityPaths() []ForeignAvailabilityPath {
+func (p DoctorReport) foreignAvailabilityPaths() []ForeignAvailabilityPath {
 	var paths []ForeignAvailabilityPath
 	for _, drift := range p.Drift {
 		paths = append(paths, drift.Foreign...)
@@ -228,8 +241,8 @@ func availabilitySource(item models.SkillItem) string {
 
 // diagnose records untracked Skills as warnings. Missing Skills and invalid
 // folders are issues but are not repaired.
-func (d *Doctor) diagnose() (healthPlan, error) {
-	plan := healthPlan{SkillsDir: d.skillsDir}
+func (d *Doctor) diagnose() (DoctorReport, error) {
+	plan := DoctorReport{SkillsDir: d.skillsDir}
 	if d.stateStore != nil {
 		state, err := d.stateStore.Load()
 		if err != nil {
@@ -245,7 +258,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 	}
 	artifacts, artifactErr := ListScopeStateArtifacts()
 	if artifactErr != nil {
-		return healthPlan{}, artifactErr
+		return DoctorReport{}, artifactErr
 	}
 	for _, artifact := range artifacts {
 		if artifact.Err == nil {
@@ -256,9 +269,9 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 	}
 	legacyCache, cacheRecovery, err := d.cacheMigration.detect()
 	if err != nil {
-		return healthPlan{}, err
+		return DoctorReport{}, err
 	}
-	plan.LegacyCache = legacyCache
+	plan.legacyCache = legacyCache
 	plan.CacheRecovery = cacheRecovery
 	if _, err := os.Stat(d.skillsDir); os.IsNotExist(err) {
 		plan.MasterMissing = true
@@ -275,11 +288,11 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			continue
 		}
 		if err == nil && !info.IsDir() {
-			plan.Agents = append(plan.Agents, agentHealth{Name: agentName, Dir: agentDir, Unusable: "not a directory"})
+			plan.Agents = append(plan.Agents, AgentHealth{Name: agentName, Dir: agentDir, Unusable: "not a directory"})
 			continue
 		}
 		broken, unmanaged, physical := d.links.DiagnoseHealth(agentDir)
-		plan.Agents = append(plan.Agents, agentHealth{
+		plan.Agents = append(plan.Agents, AgentHealth{
 			Name:            agentName,
 			Dir:             agentDir,
 			Broken:          broken,
@@ -297,7 +310,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 		if len(stale) == 0 {
 			continue
 		}
-		plan.StaleUniversal = append(plan.StaleUniversal, staleUniversalLinks{
+		plan.StaleUniversal = append(plan.StaleUniversal, StaleUniversalLinks{
 			Agent: agentName,
 			Dir:   agentDir,
 			Names: stale,
@@ -309,7 +322,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 
 	inv, err := Inventory(d.cfg, d.skillsDir)
 	if err != nil {
-		return healthPlan{}, err
+		return DoctorReport{}, err
 	}
 	for _, s := range inv {
 		if !s.IsInstalled {
@@ -321,14 +334,14 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 			continue
 		}
 		if !s.IsValidSkill {
-			plan.Invalid = append(plan.Invalid, invalidSkill{Name: s.Name, SourceType: s.SourceType, Source: s.Source})
+			plan.Invalid = append(plan.Invalid, InvalidSkill{Name: s.Name, SourceType: s.SourceType, Source: s.Source})
 		}
 		source := availabilitySource(s)
 		drift := d.availability.ObserveAvailability(s.Name)
 		if drift.Empty() {
 			continue
 		}
-		plan.Drift = append(plan.Drift, driftFinding{
+		plan.Drift = append(plan.Drift, SkillDrift{
 			Skill:        s.Name,
 			Source:       source,
 			Missing:      drift.Missing,
@@ -342,7 +355,7 @@ func (d *Doctor) diagnose() (healthPlan, error) {
 
 // IssueCount is the number of issues doctor reports without --fix.
 // Untracked Skills are warnings only.
-func (p healthPlan) issueCount() int {
+func (p DoctorReport) issueCount() int {
 	n := 0
 	if p.MasterMissing {
 		n++
@@ -365,14 +378,14 @@ func (p healthPlan) issueCount() int {
 	if p.StateError != "" {
 		n++
 	}
-	n += len(p.StaleState) + len(p.LegacyCache) + len(p.CacheRecovery) + len(p.StaleScopes)
+	n += len(p.StaleState) + len(p.legacyCache) + len(p.CacheRecovery) + len(p.StaleScopes)
 	return n
 }
 
 // repair leaves physical dirs, unmanaged broken links, and missing/untracked/
 // invalid Skills unchanged. Independent repair failures do not stop the run.
-func (d *Doctor) repair(plan healthPlan, progress DoctorProgress, replaceForeign bool) healthFixResult {
-	result := healthFixResult{}
+func (d *Doctor) repair(plan DoctorReport, progress DoctorProgress, replaceForeign bool) RepairOutcome {
+	result := RepairOutcome{}
 	if d.stateStore != nil {
 		if plan.StateError != "" {
 			result.StateRepairErr = d.stateStore.Prune()
@@ -390,11 +403,11 @@ func (d *Doctor) repair(plan healthPlan, progress DoctorProgress, replaceForeign
 		}
 	}
 	total := 0
-	for _, migration := range plan.LegacyCache {
+	for _, migration := range plan.legacyCache {
 		total += len(migration.Sources)
 	}
 	index := 0
-	result.LegacyResults = d.cacheMigration.apply(plan.LegacyCache, func(event legacyCacheMigrationEvent) {
+	migrations := d.cacheMigration.apply(plan.legacyCache, func(event legacyCacheMigrationEvent) {
 		if event.Phase != legacyCacheMigrationStaging {
 			return
 		}
@@ -403,9 +416,12 @@ func (d *Doctor) repair(plan healthPlan, progress DoctorProgress, replaceForeign
 			progress(DoctorEvent{Source: event.Source, Index: index, Total: total})
 		}
 	})
+	for _, migration := range migrations {
+		result.CacheMigrations = append(result.CacheMigrations, migration.outcome())
+	}
 	for _, artifact := range plan.StaleScopes {
 		if err := os.Remove(artifact.Path); err != nil && !os.IsNotExist(err) {
-			result.FailedScopes = append(result.FailedScopes, healthFix{Name: artifact.Path, Err: err})
+			result.FailedScopes = append(result.FailedScopes, HealthFix{Name: artifact.Path, Err: err})
 		} else {
 			result.RemovedScopes = append(result.RemovedScopes, artifact.ScopePath)
 		}
@@ -413,7 +429,7 @@ func (d *Doctor) repair(plan healthPlan, progress DoctorProgress, replaceForeign
 	for _, agent := range plan.Agents {
 		for _, name := range agent.Broken {
 			path := filepath.Join(agent.Dir, name)
-			fix := healthFix{Agent: agent.Name, Name: name}
+			fix := HealthFix{Agent: agent.Name, Name: name}
 			if !d.links.RemoveManagedPath(path, name) {
 				fix.Err = fmt.Errorf("failed to remove broken symlink %s", name)
 				result.FailedBroken = append(result.FailedBroken, fix)
@@ -424,7 +440,7 @@ func (d *Doctor) repair(plan healthPlan, progress DoctorProgress, replaceForeign
 	}
 	for _, stale := range plan.StaleUniversal {
 		for _, name := range stale.Names {
-			fix := healthFix{Agent: stale.Agent, Name: name}
+			fix := HealthFix{Agent: stale.Agent, Name: name}
 			path := filepath.Join(stale.Dir, name)
 			if !d.links.RemoveManagedPath(path, name) {
 				fix.Err = fmt.Errorf("failed to remove stale link %s", name)
@@ -436,7 +452,7 @@ func (d *Doctor) repair(plan healthPlan, progress DoctorProgress, replaceForeign
 	}
 	for _, leftover := range plan.LeftoverEmpty {
 		if err := d.links.RemoveEmptyDir(leftover.Dir); err != nil {
-			result.FailedLeftover = append(result.FailedLeftover, healthFix{
+			result.FailedLeftover = append(result.FailedLeftover, HealthFix{
 				Agent: leftover.Name,
 				Name:  leftover.Dir,
 				Err:   err,
@@ -453,10 +469,20 @@ func (d *Doctor) repair(plan healthPlan, progress DoctorProgress, replaceForeign
 			err = d.availability.Apply(drift.Skill)
 		}
 		if err != nil {
-			result.FailedDrift = append(result.FailedDrift, healthFix{Name: drift.Skill, Err: err})
+			result.FailedDrift = append(result.FailedDrift, HealthFix{Name: drift.Skill, Err: err})
 			continue
 		}
 		result.FixedDrift = append(result.FixedDrift, drift.Skill)
 	}
 	return result
+}
+
+// LegacyCacheRoots names the legacy branchless Cache roots doctor found, for
+// callers that report them. The migration plans themselves stay internal.
+func (p DoctorReport) LegacyCacheRoots() []string {
+	roots := make([]string, 0, len(p.legacyCache))
+	for _, migration := range p.legacyCache {
+		roots = append(roots, migration.Root)
+	}
+	return roots
 }

@@ -34,6 +34,36 @@ type legacyCacheMigrationResult struct {
 	Artifacts []string
 }
 
+// CacheMigrationStatus is what became of one legacy Cache migration.
+type CacheMigrationStatus uint8
+
+const (
+	CacheMigrationRebuilt CacheMigrationStatus = iota
+	CacheMigrationFailed
+	CacheMigrationRecoveryNeeded
+)
+
+// CacheMigrationOutcome is the reportable projection of one migration result:
+// what a reader needs to describe it, without the plan and fingerprint the
+// migrator works from.
+type CacheMigrationOutcome struct {
+	Root      string
+	Status    CacheMigrationStatus
+	Err       error
+	Artifacts []string
+}
+
+func (r legacyCacheMigrationResult) outcome() CacheMigrationOutcome {
+	status := CacheMigrationRebuilt
+	switch r.Status {
+	case legacyCacheFailed:
+		status = CacheMigrationFailed
+	case legacyCacheRecoveryNeeded:
+		status = CacheMigrationRecoveryNeeded
+	}
+	return CacheMigrationOutcome{Root: r.Plan.Root, Status: status, Err: r.Err, Artifacts: r.Artifacts}
+}
+
 type legacyCacheMigrationEvent struct {
 	Root   string
 	Source string
