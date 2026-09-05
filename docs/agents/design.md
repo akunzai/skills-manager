@@ -95,4 +95,4 @@ The README's first job is to get a new user through installation and one success
 
 Use a plain heading, a short value proposition, one install path, one quick-start path, and one real terminal demo. Keep comprehensive reference material in command help, the schema, or focused docs. Document released behavior, not plans.
 
-The demo uses fixed fixture data, dimensions, theme, timing, and output paths. It must not expose local usernames or home paths. Commit only `docs/assets/demo.gif`; regeneration rules live in the release SOP.
+The demo uses fixed fixture data, dimensions, theme, timing, and output paths. It must not expose local usernames or home paths. Commit only `website/demo.gif`; regeneration rules live in the release SOP.
