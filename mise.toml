@@ -5,3 +5,18 @@ go = "1.27"
 [tasks.demo]
 description = "Rebuild the README terminal demo"
 run = "tcut scripts/demo.video.ts"
+
+[tasks.check]
+description = "Run the same checks CI does, in the same order"
+run = """
+set -e
+unformatted=$(gofmt -l .)
+if [ -n "$unformatted" ]; then
+  echo "The following files are not gofmt'd:"
+  echo "$unformatted"
+  exit 1
+fi
+go vet ./...
+go test -race ./...
+go build ./cmd/skills
+"""
