@@ -147,7 +147,13 @@ When upgrading from a legacy branchless Cache layout, `skills doctor --fix` may 
       }
     }
   },
-  "local": {}
+  "local": {
+    "skills-manager": {
+      "type": "command",
+      "command": "skills guide --install",
+      "description": "Skills Manager CLI guide for AI coding agents"
+    }
+  }
 }
 ```
 
