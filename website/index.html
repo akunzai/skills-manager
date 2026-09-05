@@ -466,15 +466,15 @@
         <div class="term">
           <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>Project Scope for team reproducibility</span></div>
 <pre><span class="comment"># Initialize project-level configuration</span>
-<span class="prompt">$ </span><span class="cmd">skills --project init</span>
-<span class="prompt">$ </span><span class="cmd">skills --project add akunzai/agent-skills --skill agents-md</span>
+<span class="prompt">$ </span><span class="cmd">skills -p init</span>
+<span class="prompt">$ </span><span class="cmd">skills -p add akunzai/agent-skills --skill agents-md</span>
 <span class="prompt">$ </span><span class="cmd">git add .agents/skills.json &amp;&amp; git commit -m "chore: add agent skills"</span>
 
 <span class="comment"># Teammates clone and restore declared state deterministically</span>
-<span class="prompt">$ </span><span class="cmd">skills --project update &amp;&amp; skills --project sync</span></pre>
+<span class="prompt">$ </span><span class="cmd">skills -p update &amp;&amp; skills -p sync</span></pre>
         </div>
         <p style="margin-top: 10px; font-size: 14px; color: var(--muted);">
-          Declare team-wide skills in <code>.agents/skills.json</code> beside your repository code.
+          Declare team-wide skills in <code>.agents/skills.json</code>. Materialized skills in <code>.agents/skills/</code> are ordinary files—commit only <code>skills.json</code> for a clean repo, or commit the skills directory directly for zero-install onboarding.
         </p>
       </div>
     </div>
@@ -503,7 +503,7 @@
           </tr>
           <tr>
             <td><strong>Project</strong></td>
-            <td><code>skills --project ...</code></td>
+            <td><code>skills -p ...</code> <span style="color: var(--dim); font-size: 12px;">(--project)</span></td>
             <td><code>./.agents/skills.json</code></td>
             <td><code>./.agents/skills/</code></td>
           </tr>

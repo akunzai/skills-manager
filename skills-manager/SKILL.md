@@ -27,7 +27,7 @@ Choose the active Scope at the beginning of an operation:
 | **Global** (Default) | (none) / `-g` | `~/.agents/skills.json` | `~/.agents/skills/` | Personal skills across all projects |
 | **Project** | `-p` / `--project` | `./.agents/skills.json` | `./.agents/skills/` | Team-shared project skills committed to git |
 
-Every operational command accepts `--project` / `-p`.
+Every operational command accepts `-p` (or `--project`). Prefer the `-p` short flag.
 
 ## Automation Rules for Agents
 
@@ -70,10 +70,10 @@ skills add ./my-local-skill --yes
 skills add akunzai/agent-skills --skill agents-md --agent claude,antigravity --yes
 
 # Add from CLI command installer (playwright-cli defaults to workspace unless --global is set)
-skills add --command "playwright-cli install --skills=agents --global" --check "which playwright-cli" playwright-cli --yes
+skills add --command "playwright-cli install --global --skills=agents" --check "which playwright-cli" playwright-cli --yes
 
 # Overwrite or migrate an existing skill to a new source (e.g., remote -> CLI command)
-skills add --command "playwright-cli install --skills=agents --global" playwright-cli --yes
+skills add --command "playwright-cli install --global --skills=agents" playwright-cli --yes
 
 # Add to Project scope (workspace installation)
 skills -p add akunzai/agent-skills --skill agents-md --yes
@@ -100,6 +100,10 @@ skills sync --dry-run
 
 # Step 4: Materialize skills and apply availability (offline operation)
 skills sync
+
+# Project Scope (workspace reconciliation):
+skills -p update
+skills -p sync
 ```
 
 **Protected drift**: If local files inside a materialized skill were modified, `skills sync` leaves them untouched and reports them as `Blocked` (exit code `1`). To intentionally discard local modifications and overwrite from cache:
@@ -125,6 +129,10 @@ skills prune --dry-run
 
 # Remove untracked skills and obsolete links
 skills prune --yes
+
+# Project Scope (workspace diagnosis and repair):
+skills -p doctor
+skills -p doctor --fix
 ```
 
 **Completion criterion**: `skills doctor` reports all checks passing and exits `0`.
@@ -145,6 +153,9 @@ skills agents agents-md follow-defaults
 # Manage global default agents
 skills config
 skills config set defaultAgents claude,antigravity
+
+# Project Scope availability overrides:
+skills -p agents agents-md include antigravity
 ```
 
 **Completion criterion**: `skills agents <skill>` reflects the desired agent list and symlinks in agent directories match.

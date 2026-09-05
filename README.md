@@ -67,19 +67,19 @@ Global is the default. Project mode keeps the declaration beside the code so a t
 | Scope | Command | Configuration | Installed skills |
 | --- | --- | --- | --- |
 | Global | `skills …` | `~/.agents/skills.json` | `~/.agents/skills/` |
-| Project | `skills --project …` | `./.agents/skills.json` | `./.agents/skills/` |
+| Project | `skills -p …` | `./.agents/skills.json` | `./.agents/skills/` |
 
 ```sh
-skills --project init
-skills --project add akunzai/agent-skills --skill agents-md
+skills -p init
+skills -p add akunzai/agent-skills --skill agents-md
 git add .agents/skills.json
 ```
 
 Teammates restore the declared state with:
 
 ```sh
-skills --project update
-skills --project sync
+skills -p update
+skills -p sync
 ```
 
 `update` and `sync` are deliberately separate. Update uses the Project Config to refresh its declared remote Sources in the shared Cache; Sync then reconciles Project Skills from that Cache without network access. Materialized Project Skills are ordinary team-owned files—you decide whether to commit them.
@@ -115,7 +115,7 @@ Universal agents that read the central skills directory directly do not need lin
 | Remove a skill | `skills rm <skill>` |
 | Print or install AI agent guide | `skills guide [--install]` |
 
-Every operational command accepts `--project`. Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
+Every operational command accepts `-p` (or `--project`). Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
 
 For remote Skills, the normal flow is `skills outdated`, `skills update`, then `skills sync`. Sync protects known local changes and unknown baselines; inspect them first, or explicitly overwrite with `skills sync --force`. `sync --dry-run` is a non-mutating freshness gate: it reports what Sync would do without writing anything, and without running a skill's own commands.
 
