@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -83,5 +84,158 @@ func TestAvailabilityMutationsRejectUnknownAgent(t *testing.T) {
 	}
 	if _, ok := cfg.Settings.Availability["sample"]; ok {
 		t.Fatal("failed mutation changed Config")
+	}
+}
+
+// projectAvailability declares one Skill for claude-code in a Project Scope and
+// returns the Availability plus the agent link path Drift is measured against.
+func projectAvailability(t *testing.T, skill string) (*Availability, string, string) {
+	t.Helper()
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, skill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	return NewAvailability(cfg, skillsDir), filepath.Join(project, ".claude", "skills", skill), skillsDir
+}
+
+// The Drift branches doctor and sync act on differently: a missing link is
+// repaired silently, a foreign path needs the user's consent before it is
+// replaced, and an unobservable one cannot be repaired at all. Each was
+// reachable only through the CLI before this.
+func TestObserveAvailabilityDistinguishesDriftBranches(t *testing.T) {
+	t.Run("missing link", func(t *testing.T) {
+		availability, _, _ := projectAvailability(t, "sample")
+
+		drift := availability.ObserveAvailability("sample")
+
+		if !reflect.DeepEqual(drift.Missing, []string{"claude-code"}) {
+			t.Fatalf("Missing = %#v; want claude-code", drift.Missing)
+		}
+		if len(drift.Foreign) != 0 || len(drift.Unobservable) != 0 {
+			t.Fatalf("a link that is merely absent must not read as foreign or unobservable: %#v", drift)
+		}
+	})
+
+	t.Run("declared link is present and managed", func(t *testing.T) {
+		availability, _, _ := projectAvailability(t, "sample")
+		if err := availability.Apply("sample"); err != nil {
+			t.Fatal(err)
+		}
+
+		if drift := availability.ObserveAvailability("sample"); !drift.Empty() {
+			t.Fatalf("Drift after Apply = %#v; want none", drift)
+		}
+	})
+
+	t.Run("foreign directory", func(t *testing.T) {
+		availability, linkPath, _ := projectAvailability(t, "sample")
+		if err := os.MkdirAll(linkPath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		drift := availability.ObserveAvailability("sample")
+
+		if len(drift.Foreign) != 1 {
+			t.Fatalf("Foreign = %#v; want the unmanaged directory", drift.Foreign)
+		}
+		if got := drift.Foreign[0]; got.Kind != ForeignAvailabilityDirectory || got.Agent != "claude-code" {
+			t.Fatalf("Foreign[0] = %#v; want a claude-code directory", got)
+		}
+		if len(drift.Missing) != 0 {
+			t.Fatalf("an occupied path is not a missing one: %#v", drift.Missing)
+		}
+	})
+
+	t.Run("foreign symlink keeps its target for the detail line", func(t *testing.T) {
+		availability, linkPath, _ := projectAvailability(t, "sample")
+		elsewhere := filepath.Join(t.TempDir(), "somewhere-else")
+		if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(elsewhere, linkPath); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+
+		drift := availability.ObserveAvailability("sample")
+
+		if len(drift.Foreign) != 1 {
+			t.Fatalf("Foreign = %#v; want the unmanaged symlink", drift.Foreign)
+		}
+		if got := drift.Foreign[0]; got.Kind != ForeignAvailabilitySymlink || got.Target != elsewhere {
+			t.Fatalf("Foreign[0] = %#v; want a symlink carrying its target", got)
+		}
+	})
+
+	t.Run("unobservable agent directory", func(t *testing.T) {
+		availability, linkPath, _ := projectAvailability(t, "sample")
+		agentDir := filepath.Dir(linkPath)
+		if err := os.MkdirAll(filepath.Dir(agentDir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// A regular file where the Agent directory belongs: Lstat below it
+		// fails with ENOTDIR, which is neither absent nor readable.
+		if err := os.WriteFile(agentDir, []byte("not a directory\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		drift := availability.ObserveAvailability("sample")
+
+		if len(drift.Unobservable) != 1 {
+			t.Fatalf("Unobservable = %#v; want the unreadable path", drift.Unobservable)
+		}
+		got := drift.Unobservable[0]
+		if got.Agent != "claude-code" || got.Dir != agentDir || got.Err == "" {
+			t.Fatalf("Unobservable[0] = %#v; want the agent, its directory and a reason", got)
+		}
+		if len(drift.Missing) != 0 || len(drift.Foreign) != 0 {
+			t.Fatalf("an unreadable path must not be reported as missing or foreign: %#v", drift)
+		}
+	})
+
+	t.Run("unexpected managed link after the agent is excluded", func(t *testing.T) {
+		availability, _, _ := projectAvailability(t, "sample")
+		if err := availability.Apply("sample"); err != nil {
+			t.Fatal(err)
+		}
+		if err := availability.Exclude("sample", "claude"); err != nil {
+			t.Fatal(err)
+		}
+
+		drift := availability.ObserveAvailability("sample")
+
+		if !reflect.DeepEqual(drift.Unexpected, []string{"claude-code"}) {
+			t.Fatalf("Unexpected = %#v; want the link left behind by the excluded Agent", drift.Unexpected)
+		}
+	})
+}
+
+// ReplaceForeign is the one mutation that removes a path the user did not
+// declare, so it refuses to act on a diagnosis the filesystem has moved past.
+func TestReplaceForeignRefusesAStaleDiagnosis(t *testing.T) {
+	availability, linkPath, _ := projectAvailability(t, "sample")
+	if err := os.MkdirAll(linkPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	diagnosed := availability.ObserveAvailability("sample").Foreign
+
+	// The directory becomes a file between diagnosis and confirmation.
+	if err := os.RemoveAll(linkPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(linkPath, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := availability.ReplaceForeign("sample", diagnosed); err == nil {
+		t.Fatal("ReplaceForeign accepted a diagnosis the filesystem had moved past")
+	}
+	if _, err := os.Stat(linkPath); err != nil {
+		t.Fatalf("the refused path must be left untouched: %v", err)
 	}
 }
