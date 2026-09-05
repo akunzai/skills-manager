@@ -112,7 +112,7 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 	}
 
 	for _, item := range plan.LocalItems() {
-		report.tally(applyLocalItem(plan.availability, item, emit))
+		report.tally(applyLocalItem(plan.availability, plan.skillsDir, item, emit))
 	}
 	return report, nil
 }
@@ -186,7 +186,7 @@ func (plan *SyncPlan) openState() (ScopeState, *ScopeStateStore) {
 // applyLocalItem Materializes one local Skill and applies its Availability. A
 // missing Source or a check that does not pass blocks the Skill; a failed
 // installer is a failure, and Availability is still applied.
-func applyLocalItem(availability *Availability, item SyncPlanItem, emit func(SyncEvent)) SyncOutcome {
+func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanItem, emit func(SyncEvent)) SyncOutcome {
 	if item.Block == SyncBlockSourceMissing {
 		emit(SyncEvent{Kind: SyncSourceMissing, Skill: item.Name, Path: item.SourcePath})
 		return SyncBlocked
@@ -205,7 +205,7 @@ func applyLocalItem(availability *Availability, item SyncPlanItem, emit func(Syn
 			outcome = SyncFailed
 		}
 	} else {
-		if err := MaterializeLocalSymlink(item.Name, item.LinkTarget, availability.skillsDir); err != nil {
+		if err := MaterializeLocalSymlink(item.Name, item.LinkTarget, skillsDir); err != nil {
 			emit(SyncEvent{Kind: SyncSymlinkFailed, Skill: item.Name, Err: err.Error()})
 			return SyncFailed
 		}

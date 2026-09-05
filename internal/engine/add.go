@@ -274,7 +274,8 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 			one := map[string]string{name: subpath}
 			err = newRemoteSource(availability, plan.Source.Key, config.RemoteRepo{Skills: one}, "").reconcile(plan.Source.RepoDir, one, note)
 		case AddSourceSymlink, AddSourceCommand:
-			applyLocalItem(availability, planLocalItem(availability, name), note)
+			item := planLocalItem(cfg, plan.SkillsDir, availability.ObserveAvailability(name), name)
+			applyLocalItem(availability, plan.SkillsDir, item, note)
 			err = availabilityErr
 		}
 		if err != nil {
