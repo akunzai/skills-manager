@@ -53,7 +53,7 @@ func newDoctorCmd() *cobra.Command {
 					return promptReplaceForeignAvailability(out, paths)
 				}
 			}
-			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).RunWithRepairApproval(flagFix, func(event engine.DoctorEvent) {
+			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix, func(event engine.DoctorEvent) {
 				progress.Stop()
 				progress = startDoctorProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Rebuilding %s Cache...", event.Index, event.Total, event.Source))
 			}, approve)

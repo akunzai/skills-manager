@@ -31,7 +31,7 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	doctor := engine.NewDoctor(cfg, skillsDir)
-	beforeOutcome, err := doctor.Run(false)
+	beforeOutcome, err := doctor.Run(false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 		t.Fatalf("expected a pre-fix warning finding, got %#v", before)
 	}
 
-	afterOutcome, err := doctor.Run(true)
+	afterOutcome, err := doctor.Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(true)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 		writeUntracked(t, skillsDir)
 
-		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
+		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +210,7 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 		writeUntracked(t, skillsDir)
 
-		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
+		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,7 +248,7 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "linked", source, "")
 	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "")
 
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 		t.Errorf("an unreadable path is neither missing nor foreign: %#v", drift)
 	}
 
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
