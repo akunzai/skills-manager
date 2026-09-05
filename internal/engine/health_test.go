@@ -33,7 +33,7 @@ func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "missing", ".", "github", "")
 	config.AddLocalSymlinkEntry(cfg, "broken", invalid, "")
 
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestDoctorRunFixesThenRediagnosesFilesystem(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	outcome, err := NewDoctor(cfg, skillsDir).Run(true)
+	outcome, err := NewDoctor(cfg, skillsDir).Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestDoctorRunRebuildsLegacyCacheBeforeRemovingIt(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true)
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestDoctorRunRecordsDefaultBranchForInferredSourceURL(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Remote["owner/repo"] = config.RemoteRepo{Skills: map[string]string{}}
 
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true)
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestDoctorRunKeepsValidBranchAwareCacheWithoutRemoteAccess(t *testing.T) {
 		Branch: defaultBranch,
 		Skills: map[string]string{"sample": "sample"},
 	}
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true)
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestDoctorRunPreservesLegacyCacheWhenRebuildFails(t *testing.T) {
 		Skills: map[string]string{"sample": "sample"},
 	}
 
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true)
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestDoctorRunKeepsInstalledCacheAndReportsRecoveryWhenBackupCleanupFails(t 
 		return realRemoveAll(path)
 	}
 
-	outcome, err := doctor.Run(true)
+	outcome, err := doctor.Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestDoctorRunRestoresLegacyCacheWhenReplacementRenameFails(t *testing.T) {
 		return realRename(oldPath, newPath)
 	}
 
-	outcome, err := doctor.Run(true)
+	outcome, err := doctor.Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestDoctorRunPreservesArtifactsWhenReplacementAndRollbackRenameFail(t *test
 		return realRename(oldPath, newPath)
 	}
 
-	outcome, err := doctor.Run(true)
+	outcome, err := doctor.Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,9 +469,9 @@ func TestDoctorRunRebuildsEveryConfiguredBranchForLegacyCache(t *testing.T) {
 	}
 
 	var rebuilt []string
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).RunWithProgress(true, func(event DoctorEvent) {
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, func(event DoctorEvent) {
 		rebuilt = append(rebuilt, event.Source)
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestDoctorRunLeavesUnknownAgentReferencesForUser(t *testing.T) {
 	}
 
 	doctor := NewDoctor(cfg, skillsDir)
-	before, err := doctor.Run(false)
+	before, err := doctor.Run(false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +515,7 @@ func TestDoctorRunLeavesUnknownAgentReferencesForUser(t *testing.T) {
 		t.Fatalf("UnknownAgents = %#v; want both policy references", before.Report.UnknownAgents)
 	}
 
-	after, err := doctor.Run(true)
+	after, err := doctor.Run(true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +535,7 @@ func TestDoctorRunPropagatesInventoryErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
+	outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil, nil)
 	if err == nil {
 		t.Fatal("expected inventory error")
 	}

@@ -162,16 +162,14 @@ func NewDoctorWithCache(cfg *config.Config, skillsDir, cacheDir string) *Doctor 
 }
 
 // Run diagnoses the Scope. With fix, it repairs independent findings, keeps
-// their action report, then diagnoses again to count the actual remaining state.
-func (d *Doctor) Run(fix bool) (DoctorOutcome, error) {
-	return d.RunWithProgress(fix, nil)
-}
-
-func (d *Doctor) RunWithProgress(fix bool, progress DoctorProgress) (DoctorOutcome, error) {
-	return d.RunWithRepairApproval(fix, progress, nil)
-}
-
-func (d *Doctor) RunWithRepairApproval(fix bool, progress DoctorProgress, approve DoctorReplaceForeign) (DoctorOutcome, error) {
+// their action report, then diagnoses again to count the actual remaining
+// state. progress and approve are optional: a nil progress reports nothing, a
+// nil approve declines every foreign-path replacement.
+//
+// One entry point on purpose. Run/RunWithProgress/RunWithRepairApproval used
+// to layer over this one, which made the interface read as three shapes when
+// only this signature ever ran — the two wrappers had no caller outside tests.
+func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceForeign) (DoctorOutcome, error) {
 	plan, err := d.diagnose()
 	if err != nil {
 		return DoctorOutcome{}, err
