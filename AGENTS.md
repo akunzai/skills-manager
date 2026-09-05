@@ -6,6 +6,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 
 ## Commands
 
+- Run every CI check locally: `mise run check` (gofmt, vet, `test -race`, build — in CI's order)
 - Run tests: `go test -v ./...`
 - Build / install standalone binary: `./install.sh`
 - Local binary build: `go build -o skills ./cmd/skills`
