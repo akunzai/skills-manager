@@ -15,7 +15,7 @@ process.on("exit", () => {
 
 export default defineVideo(
   {
-    output: "docs/assets/demo.gif",
+    output: "website/demo.gif",
     cast: join(castDir, "demo.cast"),
     theme: "github-dark",
     cols: 88,
