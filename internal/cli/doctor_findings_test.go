@@ -1,4 +1,4 @@
-package engine
+package cli
 
 import (
 	"os"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
@@ -16,6 +17,7 @@ import (
 // Availability.ConfiguredAgentDirs, which unions defaultAgents with every per-Skill
 // Include — not defaultAgents alone.
 func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -29,11 +31,11 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings := outcome.Findings
+	findings := doctorFindings(outcome.Report, outcome.Repair)
 	var leftover *Finding
 	for i := range findings {
 		if strings.Contains(findings[i].Message, "leftover empty agent director") {
@@ -54,6 +56,7 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 // A fixing run reports repair actions, then derives Remaining from a fresh
 // diagnosis rather than subtracting successful actions from the old plan.
 func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
@@ -66,12 +69,12 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	doctor := NewDoctor(cfg, skillsDir)
+	doctor := engine.NewDoctor(cfg, skillsDir)
 	beforeOutcome, err := doctor.Run(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := beforeOutcome.Findings
+	before := doctorFindings(beforeOutcome.Report, beforeOutcome.Repair)
 	if !containsMessage(before, "Warning:") {
 		t.Fatalf("expected a pre-fix warning finding, got %#v", before)
 	}
@@ -80,7 +83,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after := afterOutcome.Findings
+	after := doctorFindings(afterOutcome.Report, afterOutcome.Repair)
 	if containsMessage(after, "Warning:") {
 		t.Errorf("post-fix findings still contain a pre-fix warning: %#v", after)
 	}
@@ -93,6 +96,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 // "Removed": the outcome finding lists result.RemovedLeftover, not the
 // pre-fix plan.LeftoverEmpty (which would include both).
 func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based permission denial is unreliable on Windows")
 	}
@@ -122,11 +126,11 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	outcome, err := NewDoctor(cfg, skillsDir).Run(true)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings := outcome.Findings
+	findings := doctorFindings(outcome.Report, outcome.Repair)
 	var removedMsg string
 	for _, f := range findings {
 		if strings.HasPrefix(f.Message, "  Removed ") {
@@ -164,6 +168,7 @@ func containsMessage(findings []Finding, substr string) bool {
 // Global command printed while diagnosing a Project sends the user at the
 // wrong skills directory.
 func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	writeUntracked := func(t *testing.T, skillsDir string) {
 		t.Helper()
 		orphan := filepath.Join(skillsDir, "orphan")
@@ -182,12 +187,12 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 		writeUntracked(t, skillsDir)
 
-		outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
+		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !containsMessage(outcome.Findings, "Declare it with 'skills add -p', or remove it with 'skills prune -p --skills-only'.") {
-			t.Fatalf("untracked finding has no Project-scoped next action: %#v", outcome.Findings)
+		if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Declare it with 'skills add -p', or remove it with 'skills prune -p --skills-only'.") {
+			t.Fatalf("untracked finding has no Project-scoped next action: %#v", doctorFindings(outcome.Report, outcome.Repair))
 		}
 		if outcome.Untracked != 1 {
 			t.Errorf("Untracked = %d; want 1", outcome.Untracked)
@@ -205,15 +210,15 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 		writeUntracked(t, skillsDir)
 
-		outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
+		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !containsMessage(outcome.Findings, "Declare it with 'skills add', or remove it with 'skills prune --skills-only'.") {
-			t.Fatalf("untracked finding has no Global-scoped next action: %#v", outcome.Findings)
+		if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Declare it with 'skills add', or remove it with 'skills prune --skills-only'.") {
+			t.Fatalf("untracked finding has no Global-scoped next action: %#v", doctorFindings(outcome.Report, outcome.Repair))
 		}
-		if containsMessage(outcome.Findings, "skills prune -p") {
-			t.Errorf("Global finding suggested a Project command: %#v", outcome.Findings)
+		if containsMessage(doctorFindings(outcome.Report, outcome.Repair), "skills prune -p") {
+			t.Errorf("Global finding suggested a Project command: %#v", doctorFindings(outcome.Report, outcome.Repair))
 		}
 	})
 }
@@ -223,6 +228,7 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 // as valid as its Source and a command installer is not re-run by Sync. One
 // shared sentence would be wrong for two of the three.
 func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	source := filepath.Join(project, "src", "linked")
@@ -242,7 +248,7 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "linked", source, "")
 	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "")
 
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,8 +258,8 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 		"Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm -p installed'.",
 	}
 	for _, message := range want {
-		if !containsMessage(outcome.Findings, message) {
-			t.Errorf("missing next action %q in %#v", message, outcome.Findings)
+		if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), message) {
+			t.Errorf("missing next action %q in %#v", message, doctorFindings(outcome.Report, outcome.Repair))
 		}
 	}
 }
@@ -263,6 +269,7 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 // was a regular file — Lstat returns ENOTDIR, not ENOENT — report as healthy
 // while nothing was linked.
 func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	alpha := filepath.Join(skillsDir, "alpha")
@@ -284,7 +291,7 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddLocalSymlinkEntry(cfg, "alpha", alpha, "")
 
-	availability := NewAvailability(cfg, skillsDir)
+	availability := engine.NewAvailability(cfg, skillsDir)
 	drift := availability.ObserveAvailability("alpha")
 	if drift.Empty() {
 		t.Fatal("an unreadable availability path must not observe as no drift")
@@ -299,21 +306,21 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 		t.Errorf("an unreadable path is neither missing nor foreign: %#v", drift)
 	}
 
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if containsMessage(outcome.Findings, "Symlinks healthy") {
-		t.Fatalf("doctor called a non-directory Agent path healthy: %#v", outcome.Findings)
+	if containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Symlinks healthy") {
+		t.Fatalf("doctor called a non-directory Agent path healthy: %#v", doctorFindings(outcome.Report, outcome.Repair))
 	}
-	if !containsMessage(outcome.Findings, "[claude-code] Agent directory is not usable") {
-		t.Fatalf("doctor did not report the unusable Agent directory: %#v", outcome.Findings)
+	if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "[claude-code] Agent directory is not usable") {
+		t.Fatalf("doctor did not report the unusable Agent directory: %#v", doctorFindings(outcome.Report, outcome.Repair))
 	}
-	if !containsMessage(outcome.Findings, "Cannot observe availability for alpha") {
-		t.Fatalf("doctor did not report the unreadable availability path: %#v", outcome.Findings)
+	if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Cannot observe availability for alpha") {
+		t.Fatalf("doctor did not report the unreadable availability path: %#v", doctorFindings(outcome.Report, outcome.Repair))
 	}
-	if !containsMessage(outcome.Findings, "Next: inspect "+models.ToTildePath(filepath.Join(claudeDir, "skills"))) {
-		t.Fatalf("the finding names no next action: %#v", outcome.Findings)
+	if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Next: inspect "+models.ToTildePath(filepath.Join(claudeDir, "skills"))) {
+		t.Fatalf("the finding names no next action: %#v", doctorFindings(outcome.Report, outcome.Repair))
 	}
 	if outcome.Remaining == 0 {
 		t.Fatal("a Scope with no working availability must not report as clean")

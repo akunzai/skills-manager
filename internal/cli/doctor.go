@@ -58,7 +58,7 @@ func newDoctorCmd() *cobra.Command {
 				progress = startDoctorProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Rebuilding %s Cache...", event.Index, event.Total, event.Source))
 			}, approve)
 			progress.Stop()
-			printHealthReport(out, outcome.Findings)
+			printHealthReport(out, doctorFindings(outcome.Report, outcome.Repair))
 			if runErr != nil {
 				return runErr
 			}
@@ -114,7 +114,7 @@ func untrackedPending(n int) string {
 	return fmt.Sprintf("%d untracked skills need", n)
 }
 
-func printHealthReport(out io.Writer, findings []engine.Finding) {
+func printHealthReport(out io.Writer, findings []Finding) {
 	for _, f := range findings {
 		if f.Blank {
 			fmt.Fprintln(out)
@@ -123,13 +123,13 @@ func printHealthReport(out io.Writer, findings []engine.Finding) {
 	}
 }
 
-func severityColor(s engine.Severity) string {
+func severityColor(s Severity) string {
 	switch s {
-	case engine.SeverityOK:
+	case SeverityOK:
 		return colorGreen
-	case engine.SeverityWarning:
+	case SeverityWarning:
 		return colorYellow
-	case engine.SeverityError:
+	case SeverityError:
 		return colorRed
 	default:
 		return colorBold
