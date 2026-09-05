@@ -201,39 +201,44 @@ func PlanSync(cfg *config.Config, skillsDir, cacheDir string) (*SyncPlan, error)
 		if cfg.Local[name].Type != "symlink" {
 			continue
 		}
-		plan.Items = append(plan.Items, planLocalItem(availability, name))
+		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, availability.ObserveAvailability(name), name))
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Local)) {
 		if cfg.Local[name].Type != "command" {
 			continue
 		}
-		plan.Items = append(plan.Items, planLocalItem(availability, name))
+		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, availability.ObserveAvailability(name), name))
 	}
 	return plan, nil
 }
 
 // planLocalItem observes one declared local Skill. Add reuses it so a newly
 // declared Skill is Materialized exactly the way Sync would.
-func planLocalItem(availability *Availability, name string) SyncPlanItem {
-	info := availability.cfg.Local[name]
+//
+// It takes the Config, the skills directory and the observed Drift rather than
+// an *Availability, because it needs none of that type's behavior: it used to
+// take one and reach through it for cfg and skillsDir, which read as a
+// dependency it does not have.
+func planLocalItem(cfg *config.Config, skillsDir string, drift AvailabilityDrift, name string) SyncPlanItem {
+	info := cfg.Local[name]
 	item := SyncPlanItem{
 		Name:   name,
 		Source: "local",
-		Drift:  availability.ObserveAvailability(name),
+		Drift:  drift,
 	}
 	if info.Type == "command" {
 		item.Kind = SyncItemCommand
 		item.Command = info.Command
 		item.Check = info.Check
-		_, err := os.Stat(filepath.Join(availability.skillsDir, name))
+		_, err := os.Stat(filepath.Join(skillsDir, name))
 		item.Installed = err == nil
 		return item
 	}
-	absSource := models.ResolveLocalSourcePath(info.Source, availability.skillsDir)
+	absSource := models.ResolveLocalSourcePath(info.Source, skillsDir)
 	item.Kind = SyncItemSymlink
 	item.SourcePath = absSource
-	item.LinkPath = filepath.Join(availability.skillsDir, name)
-	item.LinkTarget = models.LocalSymlinkTarget(absSource, availability.skillsDir)
+	item.LinkPath = filepath.Join(skillsDir, name)
+	item.LinkTarget = models.LocalSymlinkTarget(absSource, skillsDir)
 	if _, err := os.Stat(absSource); err != nil {
 		item.Block = SyncBlockSourceMissing
 		return item

@@ -147,6 +147,11 @@ func NewDoctor(cfg *config.Config, skillsDir string) *Doctor {
 }
 
 func NewDoctorWithCache(cfg *config.Config, skillsDir, cacheDir string) *Doctor {
+	// Doctor reads cfg and skillsDir back off the Availability it just built
+	// rather than off its own arguments: NewAvailability is what defaults a nil
+	// Config and an empty skills directory, and a Doctor diagnosing a different
+	// pair from the one its Availability applies would report Drift that is not
+	// there. Deliberate reuse, not a Config carried around inside Availability.
 	availability := NewAvailability(cfg, skillsDir)
 	stateStore, _ := NewScopeStateStore(availability.skillsDir)
 	doctor := &Doctor{
