@@ -1,6 +1,6 @@
 ---
 name: skills-manager
-description: Manage skills across AI coding agents (Claude Code, Antigravity, Copilot, Codex) using the skills CLI. Triggers when discovering or adding skills to a project or global scope, migrating skill sources, changing install methods, reconciling drift with sync, refreshing remote sources with outdated or update, diagnosing or fixing health with doctor or prune, or configuring agent availability.
+description: Manage AI agent skills across coding agents via the skills CLI. Triggers when adding skills (Git, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated), diagnosing health issues (doctor, prune), or configuring availability policies.
 ---
 
 # Skills Manager
@@ -9,14 +9,14 @@ A control point for skills shared across coding agents (Claude Code, Google Anti
 
 ## Core Invariants
 
-- **Two-phase Refresh**: `skills update` refreshes remote sources into local cache only; `skills sync` reconciles Scope skills from cache without network access.
-- **Availability via Symlinks & Defaults**: Universal agents read the central skills directory directly; other agents receive symlinks matching declared policy (`defaultAgents`, `include`, `exclude`).
-- **Exit-Code Contract (ADR 0002)**:
-  | Exit Code | Meaning | Action |
+- **Two-phase Refresh**: `update` fetches remote sources into local cache; `sync` reconciles Scope skills from cache offline.
+- **Availability via Defaults & Symlinks**: Universal agents read the central skills directory directly; non-universal agents receive symlinks per declared policy (`defaultAgents`, `include`, `exclude`).
+- **Exit-Code Contract**:
+  | Exit Code | Meaning | Agent Action |
   | --- | --- | --- |
-  | `0` | Scope matches Config / All current | Proceed |
-  | `1` | Actionable state (drift, blocked skill, dry-run pending, outdated) | Read stdout for recommended disposition; this is not an execution failure |
-  | `2` | Execution failure (unreadable config, git clone error, disk write failure) | Inspect error and abort or repair |
+  | `0` | Converged: Scope matches Config | Proceed |
+  | `1` | Actionable state: drift, blocked overwrite, outdated, or dry-run pending | Inspect stdout for recommended disposition; this is expected state, not a failure |
+  | `2` | Execution failure: unreadable config, git error, or disk failure | Inspect error and abort or repair |
 
 ## Scope Selection
 
@@ -24,19 +24,19 @@ Choose the active Scope at the beginning of an operation:
 
 | Scope | Flag | Config Path | Skills Directory | Use Case |
 | --- | --- | --- | --- | --- |
-| **Global** (Default) | (none) / `-g` | `~/.agents/skills.json` | `~/.agents/skills/` | Personal skills across all projects |
+| **Global** (Default) | (none) / `-g` | `~/.agents/skills.json` | `~/.agents/skills/` | Personal skills shared across all projects |
 | **Project** | `-p` / `--project` | `./.agents/skills.json` | `./.agents/skills/` | Team-shared project skills committed to git |
 
-Every operational command accepts `-p` (or `--project`). Prefer the `-p` short flag.
+Prefer `-p` over `--project` for project-scoped commands. Commit `./.agents/skills.json` to share declared skills with teammates; optionally commit `./.agents/skills/` for zero-install onboarding.
 
 ## Automation Rules for Agents
 
 When calling `skills` in automated scripts or tool calls:
-- **Pass `--yes` (`-y`)**: Suppresses interactive prompts so commands run deterministically without blocking on stdin.
+- **Pass `-y` / `--yes`**: Suppresses interactive prompts so commands run deterministically without blocking on stdin.
 - **Specify skills explicitly on `add`**: Use `--skill <name>` (or `--all`).
 - **Resolve ambiguous repository paths**: If a repository contains duplicate skill names across subdirectories, pass `--path <subpath>` or append the path (e.g. `owner/repo/skills`).
-- **Use `--json` for inspection**: `skills ls --json` outputs structured inventory.
-- **Non-interactive Source Replacement**: When overwriting or migrating an existing skill (e.g. from a remote Git repository to a local CLI command), pass `--yes` (`-y`) to automatically accept the replacement plan.
+- **Inspect with `--json`**: `skills ls --json` outputs structured inventory.
+- **Non-interactive Source Replacement**: When overwriting or migrating an existing skill (e.g. from a remote Git repository to a local CLI command), pass `-y` to automatically accept the replacement plan.
 
 ## Configuration Structure (`skills.json`)
 
@@ -63,13 +63,13 @@ skills add akunzai/agent-skills --skill agents-md --skill writing-for-agents --y
 # Add all skills from a specific subpath
 skills add microsoft/azure-skills --path skills --all --yes
 
-# Add a local directory as a symlink
-skills add ./my-local-skill --yes
+# Add a local directory as a live symlink
+skills add --symlink ./my-local-skill --yes
 
 # Add with custom agent availability overrides
 skills add akunzai/agent-skills --skill agents-md --agent claude,antigravity --yes
 
-# Add from CLI command installer (playwright-cli defaults to workspace unless --global is set)
+# Add from CLI command installer (with prerequisite check)
 skills add --command "playwright-cli install --global --skills=agents" --check "which playwright-cli" playwright-cli --yes
 
 # Overwrite or migrate an existing skill to a new source (e.g., remote -> CLI command)
@@ -80,9 +80,9 @@ skills -p add akunzai/agent-skills --skill agents-md --yes
 skills -p add --command "playwright-cli install --skills=agents" playwright-cli --yes
 ```
 
-**Source Replacement & Migration**: If a skill with the same name already exists in Config (or Scope), `skills add` plans a replacement. Pass `--yes` to accept the conflict non-interactively; `skills-manager` automatically cleans up the old registration (e.g. from `remote`), records the new entry under `local` (or `remote`), and reconciles agent availability.
+**Source Replacement & Migration**: If a skill with the same name already exists in Config (or Scope), `skills add` plans a replacement. Pass `-y` to accept the conflict non-interactively; `skills-manager` automatically cleans up the old registration, records the new entry, and reconciles agent availability.
 
-**Completion criterion**: Run `skills ls` and verify the skill appears in Inventory with state `Current` and matching availability.
+**Completion criterion**: Run `skills ls` (or `skills -p ls`) and verify the skill appears with status `Installed` and expected availability.
 
 ### 2. Inspect and Reconcile (`skills outdated` -> `skills update` -> `skills sync`)
 
@@ -95,7 +95,7 @@ skills outdated
 # Step 2: Fetch remote changes into the shared Cache (network operation)
 skills update
 
-# Step 3: Preview reconciliation plan without writing to disk
+# Step 3: Preview reconciliation plan without writing to disk (Exit 0 = synced, 1 = pending work)
 skills sync --dry-run
 
 # Step 4: Materialize skills and apply availability (offline operation)
@@ -111,14 +111,14 @@ skills -p sync
 skills sync --force
 ```
 
-**Completion criterion**: `skills sync` exits `0`.
+**Completion criterion**: `skills sync` (or `skills -p sync`) exits `0` (converged).
 
 ### 3. Diagnose and Repair Health (`skills doctor` & `skills prune`)
 
 Identify and repair broken symlinks, orphaned files, or untracked skills.
 
 ```sh
-# Diagnose Scope integrity and agent availability health
+# Diagnose Scope integrity and agent availability health (Exit 0 = healthy, 1 = findings)
 skills doctor
 
 # Automatically repair diagnosed issues and rebuild corrupted cache
@@ -135,7 +135,7 @@ skills -p doctor
 skills -p doctor --fix
 ```
 
-**Completion criterion**: `skills doctor` reports all checks passing and exits `0`.
+**Completion criterion**: `skills doctor` (or `skills -p doctor`) reports all checks passing and exits `0`.
 
 ### 4. Manage Agent Availability (`skills agents` & `skills config`)
 
@@ -158,4 +158,4 @@ skills config set defaultAgents claude,antigravity
 skills -p agents agents-md include antigravity
 ```
 
-**Completion criterion**: `skills agents <skill>` reflects the desired agent list and symlinks in agent directories match.
+**Completion criterion**: `skills ls` reflects the target agents under `AGENTS` and `skills doctor` exits `0`.
