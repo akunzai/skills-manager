@@ -34,6 +34,7 @@ jobs:
               ci: "ci",
               build: "ci",
               chore: "chore",
+              release: "chore",
               refactor: "refactor",
               test: "tests",
               tests: "tests",
