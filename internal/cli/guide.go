@@ -72,7 +72,7 @@ With --install, materializes the skill to the Scope skills directory, registers 
 			}
 
 			availability := engine.NewAvailability(cfg, scope.SkillsDir)
-			if err := availability.Apply("skills-manager"); err != nil {
+			if _, err := availability.Apply("skills-manager"); err != nil {
 				return fmt.Errorf("apply availability for skills-manager: %w", err)
 			}
 

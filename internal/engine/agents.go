@@ -41,7 +41,7 @@ func (m AgentLinkManager) RemoveLinks(skillName string) []string {
 	return RemoveAgentSymlinks(skillName, m.skillsDir)
 }
 
-func (m AgentLinkManager) DiagnoseHealth(agentDir string) (broken, unmanagedBroken, physical []string) {
+func (m AgentLinkManager) DiagnoseHealth(agentDir string) AgentDirHealth {
 	return DiagnoseAgentDirHealth(agentDir, m.skillsDir)
 }
 
@@ -65,20 +65,40 @@ func (m AgentLinkManager) IsManagedCopy(path, skillName string) bool {
 	return IsManagedSkillCopy(path, skillName, m.skillsDir)
 }
 
+// IsManagedPath reports whether path is Availability this tool created for
+// skillName by either mechanism — a symlink, or the copy that stands in for
+// one where the operating system does not grant the privilege to link.
+func (m AgentLinkManager) IsManagedPath(path, skillName string) bool {
+	return m.IsManagedLink(path, skillName) || m.IsManagedCopy(path, skillName)
+}
+
 func (m AgentLinkManager) RemoveManagedPath(path, skillName string) bool {
 	return RemoveManagedSkillPath(path, skillName, m.skillsDir)
 }
 
-// DiagnoseAgentDirHealth classifies every entry in a configured agent's
-// skills directory: broken is a managed symlink whose target has gone
-// missing, unmanagedBroken is a dangling symlink this tool never created,
-// and physical is a real directory sitting where a managed symlink is
-// expected (and isn't a copy this tool made, e.g. the Windows fallback).
-// A missing agentDir is not itself unhealthy: it reports no findings.
-func DiagnoseAgentDirHealth(agentDir, skillsDir string) (broken, unmanagedBroken, physical []string) {
+// AgentDirHealth is one Agent skills directory classified in a single pass.
+// Copies travel with the rest because the same test that keeps a copy out of
+// Physical is what identifies it — computing them separately meant reading
+// every marker on disk twice per doctor run.
+type AgentDirHealth struct {
+	// Broken is a managed symlink whose target has gone missing.
+	Broken []string
+	// UnmanagedBroken is a dangling symlink this tool never created.
+	UnmanagedBroken []string
+	// Physical is a real directory sitting where a managed symlink is
+	// expected, and which is not a copy this tool made.
+	Physical []string
+	// Copies is Availability applied by copying instead of linking.
+	Copies []string
+}
+
+// DiagnoseAgentDirHealth classifies every entry in a configured agent's skills
+// directory. A missing agentDir is not itself unhealthy: it reports nothing.
+func DiagnoseAgentDirHealth(agentDir, skillsDir string) AgentDirHealth {
+	var health AgentDirHealth
 	entries, err := os.ReadDir(agentDir)
 	if err != nil {
-		return nil, nil, nil
+		return health
 	}
 
 	for _, entry := range entries {
@@ -93,17 +113,21 @@ func DiagnoseAgentDirHealth(agentDir, skillsDir string) (broken, unmanagedBroken
 		if fi.Mode()&os.ModeSymlink != 0 {
 			if _, err := os.Stat(fullPath); err != nil {
 				if IsManagedSkillLink(fullPath, name, skillsDir) {
-					broken = append(broken, name)
+					health.Broken = append(health.Broken, name)
 				} else {
-					unmanagedBroken = append(unmanagedBroken, name)
+					health.UnmanagedBroken = append(health.UnmanagedBroken, name)
 				}
 			}
-		} else if fi.IsDir() && !strings.HasPrefix(name, ".") && !IsManagedSkillCopy(fullPath, name, skillsDir) {
-			physical = append(physical, name)
+		} else if fi.IsDir() && !strings.HasPrefix(name, ".") {
+			if IsManagedSkillCopy(fullPath, name, skillsDir) {
+				health.Copies = append(health.Copies, name)
+			} else {
+				health.Physical = append(health.Physical, name)
+			}
 		}
 	}
 
-	return broken, unmanagedBroken, physical
+	return health
 }
 
 // FindStaleManagedLinks returns managed symlinks in a universal agent's

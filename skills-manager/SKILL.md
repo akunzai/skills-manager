@@ -27,7 +27,9 @@ Choose the active Scope at the beginning of an operation:
 | **Global** (Default) | (none) / `-g` | `~/.agents/skills.json` | `~/.agents/skills/` | Personal skills shared across all projects |
 | **Project** | `-p` / `--project` | `./.agents/skills.json` | `./.agents/skills/` | Team-shared project skills committed to git |
 
-Prefer `-p` over `--project` for project-scoped commands. Commit `./.agents/skills.json` to share declared skills with teammates; optionally commit `./.agents/skills/` for zero-install onboarding.
+Prefer `-p` over `--project` for project-scoped commands. Commit `./.agents/skills.json` to share declared skills with teammates.
+
+Commit `./.agents/skills/` for zero-install onboarding **only when every declared skill comes from a remote Source**: those are materialized as real directories that commit cleanly. A local symlink Source points at a path on one developer's machine, so it does not belong in version control — and a git client that cannot create symbolic links (the default on Windows) checks the committed link out as a text file holding its target path, which the agent then reads as the skill. `skills -p doctor` reports that stub and names the way out.
 
 ## Automation Rules for Agents
 

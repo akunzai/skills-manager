@@ -11,6 +11,17 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 )
 
+// localFileURL renders a local path as a file:// URL git accepts. A Windows
+// absolute path opens with a drive letter rather than a separator, so it needs
+// forward slashes and one leading slash of its own.
+func localFileURL(path string) string {
+	slashed := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	return "file://" + slashed
+}
+
 func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
@@ -160,7 +171,7 @@ func TestDoctorRunRecordsDefaultBranchForInferredSourceURL(t *testing.T) {
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
 	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "url.file://"+origin+".insteadOf")
+	t.Setenv("GIT_CONFIG_KEY_0", "url."+localFileURL(origin)+".insteadOf")
 	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/owner/repo.git")
 
 	cacheDir := filepath.Join(root, "cache")

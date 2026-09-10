@@ -69,7 +69,7 @@ func newAgentsCmd() *cobra.Command {
 				return err
 			}
 			if installed {
-				if err := availability.Apply(skill); err != nil {
+				if _, err := availability.Apply(skill); err != nil {
 					return fmt.Errorf("saved policy but failed to apply availability for %s: %w", skill, err)
 				}
 			}

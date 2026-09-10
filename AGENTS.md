@@ -27,6 +27,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Release SOP: @docs/agents/release.md
 - Lessons learned: @docs/agents/lessons-learned.md
 - Exit-code contract: @docs/adr/0002-exit-codes-express-state.md
+- Windows Availability mechanism: @docs/adr/0003-windows-availability-is-copied-not-junctioned.md
 - Agent skill & guide: @skills-manager/SKILL.md
 - Gold-standard CLI test: @internal/cli/cli_test.go
 - Gold-standard engine test: @internal/engine/sync_plan_test.go

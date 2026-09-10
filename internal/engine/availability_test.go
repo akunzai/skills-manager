@@ -121,7 +121,7 @@ func TestObserveAvailabilityDistinguishesDriftBranches(t *testing.T) {
 
 	t.Run("declared link is present and managed", func(t *testing.T) {
 		availability, _, _ := projectAvailability(t, "sample")
-		if err := availability.Apply("sample"); err != nil {
+		if _, err := availability.Apply("sample"); err != nil {
 			t.Fatal(err)
 		}
 
@@ -200,7 +200,7 @@ func TestObserveAvailabilityDistinguishesDriftBranches(t *testing.T) {
 
 	t.Run("unexpected managed link after the agent is excluded", func(t *testing.T) {
 		availability, _, _ := projectAvailability(t, "sample")
-		if err := availability.Apply("sample"); err != nil {
+		if _, err := availability.Apply("sample"); err != nil {
 			t.Fatal(err)
 		}
 		if err := availability.Exclude("sample", "claude"); err != nil {

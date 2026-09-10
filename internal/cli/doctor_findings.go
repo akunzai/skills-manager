@@ -73,6 +73,13 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 		}
 	}
 
+	// One line for the whole Scope rather than a badge on every row: the
+	// question this answers — why are these real files instead of links — is
+	// asked once.
+	if copied, breakdown := describeCopiedAvailability(p.Agents); copied > 0 {
+		add(Finding{Severity: SeverityInfo, Message: "  " + copiedAvailabilityNotice(copied, breakdown, scopeFlag(p))})
+	}
+
 	for _, stale := range p.StaleUniversal {
 		add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Stale links to removed skills: %s", stale.Agent, strings.Join(stale.Names, ", "))})
 		if result != nil {
@@ -144,6 +151,12 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
 			"  Declare %s with 'skills add%s', or remove %s with 'skills prune%s --skills-only'.",
 			objectPronoun(len(p.Untracked)), scopeFlag(p), objectPronoun(len(p.Untracked)), scopeFlag(p))})
+	}
+	for _, stub := range p.Stubs {
+		add(Finding{Severity: SeverityWarning, Message: "Skill arrived as a text stub instead of a directory: " + stub, Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
+			"  Next: set 'git config core.symlinks true' and check the file out again, or remove %s and run 'skills sync%s'.",
+			models.ToTildePath(filepath.Join(p.SkillsDir, stub)), scopeFlag(p))})
 	}
 	for _, invalid := range p.Invalid {
 		add(Finding{Severity: SeverityError, Message: "Installed folder missing SKILL.md: " + invalid.Name, Blank: true})
@@ -224,7 +237,9 @@ func invalidNextAction(p engine.DoctorReport, invalid engine.InvalidSkill) strin
 
 // scopeFlag is the flag a suggested command needs to act on the Scope doctor
 // just diagnosed. Printing a Global command while diagnosing a Project would
-// send the user at the wrong skills directory.
+// send the user at the wrong skills directory. It derives from the diagnosed
+// skills directory rather than from a Scope, because doctorFindings is handed
+// a report, and every finding it words is about that directory.
 func scopeFlag(p engine.DoctorReport) string {
 	if models.IsProjectScope(p.SkillsDir) {
 		return " -p"

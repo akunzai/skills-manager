@@ -18,6 +18,11 @@ This is the project's own gate, and it is what CI runs, in CI's order:
 ./cmd/skills`. It never prompts. A step needing a human aborts non-zero
 naming the prerequisite — see Human prerequisites below.
 
+The task is a POSIX shell script and does not run on Windows. There is no
+second script for a platform nobody develops on: CI's Windows job runs
+`go test ./...` and `go build ./cmd/skills` directly, and so should you if
+you ever hold a Windows machine.
+
 **Proof it ran**: `go run ./cmd/skills version` prints `skills-manager
 <version>`. `skills-manager` is a CLI, so the proof is the built binary
 answering, not a process that stays up.
@@ -135,9 +140,18 @@ and the on-disk result, not that the command printed something.
 ## Not verified
 
 - Windows and Linux behaviour: the gate runs on the developer's macOS
-  clone only. Path handling, the PowerShell installer, and the Store
-  App Execution Alias stub case are covered by CI's Ubuntu runner and by
-  release builds, not locally.
+  clone only. Linux is covered by CI's Ubuntu runner, which runs the
+  whole gate. Windows has its own CI job, but a narrower one — the test
+  suite and the build, without the formatter, the vet pass, or the race
+  detector (`.github/workflows/ci.yml` says why). Neither runner covers
+  the PowerShell installer, the Store App Execution Alias stub case, or
+  whether an Agent reads a Skill that Availability copied rather than
+  linked.
+
+  A platform branch is only in this list when nothing reaches it. The
+  Windows symbolic-link privilege branch is not: `engine.CreateSymbolicLink`
+  exists so a test can hand it the Windows errno on any platform, and
+  `internal/engine/copy_fallback_test.go` does.
 - `skills self-update` end to end: it downloads a published GitHub
   release asset and replaces the running binary. Only the version
   comparison and asset matching are unit-tested.

@@ -23,6 +23,9 @@ type AgentHealth struct {
 	// with ENOTDIR and returns nothing — indistinguishable from an empty,
 	// healthy directory unless it is recorded here.
 	Unusable string
+	// Copies is Availability applied by copying instead of linking. Doctor
+	// derives these from the markers on disk rather than from a Sync event.
+	Copies []string
 }
 
 type StaleUniversalLinks struct {
@@ -66,10 +69,15 @@ type DoctorReport struct {
 	Missing        []string
 	Untracked      []string
 	Invalid        []InvalidSkill
-	UnknownAgents  []UnknownAgentReference
-	StateError     string
-	StaleState     []string
-	CacheRecovery  []string
+	// Stubs are declared Skills that arrived on the skills directory as text
+	// files instead of directories — what a git client that cannot create
+	// symbolic links leaves behind when a committed Project skills directory
+	// is checked out.
+	Stubs         []string
+	UnknownAgents []UnknownAgentReference
+	StateError    string
+	StaleState    []string
+	CacheRecovery []string
 	// legacyCache holds the migration plans repair executes. Only their
 	// roots are reportable (LegacyCacheRoots); the migration machinery is
 	// an engine concern and stays unexported.
@@ -294,13 +302,14 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			plan.Agents = append(plan.Agents, AgentHealth{Name: agentName, Dir: agentDir, Unusable: "not a directory"})
 			continue
 		}
-		broken, unmanaged, physical := d.links.DiagnoseHealth(agentDir)
+		health := d.links.DiagnoseHealth(agentDir)
 		plan.Agents = append(plan.Agents, AgentHealth{
 			Name:            agentName,
 			Dir:             agentDir,
-			Broken:          broken,
-			UnmanagedBroken: unmanaged,
-			Physical:        physical,
+			Broken:          health.Broken,
+			UnmanagedBroken: health.UnmanagedBroken,
+			Physical:        health.Physical,
+			Copies:          health.Copies,
 		})
 	}
 
@@ -337,7 +346,13 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			continue
 		}
 		if !s.IsValidSkill {
-			plan.Invalid = append(plan.Invalid, InvalidSkill{Name: s.Name, SourceType: s.SourceType, Source: s.Source})
+			// A stub takes precedence over the invalid folder it also looks
+			// like: its way out is a git setting, not a repair of the Source.
+			if isSymlinkStub(s, d.skillsDir) {
+				plan.Stubs = append(plan.Stubs, s.Name)
+			} else {
+				plan.Invalid = append(plan.Invalid, InvalidSkill{Name: s.Name, SourceType: s.SourceType, Source: s.Source})
+			}
 		}
 		source := availabilitySource(s)
 		drift := d.availability.ObserveAvailability(s.Name)
@@ -354,6 +369,23 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		})
 	}
 	return plan, nil
+}
+
+// isSymlinkStub reports whether a declared Skill arrived on the skills
+// directory as a plain file instead of a directory. A git client that cannot
+// create symbolic links — the default on Windows — checks a committed symlink
+// out as a text file holding its target path, and an Agent then reads that
+// path as the Skill's content. Two signals decide it together: the entry is a
+// regular file, and Config declares the Skill with a local symlink Source. No
+// content sniffing — a file where only directories belong is already
+// anomalous, and the declaration is what lets doctor word a precise next
+// action.
+func isSymlinkStub(item models.SkillItem, skillsDir string) bool {
+	if item.SourceType != "local_symlink" {
+		return false
+	}
+	info, err := os.Lstat(filepath.Join(skillsDir, item.Name))
+	return err == nil && info.Mode().IsRegular()
 }
 
 // IssueCount is the number of issues doctor reports without --fix.
@@ -376,7 +408,9 @@ func (p DoctorReport) issueCount() int {
 	for _, d := range p.Drift {
 		n += len(d.Missing) + len(d.Unexpected) + len(d.Foreign) + len(d.Unobservable)
 	}
-	n += len(p.Missing) + len(p.Invalid)
+	// Copies are not counted: Availability applied by copying is a working
+	// Scope by another mechanism, not Drift to reconcile (ADR-0002).
+	n += len(p.Missing) + len(p.Invalid) + len(p.Stubs)
 	n += len(p.UnknownAgents)
 	if p.StateError != "" {
 		n++
@@ -469,7 +503,7 @@ func (d *Doctor) repair(plan DoctorReport, progress DoctorProgress, replaceForei
 		if len(drift.Foreign) > 0 && replaceForeign {
 			err = d.availability.ReplaceForeign(drift.Skill, drift.Foreign)
 		} else {
-			err = d.availability.Apply(drift.Skill)
+			_, err = d.availability.Apply(drift.Skill)
 		}
 		if err != nil {
 			result.FailedDrift = append(result.FailedDrift, HealthFix{Name: drift.Skill, Err: err})

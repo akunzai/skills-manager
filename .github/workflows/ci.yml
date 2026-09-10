@@ -38,3 +38,35 @@ jobs:
 
       - name: Build binary
         run: go build -v ./cmd/skills
+
+  windows:
+    name: Test & Build (Windows)
+    runs-on: windows-latest
+    steps:
+      # Without this the checkout arrives as CRLF and a byte-exact assertion
+      # ends up testing git rather than the code.
+      - name: Keep line endings unchanged
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: "go.mod"
+          check-latest: true
+          cache: true
+
+      # No formatter and no vet pass: their answers are platform-independent,
+      # and the job above already gave them. No race detector either — it needs
+      # cgo and a C toolchain on Windows, which makes it a job that turns red
+      # when a runner image changes rather than when the code does, and the
+      # only concurrency here has no platform-specific branch.
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build binary
+        run: go build -v ./cmd/skills

@@ -11,6 +11,7 @@ const (
 	SyncPathMissing        = "path_missing"
 	SyncCopyFailed         = "copy_failed"
 	SyncAvailabilityFailed = "availability_failed"
+	SyncAvailabilityCopied = "availability_copied"
 	SyncStateFailed        = "state_failed"
 	SyncMaterialized       = "materialized"
 	SyncSourceMissing      = "source_missing"
@@ -44,6 +45,10 @@ type SyncEvent struct {
 	Err        string
 	Missing    []string
 	Unexpected []string
+	// Agents carries the Agents named by an Availability event — for
+	// SyncAvailabilityCopied, those whose Availability is a copy of the Skill
+	// rather than a link to it.
+	Agents []string
 }
 
 // SyncReport is the observable outcome of applying a SyncPlan.
@@ -140,9 +145,13 @@ func (plan *SyncPlan) applyRemoteItem(item SyncPlanItem, decision SyncDecision, 
 		}
 		emit(SyncEvent{Kind: SyncMaterialized, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath})
 	}
-	if err := plan.availability.Apply(item.Name); err != nil {
+	copied, err := plan.availability.Apply(item.Name)
+	if err != nil {
 		emit(SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
 		return SyncFailed
+	}
+	if len(copied) > 0 {
+		emit(SyncEvent{Kind: SyncAvailabilityCopied, Source: item.Source, Skill: item.Name, Agents: copied})
 	}
 	if stateStore == nil {
 		return SyncDone
@@ -211,9 +220,13 @@ func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanI
 		}
 		emit(SyncEvent{Kind: SyncSymlinked, Skill: item.Name, Target: item.SourcePath})
 	}
-	if err := availability.Apply(item.Name); err != nil {
+	copied, err := availability.Apply(item.Name)
+	if err != nil {
 		emit(SyncEvent{Kind: SyncAvailabilityFailed, Skill: item.Name, Err: err.Error()})
 		return SyncFailed
+	}
+	if len(copied) > 0 {
+		emit(SyncEvent{Kind: SyncAvailabilityCopied, Skill: item.Name, Agents: copied})
 	}
 	return outcome
 }

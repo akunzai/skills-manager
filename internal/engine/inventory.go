@@ -2,6 +2,7 @@ package engine
 
 import (
 	"cmp"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -56,6 +57,9 @@ func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error)
 		}
 	}
 
+	if reason := unusableDirectory(baseSkills); reason != "" {
+		return nil, fmt.Errorf("skills directory %s: %s", baseSkills, reason)
+	}
 	entries, err := os.ReadDir(baseSkills)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
