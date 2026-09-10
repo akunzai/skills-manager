@@ -2118,3 +2118,127 @@ func TestCLIDoctorDoesNotPassAScopeWithNoUsableAgentDir(t *testing.T) {
 		t.Fatalf("doctor did not name what it could not observe:\n%s", out)
 	}
 }
+
+// denyLinkPrivilege makes symbolic link creation fail the way Windows does
+// when the process holds no link privilege. engine.CreateSymbolicLink is
+// exported for exactly this: the copy fallback fires on an errno no other
+// platform produces, so without the seam its user-visible output could only
+// ever be asserted on Windows.
+func denyLinkPrivilege(t *testing.T) {
+	t.Helper()
+	previous := engine.CreateSymbolicLink
+	engine.CreateSymbolicLink = func(target, link string) error {
+		return &os.LinkError{Op: "symlink", Old: target, New: link, Err: engine.ErrLinkPrivilegeNotHeld}
+	}
+	t.Cleanup(func() { engine.CreateSymbolicLink = previous })
+}
+
+// copiedAvailabilityScope declares two remote Skills whose Cache is ready, so
+// a Scope with more than one Skill can show that the copy notice is said once.
+func copiedAvailabilityScope(t *testing.T) (configFile, skillsDir, cacheDir string) {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	configFile = filepath.Join(root, ".agents", "skills.json")
+	skillsDir = filepath.Join(root, ".agents", "skills")
+	cacheDir = filepath.Join(root, "cache")
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "alpha")
+	writeCLIGitSkill(t, origin, "beta")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "alpha", "alpha", "git", origin)
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "beta", "beta", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	return configFile, skillsDir, cacheDir
+}
+
+// A Windows user with Developer Mode off gets working Availability, plus one
+// line saying it is copies and why. Once per Sync, not once per Skill, or a
+// Scope with thirty Skills buries its own result.
+func TestCLISyncSaysOnceThatAvailabilityWasAppliedByCopying(t *testing.T) {
+	resetRootCmdFlags()
+	configFile, skillsDir, cacheDir := copiedAvailabilityScope(t)
+	denyLinkPrivilege(t)
+
+	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
+		t.Fatalf("copying is a working Availability, so Sync must converge: %v\n%s", err, out)
+	}
+	if got := strings.Count(out, "applied by copying"); got != 1 {
+		t.Fatalf("copy notice appeared %d times; want exactly one:\n%s", got, out)
+	}
+	for _, want := range []string{"Availability applied by copying: 2 paths", "A symbolic link needs a privilege this machine did not grant", "Enable Developer Mode on Windows"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("copy notice missing %q:\n%s", want, out)
+		}
+	}
+	// The suggested command has to name the Scope the user chose, not the one
+	// this --skills-dir happens to look like (root.go, and the same invariant
+	// ls and config already assert).
+	if !strings.Contains(out, "run 'skills sync' to switch") {
+		t.Fatalf("a custom --skills-dir without --project must not suggest the Project Scope:\n%s", out)
+	}
+}
+
+// The same fact, asked later: doctor counts the copies on disk, so the user
+// never has to re-run Sync to find out why their Agent directories hold files.
+func TestCLIDoctorCountsAvailabilityPathsAppliedByCopying(t *testing.T) {
+	resetRootCmdFlags()
+	configFile, skillsDir, cacheDir := copiedAvailabilityScope(t)
+	denyLinkPrivilege(t)
+	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("copies are not Drift, so doctor must exit 0: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Availability applied by copying: 2 paths (claude-code 2)") {
+		t.Fatalf("doctor did not count the copies:\n%s", out)
+	}
+	if !strings.Contains(out, "Developer Mode") {
+		t.Fatalf("doctor did not say how to switch to links:\n%s", out)
+	}
+}
+
+// A teammate's Windows clone turns a committed symlinked Skill into a text
+// file holding its target path, and the Agent reads that as the Skill.
+func TestCLIDoctorReportsASkillThatArrivedAsATextStub(t *testing.T) {
+	project := projectScope(t)
+
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "shared"), []byte("../../my-skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "shared", "my-skill", "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "-p")
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("a stub is a state with a next action, so it should exit 1: err=%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Skill arrived as a text stub instead of a directory: shared") {
+		t.Fatalf("doctor did not recognize the stub:\n%s", out)
+	}
+	if !strings.Contains(out, "git config core.symlinks true") || !strings.Contains(out, "skills sync -p") {
+		t.Fatalf("doctor did not name the way out:\n%s", out)
+	}
+	if strings.Contains(out, "Installed folder missing SKILL.md: shared") {
+		t.Fatalf("a stub must not also be reported as an invalid folder:\n%s", out)
+	}
+}

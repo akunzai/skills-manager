@@ -91,6 +91,12 @@ completed.`,
 
 			report, err := plan.Apply(decision, nil)
 			printSyncEvents(out, report)
+			// The flag the user passed, not the shape of --skills-dir (root.go).
+			scopeFlag := ""
+			if scope.IsProject {
+				scopeFlag = " -p"
+			}
+			printCopiedAvailability(out, report, scopeFlag)
 			if err != nil {
 				return err
 			}
@@ -201,6 +207,28 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 	if len(item.Drift.Unexpected) > 0 {
 		fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", item.Name, strings.Join(item.Drift.Unexpected, ", "))
 	}
+}
+
+// printCopiedAvailability says once, after the per-Skill results, that
+// Availability was applied by copying and why. Per-Skill it would be noise;
+// omitted entirely, a Windows user has no way to tell that their Agent
+// directories hold real files on purpose. Left unstyled on purpose: a copy is
+// a working Availability by another mechanism (ADR-0003), not a warning, and
+// Sync counts it towards neither blocked nor failed.
+func printCopiedAvailability(out io.Writer, report *engine.SyncReport, scopeFlag string) {
+	if report == nil {
+		return
+	}
+	copied := 0
+	for _, ev := range report.Events {
+		if ev.Kind == engine.SyncAvailabilityCopied {
+			copied += len(ev.Agents)
+		}
+	}
+	if copied == 0 {
+		return
+	}
+	fmt.Fprintln(out, "\n"+copiedAvailabilityNotice(copied, "", scopeFlag))
 }
 
 func printSyncEvents(out io.Writer, report *engine.SyncReport) {

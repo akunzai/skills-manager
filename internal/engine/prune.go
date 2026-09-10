@@ -88,7 +88,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 					continue
 				}
 				path := filepath.Join(dir, skill)
-				if agentLinks.IsManagedLink(path, skill) {
+				if agentLinks.IsManagedPath(path, skill) {
 					links[path] = PruneLink{Agent: agent, Path: path}
 				}
 			}
@@ -132,14 +132,14 @@ func pruneAgentDirs(skillsDir string) map[string]string {
 // while an interactive confirmation prompt is open.
 func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 	result := PruneResult{}
-	links := NewAgentLinkManager(skillsDir)
 	var errs []error
 	for _, link := range plan.Unconfigured {
-		if !links.IsManagedLink(link.Path, filepath.Base(link.Path)) {
+		managed, err := removeManagedSkillPath(link.Path, filepath.Base(link.Path), skillsDir)
+		if !managed {
 			result.SkippedLinks = append(result.SkippedLinks, link)
 			continue
 		}
-		if err := os.Remove(link.Path); err != nil && !os.IsNotExist(err) {
+		if err != nil && !os.IsNotExist(err) {
 			result.Failures = append(result.Failures, PruneFailure{Path: link.Path, Err: err})
 			errs = append(errs, err)
 			continue

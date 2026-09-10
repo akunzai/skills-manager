@@ -124,6 +124,7 @@ func TestAddRunCancellationPrecedesMutation(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	progressCalled := false
 	intake := &addIntake{
 		source:     engine.NewSymlinkAddSource(t.TempDir(), ""),

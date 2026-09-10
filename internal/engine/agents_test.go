@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -358,24 +359,43 @@ func TestDiagnoseAgentDirHealthClassifiesEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broken, unmanagedBroken, physical := DiagnoseAgentDirHealth(agentDir, skillsDir)
+	health := DiagnoseAgentDirHealth(agentDir, skillsDir)
 
-	if len(broken) != 1 || broken[0] != "removed" {
-		t.Fatalf("broken = %v; want [removed]", broken)
+	if want := (AgentDirHealth{
+		Broken:          []string{"removed"},
+		UnmanagedBroken: []string{"foreign"},
+		Physical:        []string{"manual"},
+	}); !reflect.DeepEqual(health, want) {
+		t.Fatalf("health = %#v; want %#v", health, want)
 	}
-	if len(unmanagedBroken) != 1 || unmanagedBroken[0] != "foreign" {
-		t.Fatalf("unmanagedBroken = %v; want [foreign]", unmanagedBroken)
+}
+
+// A copy of the Skill named by its own entry is Availability, not a stray
+// directory, and it is classified in the same pass that rules it out of
+// Physical rather than by a second scan of the same markers.
+func TestDiagnoseAgentDirHealthReportsManagedCopiesApartFromPhysicalDirs(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "alpha")
+	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "alpha", "SKILL.md"), []byte("# Alpha\n"))
+	agentDir := filepath.Join(home, ".codex", "skills")
+	if err := replaceManagedCopy(filepath.Join(skillsDir, "alpha"), filepath.Join(agentDir, "alpha")); err != nil {
+		t.Fatal(err)
 	}
-	if len(physical) != 1 || physical[0] != "manual" {
-		t.Fatalf("physical = %v; want [manual]", physical)
+
+	health := DiagnoseAgentDirHealth(agentDir, skillsDir)
+
+	if !reflect.DeepEqual(health.Copies, []string{"alpha"}) {
+		t.Fatalf("Copies = %#v; want [alpha]", health.Copies)
+	}
+	if health.Physical != nil {
+		t.Fatalf("a managed copy must not also read as a stray directory: %#v", health.Physical)
 	}
 }
 
 func TestDiagnoseAgentDirHealthOnMissingDirReportsNothing(t *testing.T) {
 	_, skillsDir := globalSkillsHome(t, "alpha")
-	broken, unmanagedBroken, physical := DiagnoseAgentDirHealth(filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
-	if broken != nil || unmanagedBroken != nil || physical != nil {
-		t.Fatalf("got (%v, %v, %v); want all nil for a missing agent dir", broken, unmanagedBroken, physical)
+	health := DiagnoseAgentDirHealth(filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
+	if !reflect.DeepEqual(health, AgentDirHealth{}) {
+		t.Fatalf("got %#v; want nothing for a missing agent dir", health)
 	}
 }
 

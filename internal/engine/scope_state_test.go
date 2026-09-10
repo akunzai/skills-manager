@@ -16,6 +16,13 @@ func TestDigestSkillContentHashesFilesAndSymlinkTargets(t *testing.T) {
 	if err := os.Symlink("nested/data.txt", filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
+	// A multi-segment target written with the platform's own separator is
+	// where the two diverge: Readlink hands it back separator for separator.
+	// The digests below are the forward-slash form on every platform, so a
+	// Scope state file created on one machine stays meaningful on another.
+	if err := os.Symlink(filepath.Join("..", "SKILL.md"), filepath.Join(root, "nested", "up")); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := DigestSkillContent(root)
 	if err != nil {
@@ -25,6 +32,7 @@ func TestDigestSkillContentHashesFilesAndSymlinkTargets(t *testing.T) {
 		"SKILL.md":        scopeStateTestSHA256("hello"),
 		"nested/data.txt": scopeStateTestSHA256("world"),
 		"link":            scopeStateTestSHA256("nested/data.txt"),
+		"nested/up":       scopeStateTestSHA256("../SKILL.md"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("digest map = %#v, want %#v", got, want)

@@ -267,7 +267,6 @@ func (a *Availability) SetManagedAgents(skill string, selected []string) error {
 // availabilityState is desired Availability vs disk for one Skill.
 type availabilityState struct {
 	skillName string
-	skillsDir string
 	desired   map[string]struct{}
 	known     map[string]string
 	links     AgentLinkManager
@@ -276,7 +275,6 @@ type availabilityState struct {
 func (a *Availability) state(skillName string) availabilityState {
 	return availabilityState{
 		skillName: skillName,
-		skillsDir: a.skillsDir,
 		desired:   agentSet(a.ManagedAgents(skillName)),
 		known:     a.known,
 		links:     a.links,
@@ -286,7 +284,7 @@ func (a *Availability) state(skillName string) availabilityState {
 // isManagedPath reports whether path is a managed symlink or a managed copy
 // of this Skill (the Windows fallback when symlinks aren't available).
 func (s availabilityState) isManagedPath(path string) bool {
-	return s.links.IsManagedLink(path, s.skillName) || s.links.IsManagedCopy(path, s.skillName)
+	return s.links.IsManagedPath(path, s.skillName)
 }
 
 func (s availabilityState) drift() AvailabilityDrift {
@@ -295,6 +293,16 @@ func (s availabilityState) drift() AvailabilityDrift {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		_, want := s.desired[agent]
 		if want {
+			// Stat the Agent directory first. Lstat of a child of a file is
+			// ENOTDIR on POSIX but ERROR_PATH_NOT_FOUND on Windows, which Go
+			// maps to os.ErrNotExist — the same answer as a missing link.
+			// https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-
+			if reason := unusableDirectory(agentDir); reason != "" {
+				observation.Unobservable = append(observation.Unobservable, UnobservableAvailabilityPath{
+					Agent: agent, Dir: agentDir, Path: linkPath, Err: reason,
+				})
+				continue
+			}
 			_, err := os.Lstat(linkPath)
 			switch {
 			case os.IsNotExist(err):
@@ -321,7 +329,8 @@ func (s availabilityState) drift() AvailabilityDrift {
 	return observation
 }
 
-func (s availabilityState) apply() error {
+func (s availabilityState) apply() ([]string, error) {
+	var copied []string
 	for agent := range s.desired {
 		agentDir, ok := s.known[agent]
 		if !ok {
@@ -330,31 +339,34 @@ func (s availabilityState) apply() error {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		_, err := os.Lstat(linkPath)
 		if err == nil && !s.isManagedPath(linkPath) {
-			return fmt.Errorf("agent path already exists and is not managed by skills: %s", models.ToTildePath(linkPath))
+			return copied, fmt.Errorf("agent path already exists and is not managed by skills: %s", models.ToTildePath(linkPath))
 		}
 	}
 	for agent, agentDir := range s.known {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		if _, shouldLink := s.desired[agent]; shouldLink {
-			if s.links.IsManagedCopy(linkPath, s.skillName) {
-				if err := replaceManagedCopy(filepath.Join(s.skillsDir, s.skillName), linkPath); err != nil {
-					return err
-				}
-				continue
-			}
 			if _, err := s.links.EnsureLink(s.skillName, agent); err != nil {
-				return err
+				return copied, err
+			}
+			// Read the outcome back rather than inferring it: a copy left
+			// over from an earlier run is as much a copy as one made now, and
+			// the user's question is why these paths are files at all.
+			if s.links.IsManagedCopy(linkPath, s.skillName) {
+				copied = append(copied, agent)
 			}
 			continue
 		}
 		if s.isManagedPath(linkPath) && !s.links.RemoveManagedPath(linkPath, s.skillName) {
-			return fmt.Errorf("failed to remove managed availability path: %s", linkPath)
+			return copied, fmt.Errorf("failed to remove managed availability path: %s", linkPath)
 		}
 	}
-	return nil
+	slices.Sort(copied)
+	return copied, nil
 }
 
-func (a *Availability) Apply(skill string) error {
+// Apply reconciles declared Availability for skill. The returned names are
+// Agents whose Availability is a copy rather than a link.
+func (a *Availability) Apply(skill string) ([]string, error) {
 	return a.state(skill).apply()
 }
 
@@ -404,6 +416,28 @@ func describeUnobservableAvailabilityPath(agent, agentDir, path string, err erro
 	return UnobservableAvailabilityPath{Agent: agent, Dir: agentDir, Path: path, Err: reason}
 }
 
+// unusableDirectory reports why path cannot be scanned as a directory.
+// Absence is not unusable: callers treat a missing directory as empty or as
+// missing Availability. A present non-directory, or a Stat error other than
+// NotExist, is. Doctor already asked this of the Agent directory; Availability
+// observation has to ask it too, because Windows will not.
+func unusableDirectory(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		if root := rootPathError(err); root != nil {
+			return root.Error()
+		}
+		return err.Error()
+	}
+	if info.IsDir() {
+		return ""
+	}
+	return "not a directory"
+}
+
 func describeForeignAvailabilityPath(agent, path string) ForeignAvailabilityPath {
 	foreign := ForeignAvailabilityPath{Agent: agent, Path: path, Kind: ForeignAvailabilityFile}
 	info, err := os.Lstat(path)
@@ -435,7 +469,8 @@ func (a *Availability) ReplaceForeign(skill string, diagnosed []ForeignAvailabil
 			return fmt.Errorf("remove unmanaged agent path %s: %w", models.ToTildePath(foreign.Path), err)
 		}
 	}
-	return a.Apply(skill)
+	_, err := a.Apply(skill)
+	return err
 }
 
 // AvailabilityDrift is declared Availability for one Skill measured against

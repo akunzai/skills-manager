@@ -117,7 +117,7 @@ func newConfigSetCmd() *cobra.Command {
 						return err
 					}
 					if installed {
-						if err := availability.Apply(skill); err != nil {
+						if _, err := availability.Apply(skill); err != nil {
 							return fmt.Errorf("saved %s but failed to apply availability for %s: %w", args[0], skill, err)
 						}
 					}

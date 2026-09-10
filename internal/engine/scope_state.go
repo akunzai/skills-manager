@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -254,6 +256,21 @@ func (s *ScopeStateStore) exists() (bool, error) {
 	return false, fmt.Errorf("inspect Scope state: %w", err)
 }
 
+// DigestSkillTree reduces DigestSkillContent's per-file map to one digest of
+// the whole Skill, so a derived artifact — a managed copy under an Agent
+// directory — can record what it was made from in a single line.
+func DigestSkillTree(root string) (string, error) {
+	digests, err := DigestSkillContent(root)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.New()
+	for _, rel := range slices.Sorted(maps.Keys(digests)) {
+		fmt.Fprintf(sum, "%s\x00%s\n", rel, digests[rel])
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
 // DigestSkillContent returns the complete relative path to SHA-256 map for a
 // materialized Skill. Symlinks hash their target strings and are not followed.
 func DigestSkillContent(root string) (map[string]string, error) {
@@ -283,7 +300,10 @@ func DigestSkillContent(root string) (map[string]string, error) {
 			if err != nil {
 				return err
 			}
-			content = []byte(target)
+			// Normalized to forward slashes, matching the map key below.
+			// Without it the same Skill digests differently on Windows and
+			// POSIX, so a Scope state file is not portable between them.
+			content = []byte(filepath.ToSlash(target))
 		} else {
 			info, err := entry.Info()
 			if err != nil {

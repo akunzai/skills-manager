@@ -82,7 +82,9 @@ skills -p update
 skills -p sync
 ```
 
-`update` and `sync` are deliberately separate. Update uses the Project Config to refresh its declared remote Sources in the shared Cache; Sync then reconciles Project Skills from that Cache without network access. Materialized Project Skills are ordinary team-owned files—you decide whether to commit them.
+`update` and `sync` are deliberately separate. Update uses the Project Config to refresh its declared remote Sources in the shared Cache; Sync then reconciles Project Skills from that Cache without network access.
+
+Materialized Project Skills are ordinary team-owned files. Commit `.agents/skills/` when every declared skill comes from a remote Source—those are real directories that commit cleanly. Keep it out of version control once a skill is declared from a local directory: that source is a path on one machine, and a git client without symlink support checks the committed link out as a text file instead of the skill.
 
 ## Control availability
 

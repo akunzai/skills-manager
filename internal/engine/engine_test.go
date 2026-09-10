@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -223,6 +224,9 @@ func TestDiscoverSkillsInRepoRejectsEscapingScope(t *testing.T) {
 
 func TestDiscoverSkillsInRepoPreservesExecutableAndSymlinkDifferences(t *testing.T) {
 	t.Run("executable bit", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows does not store Unix executable bits, so two bundles that differ only in mode 0o111 are the same tree")
+		}
 		repo := t.TempDir()
 		for _, root := range []string{"skills/duplicate", "mirror/duplicate"} {
 			dir := filepath.Join(repo, root)
@@ -280,11 +284,7 @@ func TestDiscoverSkillsInRepoPreservesExecutableAndSymlinkDifferences(t *testing
 }
 
 func TestDiscoverSkillsInRepoFailsClosedForUnsupportedBundleEntries(t *testing.T) {
-	repo, err := os.MkdirTemp("/tmp", "skill-bundle-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(repo) })
+	repo := t.TempDir()
 	var listeners []net.Listener
 	for _, root := range []string{"skills/duplicate", "mirror/duplicate"} {
 		dir := filepath.Join(repo, root)
@@ -494,7 +494,7 @@ func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
 	availability := NewAvailability(cfg, skillsDir)
-	if err := availability.Apply("sample"); err != nil {
+	if _, err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
@@ -514,7 +514,7 @@ func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 	if len(drift.Missing) != 0 || !reflect.DeepEqual(drift.Unexpected, []string{"claude-code"}) {
 		t.Fatalf("drift = %#v", drift)
 	}
-	if err := availability.Apply("sample"); err != nil {
+	if _, err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
@@ -550,7 +550,7 @@ func TestAvailabilityApplyPreservesUnmanagedTarget(t *testing.T) {
 	if err := os.Symlink(unmanagedTarget, unmanaged); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewAvailability(config.DefaultConfig(), skillsDir).Apply("sample"); err == nil {
+	if _, err := NewAvailability(config.DefaultConfig(), skillsDir).Apply("sample"); err == nil {
 		t.Fatal("expected unmanaged target conflict")
 	}
 	if _, err := os.Stat(marker); err != nil {
@@ -587,7 +587,7 @@ func TestAvailabilityApplyRemovesManagedCopy(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	availability := NewAvailability(cfg, skillsDir)
-	if err := availability.Apply("sample"); err != nil {
+	if _, err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(filepath.Join(copyPath, "SKILL.md"))
@@ -595,7 +595,7 @@ func TestAvailabilityApplyRemovesManagedCopy(t *testing.T) {
 		t.Fatalf("managed copy was not refreshed: content=%q err=%v", content, err)
 	}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	if err := availability.Apply("sample"); err != nil {
+	if _, err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
