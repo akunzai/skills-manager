@@ -40,6 +40,61 @@ Tests must not reach the network. `ObserveFreshness` shells out to
 `git ls-remote` when a remote Source fixture has no explicit branch, so
 fixtures always name one.
 
+## Verifying the interactive prompts
+
+`internal/tui/prompt.go` drives raw terminal mode, so `go test` cannot
+exercise what a real TTY does with arrow keys, `Space`, and a redrawn
+list. Where a change touches a prompt, drive the built binary in a pane
+instead of asserting from the unit tests alone.
+
+Only when `herdr` is available. Check both, and skip this path silently
+when either fails — it is an optional aid, never a gate:
+
+```sh
+command -v herdr >/dev/null && [ "${HERDR_ENV:-}" = 1 ]
+```
+
+Then split a pane beside the calling one, keeping the developer's focus
+where it is, and drive the binary there:
+
+```sh
+herdr pane split --current --direction right --cwd "$PWD" --no-focus
+# read the new id from .result.pane.pane_id
+herdr pane run <pane> "cd <scratch> && clear"
+herdr pane run <pane> "./skills add --symlink ./src --config ./scope/skills.json --skills-dir ./scope/skills --cache-dir ./scope/cache"
+herdr pane wait-output <pane> --source visible --match "Space to toggle" --timeout 20000
+herdr pane send-text <pane> " "
+herdr pane send-keys <pane> down
+herdr pane send-text <pane> " "
+herdr pane read <pane> --source visible --lines 10
+herdr pane send-keys <pane> enter
+```
+
+Four things this repo has already been caught by:
+
+- **Always pass `--config`, `--skills-dir` and `--cache-dir` into a
+  scratch directory.** A prompt driven without them writes to the
+  developer's real `~/.agents/skills.json` and links into their real
+  agent directories. A skills directory outside the global one is
+  Project Scope, so the agent links land beside it rather than under
+  `$HOME`.
+- **Wait on `--source visible`, not the default.** `wait-output`
+  searches the snapshot immediately and matches output that is already
+  there, so a previous run's prompt in scrollback satisfies the wait and
+  the keys then arrive before the new prompt has drawn. Run `clear`
+  first, and keep the command line short enough not to wrap — a wrapped
+  absolute path fills the viewport and hides the prompt.
+- **`Space` goes through `pane send-text " "`.** `pane send-keys <pane>
+  space` returns success but does not toggle the checkbox.
+- **Wait for each prompt, not for the final line.** `skills add` asks
+  three questions in sequence — skill selection, Scope, Agent
+  availability. Waiting for `Added` alone times out while an unanswered
+  prompt sits on screen.
+
+Close the pane when done, and verify the result on disk rather than from
+the prompt's own output: the checkbox state is what the prompt drew, the
+symlinks are what the command did.
+
 ## Human prerequisites
 
 Run once, by a person. `mise run check` fails until they are done.

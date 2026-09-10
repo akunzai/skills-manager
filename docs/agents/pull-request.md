@@ -73,7 +73,9 @@ username, home paths, and their real skills configuration.
   bumps with no behaviour change.
 - **Structurally untestable** code — a terminal-only interactive path, a
   platform branch that cannot run on the developer's machine — is
-  declared in the description, naming what covers it instead.
+  declared in the description, naming what covers it instead. For a
+  prompt, that is the pane transcript from
+  `docs/agents/verification.md`'s interactive-prompt section.
 
 A user-visible change to CLI output, a prompt, or a command's exit code
 lands with the assertion that pins it. The exit-code contract in
