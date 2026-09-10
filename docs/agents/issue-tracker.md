@@ -1,6 +1,11 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+**This file is English throughout**, sample blocks included.
+
+Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all
+operations; it infers the repo when run inside a clone.
+
+Write issue titles and descriptions in **English**.
 
 ## Conventions
 
@@ -11,7 +16,103 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
+Use a concise descriptive title with no Conventional Commit prefix.
+
+## Description shape
+
+1. Open with what a new user of the CLI would observe: the symptom or the
+   request, in plain language. Skip file paths and function names unless
+   the reader cannot otherwise locate the issue.
+2. Add a visual GitHub renders inline — a terminal capture for wrong CLI
+   output or a broken prompt, a Mermaid diagram for a Sync, Freshness, or
+   Availability flow. Skip formats the description editor cannot render,
+   such as a link to an external artifact or a raw HTML or SVG file.
+   Upload it with the repeatable `--attach` flag
+   (`gh issue create --attach './bug.png#The blocked sync output'`); alt
+   text follows the path after `#`. Only when capture is genuinely
+   impossible, leave `<!-- screenshot pending: <what it should show> -->`
+   rather than omitting it silently.
+3. Close with a collapsed technical section, so it does not push the
+   human summary below the fold:
+
+```markdown
+<details>
+<summary>Technical details</summary>
+
+suspected cause, related code paths, repro commands, log excerpts,
+the Scope and skills.json involved
+
+</details>
+```
+
+**No personally identifiable information in any attachment**; use test
+data, masking, or cropping. A terminal capture carries the reporter's
+username, home paths, and their real `~/.agents/skills.json`, so paste
+output from a scratch Scope rather than from a live one. The capture
+rules live in `docs/agents/verification.md`.
+
+## Spec issues
+
+An issue an agent will implement from carries a different shape, because
+its reader is building rather than triaging. Acceptance criteria stay
+above the fold; only background goes into `<details>`.
+
+```markdown
+<one paragraph: the observable outcome>
+
+## Acceptance criteria
+
+- [ ] <checkable statement about observable behaviour>
+- [ ] <one per criterion; a reviewer can tick these without reading code>
+
+## Scope
+
+- In: <paths or areas>
+- Out: <what this issue deliberately does not change>
+
+## Verification
+
+<how to prove it works, per docs/agents/verification.md; name the exit
+code the change must produce where one applies>
+
+<details>
+<summary>Technical details</summary>
+
+related code paths, prior art, log excerpts, open questions
+
+</details>
+```
+
+Use the vocabulary `CONTEXT.md` defines — Scope, Source, Availability,
+Sync, Materialize, Freshness, Drift — so the issue, the tests, and the
+code name the same things. Do not drift to the synonyms it lists under
+_Avoid_.
+
+An issue with unanswered open questions is not ready to implement. Say
+so in the issue rather than letting an agent guess.
+
+## Labels
+
+This repo's own labels, read from `gh label list --limit 100`. `gh`
+defaults to 30 and reports that page as the whole set, so a label past
+the first page reads as absent. Nothing here invents a vocabulary; when a
+label really is missing, that is a conversation with the maintainer, not
+a label to create.
+
+The five triage roles — `needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human`, `wontfix` — are owned by
+`docs/agents/triage-labels.md`. Read them there; they are not repeated
+here.
+
+- **Required on every new issue**: `needs-triage`.
+- **Applied when it applies**: `bug`, `enhancement`, `documentation`,
+  `question`, `accessibility`, `good first issue`, `help wanted`,
+  `duplicate`, `invalid`.
+
+Pull request labels are a separate mechanism: they drive release-note
+sections, are applied automatically from the branch name, and are
+documented in `docs/agents/release.md`. Do not apply them by hand to
+issues.
 
 ## Pull requests as a triage surface
 
@@ -24,6 +125,9 @@ When set to `yes`, PRs run through the same labels and states as issues, using t
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
+
+The conventions for opening and shaping a pull request live in
+`docs/agents/pull-request.md`.
 
 ## When a skill says "publish to the issue tracker"
 
