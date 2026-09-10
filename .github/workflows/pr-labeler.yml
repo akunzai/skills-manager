@@ -2,7 +2,7 @@ name: "PR Auto Labeler"
 
 on:
   pull_request_target:
-    types: [opened, edited, reopened, synchronize]
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: read
@@ -12,14 +12,14 @@ jobs:
   labeler:
     runs-on: ubuntu-latest
     steps:
-      - name: Apply labels based on Conventional Commits prefix
+      - name: Apply labels based on branch name prefix
         uses: actions/github-script@v9
         with:
           script: |
-            const title = context.payload.pull_request.title || "";
-            const match = title.match(/^([a-zA-Z]+)(\(.*\))?!?:\s+/);
+            const branch = context.payload.pull_request.head.ref || "";
+            const match = branch.match(/^([a-zA-Z]+)\//);
             if (!match) {
-              console.log(`No conventional commit prefix found in title: "${title}"`);
+              console.log(`No recognized prefix in branch name: "${branch}"`);
               return;
             }
 

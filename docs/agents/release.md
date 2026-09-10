@@ -13,10 +13,11 @@ The release pipeline is automated via GitHub Actions (`.github/workflows/release
 
 Release notes list **merged pull requests, grouped by label**. Three pieces cooperate:
 
-1. `.github/workflows/pr-labeler.yml` reads the **PR title** prefix and applies a label
-   (`feat:` -> `enhancement`, `fix:` -> `bug`, `docs:` -> `documentation`, `ci:` /
-   `build:` -> `ci`, `chore:` -> `chore`, `refactor:` -> `refactor`, `test:` -> `tests`,
-   `perf:` -> `enhancement`).
+1. `.github/workflows/pr-labeler.yml` reads the **branch name** prefix and applies a label
+   (`feat/` -> `enhancement`, `fix/` -> `bug`, `docs/` -> `documentation`, `ci/` /
+   `build/` -> `ci`, `chore/` -> `chore`, `refactor/` -> `refactor`, `test/` -> `tests`,
+   `perf/` -> `enhancement`). An unrecognized prefix leaves labels untouched, so a
+   label applied by hand survives.
 2. `.github/release.yml` maps those labels to release-note sections, and drops PRs
    labelled `wontfix`, `duplicate`, or `invalid`.
 3. `.goreleaser.yaml` sets `changelog.use: github-native`, handing note generation to
@@ -38,10 +39,13 @@ Because `github-native` is in use, GoReleaser's own `groups`, `sort`, `filters`,
 
 ### What this means in practice
 
-- **Commit messages no longer affect categorization.** A PR carrying a mix of `fix:` and
-  `docs:` commits is filed once, under its own label.
-- **Give the PR a Conventional Commits title.** That title is the only input the labeler
-  has, and it becomes the release-note entry.
+- **Neither commit messages nor the PR title affect categorization.** A PR carrying a
+  mix of `fix:` and `docs:` commits is filed once, under its own label.
+- **Name the branch with a category prefix.** The branch name is the labeler's only
+  input. PR titles are free-form and need no Conventional Commits prefix; the title is
+  what becomes the release-note entry, so write it for a reader.
+- **A PR that spans categories gets one label.** Pick the prefix matching its primary
+  intent, or relabel by hand after opening it.
 - **Commits pushed straight to `main` never appear.** They belong to no PR, so a fix
   landed outside the PR flow is silently missing from the notes. Either route it through
   a PR, or patch the published release afterwards:
