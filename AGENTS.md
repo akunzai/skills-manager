@@ -4,14 +4,6 @@ Skills manager CLI (`skills` / `skills-manager`) for AI coding agents (Claude Co
 
 This project is written in Go (>=1.27) and compiled to standalone cross-platform binaries with zero language runtime dependencies (uses system `git` for remote repository operations).
 
-## Commands
-
-- Run every CI check locally: `mise run check` (gofmt, vet, `test -race`, build — in CI's order)
-- Run tests: `go test -v ./...`
-- Build / install standalone binary: `./install.sh`
-- Local binary build: `go build -o skills ./cmd/skills`
-- Run local CLI: `go run ./cmd/skills <command>`
-
 ## Pointers
 
 - Schema definition: @skills.schema.json
@@ -25,6 +17,8 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Scope paths: @internal/models/scope.go
 - GoReleaser config: @.goreleaser.yaml
 - Issue tracker: @docs/agents/issue-tracker.md
+- Pull requests: @docs/agents/pull-request.md
+- Verification: @docs/agents/verification.md
 - Triage labels: @docs/agents/triage-labels.md
 - Domain glossary: @CONTEXT.md
 - Domain docs: @docs/agents/domain.md
