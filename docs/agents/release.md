@@ -15,9 +15,10 @@ Release notes list **merged pull requests, grouped by label**. Three pieces coop
 
 1. `.github/workflows/pr-labeler.yml` reads the **branch name** prefix and applies a label
    (`feat/` -> `enhancement`, `fix/` -> `bug`, `docs/` -> `documentation`, `ci/` /
-   `build/` -> `ci`, `chore/` -> `chore`, `refactor/` -> `refactor`, `test/` -> `tests`,
-   `perf/` -> `enhancement`). An unrecognized prefix leaves labels untouched, so a
-   label applied by hand survives.
+   `build/` -> `ci`, `chore/` / `release/` -> `chore`, `refactor/` -> `refactor`,
+   `test/` -> `tests`, `perf/` -> `enhancement`). An unrecognized prefix leaves labels
+   untouched, so a label applied by hand survives — which is also why Dependabot keeps
+   the `dependencies` label it applies to its own `dependabot/...` branches.
 2. `.github/release.yml` maps those labels to release-note sections, and drops PRs
    labelled `wontfix`, `duplicate`, or `invalid`.
 3. `.goreleaser.yaml` sets `changelog.use: github-native`, handing note generation to
@@ -46,6 +47,10 @@ Because `github-native` is in use, GoReleaser's own `groups`, `sort`, `filters`,
   what becomes the release-note entry, so write it for a reader.
 - **A PR that spans categories gets one label.** Pick the prefix matching its primary
   intent, or relabel by hand after opening it.
+- **Labels are read when the notes are generated, not when the PR merges.** A PR that
+  landed with the wrong label, or none, can be relabelled afterwards and the notes
+  regenerated. `.github/release.yml` is also resolved from the ref being released, not
+  from the default branch.
 - **Commits pushed straight to `main` never appear.** They belong to no PR, so a fix
   landed outside the PR flow is silently missing from the notes. Either route it through
   a PR, or patch the published release afterwards:
