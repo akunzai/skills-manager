@@ -59,6 +59,13 @@ type InvalidSkill struct {
 	Source     string
 }
 
+// IllegalLocalSource is a declared local symlink whose Source resolves inside
+// the skills directory. Materialize must not replace that destination.
+type IllegalLocalSource struct {
+	Name   string
+	Source string
+}
+
 type DoctorReport struct {
 	SkillsDir      string
 	MasterMissing  bool
@@ -68,6 +75,8 @@ type DoctorReport struct {
 	Drift          []SkillDrift
 	Missing        []string
 	Untracked      []string
+	UntrackedLinks []string
+	IllegalLocal   []IllegalLocalSource
 	Invalid        []InvalidSkill
 	// Stubs are declared Skills that arrived on the skills directory as text
 	// files instead of directories — what a git client that cannot create
@@ -134,10 +143,9 @@ type DoctorOutcome struct {
 	// two apart: a finding is a state to act on, a failed repair is work
 	// that broke.
 	Failed int
-	// Untracked is how many undeclared Skills sit on the skills directory.
-	// They are not counted in Remaining (see issueCount) because they are a
-	// decision the user has not made, not Drift to reconcile — but the CLI
-	// still has to say they are waiting.
+	// Untracked is how many Untracked real directories sit on the skills
+	// directory. They are not counted in Remaining (see issueCount): they are
+	// occupancy the tool does not manage, not Drift to reconcile.
 	Untracked int
 }
 
@@ -342,7 +350,15 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			continue
 		}
 		if isUntracked(s) {
-			plan.Untracked = append(plan.Untracked, s.Name)
+			if s.SourceType == "symlink" {
+				plan.UntrackedLinks = append(plan.UntrackedLinks, s.Name)
+			} else {
+				plan.Untracked = append(plan.Untracked, s.Name)
+			}
+			continue
+		}
+		if s.SourceType == "local_symlink" && models.LocalSourceInsideSkillsDir(models.ResolveLocalSourcePath(s.Source, d.skillsDir), d.skillsDir) && IsRealMasterDir(d.skillsDir, s.Name) {
+			plan.IllegalLocal = append(plan.IllegalLocal, IllegalLocalSource{Name: s.Name, Source: s.Source})
 			continue
 		}
 		if !s.IsValidSkill {
@@ -410,7 +426,7 @@ func (p DoctorReport) issueCount() int {
 	}
 	// Copies are not counted: Availability applied by copying is a working
 	// Scope by another mechanism, not Drift to reconcile (ADR-0002).
-	n += len(p.Missing) + len(p.Invalid) + len(p.Stubs)
+	n += len(p.Missing) + len(p.Invalid) + len(p.Stubs) + len(p.IllegalLocal)
 	n += len(p.UnknownAgents)
 	if p.StateError != "" {
 		n++

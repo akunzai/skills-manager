@@ -209,17 +209,29 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	names := sortedSkillKeys(plan.Skills)
 	stateStore, _ := NewScopeStateStore(plan.SkillsDir)
 
+	resolvedLocal := func(subpath string) string {
+		resolved := plan.Source.LocalPath
+		if subpath != "" && subpath != "." {
+			resolved = filepath.Join(resolved, filepath.FromSlash(subpath))
+		}
+		return resolved
+	}
+	if plan.Source.Kind == AddSourceSymlink {
+		for _, name := range names {
+			resolved := resolvedLocal(plan.Skills[name])
+			if models.LocalSourceInsideSkillsDir(resolved, plan.SkillsDir) {
+				return AddResult{}, fmt.Errorf("local source %s is inside the skills directory", models.ToTildePath(resolved))
+			}
+		}
+	}
+
 	for _, name := range names {
 		subpath := plan.Skills[name]
 		switch plan.Source.Kind {
 		case AddSourceRemote:
 			config.AddRemoteSkillEntry(cfg, plan.Source.Key, name, subpath, plan.Source.RepoType, plan.Source.URL)
 		case AddSourceSymlink:
-			resolved := plan.Source.LocalPath
-			if subpath != "" && subpath != "." {
-				resolved = filepath.Join(plan.Source.LocalPath, filepath.FromSlash(subpath))
-			}
-			config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(resolved, plan.SkillsDir), plan.Source.Description)
+			config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(resolvedLocal(subpath), plan.SkillsDir), plan.Source.Description)
 		case AddSourceCommand:
 			config.AddLocalCommandEntry(cfg, name, plan.Source.Command, plan.Source.Check, plan.Source.Description)
 		}

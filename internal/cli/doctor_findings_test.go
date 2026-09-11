@@ -191,7 +191,10 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Declare it with 'skills add -p', or remove it with 'skills prune -p --skills-only'.") {
+		if containsMessage(doctorFindings(outcome.Report, outcome.Repair), "skills add") {
+			t.Fatalf("untracked real directory must not suggest add: %#v", doctorFindings(outcome.Report, outcome.Repair))
+		}
+		if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Not in Config; left as-is. A TTY prune can remove it; 'skills prune -p --yes' will not.") {
 			t.Fatalf("untracked finding has no Project-scoped next action: %#v", doctorFindings(outcome.Report, outcome.Repair))
 		}
 		if outcome.Untracked != 1 {
@@ -214,13 +217,48 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Declare it with 'skills add', or remove it with 'skills prune --skills-only'.") {
+		if containsMessage(doctorFindings(outcome.Report, outcome.Repair), "skills add") {
+			t.Fatalf("untracked real directory must not suggest add: %#v", doctorFindings(outcome.Report, outcome.Repair))
+		}
+		if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Not in Config; left as-is. A TTY prune can remove it; 'skills prune --yes' will not.") {
 			t.Fatalf("untracked finding has no Global-scoped next action: %#v", doctorFindings(outcome.Report, outcome.Repair))
 		}
 		if containsMessage(doctorFindings(outcome.Report, outcome.Repair), "skills prune -p") {
 			t.Errorf("Global finding suggested a Project command: %#v", doctorFindings(outcome.Report, outcome.Repair))
 		}
 	})
+}
+
+func TestFindingsLeftoverMasterSymlinkNamesPrune(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	skillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(skillsDir, "orphan")); err != nil {
+		t.Fatal(err)
+	}
+
+	outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsMessage(doctorFindings(outcome.Report, outcome.Repair), "Remove it with 'skills prune -p'.") {
+		t.Fatalf("leftover symlink has no prune next action: %#v", doctorFindings(outcome.Report, outcome.Repair))
+	}
+	if containsMessage(doctorFindings(outcome.Report, outcome.Repair), "skills add") {
+		t.Fatalf("leftover symlink must not suggest add: %#v", doctorFindings(outcome.Report, outcome.Repair))
+	}
+	if outcome.Remaining != 0 {
+		t.Errorf("Remaining = %d; want 0", outcome.Remaining)
+	}
 }
 
 // An invalid folder's remedy depends on how the Skill was declared: removing a
@@ -289,7 +327,7 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	config.AddLocalSymlinkEntry(cfg, "alpha", alpha, "")
+	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(filepath.Dir(skillsDir), "local-src", "alpha"), "")
 
 	availability := engine.NewAvailability(cfg, skillsDir)
 	drift := availability.ObserveAvailability("alpha")

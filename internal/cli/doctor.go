@@ -65,15 +65,22 @@ func newDoctorCmd() *cobra.Command {
 
 			fmt.Fprintln(out, "\n"+strings.Repeat(tableRule, 60))
 			if outcome.Remaining == 0 {
-				// An untracked Skill is not counted as an issue (ADR-0002: 1
-				// means the Scope does not match its Config), so the exit code
-				// stays 0 — but saying "top condition" above a yellow warning
-				// doctor cannot act on is what makes --fix read as broken.
-				if outcome.Untracked > 0 {
-					fmt.Fprintf(out, "%s%sNo issues detected. %s your decision.%s\n\n", colorBold, colorYellow, untrackedPending(outcome.Untracked), colorReset)
-					return nil
+				// Untracked occupancy is not an issue (ADR-0002: 1 means the
+				// Scope does not match its Config), so the exit code stays 0
+				// — but saying "top condition" above a standing finding is
+				// what made --fix read as broken.
+				real := outcome.Untracked
+				links := len(outcome.Report.UntrackedLinks)
+				switch {
+				case real > 0 && links > 0:
+					fmt.Fprintf(out, "%s%sNo issues detected. %s not in Config; %s can be pruned.%s\n\n", colorBold, colorYellow, untrackedOccupancy(real), leftoverSymlinks(links), colorReset)
+				case real > 0:
+					fmt.Fprintf(out, "%s%sNo issues detected. %s not in Config.%s\n\n", colorBold, colorYellow, untrackedOccupancy(real), colorReset)
+				case links > 0:
+					fmt.Fprintf(out, "%s%sNo issues detected. %s can be pruned.%s\n\n", colorBold, colorYellow, leftoverSymlinks(links), colorReset)
+				default:
+					fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n\n", colorBold, colorGreen, colorReset)
 				}
-				fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n\n", colorBold, colorGreen, colorReset)
 				return nil
 			}
 
@@ -105,13 +112,18 @@ func newDoctorCmd() *cobra.Command {
 	return cmd
 }
 
-// untrackedPending renders the count of Skills waiting on the user, without
-// their names: those are already on the warning line above.
-func untrackedPending(n int) string {
+func untrackedOccupancy(n int) string {
 	if n == 1 {
-		return "1 untracked skill needs"
+		return "1 untracked skill is"
 	}
-	return fmt.Sprintf("%d untracked skills need", n)
+	return fmt.Sprintf("%d untracked skills are", n)
+}
+
+func leftoverSymlinks(n int) string {
+	if n == 1 {
+		return "1 leftover symlink"
+	}
+	return fmt.Sprintf("%d leftover symlinks", n)
 }
 
 func printHealthReport(out io.Writer, findings []Finding) {

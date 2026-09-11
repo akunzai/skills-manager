@@ -144,13 +144,22 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 		add(Finding{Severity: SeverityWarning, Message: "Warning: Configured but missing skills: " + strings.Join(p.Missing, ", "), Blank: true})
 	}
 	if len(p.Untracked) > 0 {
-		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Warning: Untracked skills in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.Untracked, ", ")), Blank: true})
-		// Untracked Skills are the one finding --fix deliberately never acts
-		// on, so the way out has to be spelled here: doctor restores declared
-		// state, discarding undeclared data belongs to prune.
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Untracked skills in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.Untracked, ", ")), Blank: true})
 		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
-			"  Declare %s with 'skills add%s', or remove %s with 'skills prune%s --skills-only'.",
-			objectPronoun(len(p.Untracked)), scopeFlag(p), objectPronoun(len(p.Untracked)), scopeFlag(p))})
+			"  Not in Config; left as-is. A TTY prune can remove %s; 'skills prune%s --yes' will not.",
+			objectPronoun(len(p.Untracked)), scopeFlag(p))})
+	}
+	if len(p.UntrackedLinks) > 0 {
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Untracked leftover symlink in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.UntrackedLinks, ", ")), Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
+			"  Remove %s with 'skills prune%s'.",
+			objectPronoun(len(p.UntrackedLinks)), scopeFlag(p))})
+	}
+	for _, illegal := range p.IllegalLocal {
+		add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Local source for %s is inside the skills directory.", illegal.Name), Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
+			"  Next: delete the local entry for %s from skills.json and leave the directory.",
+			illegal.Name)})
 	}
 	for _, stub := range p.Stubs {
 		add(Finding{Severity: SeverityWarning, Message: "Skill arrived as a text stub instead of a directory: " + stub, Blank: true})

@@ -73,10 +73,14 @@ func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	if err := os.MkdirAll(invalid, 0755); err != nil {
 		t.Fatal(err)
 	}
+	source := filepath.Join(project, "src", "broken")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "missing", ".", "github", "")
-	config.AddLocalSymlinkEntry(cfg, "broken", invalid, "")
+	config.AddLocalSymlinkEntry(cfg, "broken", source, "")
 
 	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil, nil)
 	if err != nil {

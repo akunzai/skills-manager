@@ -369,14 +369,20 @@ func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prune --yes failed: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Pruned 1 untracked master skill") || !strings.Contains(out, "2 unconfigured agent links") {
+	if !strings.Contains(out, "2 unconfigured agent links") {
 		t.Fatalf("expected prune summary, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Removed master skill: orphan") || !strings.Contains(out, "Removed managed link:") {
+	if !strings.Contains(out, "Skipped 1 untracked real directory") || !strings.Contains(out, "Skipped master skill: orphan") {
+		t.Fatalf("expected real master to be skipped, got:\n%s", out)
+	}
+	if strings.Contains(out, "Removed master skill: orphan") {
+		t.Fatalf("prune --yes must not RemoveAll a real master directory:\n%s", out)
+	}
+	if !strings.Contains(out, "Removed managed link:") {
 		t.Fatalf("expected per-path prune results, got:\n%s", out)
 	}
-	if _, err := os.Lstat(filepath.Join(skillsDir, "orphan")); !os.IsNotExist(err) {
-		t.Fatal("untracked master skill should be removed")
+	if _, err := os.Lstat(filepath.Join(skillsDir, "orphan")); err != nil {
+		t.Fatal("untracked real master directory must survive prune --yes")
 	}
 	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "orphan")); !os.IsNotExist(err) {
 		t.Fatal("managed link for removed master skill should be removed")
@@ -1310,7 +1316,7 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
+	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(filepath.Dir(skillsDir), "local-src", "alpha"), "")
 	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -1436,7 +1442,7 @@ func TestCLIDoctorFixExplainsForeignAvailabilityPathWithoutTerminal(t *testing.T
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	config.AddLocalSymlinkEntry(cfg, "sample", master, "")
+	config.AddLocalSymlinkEntry(cfg, "sample", filepath.Join(filepath.Dir(skillsDir), "local-src", "sample"), "")
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
@@ -1481,7 +1487,7 @@ func TestCLIDoctorFixReplacesConfirmedForeignAvailabilityPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	config.AddLocalSymlinkEntry(cfg, "sample", master, "")
+	config.AddLocalSymlinkEntry(cfg, "sample", filepath.Join(filepath.Dir(skillsDir), "local-src", "sample"), "")
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
@@ -1583,7 +1589,7 @@ func TestCLIDoctorDetectsAndFixesStaleUniversalAgentLinks(t *testing.T) {
 	}
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	cfg := config.DefaultConfig()
-	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
+	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(filepath.Dir(skillsDir), "local-src", "alpha"), "")
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
@@ -1940,11 +1946,12 @@ func TestCLICommandAddCheckFailureStillSaves(t *testing.T) {
 	}
 }
 
-// A Scope whose only finding is an untracked Skill used to print a yellow
-// warning and then claim everything was in top condition, which is what made
-// `doctor --fix` read as unable to handle it. The exit code stays 0 —
-// untracked is a decision the user has not made, not Drift (ADR-0002).
-func TestCLIDoctorSaysUntrackedNeedsDecisionWhileStayingClean(t *testing.T) {
+// A Scope whose only finding is an untracked real Skill used to print a
+// yellow warning and then claim everything was in top condition, which is
+// what made `doctor --fix` read as unable to handle it. The exit code stays 0
+// — untracked occupancy is not Drift (ADR-0002), and doctor must not suggest
+// add (that path destroyed the Skill).
+func TestCLIDoctorLeavesUntrackedRealDirectoryAsOccupancy(t *testing.T) {
 	project := projectScope(t)
 
 	if _, err := runCLI(t, "init", "-p"); err != nil {
@@ -1965,14 +1972,186 @@ func TestCLIDoctorSaysUntrackedNeedsDecisionWhileStayingClean(t *testing.T) {
 	if strings.Contains(out, "Everything is in top condition") {
 		t.Fatalf("doctor claimed top condition above an untracked warning:\n%s", out)
 	}
-	if !strings.Contains(out, "No issues detected. 1 untracked skill needs your decision.") {
-		t.Fatalf("doctor did not say the untracked skill is waiting:\n%s", out)
+	if !strings.Contains(out, "No issues detected. 1 untracked skill is not in Config.") {
+		t.Fatalf("doctor did not say the untracked skill is occupancy:\n%s", out)
 	}
-	if !strings.Contains(out, "skills prune -p --skills-only") {
-		t.Fatalf("doctor did not name the way out:\n%s", out)
+	if strings.Contains(out, "skills add") {
+		t.Fatalf("doctor must not suggest add for a real untracked directory:\n%s", out)
+	}
+	if !strings.Contains(out, "skills prune -p --yes") {
+		t.Fatalf("doctor did not say prune --yes will not remove it:\n%s", out)
 	}
 	if _, err := os.Stat(orphan); err != nil {
 		t.Fatalf("doctor --fix removed an untracked skill: %v", err)
+	}
+}
+
+func TestCLIAddRefusesLocalSourceInsideSkillsDir(t *testing.T) {
+	project := projectScope(t)
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	dest := filepath.Join(project, ".agents", "skills", "my-project-skill")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillMd := filepath.Join(dest, "SKILL.md")
+	if err := os.WriteFile(skillMd, []byte("---\nname: my-project-skill\n---\n# Mine\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "add", "-p", "--symlink", dest, "--skill", "my-project-skill", "--yes")
+	if err == nil {
+		t.Fatalf("add should refuse a Source inside the skills directory\n%s", out)
+	}
+	if ExitCode(err) != 2 {
+		t.Fatalf("exit = %d; want 2 (%v)\n%s", ExitCode(err), err, out)
+	}
+	info, err := os.Lstat(dest)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("destination must remain a real directory: mode=%v err=%v", info.Mode(), err)
+	}
+	if _, err := os.Stat(skillMd); err != nil {
+		t.Fatalf("SKILL.md must survive: %v", err)
+	}
+	cfg, err := config.LoadConfig(filepath.Join(project, ".agents", "skills.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Local["my-project-skill"]; ok {
+		t.Fatal("Config must not record the refused Skill")
+	}
+}
+
+func TestCLISyncIllegalLocalSourceLeavesRealDirectory(t *testing.T) {
+	project := projectScope(t)
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	dest := filepath.Join(project, ".agents", "skills", "mine")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillMd := filepath.Join(dest, "SKILL.md")
+	if err := os.WriteFile(skillMd, []byte("# Mine\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "mine", ".agents/skills/mine", "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "sync", "-p")
+	if err == nil || ExitCode(err) != 2 {
+		t.Fatalf("illegal local Source should fail Materialize with exit 2, got err=%v:\n%s", err, out)
+	}
+	info, lerr := os.Lstat(dest)
+	if lerr != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("destination must remain a real directory: mode=%v err=%v", info.Mode(), lerr)
+	}
+	if _, err := os.Stat(skillMd); err != nil {
+		t.Fatalf("SKILL.md must survive: %v", err)
+	}
+}
+
+func TestCLIDoctorTreatsSelfSymlinkLoopAsBroken(t *testing.T) {
+	project := projectScope(t)
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	dest := filepath.Join(project, ".agents", "skills", "mine")
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("mine", dest); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "mine", ".agents/skills/mine", "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "-p")
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("a self-symlink loop should exit 1, got err=%v:\n%s", err, out)
+	}
+	if strings.Contains(out, "leave the directory") {
+		t.Fatalf("a destroyed loop must not be told to leave the directory:\n%s", out)
+	}
+	if !strings.Contains(out, "missing SKILL.md") && !strings.Contains(out, "Broken") {
+		t.Fatalf("a self-symlink loop should be reported as broken:\n%s", out)
+	}
+}
+
+func TestCLIDoctorIllegalLocalSourceDoesNotRecommendRm(t *testing.T) {
+	project := projectScope(t)
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	dest := filepath.Join(project, ".agents", "skills", "mine")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, "SKILL.md"), []byte("# Mine\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "mine", ".agents/skills/mine", "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "-p")
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("illegal local Source should exit 1, got err=%v:\n%s", err, out)
+	}
+	if !strings.Contains(out, "Local source for mine is inside the skills directory.") {
+		t.Fatalf("doctor did not report the illegal Source:\n%s", out)
+	}
+	if !strings.Contains(out, "delete the local entry for mine from skills.json") {
+		t.Fatalf("doctor did not say to drop the Config entry:\n%s", out)
+	}
+	if strings.Contains(out, "skills rm") {
+		t.Fatalf("doctor must not recommend rm:\n%s", out)
+	}
+}
+
+func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(home, "elsewhere", "orphan")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(skillsDir, "orphan")); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "prune", "--yes", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("prune --yes: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Removed master skill: orphan") {
+		t.Fatalf("leftover master symlink should be removed:\n%s", out)
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "orphan")); !os.IsNotExist(err) {
+		t.Fatal("leftover master symlink should be gone")
+	}
+	if _, err := os.Stat(filepath.Join(source, "SKILL.md")); err != nil {
+		t.Fatalf("Source outside the skills directory must survive: %v", err)
 	}
 }
 
@@ -2028,7 +2207,7 @@ func TestCLIDoctorExitCodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
+	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(filepath.Dir(skillsDir), "local-src", "alpha"), "")
 	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -2093,7 +2272,7 @@ func TestCLIDoctorDoesNotPassAScopeWithNoUsableAgentDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	config.AddLocalSymlinkEntry(cfg, "alpha", alpha, "")
+	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(filepath.Dir(skillsDir), "local-src", "alpha"), "")
 	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
 		t.Fatal(err)
 	}

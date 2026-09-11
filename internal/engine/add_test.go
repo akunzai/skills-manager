@@ -27,6 +27,34 @@ func TestBuildAddPlanDetectsRemoteConflicts(t *testing.T) {
 	}
 }
 
+func TestApplyAddPlanRefusesSourceInsideSkillsDir(t *testing.T) {
+	skillsDir := t.TempDir()
+	dest := filepath.Join(skillsDir, "mine")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillMd := filepath.Join(dest, "SKILL.md")
+	if err := os.WriteFile(skillMd, []byte("# Mine\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "skills.json")
+	cfg := config.DefaultConfig()
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(dest, ""), map[string]string{"mine": "."}, nil)
+	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
+		t.Fatal("expected refusal of a Source inside the skills directory")
+	}
+	info, err := os.Lstat(dest)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("destination must remain a real directory: mode=%v err=%v", info.Mode(), err)
+	}
+	if _, err := os.Stat(skillMd); err != nil {
+		t.Fatalf("SKILL.md must survive: %v", err)
+	}
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Fatal("Config must not be written")
+	}
+}
+
 func TestBuildAddPlanDetectsUntrackedDiskConflicts(t *testing.T) {
 	skillsDir := t.TempDir()
 	untrackedDir := filepath.Join(skillsDir, "existing-skill")
