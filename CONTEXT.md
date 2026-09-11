@@ -24,6 +24,10 @@ _Avoid_: settings file, manifest (except the JSON Schema)
 The declared Skills for one Scope plus what is on its skills directory, classified as missing, untracked, or invalid.
 _Avoid_: scan, catalog, listing
 
+**Untracked**:
+Occupancy on a Scope skills directory that Config does not declare. A real directory there is occupancy the tool does not manage, not a missing declaration.
+_Avoid_: orphan (when you mean this occupancy), undeclared (as a noun)
+
 **Availability**:
 Where a Skill can be used. Declared by defaults, include, and exclude. Symlinks are not the concept.
 _Avoid_: linked agents, dispatch, install targets

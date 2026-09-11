@@ -108,6 +108,33 @@ func TestResolveLocalSourcePathTildeSourceExpandsToHome(t *testing.T) {
 	}
 }
 
+func TestLocalSourceInsideSkillsDir(t *testing.T) {
+	skillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
+	inside := filepath.Join(skillsDir, "mine")
+	nested := filepath.Join(skillsDir, "mine", "nested")
+	sibling := skillsDir + "-backup"
+	outside := filepath.Join(filepath.Dir(skillsDir), "local-skills", "mine")
+
+	if !LocalSourceInsideSkillsDir(skillsDir, skillsDir) {
+		t.Error("the skills directory itself is inside")
+	}
+	if !LocalSourceInsideSkillsDir(inside, skillsDir) {
+		t.Error("a Skill directory on the skills directory is inside")
+	}
+	if !LocalSourceInsideSkillsDir(nested, skillsDir) {
+		t.Error("a nested path under the skills directory is inside")
+	}
+	if LocalSourceInsideSkillsDir(outside, skillsDir) {
+		t.Error("a sibling of the skills directory is not inside")
+	}
+	if LocalSourceInsideSkillsDir(sibling, skillsDir) {
+		t.Errorf("%q must not count as inside %q", sibling, skillsDir)
+	}
+	if LocalSourceInsideSkillsDir("", skillsDir) || LocalSourceInsideSkillsDir(inside, "") {
+		t.Error("empty paths are not inside")
+	}
+}
+
 func TestScopeRootProjectIsCheckout(t *testing.T) {
 	project := filepath.FromSlash("/path/to/my-project")
 	skillsDir := filepath.Join(project, ".agents", "skills")

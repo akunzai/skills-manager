@@ -40,8 +40,10 @@ type PruneResult struct {
 }
 
 // BuildPrunePlan finds untracked master skills and managed links that are no
-// longer selected by the current configuration. It never selects user-owned
-// directories or links that point somewhere other than the master skills dir.
+// longer selected by the current configuration. Agent Availability paths are
+// selected only when they are managed links into the master skills directory.
+// Untracked real directories on the master are included so a TTY prune can
+// offer them; callers that skip confirmation must omit those from apply.
 func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, includeConfiguredLinks bool) (PrunePlan, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -166,4 +168,11 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 		}
 	}
 	return result, errors.Join(errs...)
+}
+
+// IsRealMasterDir reports whether name on the skills directory is a real
+// directory rather than a leftover symlink. prune --yes must not RemoveAll it.
+func IsRealMasterDir(skillsDir, name string) bool {
+	fi, err := os.Lstat(filepath.Join(skillsDir, name))
+	return err == nil && fi.Mode()&os.ModeSymlink == 0
 }

@@ -68,6 +68,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "Dry run complete.")
 		return nil
 	}
+	var skippedReal []string
 	if !options.yes {
 		if !tui.IsTerminal() {
 			printPrunePlan(cmd, plan)
@@ -88,10 +89,25 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		}
 	} else {
 		printPrunePlan(cmd, plan)
+		kept := plan.UntrackedSkills[:0]
+		for _, skill := range plan.UntrackedSkills {
+			if engine.IsRealMasterDir(skillsDir, skill) {
+				skippedReal = append(skippedReal, skill)
+				continue
+			}
+			kept = append(kept, skill)
+		}
+		plan.UntrackedSkills = slices.Clone(kept)
+	}
+
+	if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 {
+		printPruneSkippedReal(cmd, skippedReal)
+		return nil
 	}
 
 	result, applyErr := engine.ApplyPrunePlan(plan, skillsDir)
 	printPruneSummary(cmd, result)
+	printPruneSkippedReal(cmd, skippedReal)
 	if applyErr != nil {
 		for _, failure := range result.Failures {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to prune %s: %v\n", models.ToTildePath(failure.Path), failure.Err)
@@ -116,6 +132,20 @@ func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 	}
 	for _, link := range plan.Unconfigured {
 		fmt.Fprintf(out, "  managed link: %s (%s)\n", models.ToTildePath(link.Path), link.Agent)
+	}
+}
+
+func printPruneSkippedReal(cmd *cobra.Command, skipped []string) {
+	if len(skipped) == 0 {
+		return
+	}
+	label := "untracked real directories"
+	if len(skipped) == 1 {
+		label = "untracked real directory"
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d %s.\n", len(skipped), label)
+	for _, skill := range skipped {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Skipped master skill: %s\n", skill)
 	}
 }
 

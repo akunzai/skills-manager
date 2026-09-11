@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 var errRepoPathMissing = errors.New("path missing in repository")
@@ -45,9 +47,19 @@ func MaterializeRemoteSkill(name, subpath, repoDir, skillsDir string) error {
 
 // MaterializeLocalSymlink points the Scope skills directory entry at a local
 // Skill directory. linkTarget is the path written into the symlink (relative
-// or absolute); the caller resolves Scope portability.
+// or absolute); the caller resolves Scope portability. A Source that resolves
+// inside the skills directory is occupancy, not a Source: refuse before
+// CreateSymlink would RemoveAll the destination.
 func MaterializeLocalSymlink(name, linkTarget, skillsDir string) error {
-	return CreateSymlink(linkTarget, filepath.Join(skillsDir, name), true)
+	dest := filepath.Join(skillsDir, name)
+	absSource := linkTarget
+	if !filepath.IsAbs(absSource) {
+		absSource = filepath.Join(filepath.Dir(dest), absSource)
+	}
+	if models.LocalSourceInsideSkillsDir(absSource, skillsDir) {
+		return fmt.Errorf("local source %s is inside the skills directory", models.ToTildePath(absSource))
+	}
+	return CreateSymlink(linkTarget, dest, true)
 }
 
 // MaterializeCommand runs the installer for a command Source. A failed check

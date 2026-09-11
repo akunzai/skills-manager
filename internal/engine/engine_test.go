@@ -1012,6 +1012,29 @@ func TestUpdateRemoteSkillsDryRun(t *testing.T) {
 	}
 }
 
+func TestMaterializeLocalSymlinkRefusesSourceInsideSkillsDir(t *testing.T) {
+	skillsDir := t.TempDir()
+	dest := filepath.Join(skillsDir, "mine")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillMd := filepath.Join(dest, "SKILL.md")
+	if err := os.WriteFile(skillMd, []byte("# Mine\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	target := models.LocalSymlinkTarget(dest, skillsDir)
+	if err := MaterializeLocalSymlink("mine", target, skillsDir); err == nil {
+		t.Fatal("expected refusal of a Source inside the skills directory")
+	}
+	info, err := os.Lstat(dest)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("destination must remain a real directory: mode=%v err=%v", info.Mode(), err)
+	}
+	if _, err := os.Stat(skillMd); err != nil {
+		t.Fatalf("SKILL.md must survive: %v", err)
+	}
+}
+
 func TestMaterializeRemoteSkillCopiesAndReportsMissingPath(t *testing.T) {
 	repo := t.TempDir()
 	src := filepath.Join(repo, "sample")

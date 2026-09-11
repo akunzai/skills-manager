@@ -114,6 +114,25 @@ func StoreLocalSourcePath(absSource string, skillsDir string) string {
 	return filepath.ToSlash(rel)
 }
 
+// LocalSourceInsideSkillsDir reports whether absSource is the skills directory
+// itself or anything nested under it. A local Source there is occupancy on
+// the destination, not a Source to Materialize from.
+func LocalSourceInsideSkillsDir(absSource, skillsDir string) bool {
+	if absSource == "" || skillsDir == "" {
+		return false
+	}
+	absSource, err1 := filepath.Abs(absSource)
+	absDir, err2 := filepath.Abs(skillsDir)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absDir, absSource)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
+}
+
 // LocalSymlinkTarget returns what the skills-dir symlink should point at. A
 // Source inside the project is linked relatively so the checkout survives
 // being cloned elsewhere; anything else stays absolute.
