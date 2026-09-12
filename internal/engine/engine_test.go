@@ -366,12 +366,12 @@ func TestInventoryClassifiesConfigVsSkillsDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := Inventory(cfg, skillsDir)
+	items, err := LoadInventory(cfg, skillsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName := make(map[string]models.SkillItem, len(items))
-	for _, item := range items {
+	byName := make(map[string]models.SkillItem, len(items.SkillItems()))
+	for _, item := range items.SkillItems() {
 		byName[item.Name] = item
 	}
 
@@ -423,15 +423,16 @@ func TestInventoryIgnoresAgentDirEntries(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "github", "")
 
-	items, err := Inventory(cfg, skillsDir)
+	items, err := LoadInventory(cfg, skillsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].Name != "sample" {
-		t.Fatalf("items = %#v", items)
+	got := items.SkillItems()
+	if len(got) != 1 || got[0].Name != "sample" {
+		t.Fatalf("items = %#v", got)
 	}
-	if !reflect.DeepEqual(items[0].Agents, []string{"claude-code"}) {
-		t.Fatalf("agents = %#v; disk continue link must not appear", items[0].Agents)
+	if !reflect.DeepEqual(got[0].Agents, []string{"claude-code"}) {
+		t.Fatalf("agents = %#v; disk continue link must not appear", got[0].Agents)
 	}
 }
 

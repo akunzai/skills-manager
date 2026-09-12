@@ -13,9 +13,45 @@ import (
 )
 
 // Inventory is declared Skills for one Scope plus what is on its skills
-// directory, classified as missing, untracked, or invalid. Configured entries
-// carry declared Availability; untracked entries have none.
-func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error) {
+// directory, classified as missing, untracked, invalid, stub, or illegal-local.
+type Inventory struct {
+	missing        []string
+	untracked      []string
+	untrackedLinks []string
+	invalid        []InvalidSkill
+	stubs          []string
+	illegalLocal   []IllegalLocalSource
+	present        []presentSkill
+	items          []models.SkillItem
+}
+
+type presentSkill struct {
+	Name       string
+	SourceType string
+	Source     string
+}
+
+func (inv Inventory) Missing() []string { return slices.Clone(inv.missing) }
+
+func (inv Inventory) Untracked() []string { return slices.Clone(inv.untracked) }
+
+func (inv Inventory) UntrackedLinks() []string { return slices.Clone(inv.untrackedLinks) }
+
+func (inv Inventory) Invalid() []InvalidSkill { return slices.Clone(inv.invalid) }
+
+func (inv Inventory) Stubs() []string { return slices.Clone(inv.stubs) }
+
+func (inv Inventory) IllegalLocal() []IllegalLocalSource { return slices.Clone(inv.illegalLocal) }
+
+// SkillItems projects classified occupancy into the JSON DTO. Callers that
+// decide from occupancy use the typed queries instead of SourceType.
+func (inv Inventory) SkillItems() []models.SkillItem { return slices.Clone(inv.items) }
+
+func (inv Inventory) declaredPresent() []presentSkill { return inv.present }
+
+// LoadInventory observes Config and the skills directory once and classifies
+// occupancy. Go does not allow a function named Inventory beside the type.
+func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 	baseSkills := skillsDir
 	if baseSkills == "" {
 		baseSkills = models.DefaultSkillsDir()
@@ -58,11 +94,12 @@ func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error)
 	}
 
 	if reason := unusableDirectory(baseSkills); reason != "" {
-		return nil, fmt.Errorf("skills directory %s: %s", baseSkills, reason)
+		return Inventory{}, fmt.Errorf("skills directory %s: %s", baseSkills, reason)
 	}
+	kind := make(map[string]os.FileMode)
 	entries, err := os.ReadDir(baseSkills)
 	if err != nil && !os.IsNotExist(err) {
-		return nil, err
+		return Inventory{}, err
 	}
 	if err == nil {
 		for _, entry := range entries {
@@ -72,11 +109,15 @@ func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error)
 			}
 
 			fullPath := filepath.Join(baseSkills, name)
+			info, lerr := os.Lstat(fullPath)
+			if lerr == nil {
+				kind[name] = info.Mode()
+			}
 			item, exists := items[name]
 			if !exists {
 				sourceType := "untracked"
 				source := "local"
-				if info, err := os.Lstat(fullPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if info != nil && info.Mode()&os.ModeSymlink != 0 {
 					sourceType = "symlink"
 					if linkTarget, err := os.Readlink(fullPath); err == nil {
 						source = linkTarget
@@ -114,9 +155,27 @@ func Inventory(cfg *config.Config, skillsDir string) ([]models.SkillItem, error)
 		)
 	})
 
-	return result, nil
-}
-
-func isUntracked(item models.SkillItem) bool {
-	return item.SourceType == "untracked" || item.SourceType == "symlink"
+	inv := Inventory{items: result}
+	for _, item := range result {
+		mode := kind[item.Name]
+		switch {
+		case !item.IsInstalled:
+			inv.missing = append(inv.missing, item.Name)
+		case item.SourceType == "symlink":
+			inv.untrackedLinks = append(inv.untrackedLinks, item.Name)
+		case item.SourceType == "untracked":
+			inv.untracked = append(inv.untracked, item.Name)
+		case item.SourceType == "local_symlink" && models.LocalSourceInsideSkillsDir(models.ResolveLocalSourcePath(item.Source, baseSkills), baseSkills) && mode&os.ModeSymlink == 0 && mode != 0:
+			inv.illegalLocal = append(inv.illegalLocal, IllegalLocalSource{Name: item.Name, Source: item.Source})
+		case item.SourceType == "local_symlink" && mode.IsRegular():
+			inv.stubs = append(inv.stubs, item.Name)
+			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
+		case !item.IsValidSkill:
+			inv.invalid = append(inv.invalid, InvalidSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
+			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
+		default:
+			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
+		}
+	}
+	return inv, nil
 }
