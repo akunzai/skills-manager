@@ -433,6 +433,12 @@ func TestApplyRepairsBrokenDesiredLink(t *testing.T) {
 	if err := os.Symlink(rel+string(os.PathSeparator)+"missing"+string(os.PathSeparator)+"..", linkPath); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
+	// Win32 GetFullPathName removes ".." without requiring the skipped
+	// segment to exist (https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file),
+	// so this target is a live link there and cannot represent Broken.
+	if _, err := os.Stat(linkPath); err == nil {
+		t.Skip("this platform canonicalizes extra .. segments, so the planted link is live")
+	}
 	if drift := availability.ObserveAvailability("sample"); !reflect.DeepEqual(drift.Broken, []string{"claude-code"}) {
 		t.Fatalf("Broken before Apply = %#v", drift)
 	}
