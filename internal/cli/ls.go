@@ -87,10 +87,11 @@ func newLsCmd() *cobra.Command {
 				return err
 			}
 
-			skills, err := engine.Inventory(cfg, skillsDir)
+			inv, err := engine.LoadInventory(cfg, skillsDir)
 			if err != nil {
 				return err
 			}
+			skills := inv.SkillItems()
 
 			if flagAgent != "" {
 				filterAgent := models.NormalizeAgentName(flagAgent)

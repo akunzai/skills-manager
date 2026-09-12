@@ -21,12 +21,20 @@ The declared set of Skills, Sources, and Availability for one Scope (`skills.jso
 _Avoid_: settings file, manifest (except the JSON Schema)
 
 **Inventory**:
-The declared Skills for one Scope plus what is on its skills directory, classified as missing, untracked, or invalid.
+The declared Skills for one Scope plus what is on its skills directory, classified as missing, untracked, invalid, stub, or illegal-local.
 _Avoid_: scan, catalog, listing
 
 **Untracked**:
-Occupancy on a Scope skills directory that Config does not declare. A real directory there is occupancy the tool does not manage, not a missing declaration.
+Occupancy on a Scope skills directory that Config does not declare. A real directory there is occupancy the tool does not manage, not a missing declaration. A leftover symlink on that directory is the same occupancy in another shape.
 _Avoid_: orphan (when you mean this occupancy), undeclared (as a noun)
+
+**Stub**:
+A declared local-symlink Skill that arrived on the skills directory as a regular file instead of a directory.
+_Avoid_: invalid (that is a missing SKILL.md), leftover occupancy
+
+**Illegal-local**:
+A declared local symlink whose Source resolves inside the skills directory.
+_Avoid_: Untracked, leftover occupancy, Drift
 
 **Availability**:
 Where a Skill can be used. Declared by defaults, include, and exclude. Symlinks are not the concept.

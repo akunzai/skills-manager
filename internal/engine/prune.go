@@ -21,8 +21,13 @@ type PruneLink struct {
 // PrunePlan describes managed filesystem entries that no longer match config.
 type PrunePlan struct {
 	UntrackedSkills []string
+	UntrackedDirs   []string
 	Unconfigured    []PruneLink
 	StateSkills     []string
+}
+
+func (p PrunePlan) AllUntracked() []string {
+	return append(slices.Clone(p.UntrackedSkills), p.UntrackedDirs...)
 }
 
 // PruneFailure identifies a planned path that could not be removed.
@@ -52,7 +57,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		skillsDir = models.DefaultSkillsDir()
 	}
 
-	inv, err := Inventory(cfg, skillsDir)
+	inv, err := LoadInventory(cfg, skillsDir)
 	if err != nil {
 		return PrunePlan{}, err
 	}
@@ -71,14 +76,12 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		}
 	}
 	orphans := make(map[string]struct{})
-	for _, item := range inv {
-		if !isUntracked(item) {
-			continue
-		}
-		orphans[item.Name] = struct{}{}
-		if includeSkills {
-			plan.UntrackedSkills = append(plan.UntrackedSkills, item.Name)
-		}
+	for _, name := range append(slices.Clone(inv.Untracked()), inv.UntrackedLinks()...) {
+		orphans[name] = struct{}{}
+	}
+	if includeSkills {
+		plan.UntrackedSkills = inv.UntrackedLinks()
+		plan.UntrackedDirs = inv.Untracked()
 	}
 
 	if includeSkills || includeConfiguredLinks {
@@ -86,14 +89,20 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		links := make(map[string]PruneLink)
 		if includeConfiguredLinks {
 			agentDirs := models.GetAgentsForSkillsDir(skillsDir)
-			for _, item := range inv {
-				if isUntracked(item) {
-					continue
-				}
-				for _, agent := range availability.ObserveAvailability(item.Name).Unexpected {
-					path := filepath.Join(agentDirs[agent], item.Name)
+			observeUnexpected := func(name string) {
+				for _, agent := range availability.ObserveAvailability(name).Unexpected {
+					path := filepath.Join(agentDirs[agent], name)
 					links[path] = PruneLink{Agent: agent, Path: path}
 				}
+			}
+			for _, item := range inv.declaredPresent() {
+				observeUnexpected(item.Name)
+			}
+			for _, name := range inv.Missing() {
+				observeUnexpected(name)
+			}
+			for _, illegal := range inv.IllegalLocal() {
+				observeUnexpected(illegal.Name)
 			}
 		}
 		leftover := availability.ObserveLeftover().WithoutEmpty()
@@ -107,6 +116,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 	}
 
 	slices.Sort(plan.UntrackedSkills)
+	slices.Sort(plan.UntrackedDirs)
 	slices.Sort(plan.StateSkills)
 	slices.SortFunc(plan.Unconfigured, func(a, b PruneLink) int { return cmp.Compare(a.Path, b.Path) })
 	return plan, nil
@@ -151,11 +161,4 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 		}
 	}
 	return result, errors.Join(errs...)
-}
-
-// IsRealMasterDir reports whether name on the skills directory is a real
-// directory rather than a leftover symlink. prune --yes must not RemoveAll it.
-func IsRealMasterDir(skillsDir, name string) bool {
-	fi, err := os.Lstat(filepath.Join(skillsDir, name))
-	return err == nil && fi.Mode()&os.ModeSymlink == 0
 }

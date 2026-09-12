@@ -3,12 +3,10 @@ package engine
 import (
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
-	"github.com/akunzai/skills-manager/internal/models"
 )
 
 type AgentHealth struct {
@@ -238,11 +236,11 @@ func (p DoctorReport) foreignAvailabilityPaths() []ForeignAvailabilityPath {
 	return paths
 }
 
-func availabilitySource(item models.SkillItem) string {
-	if strings.HasPrefix(item.SourceType, "local_") {
+func availabilitySource(sourceType, source string) string {
+	if strings.HasPrefix(sourceType, "local_") {
 		return "local"
 	}
-	return item.Source
+	return source
 }
 
 // diagnose records untracked Skills as warnings. Missing Skills and invalid
@@ -309,37 +307,18 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	plan.LeftoverEmpty = leftover.Empty
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
 
-	inv, err := Inventory(d.cfg, d.skillsDir)
+	inv, err := LoadInventory(d.cfg, d.skillsDir)
 	if err != nil {
 		return DoctorReport{}, err
 	}
-	for _, s := range inv {
-		if !s.IsInstalled {
-			plan.Missing = append(plan.Missing, s.Name)
-			continue
-		}
-		if isUntracked(s) {
-			if s.SourceType == "symlink" {
-				plan.UntrackedLinks = append(plan.UntrackedLinks, s.Name)
-			} else {
-				plan.Untracked = append(plan.Untracked, s.Name)
-			}
-			continue
-		}
-		if s.SourceType == "local_symlink" && models.LocalSourceInsideSkillsDir(models.ResolveLocalSourcePath(s.Source, d.skillsDir), d.skillsDir) && IsRealMasterDir(d.skillsDir, s.Name) {
-			plan.IllegalLocal = append(plan.IllegalLocal, IllegalLocalSource{Name: s.Name, Source: s.Source})
-			continue
-		}
-		if !s.IsValidSkill {
-			// A stub takes precedence over the invalid folder it also looks
-			// like: its way out is a git setting, not a repair of the Source.
-			if isSymlinkStub(s, d.skillsDir) {
-				plan.Stubs = append(plan.Stubs, s.Name)
-			} else {
-				plan.Invalid = append(plan.Invalid, InvalidSkill{Name: s.Name, SourceType: s.SourceType, Source: s.Source})
-			}
-		}
-		source := availabilitySource(s)
+	plan.Missing = inv.Missing()
+	plan.Untracked = inv.Untracked()
+	plan.UntrackedLinks = inv.UntrackedLinks()
+	plan.IllegalLocal = inv.IllegalLocal()
+	plan.Invalid = inv.Invalid()
+	plan.Stubs = inv.Stubs()
+	for _, s := range inv.declaredPresent() {
+		source := availabilitySource(s.SourceType, s.Source)
 		drift := d.availability.ObserveAvailability(s.Name)
 		if drift.Empty() && len(drift.Copies) == 0 {
 			continue
@@ -356,23 +335,6 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		})
 	}
 	return plan, nil
-}
-
-// isSymlinkStub reports whether a declared Skill arrived on the skills
-// directory as a plain file instead of a directory. A git client that cannot
-// create symbolic links — the default on Windows — checks a committed symlink
-// out as a text file holding its target path, and an Agent then reads that
-// path as the Skill's content. Two signals decide it together: the entry is a
-// regular file, and Config declares the Skill with a local symlink Source. No
-// content sniffing — a file where only directories belong is already
-// anomalous, and the declaration is what lets doctor word a precise next
-// action.
-func isSymlinkStub(item models.SkillItem, skillsDir string) bool {
-	if item.SourceType != "local_symlink" {
-		return false
-	}
-	info, err := os.Lstat(filepath.Join(skillsDir, item.Name))
-	return err == nil && info.Mode().IsRegular()
 }
 
 // IssueCount is the number of issues doctor reports without --fix.

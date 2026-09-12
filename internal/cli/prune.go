@@ -58,7 +58,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 	if err != nil {
 		return fmt.Errorf("build prune plan: %w", err)
 	}
-	if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 {
+	if len(plan.AllUntracked()) == 0 && len(plan.Unconfigured) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "Nothing to prune.")
 		return nil
 	}
@@ -89,15 +89,8 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		}
 	} else {
 		printPrunePlan(cmd, plan)
-		kept := plan.UntrackedSkills[:0]
-		for _, skill := range plan.UntrackedSkills {
-			if engine.IsRealMasterDir(skillsDir, skill) {
-				skippedReal = append(skippedReal, skill)
-				continue
-			}
-			kept = append(kept, skill)
-		}
-		plan.UntrackedSkills = slices.Clone(kept)
+		skippedReal = slices.Clone(plan.UntrackedDirs)
+		plan.UntrackedDirs = nil
 	}
 
 	if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 {
@@ -119,7 +112,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 
 func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Prune plan: %d untracked master skills; %d unconfigured managed links.\n", len(plan.UntrackedSkills), len(plan.Unconfigured))
+	fmt.Fprintf(out, "Prune plan: %d untracked master skills; %d unconfigured managed links.\n", len(plan.AllUntracked()), len(plan.Unconfigured))
 	agents := make(map[string]struct{})
 	for _, link := range plan.Unconfigured {
 		agents[link.Agent] = struct{}{}
@@ -127,7 +120,7 @@ func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 	if len(agents) > 0 {
 		fmt.Fprintf(out, "Affected agents: %s\n", strings.Join(slices.Sorted(maps.Keys(agents)), ", "))
 	}
-	for _, skill := range plan.UntrackedSkills {
+	for _, skill := range plan.AllUntracked() {
 		fmt.Fprintf(out, "  master skill: %s\n", skill)
 	}
 	for _, link := range plan.Unconfigured {
@@ -187,8 +180,8 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 
 func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
 	groups := make(tui.GroupedItems)
-	masterKeys := make(map[string]string, len(plan.UntrackedSkills))
-	for _, skill := range plan.UntrackedSkills {
+	masterKeys := make(map[string]string, len(plan.AllUntracked()))
+	for _, skill := range plan.AllUntracked() {
 		key := pruneMasterKey(skill)
 		masterKeys[skill] = key
 		linked := 0
@@ -225,7 +218,7 @@ func selectedPrunePlan(plan engine.PrunePlan, selected []string) engine.PrunePla
 	}
 	result := engine.PrunePlan{}
 	selectedMasters := make(map[string]bool)
-	for _, skill := range plan.UntrackedSkills {
+	for _, skill := range plan.AllUntracked() {
 		if selectedSet[pruneMasterKey(skill)] {
 			result.UntrackedSkills = append(result.UntrackedSkills, skill)
 			selectedMasters[skill] = true
