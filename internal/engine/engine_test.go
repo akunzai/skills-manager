@@ -443,9 +443,9 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Test Skill"), 0644)
 
 	// 1. Ensure project-level symlink for claude-code
-	created, err := EnsureAgentSymlink("test-skill", "claude", skillsDir)
+	created, err := ensureAgentSymlink("test-skill", "claude", skillsDir)
 	if err != nil {
-		t.Fatalf("EnsureAgentSymlink failed: %v", err)
+		t.Fatalf("ensureAgentSymlink failed: %v", err)
 	}
 	if !created {
 		t.Fatalf("expected symlink to be created")
@@ -456,10 +456,12 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 		t.Fatalf("expected symlink at %s", claudeLink)
 	}
 
-	// 2. Remove agent symlinks in project
-	removed := RemoveAgentSymlinks("test-skill", skillsDir)
-	if len(removed) == 0 {
-		t.Errorf("expected at least 1 agent removed")
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	availability := NewAvailability(cfg, skillsDir)
+	result := availability.ApplyLeftover(availability.ObserveLeftover().ForSkills([]string{"test-skill"}).WithoutEmpty())
+	if len(result.RemovedPaths) == 0 {
+		t.Errorf("expected at least 1 leftover path removed")
 	}
 	if _, err := os.Lstat(claudeLink); err == nil {
 		t.Errorf("expected symlink %s to be removed", claudeLink)
@@ -501,7 +503,7 @@ func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
 	continueLink := filepath.Join(project, ".continue", "skills", "sample")
 	for _, link := range []string{claudeLink, continueLink} {
-		if !IsManagedSkillLink(link, "sample", skillsDir) {
+		if !isManagedSkillLink(link, "sample", skillsDir) {
 			t.Fatalf("missing managed link %s", link)
 		}
 	}
@@ -521,7 +523,7 @@ func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
 		t.Fatalf("excluded Claude link still exists: %v", err)
 	}
-	if !IsManagedSkillLink(continueLink, "sample", skillsDir) {
+	if !isManagedSkillLink(continueLink, "sample", skillsDir) {
 		t.Fatal("declared Continue link was removed")
 	}
 	if fi, err := os.Stat(unmanaged); err != nil || !fi.IsDir() {
@@ -583,7 +585,7 @@ func TestAvailabilityApplyRemovesManagedCopy(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(copyPath, managedCopyMarker), []byte(absMaster+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !IsManagedSkillCopy(copyPath, "sample", skillsDir) {
+	if !isManagedSkillCopy(copyPath, "sample", skillsDir) {
 		t.Fatal("copy marker was not recognized")
 	}
 	cfg := config.DefaultConfig()
@@ -643,7 +645,7 @@ func TestApplyRemovePlanDropsConfigBeforeMaster(t *testing.T) {
 	if err := config.SaveConfig(cfg, configPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := EnsureAgentSymlink("sample", "claude", skillsDir); err != nil {
+	if _, err := ensureAgentSymlink("sample", "claude", skillsDir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1150,7 +1152,7 @@ func TestUpdateRemoteSkillsDoesNotReconcileAvailability(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{"claude", "continue"} {
-		if _, err := EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+		if _, err := ensureAgentSymlink("sample", agent, skillsDir); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1167,7 +1169,7 @@ func TestUpdateRemoteSkillsDoesNotReconcileAvailability(t *testing.T) {
 	if _, err := os.Lstat(claudeLink); err != nil {
 		t.Fatalf("Update changed the Claude link: %v", err)
 	}
-	if !IsManagedSkillLink(continueLink, "sample", skillsDir) {
+	if !isManagedSkillLink(continueLink, "sample", skillsDir) {
 		t.Fatal("declared Continue link was removed")
 	}
 }
@@ -1191,7 +1193,7 @@ func TestUpdateRemoteSkillsDryRunDoesNotApplyAvailabilityDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{"claude", "continue"} {
-		if _, err := EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+		if _, err := ensureAgentSymlink("sample", agent, skillsDir); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1330,7 +1332,7 @@ func TestSyncPlanApplyLocalSymlinkAppliesAvailability(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
 		t.Fatal("excluded Claude link exists")
 	}
-	if !IsManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
+	if !isManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
 		t.Fatal("declared Continue link missing")
 	}
 }
@@ -1369,7 +1371,7 @@ func TestSyncPlanApplyCommandFailureStillAppliesAvailability(t *testing.T) {
 	config.AddLocalCommandEntry(cfg, "sample", "exit 1", "", "")
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 	for _, agent := range []string{"claude", "continue"} {
-		if _, err := EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+		if _, err := ensureAgentSymlink("sample", agent, skillsDir); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1390,7 +1392,7 @@ func TestSyncPlanApplyCommandFailureStillAppliesAvailability(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
 		t.Fatal("excluded Claude link still exists")
 	}
-	if !IsManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
+	if !isManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
 		t.Fatal("declared Continue link missing")
 	}
 }
@@ -1413,7 +1415,7 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 	for _, agent := range []string{"claude", "continue"} {
-		if _, err := EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
+		if _, err := ensureAgentSymlink("sample", agent, skillsDir); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1433,7 +1435,7 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
 		t.Fatal("excluded Claude link still exists")
 	}
-	if !IsManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
+	if !isManagedSkillLink(filepath.Join(project, ".continue", "skills", "sample"), "sample", skillsDir) {
 		t.Fatal("declared Continue link missing")
 	}
 }

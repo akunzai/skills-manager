@@ -201,7 +201,7 @@ func replaceManagedCopy(src, dst string) error {
 		return err
 	}
 	// The marker names the master Skill, not where its bytes came from: that
-	// is what IsManagedSkillCopy matches against to recognize its own work.
+	// is what isManagedSkillCopy matches against to recognize its own work.
 	absSource, err := filepath.Abs(src)
 	if err != nil {
 		return err
@@ -216,7 +216,7 @@ func replaceManagedCopy(src, dst string) error {
 	return installAtomically(staging, dst, "managed copy")
 }
 
-func EnsureAgentSymlink(
+func ensureAgentSymlink(
 	skillName string,
 	agentName string,
 	skillsDir string,
@@ -251,21 +251,35 @@ func EnsureAgentSymlink(
 		relTarget = masterSkillPath
 	}
 
-	// Check if already correctly linked
 	if fi, err := os.Lstat(agentLink); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
 			target, err := os.Readlink(agentLink)
-			if err == nil && (target == relTarget || filepath.Clean(target) == filepath.Clean(masterSkillPath)) {
-				return true, nil
+			live := err == nil && (target == relTarget || filepath.Clean(target) == filepath.Clean(masterSkillPath))
+			if live {
+				if _, statErr := os.Stat(agentLink); statErr == nil {
+					return true, nil
+				}
 			}
-		}
-		if IsManagedSkillCopy(agentLink, skillName, skillsDir) {
+			if isManagedSkillLink(agentLink, skillName, skillsDir) {
+				if err := os.Remove(agentLink); err != nil {
+					return false, err
+				}
+			} else if isManagedSkillCopy(agentLink, skillName, skillsDir) {
+				if err := reconcileManagedCopy(masterSkillPath, relTarget, agentLink); err != nil {
+					return false, err
+				}
+				return true, nil
+			} else {
+				return false, fmt.Errorf("agent path already exists and is not a managed link: %s", agentLink)
+			}
+		} else if isManagedSkillCopy(agentLink, skillName, skillsDir) {
 			if err := reconcileManagedCopy(masterSkillPath, relTarget, agentLink); err != nil {
 				return false, err
 			}
 			return true, nil
+		} else {
+			return false, fmt.Errorf("agent path already exists and is not a managed link: %s", agentLink)
 		}
-		return false, fmt.Errorf("agent path already exists and is not a managed link: %s", agentLink)
 	}
 
 	if err := CreateSymlink(relTarget, agentLink, true); err != nil {
@@ -274,65 +288,27 @@ func EnsureAgentSymlink(
 	return true, nil
 }
 
-func RemoveAgentSymlinks(skillName string, skillsDir ...string) []string {
-	removed := make([]string, 0)
-	var dir string
-	if len(skillsDir) > 0 {
-		dir = skillsDir[0]
-	}
-	knownAgents := models.GetAgentsForSkillsDir(dir)
-
-	for agentName, agentDir := range knownAgents {
-		linkPath := filepath.Join(agentDir, skillName)
-		if RemoveManagedSkillPath(linkPath, skillName, dir) {
-			removed = append(removed, agentName)
-		}
-	}
-
-	// Universal agents read the master skills directory directly, so nothing
-	// here is created by us — but older versions and setup scripts did populate
-	// these directories, and a link left pointing at a removed skill dangles
-	// forever otherwise.
-	for agentName, agentDir := range models.GetUniversalAgentSkillDirs(dir) {
-		if _, taken := knownAgents[agentName]; taken {
-			continue
-		}
-		if RemoveManagedSkillPath(filepath.Join(agentDir, skillName), skillName, dir) {
-			removed = append(removed, agentName)
-		}
-	}
-	return removed
-}
-
-// RemoveManagedSkillPath deletes path only when it is Availability this tool
-// created for skillName: a symlink pointing at skillName inside the master
-// skills directory, or a copy of it marked as managed. Anything else — a real
-// directory, a link somewhere else entirely — is left untouched, so an
-// imprecise agent path can never cost the user unrelated files.
-func RemoveManagedSkillPath(path, skillName, skillsDir string) bool {
-	managed, err := removeManagedSkillPath(path, skillName, skillsDir)
-	return managed && err == nil
-}
-
 // removeManagedSkillPath reports both whether path was Availability this tool
 // created and how removing it went, for the caller that has to tell a path it
 // left alone from one it could not remove. One place decides which mechanism a
 // managed path used, so a third would not have to be taught to two callers.
 func removeManagedSkillPath(path, skillName, skillsDir string) (managed bool, err error) {
-	if IsManagedSkillLink(path, skillName, skillsDir) {
+	if isManagedSkillLink(path, skillName, skillsDir) {
 		return true, os.Remove(path)
 	}
 	// A copy is a directory, so removing it takes more than os.Remove —
 	// otherwise removing a Skill on Windows leaves its Availability behind.
-	if IsManagedSkillCopy(path, skillName, skillsDir) {
+	if isManagedSkillCopy(path, skillName, skillsDir) {
 		return true, RemoveAll(path)
 	}
 	return false, nil
 }
 
-// IsManagedSkillCopy reports whether path is a copy of skillName that this
-// tool made in place of a symlink, identified by the marker it writes inside.
-func IsManagedSkillCopy(path, skillName, skillsDir string) bool {
+func isManagedSkillPath(path, skillName, skillsDir string) bool {
+	return isManagedSkillLink(path, skillName, skillsDir) || isManagedSkillCopy(path, skillName, skillsDir)
+}
+
+func isManagedSkillCopy(path, skillName, skillsDir string) bool {
 	fi, err := os.Lstat(path)
 	if err != nil || !fi.IsDir() {
 		return false
@@ -350,9 +326,7 @@ func IsManagedSkillCopy(path, skillName, skillsDir string) bool {
 	return err1 == nil && err2 == nil && filepath.Clean(source) == filepath.Clean(expected)
 }
 
-// IsManagedSkillLink reports whether linkPath is a symlink this tool would have
-// created for skillName, resolved or dangling.
-func IsManagedSkillLink(linkPath string, skillName string, skillsDir string) bool {
+func isManagedSkillLink(linkPath string, skillName string, skillsDir string) bool {
 	fi, err := os.Lstat(linkPath)
 	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		return false

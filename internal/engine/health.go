@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,7 +14,6 @@ import (
 type AgentHealth struct {
 	Name            string
 	Dir             string
-	Broken          []string
 	UnmanagedBroken []string
 	Physical        []string
 	// Unusable is why the directory could not be scanned, when it exists but
@@ -23,15 +21,6 @@ type AgentHealth struct {
 	// with ENOTDIR and returns nothing — indistinguishable from an empty,
 	// healthy directory unless it is recorded here.
 	Unusable string
-	// Copies is Availability applied by copying instead of linking. Doctor
-	// derives these from the markers on disk rather than from a Sync event.
-	Copies []string
-}
-
-type StaleUniversalLinks struct {
-	Agent string
-	Dir   string
-	Names []string
 }
 
 type SkillDrift struct {
@@ -39,6 +28,8 @@ type SkillDrift struct {
 	Source       string
 	Missing      []string
 	Unexpected   []string
+	Broken       []string
+	Copies       []string
 	Foreign      []ForeignAvailabilityPath
 	Unobservable []UnobservableAvailabilityPath
 }
@@ -70,7 +61,7 @@ type DoctorReport struct {
 	SkillsDir      string
 	MasterMissing  bool
 	Agents         []AgentHealth
-	StaleUniversal []StaleUniversalLinks
+	Leftover       LeftoverOccupancy
 	LeftoverEmpty  []AgentDir
 	Drift          []SkillDrift
 	Missing        []string
@@ -95,19 +86,17 @@ type DoctorReport struct {
 }
 
 type RepairOutcome struct {
-	RemovedBroken   []HealthFix
-	FailedBroken    []HealthFix
-	RemovedStale    []HealthFix
-	FailedStale     []HealthFix
-	RemovedLeftover []AgentDir
-	FailedLeftover  []HealthFix
-	FixedDrift      []string
-	FailedDrift     []HealthFix
-	StateRepaired   bool
-	StateRepairErr  error
-	CacheMigrations []CacheMigrationOutcome
-	RemovedScopes   []string
-	FailedScopes    []HealthFix
+	RemovedLeftoverPaths []LeftoverPath
+	FailedLeftoverPaths  []LeftoverFailure
+	RemovedLeftover      []AgentDir
+	FailedLeftover       []HealthFix
+	FixedDrift           []string
+	FailedDrift          []HealthFix
+	StateRepaired        bool
+	StateRepairErr       error
+	CacheMigrations      []CacheMigrationOutcome
+	RemovedScopes        []string
+	FailedScopes         []HealthFix
 }
 
 // Doctor diagnoses and optionally repairs one Scope's Skill, Agent directory,
@@ -116,7 +105,6 @@ type Doctor struct {
 	cfg            *config.Config
 	skillsDir      string
 	availability   *Availability
-	links          AgentLinkManager
 	cacheDir       string
 	stateStore     *ScopeStateStore
 	cacheMigration *legacyCacheMigrator
@@ -174,7 +162,6 @@ func NewDoctorWithCache(cfg *config.Config, skillsDir, cacheDir string) *Doctor 
 		cfg:          availability.cfg,
 		skillsDir:    availability.skillsDir,
 		availability: availability,
-		links:        NewAgentLinkManager(availability.skillsDir),
 		cacheDir:     cacheDirOrDefault(cacheDir),
 		stateStore:   stateStore,
 	}
@@ -222,7 +209,7 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 // attempts is listed here, so a new one that forgets to report itself shows up
 // as a Scope that reports a clean-ish 1 while a repair silently failed.
 func (r RepairOutcome) repairFailures() int {
-	failures := len(r.FailedBroken) + len(r.FailedStale) + len(r.FailedLeftover) + len(r.FailedDrift) + len(r.FailedScopes)
+	failures := len(r.FailedLeftoverPaths) + len(r.FailedLeftover) + len(r.FailedDrift) + len(r.FailedScopes)
 	if r.StateRepairErr != nil {
 		failures++
 	}
@@ -296,8 +283,6 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		plan.MasterMissing = true
 	}
 
-	knownAgents := models.GetAgentsForSkillsDir(d.skillsDir)
-	universalDirs := models.GetUniversalAgentSkillDirs(d.skillsDir)
 	configuredAgents := d.availability.ConfiguredAgentDirs()
 
 	for _, agentName := range slices.Sorted(maps.Keys(configuredAgents)) {
@@ -310,34 +295,18 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			plan.Agents = append(plan.Agents, AgentHealth{Name: agentName, Dir: agentDir, Unusable: "not a directory"})
 			continue
 		}
-		health := d.links.DiagnoseHealth(agentDir)
+		health := diagnoseAgentDirHealth(agentDir, d.skillsDir)
 		plan.Agents = append(plan.Agents, AgentHealth{
 			Name:            agentName,
 			Dir:             agentDir,
-			Broken:          health.Broken,
 			UnmanagedBroken: health.UnmanagedBroken,
 			Physical:        health.Physical,
-			Copies:          health.Copies,
 		})
 	}
 
-	for _, agentName := range slices.Sorted(maps.Keys(universalDirs)) {
-		if _, ok := configuredAgents[agentName]; ok {
-			continue
-		}
-		agentDir := universalDirs[agentName]
-		stale := d.links.FindStaleLinks(agentDir)
-		if len(stale) == 0 {
-			continue
-		}
-		plan.StaleUniversal = append(plan.StaleUniversal, StaleUniversalLinks{
-			Agent: agentName,
-			Dir:   agentDir,
-			Names: stale,
-		})
-	}
-
-	plan.LeftoverEmpty = LeftoverEmptyAgentDirs(knownAgents, configuredAgents)
+	leftover := d.availability.ObserveLeftover()
+	plan.Leftover = leftover
+	plan.LeftoverEmpty = leftover.Empty
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
 
 	inv, err := Inventory(d.cfg, d.skillsDir)
@@ -372,7 +341,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		}
 		source := availabilitySource(s)
 		drift := d.availability.ObserveAvailability(s.Name)
-		if drift.Empty() {
+		if drift.Empty() && len(drift.Copies) == 0 {
 			continue
 		}
 		plan.Drift = append(plan.Drift, SkillDrift{
@@ -380,6 +349,8 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			Source:       source,
 			Missing:      drift.Missing,
 			Unexpected:   drift.Unexpected,
+			Broken:       drift.Broken,
+			Copies:       drift.Copies,
 			Foreign:      drift.Foreign,
 			Unobservable: drift.Unobservable,
 		})
@@ -412,17 +383,14 @@ func (p DoctorReport) issueCount() int {
 		n++
 	}
 	for _, a := range p.Agents {
-		n += len(a.Broken) + len(a.UnmanagedBroken) + len(a.Physical)
+		n += len(a.UnmanagedBroken) + len(a.Physical)
 		if a.Unusable != "" {
 			n++
 		}
 	}
-	for _, s := range p.StaleUniversal {
-		n += len(s.Names)
-	}
-	n += len(p.LeftoverEmpty)
+	n += len(p.Leftover.Paths) + len(p.Leftover.Empty)
 	for _, d := range p.Drift {
-		n += len(d.Missing) + len(d.Unexpected) + len(d.Foreign) + len(d.Unobservable)
+		n += len(d.Missing) + len(d.Unexpected) + len(d.Broken) + len(d.Foreign) + len(d.Unobservable)
 	}
 	// Copies are not counted: Availability applied by copying is a working
 	// Scope by another mechanism, not Drift to reconcile (ADR-0002).
@@ -479,40 +447,16 @@ func (d *Doctor) repair(plan DoctorReport, progress DoctorProgress, replaceForei
 			result.RemovedScopes = append(result.RemovedScopes, artifact.ScopePath)
 		}
 	}
-	for _, agent := range plan.Agents {
-		for _, name := range agent.Broken {
-			path := filepath.Join(agent.Dir, name)
-			fix := HealthFix{Agent: agent.Name, Name: name}
-			if !d.links.RemoveManagedPath(path, name) {
-				fix.Err = fmt.Errorf("failed to remove broken symlink %s", name)
-				result.FailedBroken = append(result.FailedBroken, fix)
-				continue
-			}
-			result.RemovedBroken = append(result.RemovedBroken, fix)
-		}
-	}
-	for _, stale := range plan.StaleUniversal {
-		for _, name := range stale.Names {
-			fix := HealthFix{Agent: stale.Agent, Name: name}
-			path := filepath.Join(stale.Dir, name)
-			if !d.links.RemoveManagedPath(path, name) {
-				fix.Err = fmt.Errorf("failed to remove stale link %s", name)
-				result.FailedStale = append(result.FailedStale, fix)
-				continue
-			}
-			result.RemovedStale = append(result.RemovedStale, fix)
-		}
-	}
-	for _, leftover := range plan.LeftoverEmpty {
-		if err := d.links.RemoveEmptyDir(leftover.Dir); err != nil {
-			result.FailedLeftover = append(result.FailedLeftover, HealthFix{
-				Agent: leftover.Name,
-				Name:  leftover.Dir,
-				Err:   err,
-			})
-			continue
-		}
-		result.RemovedLeftover = append(result.RemovedLeftover, leftover)
+	leftover := d.availability.ApplyLeftover(plan.Leftover)
+	result.RemovedLeftoverPaths = leftover.RemovedPaths
+	result.FailedLeftoverPaths = leftover.FailedPaths
+	result.RemovedLeftover = leftover.RemovedEmpty
+	for _, failure := range leftover.FailedEmpty {
+		result.FailedLeftover = append(result.FailedLeftover, HealthFix{
+			Agent: failure.Dir.Name,
+			Name:  failure.Dir.Dir,
+			Err:   failure.Err,
+		})
 	}
 	for _, drift := range plan.Drift {
 		var err error

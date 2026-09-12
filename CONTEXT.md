@@ -46,7 +46,11 @@ _Avoid_: whitelist, blacklist, enable, disable
 
 **Drift**:
 A difference between declared Availability and filesystem state.
-_Avoid_: stale, orphan, leftover, mismatch (when you mean Availability vs disk)
+_Avoid_: stale, orphan, leftover occupancy, mismatch (when you mean Availability vs disk)
+
+**Leftover occupancy**:
+On an Agent directory, occupancy this tool's Availability mechanism created (or left behind) that declared Availability does not call for: a managed path on an automatically available Agent, a managed path for a Skill Config does not declare, or an empty Agent directory the current policy does not select.
+_Avoid_: Drift (no declaration to compare), Inventory (wrong directory), stale, orphan
 
 **Sync**:
 Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability.

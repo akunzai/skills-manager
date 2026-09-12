@@ -16,66 +16,6 @@ type AgentDir struct {
 	Dir  string
 }
 
-// AgentLinkManager handles agent skills directories, symlink creation,
-// health inspection, managed link removal, and boundary-safe parent directory pruning.
-type AgentLinkManager struct {
-	skillsDir string
-	stopAt    string
-}
-
-func NewAgentLinkManager(skillsDir string) AgentLinkManager {
-	if skillsDir == "" {
-		skillsDir = models.DefaultSkillsDir()
-	}
-	return AgentLinkManager{
-		skillsDir: skillsDir,
-		stopAt:    models.ScopeRoot(skillsDir),
-	}
-}
-
-func (m AgentLinkManager) EnsureLink(skillName, agentName string) (bool, error) {
-	return EnsureAgentSymlink(skillName, agentName, m.skillsDir)
-}
-
-func (m AgentLinkManager) RemoveLinks(skillName string) []string {
-	return RemoveAgentSymlinks(skillName, m.skillsDir)
-}
-
-func (m AgentLinkManager) DiagnoseHealth(agentDir string) AgentDirHealth {
-	return DiagnoseAgentDirHealth(agentDir, m.skillsDir)
-}
-
-func (m AgentLinkManager) FindStaleLinks(agentDir string) []string {
-	return FindStaleManagedLinks(agentDir, m.skillsDir)
-}
-
-func (m AgentLinkManager) RemoveEmptyDir(agentDir string) error {
-	return RemoveEmptyAgentDir(agentDir, m.stopAt)
-}
-
-func (m AgentLinkManager) PruneParents(dir string) error {
-	return pruneEmptyParents(dir, m.stopAt)
-}
-
-func (m AgentLinkManager) IsManagedLink(linkPath, skillName string) bool {
-	return IsManagedSkillLink(linkPath, skillName, m.skillsDir)
-}
-
-func (m AgentLinkManager) IsManagedCopy(path, skillName string) bool {
-	return IsManagedSkillCopy(path, skillName, m.skillsDir)
-}
-
-// IsManagedPath reports whether path is Availability this tool created for
-// skillName by either mechanism — a symlink, or the copy that stands in for
-// one where the operating system does not grant the privilege to link.
-func (m AgentLinkManager) IsManagedPath(path, skillName string) bool {
-	return m.IsManagedLink(path, skillName) || m.IsManagedCopy(path, skillName)
-}
-
-func (m AgentLinkManager) RemoveManagedPath(path, skillName string) bool {
-	return RemoveManagedSkillPath(path, skillName, m.skillsDir)
-}
-
 // AgentDirHealth is one Agent skills directory classified in a single pass.
 // Copies travel with the rest because the same test that keeps a copy out of
 // Physical is what identifies it — computing them separately meant reading
@@ -94,7 +34,7 @@ type AgentDirHealth struct {
 
 // DiagnoseAgentDirHealth classifies every entry in a configured agent's skills
 // directory. A missing agentDir is not itself unhealthy: it reports nothing.
-func DiagnoseAgentDirHealth(agentDir, skillsDir string) AgentDirHealth {
+func diagnoseAgentDirHealth(agentDir, skillsDir string) AgentDirHealth {
 	var health AgentDirHealth
 	entries, err := os.ReadDir(agentDir)
 	if err != nil {
@@ -112,14 +52,14 @@ func DiagnoseAgentDirHealth(agentDir, skillsDir string) AgentDirHealth {
 
 		if fi.Mode()&os.ModeSymlink != 0 {
 			if _, err := os.Stat(fullPath); err != nil {
-				if IsManagedSkillLink(fullPath, name, skillsDir) {
+				if isManagedSkillLink(fullPath, name, skillsDir) {
 					health.Broken = append(health.Broken, name)
 				} else {
 					health.UnmanagedBroken = append(health.UnmanagedBroken, name)
 				}
 			}
 		} else if fi.IsDir() && !strings.HasPrefix(name, ".") {
-			if IsManagedSkillCopy(fullPath, name, skillsDir) {
+			if isManagedSkillCopy(fullPath, name, skillsDir) {
 				health.Copies = append(health.Copies, name)
 			} else {
 				health.Physical = append(health.Physical, name)
@@ -130,34 +70,9 @@ func DiagnoseAgentDirHealth(agentDir, skillsDir string) AgentDirHealth {
 	return health
 }
 
-// FindStaleManagedLinks returns managed symlinks in a universal agent's
-// skills directory whose target skill no longer exists. Universal agents
-// read the master skills directory directly, so skills-manager never
-// creates these paths, but earlier versions and setup scripts did, and a
-// link left behind after a skill is removed dangles forever otherwise. A
-// missing agentDir reports no findings.
-func FindStaleManagedLinks(agentDir, skillsDir string) []string {
-	entries, err := os.ReadDir(agentDir)
-	if err != nil {
-		return nil
-	}
-
-	var stale []string
-	for _, entry := range entries {
-		linkPath := filepath.Join(agentDir, entry.Name())
-		if !IsManagedSkillLink(linkPath, entry.Name(), skillsDir) {
-			continue
-		}
-		if _, err := os.Stat(linkPath); err != nil {
-			stale = append(stale, entry.Name())
-		}
-	}
-	return stale
-}
-
-// LeftoverEmptyAgentDirs returns known agent skills dirs that exist, are
+// leftoverEmptyAgentDirs returns known agent skills dirs that exist, are
 // effectively empty, and are not in the configured set.
-func LeftoverEmptyAgentDirs(known, configured map[string]string) []AgentDir {
+func leftoverEmptyAgentDirs(known, configured map[string]string) []AgentDir {
 	var leftover []AgentDir
 	for name, dir := range known {
 		if _, ok := configured[name]; ok {
@@ -176,7 +91,7 @@ func LeftoverEmptyAgentDirs(known, configured map[string]string) []AgentDir {
 // RemoveEmptyAgentDir deletes an empty agent skills directory and prunes
 // empty parents. Pruning never escapes stopAt (when non-empty), and always
 // stops at $HOME, XDG_CONFIG_HOME, and ~/.local.
-func RemoveEmptyAgentDir(agentDir string, stopAt string) error {
+func removeEmptyAgentDir(agentDir string, stopAt string) error {
 	if agentDir == "" {
 		return nil
 	}

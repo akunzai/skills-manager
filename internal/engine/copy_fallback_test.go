@@ -61,7 +61,7 @@ func TestSyncAppliesAvailabilityByCopyingWhenTheLinkPrivilegeIsDenied(t *testing
 	if len(copied) != 1 || copied[0].Skill != "sample" || !reflect.DeepEqual(copied[0].Agents, []string{"claude-code"}) {
 		t.Fatalf("copy events = %#v; want one naming sample and claude-code", copied)
 	}
-	if !IsManagedSkillCopy(availabilityPath, "sample", skillsDir) {
+	if !isManagedSkillCopy(availabilityPath, "sample", skillsDir) {
 		t.Fatalf("%s is not a managed copy", availabilityPath)
 	}
 	if _, err := os.Stat(filepath.Join(availabilityPath, "SKILL.md")); err != nil {
@@ -195,7 +195,7 @@ func TestSyncReplacesAManagedCopyWithALinkOnceThePrivilegeIsGranted(t *testing.T
 	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !IsManagedSkillCopy(availabilityPath, "sample", skillsDir) {
+	if !isManagedSkillCopy(availabilityPath, "sample", skillsDir) {
 		t.Fatalf("%s is not a managed copy", availabilityPath)
 	}
 
@@ -208,7 +208,7 @@ func TestSyncReplacesAManagedCopyWithALinkOnceThePrivilegeIsGranted(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !IsManagedSkillLink(availabilityPath, "sample", skillsDir) {
+	if !isManagedSkillLink(availabilityPath, "sample", skillsDir) {
 		t.Fatalf("%s is still not a link; earlier copies are permanent", availabilityPath)
 	}
 	if len(copied) != 0 {
@@ -228,7 +228,7 @@ func TestSyncKeepsAManagedCopyWhenThePrivilegeIsStillDenied(t *testing.T) {
 	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !IsManagedSkillCopy(availabilityPath, "sample", skillsDir) {
+	if !isManagedSkillCopy(availabilityPath, "sample", skillsDir) {
 		t.Fatalf("a failed relink cost the working copy at %s", availabilityPath)
 	}
 	entries, err := os.ReadDir(filepath.Dir(availabilityPath))
@@ -274,7 +274,7 @@ func TestAvailabilityCopiesThroughASymlinkedMasterSkill(t *testing.T) {
 	if !reflect.DeepEqual(copied, []string{"claude-code"}) {
 		t.Fatalf("Copied = %#v; want claude-code — the path is a copy or it is unmanaged", copied)
 	}
-	if !IsManagedSkillCopy(availabilityPath, "local", skillsDir) {
+	if !isManagedSkillCopy(availabilityPath, "local", skillsDir) {
 		t.Fatalf("%s is not a managed copy, so the next apply would refuse it as unmanaged", availabilityPath)
 	}
 	if got, err := os.ReadFile(filepath.Join(availabilityPath, "SKILL.md")); err != nil || string(got) != "# Local\n" {
