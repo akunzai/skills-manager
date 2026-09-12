@@ -1421,7 +1421,7 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 		}
 	}
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, nil)
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, AddAvailabilityIntent{})
 	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err == nil {
 		t.Fatal("expected materialize error")
@@ -1452,7 +1452,7 @@ func TestAddPlanSymlinkDeclaresAndMaterializes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, "local sample"), map[string]string{"sample": "sample"}, nil)
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, "local sample"), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1480,7 +1480,7 @@ func TestAddPlanRemoteDeclaresAndMaterializes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource("owner/repo", "github", "", repoDir), map[string]string{"sample": "sample"}, nil)
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource("owner/repo", "github", "", repoDir), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -170,11 +170,12 @@ func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
 		return err
 	}
 	req.agents = agents
-	if err := promptAddAvailability(cfg, skillsToAdd, skillsDir, req.yes, req.agents); err != nil {
+	intent, err := promptAddAvailability(cfg, skillsToAdd, skillsDir, req.yes, req.agents)
+	if err != nil {
 		return err
 	}
 
-	plan := engine.BuildAddPlan(cfg, configPath, skillsDir, intake.source, skillsToAdd, req.agents)
+	plan := engine.BuildAddPlan(cfg, configPath, skillsDir, intake.source, skillsToAdd, intent)
 
 	if len(plan.Conflicts) > 0 && !req.yes {
 		if err := promptConfirmConflicts(out, plan.Conflicts); err != nil {

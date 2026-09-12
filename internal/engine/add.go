@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -29,6 +31,48 @@ type AddSource struct {
 	Command     string // installer command
 	Check       string // command pre-check
 	Description string // description of the skill
+}
+
+// AddSourceSpec is the already-parsed CLI facts used to classify an Add Source.
+type AddSourceSpec struct {
+	Positional string
+	Symlink    string
+	Command    string
+}
+
+// ClassifyAddKind decides the Add Source kind from parsed flags and the
+// positional argument. The returned string is what the matching constructor
+// consumes: a local path, a command, or a remote Source key.
+func ClassifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
+	if spec.Symlink != "" || (spec.Command == "" && spec.Positional != "" && isLocalPath(spec.Positional)) {
+		return AddSourceSymlink, cmp.Or(spec.Symlink, spec.Positional), nil
+	}
+	if spec.Command != "" {
+		return AddSourceCommand, spec.Command, nil
+	}
+	if spec.Positional == "" {
+		return "", "", fmt.Errorf("source repository or --symlink/--command required")
+	}
+	return AddSourceRemote, spec.Positional, nil
+}
+
+func isLocalPath(raw string) bool {
+	if strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "~") ||
+		strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../") ||
+		strings.HasPrefix(raw, `.\`) || strings.HasPrefix(raw, `..\`) {
+		return true
+	}
+	if len(raw) >= 3 && ((raw[0] >= 'a' && raw[0] <= 'z') || (raw[0] >= 'A' && raw[0] <= 'Z')) && raw[1] == ':' && (raw[2] == '/' || raw[2] == '\\') {
+		return true
+	}
+	if !strings.HasPrefix(raw, "git@") && !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") &&
+		!strings.HasPrefix(raw, "github:") && !strings.HasPrefix(raw, "gitlab:") {
+		expanded := models.ExpandUser(raw)
+		if info, err := os.Stat(expanded); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func NewRemoteAddSource(key, repoType, url, repoDir string) AddSource {
@@ -86,14 +130,32 @@ type AddConflict struct {
 	ProposedSrc string
 }
 
+// AddAvailabilityKind is how ApplyAddPlan writes per-Skill Availability.
+type AddAvailabilityKind uint8
+
+const (
+	AddAvailabilityPreserve AddAvailabilityKind = iota
+	AddAvailabilityFollowDefaults
+	AddAvailabilityInclude
+	AddAvailabilitySetManaged
+)
+
+// AddAvailabilityIntent is the Availability decision for one Add plan.
+// Agents is the include list when Kind is Include, or the selected set when
+// Kind is SetManaged.
+type AddAvailabilityIntent struct {
+	Kind   AddAvailabilityKind
+	Agents []string
+}
+
 // AddPlan is the calculated set of Skills to record in Config, Materialize, and link.
 type AddPlan struct {
-	Source     AddSource
-	Skills     map[string]string // skill name -> subpath
-	Conflicts  []AddConflict
-	Agents     []string // explicit agent overrides to include
-	ConfigPath string
-	SkillsDir  string
+	Source       AddSource
+	Skills       map[string]string // skill name -> subpath
+	Conflicts    []AddConflict
+	Availability AddAvailabilityIntent
+	ConfigPath   string
+	SkillsDir    string
 }
 
 // BuildAddPlan inspects existing Config and filesystem Inventory to calculate
@@ -104,7 +166,7 @@ func BuildAddPlan(
 	skillsDir string,
 	source AddSource,
 	skills map[string]string,
-	agents []string,
+	availability AddAvailabilityIntent,
 ) AddPlan {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -117,11 +179,11 @@ func BuildAddPlan(
 	}
 
 	plan := AddPlan{
-		Source:     source,
-		Skills:     skills,
-		Agents:     agents,
-		ConfigPath: configPath,
-		SkillsDir:  skillsDir,
+		Source:       source,
+		Skills:       skills,
+		Availability: availability,
+		ConfigPath:   configPath,
+		SkillsDir:    skillsDir,
 	}
 
 	for _, name := range sortedSkillKeys(skills) {
@@ -234,8 +296,15 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		case AddSourceCommand:
 			config.AddLocalCommandEntry(cfg, name, plan.Source.Command, plan.Source.Check, plan.Source.Description)
 		}
-		if len(plan.Agents) > 0 {
-			if err := availability.Include(name, plan.Agents...); err != nil {
+		switch plan.Availability.Kind {
+		case AddAvailabilityFollowDefaults:
+			availability.FollowDefaults(name)
+		case AddAvailabilityInclude:
+			if err := availability.Include(name, plan.Availability.Agents...); err != nil {
+				return AddResult{}, err
+			}
+		case AddAvailabilitySetManaged:
+			if err := availability.SetManagedAgents(name, plan.Availability.Agents); err != nil {
 				return AddResult{}, err
 			}
 		}

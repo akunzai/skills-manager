@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -123,6 +124,22 @@ func TestDiscoveryResultPreservesDiscoveryError(t *testing.T) {
 	_, err := discoveryResult(nil, discoveryErr, "owner/repo")
 	if err == nil || !strings.Contains(err.Error(), "owner/repo") || !strings.Contains(err.Error(), discoveryErr.Error()) {
 		t.Fatalf("discovery result error = %v; want Source and cause", err)
+	}
+}
+
+func TestNewLocalIntakeDoesNotFallBackToRootSkillOutsideDiscoveryScope(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("---\nname: root-skill\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newAddCmd()
+	cmd.SetOut(io.Discard)
+	_, err := newLocalIntake(cmd, root, "", "empty")
+	if err == nil || !strings.Contains(err.Error(), "no SKILL.md") {
+		t.Fatalf("err = %v; want empty discovery scope to fail", err)
 	}
 }
 
