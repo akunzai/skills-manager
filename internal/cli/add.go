@@ -152,26 +152,6 @@ func discoveryResult(discovered engine.DiscoveredSkills, err error, sourceKey st
 	return discovered, nil
 }
 
-func isLocalPath(raw string) bool {
-	if strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "~") ||
-		strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../") ||
-		strings.HasPrefix(raw, `.\`) || strings.HasPrefix(raw, `..\`) {
-		return true
-	}
-	// Windows drive letter paths: e.g. C:\foo or C:/foo
-	if len(raw) >= 3 && ((raw[0] >= 'a' && raw[0] <= 'z') || (raw[0] >= 'A' && raw[0] <= 'Z')) && raw[1] == ':' && (raw[2] == '/' || raw[2] == '\\') {
-		return true
-	}
-	if !strings.HasPrefix(raw, "git@") && !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") &&
-		!strings.HasPrefix(raw, "github:") && !strings.HasPrefix(raw, "gitlab:") {
-		expanded := models.ExpandUser(raw)
-		if info, err := os.Stat(expanded); err == nil && info.IsDir() {
-			return true
-		}
-	}
-	return false
-}
-
 func promptConfirmConflicts(out io.Writer, conflicts []engine.AddConflict) error {
 	if !tui.IsTerminal() {
 		return fmt.Errorf("refusing to overwrite %d existing skill(s) without a terminal; rerun with --yes", len(conflicts))
@@ -204,19 +184,9 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%sScanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
 	discovered, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
+	discovered, err = discoveryResult(discovered, err, models.ToTildePath(sourcePath))
 	if err != nil {
-		return nil, fmt.Errorf("discover skills in %s: %w", models.ToTildePath(sourcePath), err)
-	}
-	if len(discovered) == 0 {
-		skillFile := filepath.Join(absSourcePath, "SKILL.md")
-		if _, err := os.Stat(skillFile); err != nil {
-			return nil, fmt.Errorf("no SKILL.md found in %s", models.ToTildePath(sourcePath))
-		}
-		skillName := engine.ParseSkillNameFromMD(skillFile)
-		if skillName == "" {
-			skillName = filepath.Base(absSourcePath)
-		}
-		discovered[skillName] = []string{"."}
+		return nil, err
 	}
 
 	resolvedPath := func(subpath string) string {
@@ -343,21 +313,28 @@ func newAddCmd() *cobra.Command {
 				return fmt.Errorf("--all cannot be combined with named Skills")
 			}
 
-			// 1. Local Symlink Mode (via --symlink flag or positional local path)
-			if flagSymlink != "" || (flagCommand == "" && len(args) > 0 && isLocalPath(args[0])) {
-				localPath := flagSymlink
-				if localPath == "" {
-					localPath = args[0]
-				}
-				intake, err := newLocalIntake(cmd, localPath, flagDescription, flagPath)
+			positional := ""
+			if len(args) > 0 {
+				positional = args[0]
+			}
+			kind, source, err := engine.ClassifyAddKind(engine.AddSourceSpec{
+				Positional: positional,
+				Symlink:    flagSymlink,
+				Command:    flagCommand,
+			})
+			if err != nil {
+				cmd.SilenceUsage = false
+				return err
+			}
+
+			switch kind {
+			case engine.AddSourceSymlink:
+				intake, err := newLocalIntake(cmd, source, flagDescription, flagPath)
 				if err != nil {
 					return err
 				}
 				return intake.run(cmd, addRequest{all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
-			}
-
-			// 2. Command Skill Mode
-			if flagCommand != "" {
+			case engine.AddSourceCommand:
 				if len(flagSkills) == 0 && len(args) == 0 {
 					cmd.SilenceUsage = false
 					return fmt.Errorf("--skill <name> or skill name argument is required when adding a command skill")
@@ -368,20 +345,17 @@ func newAddCmd() *cobra.Command {
 				} else {
 					skillName = args[0]
 				}
-				intake := newCommandIntake(skillName, flagCommand, flagCheck, flagDescription)
+				intake := newCommandIntake(skillName, source, flagCheck, flagDescription)
 				return intake.run(cmd, addRequest{skills: []string{skillName}, yes: flagYes, agents: flagAgents})
+			case engine.AddSourceRemote:
+				intake, err := newRemoteIntake(cmd, source, flagURL, flagBranch, flagPath, cacheDir)
+				if err != nil {
+					return err
+				}
+				return intake.run(cmd, addRequest{all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
+			default:
+				return fmt.Errorf("unsupported Add Source kind %q", kind)
 			}
-
-			// 3. Remote Git Repository Mode
-			if len(args) == 0 {
-				cmd.SilenceUsage = false
-				return fmt.Errorf("source repository or --symlink/--command required")
-			}
-			intake, err := newRemoteIntake(cmd, args[0], flagURL, flagBranch, flagPath, cacheDir)
-			if err != nil {
-				return err
-			}
-			return intake.run(cmd, addRequest{all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
 		},
 	}
 
@@ -400,26 +374,25 @@ func newAddCmd() *cobra.Command {
 	return cmd
 }
 
-func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsDir string, skip bool, explicitAgents []string) error {
-	if skip || len(explicitAgents) > 0 || !tui.IsTerminal() {
-		return nil
+func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsDir string, skip bool, explicitAgents []string) (engine.AddAvailabilityIntent, error) {
+	if len(explicitAgents) > 0 {
+		return engine.AddAvailabilityIntent{Kind: engine.AddAvailabilityInclude, Agents: explicitAgents}, nil
+	}
+	if skip || !tui.IsTerminal() {
+		return engine.AddAvailabilityIntent{}, nil
 	}
 	choice, err := tui.PromptSelect("Agent availability:", []tui.SelectOption{
 		{Key: "defaults", Title: "Follow defaults (recommended)"},
 		{Key: "custom", Title: "Customize"},
 	}, 0)
 	if err != nil {
-		return err
+		return engine.AddAvailabilityIntent{}, err
 	}
 	if choice == "" {
-		return fmt.Errorf("add cancelled")
+		return engine.AddAvailabilityIntent{}, fmt.Errorf("add cancelled")
 	}
 	if choice == "defaults" {
-		availability := engine.NewAvailability(cfg, skillsDir)
-		for skill := range skills {
-			availability.FollowDefaults(skill)
-		}
-		return nil
+		return engine.AddAvailabilityIntent{Kind: engine.AddAvailabilityFollowDefaults}, nil
 	}
 
 	availability := engine.NewAvailability(cfg, skillsDir)
@@ -427,7 +400,7 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsD
 	skillNames := slices.Sorted(maps.Keys(skills))
 	baseline, ok := agentSelectionBaseline(availability, skillNames)
 	if !ok {
-		return fmt.Errorf("selected skills have different availability; configure them individually with skills agents")
+		return engine.AddAvailabilityIntent{}, fmt.Errorf("selected skills have different availability; configure them individually with skills agents")
 	}
 	options := make([]tui.SelectOption, 0, len(agents))
 	for _, agent := range agents {
@@ -436,17 +409,12 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsD
 	}
 	selected, err := tui.PromptMultiSelect("Select agents where these skills should be available:", options)
 	if err != nil {
-		return err
+		return engine.AddAvailabilityIntent{}, err
 	}
 	if selected == nil {
-		return fmt.Errorf("operation cancelled by user")
+		return engine.AddAvailabilityIntent{}, fmt.Errorf("operation cancelled by user")
 	}
-	for skill := range skills {
-		if err := availability.SetManagedAgents(skill, selected); err != nil {
-			return err
-		}
-	}
-	return nil
+	return engine.AddAvailabilityIntent{Kind: engine.AddAvailabilitySetManaged, Agents: selected}, nil
 }
 
 func sameAgentSelection(want map[string]struct{}, got []string) bool {

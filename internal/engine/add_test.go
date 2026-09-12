@@ -8,12 +8,95 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 )
 
+func TestClassifyAddKind(t *testing.T) {
+	t.Run("empty spec", func(t *testing.T) {
+		_, _, err := ClassifyAddKind(AddSourceSpec{})
+		if err == nil {
+			t.Fatal("empty spec succeeded")
+		}
+	})
+
+	t.Run("symlink flag wins over command", func(t *testing.T) {
+		kind, source, err := ClassifyAddKind(AddSourceSpec{Symlink: "/tmp/local", Command: "echo hi", Positional: "owner/repo"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind != AddSourceSymlink || source != "/tmp/local" {
+			t.Fatalf("kind=%s source=%q", kind, source)
+		}
+	})
+
+	t.Run("command when no symlink", func(t *testing.T) {
+		kind, source, err := ClassifyAddKind(AddSourceSpec{Command: "npx foo", Positional: "my-skill"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind != AddSourceCommand || source != "npx foo" {
+			t.Fatalf("kind=%s source=%q", kind, source)
+		}
+	})
+
+	t.Run("remote positional", func(t *testing.T) {
+		kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "owner/repo"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind != AddSourceRemote || source != "owner/repo" {
+			t.Fatalf("kind=%s source=%q", kind, source)
+		}
+	})
+
+	for _, raw := range []string{"/abs/skill", "~/skill", "./rel", "../up", `.\win`, `..\win`, `C:\drive`, "D:/drive"} {
+		t.Run("prefix "+raw, func(t *testing.T) {
+			kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: raw})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind != AddSourceSymlink || source != raw {
+				t.Fatalf("kind=%s source=%q", kind, source)
+			}
+		})
+	}
+
+	t.Run("existing directory without prefix is local", func(t *testing.T) {
+		root := t.TempDir()
+		t.Chdir(root)
+		if err := os.Mkdir("local-skill", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "local-skill"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind != AddSourceSymlink || source != "local-skill" {
+			t.Fatalf("kind=%s source=%q", kind, source)
+		}
+	})
+
+	t.Run("url prefixes stay remote even if a directory exists", func(t *testing.T) {
+		root := t.TempDir()
+		t.Chdir(root)
+		// git@ is a remote prefix; Windows rejects ':' in directory names, so
+		// github:owner cannot be used as the colliding fixture.
+		if err := os.Mkdir("git@example.com", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "git@example.com"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind != AddSourceRemote || source != "git@example.com" {
+			t.Fatalf("kind=%s source=%q", kind, source)
+		}
+	})
+}
+
 func TestBuildAddPlanDetectsRemoteConflicts(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "original/repo", "my-skill", "subpath", "github", "")
 
 	source := NewRemoteAddSource("new/repo", "github", "", "/tmp/cache")
-	plan := BuildAddPlan(cfg, "/tmp/skills.json", "/tmp/skills", source, map[string]string{"my-skill": "subpath"}, nil)
+	plan := BuildAddPlan(cfg, "/tmp/skills.json", "/tmp/skills", source, map[string]string{"my-skill": "subpath"}, AddAvailabilityIntent{})
 
 	if len(plan.Conflicts) != 1 {
 		t.Fatalf("expected 1 conflict, got %d", len(plan.Conflicts))
@@ -39,7 +122,7 @@ func TestApplyAddPlanRefusesSourceInsideSkillsDir(t *testing.T) {
 	}
 	configPath := filepath.Join(t.TempDir(), "skills.json")
 	cfg := config.DefaultConfig()
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(dest, ""), map[string]string{"mine": "."}, nil)
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(dest, ""), map[string]string{"mine": "."}, AddAvailabilityIntent{})
 	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
 		t.Fatal("expected refusal of a Source inside the skills directory")
 	}
@@ -64,7 +147,7 @@ func TestBuildAddPlanDetectsUntrackedDiskConflicts(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	source := NewSymlinkAddSource("/tmp/local-source", "local test")
-	plan := BuildAddPlan(cfg, "/tmp/skills.json", skillsDir, source, map[string]string{"existing-skill": "."}, nil)
+	plan := BuildAddPlan(cfg, "/tmp/skills.json", skillsDir, source, map[string]string{"existing-skill": "."}, AddAvailabilityIntent{})
 
 	if len(plan.Conflicts) != 1 {
 		t.Fatalf("expected 1 conflict, got %d", len(plan.Conflicts))
@@ -96,7 +179,7 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 	}
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource("owner/repo", "git", origin, repoDir),
-		map[string]string{"sample": "sample"}, nil)
+		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +227,7 @@ func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
 	cfg := config.DefaultConfig()
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource("owner/repo", "git", "", repoDir),
-		map[string]string{"sample": "sample"}, nil)
+		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
 		t.Fatal("expected unmanaged Availability path to fail closed")
 	}
@@ -174,7 +257,7 @@ func TestApplyAddPlanStopsAfterFirstRemoteFailure(t *testing.T) {
 	cfg := config.DefaultConfig()
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource("owner/repo", "git", "", repoDir),
-		map[string]string{"bad": "missing", "good": "good"}, nil)
+		map[string]string{"bad": "missing", "good": "good"}, AddAvailabilityIntent{})
 	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
 		t.Fatal("expected the missing Skill to fail apply")
 	}
@@ -188,4 +271,65 @@ func TestApplyAddPlanStopsAfterFirstRemoteFailure(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(skillsDir, "good", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatal("second Skill must not be Materialized after the first fails")
 	}
+}
+
+func TestApplyAddPlanAvailabilityIntent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	apply := func(t *testing.T, seed *config.AvailabilityOverride, intent AddAvailabilityIntent) *config.Config {
+		t.Helper()
+		project := t.TempDir()
+		source := filepath.Join(project, "source")
+		writeLocalGitSkill(t, source, "sample")
+		skillsDir := filepath.Join(project, ".agents", "skills")
+		configPath := filepath.Join(project, ".agents", "skills.json")
+		if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.DefaultConfig()
+		if seed != nil {
+			cfg.Settings.Availability["sample"] = *seed
+		}
+		plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, ""), map[string]string{"sample": "sample"}, intent)
+		if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := config.LoadConfig(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return loaded
+	}
+
+	t.Run("preserve keeps override", func(t *testing.T) {
+		loaded := apply(t, &config.AvailabilityOverride{Include: []string{"continue"}}, AddAvailabilityIntent{})
+		got := loaded.Settings.Availability["sample"]
+		if len(got.Include) != 1 || got.Include[0] != "continue" {
+			t.Fatalf("override = %#v", got)
+		}
+	})
+
+	t.Run("follow defaults clears override", func(t *testing.T) {
+		loaded := apply(t, &config.AvailabilityOverride{Include: []string{"continue"}}, AddAvailabilityIntent{Kind: AddAvailabilityFollowDefaults})
+		if _, ok := loaded.Settings.Availability["sample"]; ok {
+			t.Fatalf("override survived: %#v", loaded.Settings.Availability["sample"])
+		}
+	})
+
+	t.Run("include records agents", func(t *testing.T) {
+		loaded := apply(t, nil, AddAvailabilityIntent{Kind: AddAvailabilityInclude, Agents: []string{"continue"}})
+		got := loaded.Settings.Availability["sample"]
+		if len(got.Include) != 1 || got.Include[0] != "continue" {
+			t.Fatalf("override = %#v", got)
+		}
+	})
+
+	t.Run("set managed stores minimal override", func(t *testing.T) {
+		loaded := apply(t, nil, AddAvailabilityIntent{Kind: AddAvailabilitySetManaged, Agents: []string{"continue"}})
+		got := loaded.Settings.Availability["sample"]
+		if len(got.Include) != 1 || got.Include[0] != "continue" || len(got.Exclude) != 1 || got.Exclude[0] != "claude-code" {
+			t.Fatalf("override = %#v", got)
+		}
+	})
 }
