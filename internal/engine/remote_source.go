@@ -1,30 +1,28 @@
 package engine
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-// remoteSource owns one remote Source's Cache, Materialize, and Availability
-// lifecycle. Batch scheduling remains with Sync and Update.
+// remoteSource owns one remote Source's Cache and Freshness observation.
+// Materialize and Availability are the shared apply path.
 type remoteSource struct {
-	availability *Availability
-	key          string
-	repo         config.RemoteRepo
-	cacheDir     string
+	key      string
+	repo     config.RemoteRepo
+	cacheDir string
 }
 
-func newRemoteSource(availability *Availability, key string, repo config.RemoteRepo, cacheDir string) remoteSource {
-	return remoteSource{availability: availability, key: key, repo: repo, cacheDir: cacheDir}
+func newRemoteSource(key string, repo config.RemoteRepo, cacheDir string) remoteSource {
+	return remoteSource{key: key, repo: repo, cacheDir: cacheDir}
 }
 
 // PrepareRemoteSource refreshes one Source's Cache and discovers its Skills.
 // Add uses this before it knows which Skills the user will declare.
 func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir, scope string) (string, DiscoveredSkills, error) {
-	remote := newRemoteSource(nil, key, repo, cacheDir)
+	remote := newRemoteSource(key, repo, cacheDir)
 	repoDir, err := remote.refresh(true)
 	if err != nil {
 		return "", nil, fmt.Errorf("refresh Source %s: %w", key, err)
@@ -95,31 +93,4 @@ func (s remoteSource) ObserveFreshness() FreshnessRepository {
 		CachePath:    repo.Dir,
 		Error:        errorMessage,
 	}
-}
-
-// reconcile Materializes selected Skills, then applies Availability for every
-// Skill in the Source. Materialize failures are events and continue;
-// Availability failures fail closed.
-func (s remoteSource) reconcile(repoDir string, toWrite map[string]string, emit func(SyncEvent)) error {
-	if emit == nil {
-		emit = func(SyncEvent) {}
-	}
-	for _, name := range sortedSkillKeys(s.repo.Skills) {
-		subpath := s.repo.Skills[name]
-		if _, write := toWrite[name]; write {
-			if err := MaterializeRemoteSkill(name, subpath, repoDir, s.availability.skillsDir); err != nil {
-				if errors.Is(err, errRepoPathMissing) {
-					emit(SyncEvent{Kind: SyncPathMissing, Source: s.key, Skill: name, Path: subpath})
-				} else {
-					emit(SyncEvent{Kind: SyncCopyFailed, Source: s.key, Skill: name, Err: err.Error()})
-				}
-				continue
-			}
-			emit(SyncEvent{Kind: SyncMaterialized, Source: s.key, Skill: name, Path: subpath})
-		}
-		if _, err := s.availability.Apply(name); err != nil {
-			return err
-		}
-	}
-	return nil
 }

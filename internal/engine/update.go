@@ -133,7 +133,7 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 			result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, DryRun: true})
 			continue
 		}
-		dir, refreshErr := newRemoteSource(nil, source, repositories[source], cacheDir).refresh(true)
+		dir, refreshErr := newRemoteSource(source, repositories[source], cacheDir).refresh(true)
 		if refreshErr != nil {
 			message := refreshErr.Error()
 			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})

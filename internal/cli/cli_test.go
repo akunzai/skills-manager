@@ -1913,7 +1913,7 @@ func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected installer failure, got:\n%s", out)
 	}
-	if !strings.Contains(err.Error(), "failed to materialize skill cmd-skill") {
+	if !strings.Contains(err.Error(), "saved config but failed to apply cmd-skill") {
 		t.Fatalf("got %v\n%s", err, out)
 	}
 	cfg, err := config.LoadConfig(configFile)
