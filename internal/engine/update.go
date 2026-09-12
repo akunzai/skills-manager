@@ -105,20 +105,18 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 	if err != nil {
 		return nil, err
 	}
+	needsUpdate := make(map[string]struct{})
+	for _, disposition := range snapshot.Dispositions() {
+		if disposition.Kind == FreshnessUpdate {
+			needsUpdate[disposition.Source] = struct{}{}
+		}
+	}
 	var refresh []string
 	for _, status := range snapshot.Repositories {
 		source := status.Source
-		if !force && status.RemoteStatus == RemoteUpToDate {
+		_, update := needsUpdate[source]
+		if !force && !update {
 			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: "up_to_date", LocalSHA: status.LocalSHA})
-			continue
-		}
-		if !force && status.RemoteStatus == RemoteError {
-			message := status.Error
-			if message == "" {
-				message = "failed to query remote repository"
-			}
-			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})
-			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: message})
 			continue
 		}
 		refresh = append(refresh, source)

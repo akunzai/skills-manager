@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1009,6 +1010,80 @@ func TestUpdateRemoteSkillsDryRun(t *testing.T) {
 
 	if len(result.UpdatedRepos) != 2 {
 		t.Fatalf("expected 2 updated repos in dry run, got %d", len(result.UpdatedRepos))
+	}
+}
+
+func TestUpdateRemoteSkillsDryRunTreatsRemoteErrorAsIntendedRefresh(t *testing.T) {
+	old := observeRemoteSource
+	t.Cleanup(func() { observeRemoteSource = old })
+	observeRemoteSource = func(source string, _ config.RemoteRepo, _ string) FreshnessRepository {
+		if source == "owner/broken" {
+			return FreshnessRepository{Source: source, RemoteStatus: RemoteError, Error: "ls-remote failed"}
+		}
+		return FreshnessRepository{Source: source, RemoteStatus: RemoteUpToDate, LocalSHA: "abc"}
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/broken"] = config.RemoteRepo{Branch: "main", Skills: map[string]string{"sample": "sample"}}
+	cfg.Remote["owner/current"] = config.RemoteRepo{Branch: "main", Skills: map[string]string{"other": "other"}}
+
+	var check UpdateEvent
+	var kinds []string
+	result, err := UpdateRemoteSkills(cfg, nil, false, true, t.TempDir(), func(ev UpdateEvent) {
+		kinds = append(kinds, ev.Kind)
+		if ev.Kind == UpdateCheckDone {
+			check = ev
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if check.Outdated != 1 || check.UpToDate != 1 {
+		t.Fatalf("CheckDone outdated=%d upToDate=%d", check.Outdated, check.UpToDate)
+	}
+	if slices.Contains(kinds, UpdateRepoError) {
+		t.Fatal("dry-run must not emit UpdateRepoError for an observation error")
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("dry-run Errors = %#v", result.Errors)
+	}
+	if len(result.UpdatedRepos) != 1 || result.UpdatedRepos[0].Source != "owner/broken" || !result.UpdatedRepos[0].DryRun {
+		t.Fatalf("UpdatedRepos = %#v", result.UpdatedRepos)
+	}
+	if len(result.SkippedRepos) != 1 || result.SkippedRepos[0].Source != "owner/current" || result.SkippedRepos[0].Reason != "up_to_date" {
+		t.Fatalf("SkippedRepos = %#v", result.SkippedRepos)
+	}
+}
+
+func TestUpdateRemoteSkillsRefreshFailureAfterRemoteError(t *testing.T) {
+	old := observeRemoteSource
+	t.Cleanup(func() { observeRemoteSource = old })
+	observeRemoteSource = func(source string, _ config.RemoteRepo, _ string) FreshnessRepository {
+		return FreshnessRepository{Source: source, RemoteStatus: RemoteError, Error: "ls-remote failed"}
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/broken"] = config.RemoteRepo{
+		URL:    filepath.Join(t.TempDir(), "missing.git"),
+		Branch: "main",
+		Skills: map[string]string{"sample": "sample"},
+	}
+
+	var kinds []string
+	result, err := UpdateRemoteSkills(cfg, nil, false, false, t.TempDir(), func(ev UpdateEvent) {
+		kinds = append(kinds, ev.Kind)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Errors) != 1 || result.Errors[0].Source != "owner/broken" || result.Errors[0].Error == "" {
+		t.Fatalf("Errors = %#v", result.Errors)
+	}
+	if !slices.Contains(kinds, UpdateCheckDone) || !slices.Contains(kinds, UpdateRepoError) {
+		t.Fatalf("event kinds = %#v", kinds)
+	}
+	if slices.Index(kinds, UpdateRepoError) < slices.Index(kinds, UpdateCheckDone) {
+		t.Fatalf("UpdateRepoError must follow CheckDone, got %#v", kinds)
 	}
 }
 
