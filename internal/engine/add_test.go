@@ -76,14 +76,16 @@ func TestClassifyAddKind(t *testing.T) {
 	t.Run("url prefixes stay remote even if a directory exists", func(t *testing.T) {
 		root := t.TempDir()
 		t.Chdir(root)
-		if err := os.Mkdir("github:owner", 0o755); err != nil {
+		// git@ is a remote prefix; Windows rejects ':' in directory names, so
+		// github:owner cannot be used as the colliding fixture.
+		if err := os.Mkdir("git@example.com", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "github:owner"})
+		kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "git@example.com"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if kind != AddSourceRemote || source != "github:owner" {
+		if kind != AddSourceRemote || source != "git@example.com" {
 			t.Fatalf("kind=%s source=%q", kind, source)
 		}
 	})
