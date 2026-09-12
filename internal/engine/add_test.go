@@ -122,3 +122,70 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 		t.Errorf("status after add then update = %q; want %q", got.Status, SkillCacheUpdateAvailable)
 	}
 }
+
+func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	repoDir := filepath.Join(project, "repo")
+	skillDir := filepath.Join(repoDir, "sample")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unmanaged := filepath.Join(project, ".claude", "skills", "sample")
+	if err := os.MkdirAll(unmanaged, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	cfg := config.DefaultConfig()
+	plan := BuildAddPlan(cfg, configPath, skillsDir,
+		NewRemoteAddSource("owner/repo", "git", "", repoDir),
+		map[string]string{"sample": "sample"}, nil)
+	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
+		t.Fatal("expected unmanaged Availability path to fail closed")
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Remote["owner/repo"].Skills["sample"] != "sample" {
+		t.Fatalf("Config must be saved before apply fails: %#v", loaded.Remote)
+	}
+}
+
+func TestApplyAddPlanStopsAfterFirstRemoteFailure(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	repoDir := filepath.Join(project, "repo")
+	good := filepath.Join(repoDir, "good")
+	if err := os.MkdirAll(good, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(good, "SKILL.md"), []byte("# Good\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	cfg := config.DefaultConfig()
+	plan := BuildAddPlan(cfg, configPath, skillsDir,
+		NewRemoteAddSource("owner/repo", "git", "", repoDir),
+		map[string]string{"bad": "missing", "good": "good"}, nil)
+	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
+		t.Fatal("expected the missing Skill to fail apply")
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Remote["owner/repo"].Skills["good"]; !ok {
+		t.Fatal("Config must already list every selected Skill")
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "good", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatal("second Skill must not be Materialized after the first fails")
+	}
+}

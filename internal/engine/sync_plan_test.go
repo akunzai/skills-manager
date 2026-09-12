@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -193,6 +194,56 @@ func TestSyncApplyNamesTheSkillWhoseAvailabilityFailed(t *testing.T) {
 	}
 	if len(failures) != 1 || failures[0].Skill != "local" || failures[0].Err == "" {
 		t.Fatalf("failure must name the Skill and say why: %#v", failures)
+	}
+}
+
+func TestSyncApplyContinuesAfterMaterializeFailure(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	repoDir := filepath.Join(project, "repo")
+	good := filepath.Join(repoDir, "good")
+	if err := os.MkdirAll(good, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(good, "SKILL.md"), []byte("# Good\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "bad", "missing", "git", "")
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "good", "good", "git", "")
+	plan := &SyncPlan{
+		Sources: []string{"owner/repo"},
+		Items: []SyncPlanItem{
+			{
+				Name: "bad", Kind: SyncItemRemote, Source: "owner/repo",
+				CachePath: repoDir, NeedsWrite: true,
+				Freshness: SkillFreshness{Name: "bad", Source: "owner/repo", Subpath: "missing", ScopePath: filepath.Join(skillsDir, "bad")},
+			},
+			{
+				Name: "good", Kind: SyncItemRemote, Source: "owner/repo",
+				CachePath: repoDir, NeedsWrite: true,
+				Freshness: SkillFreshness{Name: "good", Source: "owner/repo", Subpath: "good", ScopePath: filepath.Join(skillsDir, "good")},
+			},
+		},
+		cfg:          cfg,
+		skillsDir:    skillsDir,
+		availability: NewAvailability(cfg, skillsDir),
+	}
+	var kinds []string
+	report, err := plan.Apply(SyncDecision{}, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Failed != 1 {
+		t.Fatalf("failed=%d events=%#v", report.Failed, kinds)
+	}
+	if !slices.Contains(kinds, SyncPathMissing) || !slices.Contains(kinds, SyncMaterialized) {
+		t.Fatalf("event kinds = %#v", kinds)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "good", "SKILL.md")); err != nil {
+		t.Fatal("good Skill was not Materialized after prior failure")
 	}
 }
 

@@ -764,7 +764,7 @@ func TestObserveRemoteFreshnessSourceParsing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		res := newRemoteSource(nil, tt.source, config.RemoteRepo{
+		res := newRemoteSource(tt.source, config.RemoteRepo{
 			Branch: "main",
 			Skills: map[string]string{"foo": "skills/foo"},
 		}, tmpCache).ObserveFreshness()
@@ -934,7 +934,7 @@ func TestUpdateDetectsChangedRemoteDefaultBranch(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	status := newRemoteSource(nil, "owner/repo", cfg.Remote["owner/repo"], cacheDir).ObserveFreshness()
+	status := newRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir).ObserveFreshness()
 	if status.RemoteStatus != RemoteNotCached || status.Branch != "next" {
 		t.Fatalf("status = %#v", status)
 	}

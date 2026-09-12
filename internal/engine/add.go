@@ -207,7 +207,6 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	}
 	availability := NewAvailability(cfg, plan.SkillsDir)
 	names := sortedSkillKeys(plan.Skills)
-	stateStore, _ := NewScopeStateStore(plan.SkillsDir)
 
 	resolvedLocal := func(subpath string) string {
 		resolved := plan.Source.LocalPath
@@ -246,20 +245,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		return AddResult{}, err
 	}
 
-	var stepErr, availabilityErr error
-	note := func(ev SyncEvent) {
-		switch ev.Kind {
-		case SyncAvailabilityFailed:
-			availabilityErr = fmt.Errorf("%s", ev.Err)
-		case SyncCheckFailed:
-			stepErr = fmt.Errorf("command check %q failed, skipping %s", ev.Path, ev.Skill)
-		case SyncCommandFailed, SyncSymlinkFailed, SyncCopyFailed:
-			stepErr = fmt.Errorf("%s", ev.Err)
-		case SyncPathMissing:
-			stepErr = fmt.Errorf("path missing in repository: %s", ev.Path)
-		}
-	}
-
+	state, stateStore := openScopeState(plan.SkillsDir)
 	for _, name := range names {
 		subpath := plan.Skills[name]
 		if onProgress != nil {
@@ -279,30 +265,37 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 				Target:  target,
 			})
 		}
-		stepErr, availabilityErr = nil, nil
-		var err error
+		var (
+			outcome  SyncOutcome
+			applyErr error
+		)
 		switch plan.Source.Kind {
 		case AddSourceRemote:
-			one := map[string]string{name: subpath}
-			err = newRemoteSource(availability, plan.Source.Key, config.RemoteRepo{Skills: one}, "").reconcile(plan.Source.RepoDir, one, note)
+			item := SyncPlanItem{
+				Name:       name,
+				Kind:       SyncItemRemote,
+				Source:     plan.Source.Key,
+				CachePath:  plan.Source.RepoDir,
+				LocalSHA:   GetLocalRepoCommit(plan.Source.RepoDir),
+				NeedsWrite: true,
+				Freshness: SkillFreshness{
+					Name:      name,
+					Source:    plan.Source.Key,
+					Subpath:   subpath,
+					ScopePath: filepath.Join(plan.SkillsDir, name),
+				},
+			}
+			outcome, applyErr = applyRemoteItem(availability, plan.SkillsDir, item, SyncDecision{}, state, stateStore, nil)
 		case AddSourceSymlink, AddSourceCommand:
 			item := planLocalItem(cfg, plan.SkillsDir, availability.ObserveAvailability(name), name)
-			applyLocalItem(availability, plan.SkillsDir, item, note)
-			err = availabilityErr
+			outcome, applyErr = applyLocalItem(availability, plan.SkillsDir, item, nil)
 		}
-		if err != nil {
-			return AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}, fmt.Errorf("saved config but failed to apply availability for %s: %w", name, err)
-		}
-		if stepErr != nil {
-			return AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}, fmt.Errorf("failed to materialize skill %s: %w", name, stepErr)
-		}
-		if plan.Source.Kind == AddSourceRemote && stateStore != nil {
-			// Best effort: an unrecordable baseline costs the next Update its
-			// Cache-update classification, but the Skill itself is on disk and
-			// declared. Sync reports the Scope state failure with its own next
-			// action.
-			_ = stateStore.RecordApplied(name, plan.Source.Key, plan.Source.RepoDir,
-				GetLocalRepoCommit(plan.Source.RepoDir), filepath.Join(plan.SkillsDir, name))
+		if outcome != SyncDone {
+			result := AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}
+			if applyErr != nil {
+				return result, fmt.Errorf("saved config but failed to apply %s: %w", name, applyErr)
+			}
+			return result, fmt.Errorf("saved config but failed to apply %s", name)
 		}
 	}
 

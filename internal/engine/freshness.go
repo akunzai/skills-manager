@@ -233,7 +233,7 @@ func observeRemoteFreshness(repositories map[string]config.RemoteRepo, cacheDir 
 }
 
 var observeRemoteSource = func(source string, repo config.RemoteRepo, cacheDir string) FreshnessRepository {
-	return newRemoteSource(nil, source, repo, cacheDir).ObserveFreshness()
+	return newRemoteSource(source, repo, cacheDir).ObserveFreshness()
 }
 
 func classifyRemoteSkill(source, name, subpath, cacheDir, skillsDir string, applied AppliedSkillState) SkillFreshness {
