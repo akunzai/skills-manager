@@ -33,12 +33,11 @@ type Finding struct {
 	Blank    bool
 }
 
-// doctorFindings renders one DoctorOutcome as the ordered list doctor prints.
-// With result nil this is the diagnosis; with result set, entries that repair
-// touched report its outcome instead. Every doctor sentence is assembled here
-// and nowhere else — the engine reports facts, this file turns them into
-// English (see engine.DoctorOutcome).
-func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Finding {
+// doctorFindings renders one DoctorReport as the ordered list doctor prints.
+// Repair outcomes travel on the diagnosed items; this file only renders.
+// Every doctor sentence is assembled here and nowhere else — the engine
+// reports facts, this file turns them into English (see engine.DoctorOutcome).
+func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 	var findings []Finding
 	add := func(f Finding) { findings = append(findings, f) }
 
@@ -60,7 +59,7 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 		}
 		if len(agent.Physical) > 0 {
 			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: [%s] Physical directories found instead of symlinks: %s", agent.Name, strings.Join(agent.Physical, ", "))})
-			if result != nil {
+			if attemptedFix {
 				for _, pName := range agent.Physical {
 					add(Finding{Severity: SeverityError, Message: fmt.Sprintf("    Cannot replace unmanaged directory %s in %s.", pName, agent.Name)})
 				}
@@ -83,61 +82,48 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 		if names := live[agent]; len(names) > 0 {
 			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  [%s] Leftover occupancy: managed paths declared Availability does not call for: %s", agent, strings.Join(names, ", "))})
 		}
-		if result != nil {
-			findings = append(findings, leftoverPathFixFindings(result, agent)...)
+		for _, path := range p.Leftover.Paths {
+			if path.Agent == agent {
+				findings = append(findings, leftoverPathRepairFinding(path)...)
+			}
 		}
 	}
 
-	if result == nil {
-		if len(p.LeftoverEmpty) > 0 {
-			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: %d leftover empty agent directories (not covered by any configured Agent policy): %s", len(p.LeftoverEmpty), strings.Join(leftoverAgentNames(p.LeftoverEmpty), ", "))})
-		}
-	} else {
-		for _, fix := range result.FailedLeftover {
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  Failed to remove leftover %s dir %s: %s", fix.Agent, models.ToTildePath(fix.Name), fix.Err)})
-		}
-		if len(result.RemovedLeftover) > 0 {
-			add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("  Removed %d leftover empty agent directories: %s.", len(result.RemovedLeftover), strings.Join(leftoverAgentNames(result.RemovedLeftover), ", "))})
+	if len(p.Leftover.Empty) > 0 {
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: %d leftover empty agent directories (not covered by any configured Agent policy): %s", len(p.Leftover.Empty), strings.Join(leftoverAgentNames(p.Leftover.Empty), ", "))})
+		for _, empty := range p.Leftover.Empty {
+			findings = append(findings, leftoverEmptyRepairFinding(empty)...)
 		}
 	}
 
-	if result == nil {
-		for _, d := range p.Drift {
-			if len(d.Broken) > 0 {
-				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; broken links: %s", d.Skill, strings.Join(d.Broken, ", ")), Blank: true})
-			}
-			if len(d.Missing) > 0 {
-				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; missing links: %s", d.Skill, strings.Join(d.Missing, ", ")), Blank: true})
-			}
+	for _, d := range p.Drift {
+		if len(d.Broken) > 0 {
+			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; broken links: %s", d.Skill, strings.Join(d.Broken, ", ")), Blank: true})
+		}
+		if len(d.Missing) > 0 {
+			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; missing links: %s", d.Skill, strings.Join(d.Missing, ", ")), Blank: true})
+		}
+		for _, foreign := range d.Foreign {
+			add(Finding{Severity: SeverityWarning, Message: foreignAvailabilityFinding(d.Skill, foreign), Blank: true})
+		}
+		for _, unobservable := range d.Unobservable {
+			add(Finding{Severity: SeverityError, Message: unobservableAvailabilityFinding(d.Skill, unobservable), Blank: true})
+			add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: inspect %s, then re-run 'skills doctor%s'.", models.ToTildePath(unobservable.Dir), scopeFlag(p))})
+		}
+		if len(d.Unexpected) > 0 {
+			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; unexpected links: %s", d.Skill, strings.Join(d.Unexpected, ", ")), Blank: true})
+		}
+		switch d.Repair.Status {
+		case engine.RepairSucceeded:
+			add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("Fixed availability drift for %s.", d.Skill)})
+		case engine.RepairFailed:
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to reconcile availability for %s: %s", d.Skill, d.Repair.Err)})
 			for _, foreign := range d.Foreign {
-				add(Finding{Severity: SeverityWarning, Message: foreignAvailabilityFinding(d.Skill, foreign), Blank: true})
-			}
-			for _, unobservable := range d.Unobservable {
-				add(Finding{Severity: SeverityError, Message: unobservableAvailabilityFinding(d.Skill, unobservable), Blank: true})
-				add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: inspect %s, then re-run 'skills doctor%s'.", models.ToTildePath(unobservable.Dir), scopeFlag(p))})
-			}
-			if len(d.Unexpected) > 0 {
-				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; unexpected links: %s", d.Skill, strings.Join(d.Unexpected, ", ")), Blank: true})
-			}
-		}
-	} else {
-		for _, skill := range result.FixedDrift {
-			add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("Fixed availability drift for %s.", skill), Blank: true})
-		}
-		for _, fix := range result.FailedDrift {
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to reconcile availability for %s: %s", fix.Name, fix.Err), Blank: true})
-			for _, drift := range p.Drift {
-				if drift.Skill != fix.Name {
-					continue
+				remove := "rm -- "
+				if foreign.Kind == engine.ForeignAvailabilityDirectory {
+					remove = "rm -rf -- "
 				}
-				for _, foreign := range drift.Foreign {
-					add(Finding{Severity: SeverityWarning, Message: foreignAvailabilityFinding(drift.Skill, foreign)})
-					remove := "rm -- "
-					if foreign.Kind == engine.ForeignAvailabilityDirectory {
-						remove = "rm -rf -- "
-					}
-					add(Finding{Severity: SeverityInfo, Message: "  Remove it manually: " + remove + shellQuotePath(foreign.Path)})
-				}
+				add(Finding{Severity: SeverityInfo, Message: "  Remove it manually: " + remove + shellQuotePath(foreign.Path)})
 			}
 		}
 	}
@@ -188,31 +174,28 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 	}
 	for _, artifact := range p.StaleScopes {
 		add(Finding{Severity: SeverityWarning, Message: "Scope state references missing path: " + artifact.ScopePath, Blank: true})
-	}
-	if result != nil && (p.StateError != "" || len(p.StaleState) > 0) {
-		if result.StateRepairErr != nil {
-			add(Finding{Severity: SeverityError, Message: "Failed to repair Scope state: " + result.StateRepairErr.Error()})
-		} else {
-			add(Finding{Severity: SeverityOK, Message: "Repaired Scope state."})
+		switch artifact.Repair.Status {
+		case engine.RepairSucceeded:
+			add(Finding{Severity: SeverityOK, Message: "Removed state for missing Scope: " + artifact.ScopePath})
+		case engine.RepairFailed:
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to remove stale Scope state %s: %s", artifact.Path, artifact.Repair.Err)})
 		}
 	}
-	if result != nil {
-		for _, migration := range result.CacheMigrations {
-			switch migration.Status {
-			case engine.CacheMigrationRebuilt:
-				add(Finding{Severity: SeverityOK, Message: "Rebuilt branch-aware Cache and removed legacy Cache: " + migration.Root})
-			case engine.CacheMigrationRecoveryNeeded:
-				add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Manual Cache recovery required after rebuilding %s: %s; preserved artifacts: %s", migration.Root, migration.Err, strings.Join(migration.Artifacts, ", "))})
-				add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Inspect the preserved Cache trees, restore the desired tree to %s if needed, then remove the artifacts.", migration.Root)})
-			case engine.CacheMigrationFailed:
-				add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to rebuild legacy Cache %s: %s", migration.Root, migration.Err)})
-			}
-		}
-		for _, path := range result.RemovedScopes {
-			add(Finding{Severity: SeverityOK, Message: "Removed state for missing Scope: " + path})
-		}
-		for _, failure := range result.FailedScopes {
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to remove stale Scope state %s: %s", failure.Name, failure.Err)})
+	switch p.StateRepair.Status {
+	case engine.RepairFailed:
+		add(Finding{Severity: SeverityError, Message: "Failed to repair Scope state: " + p.StateRepair.Err.Error()})
+	case engine.RepairSucceeded:
+		add(Finding{Severity: SeverityOK, Message: "Repaired Scope state."})
+	}
+	for _, migration := range p.CacheMigrations {
+		switch migration.Status {
+		case engine.CacheMigrationRebuilt:
+			add(Finding{Severity: SeverityOK, Message: "Rebuilt branch-aware Cache and removed legacy Cache: " + migration.Root})
+		case engine.CacheMigrationRecoveryNeeded:
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Manual Cache recovery required after rebuilding %s: %s; preserved artifacts: %s", migration.Root, migration.Err, strings.Join(migration.Artifacts, ", "))})
+			add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Inspect the preserved Cache trees, restore the desired tree to %s if needed, then remove the artifacts.", migration.Root)})
+		case engine.CacheMigrationFailed:
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to rebuild legacy Cache %s: %s", migration.Root, migration.Err)})
 		}
 	}
 	for _, ref := range p.UnknownAgents {
@@ -312,19 +295,28 @@ func leftoverAgents(groups ...map[string][]string) []string {
 	return slices.Sorted(maps.Keys(seen))
 }
 
-func leftoverPathFixFindings(result *engine.RepairOutcome, agent string) []Finding {
-	var findings []Finding
-	for _, path := range result.RemovedLeftoverPaths {
-		if path.Agent == agent {
-			findings = append(findings, Finding{Severity: SeverityOK, Message: fmt.Sprintf("    Fixed: Removed leftover occupancy %s.", path.Skill)})
-		}
+func leftoverPathRepairFinding(path engine.LeftoverPath) []Finding {
+	switch path.Repair.Status {
+	case engine.RepairSucceeded:
+		return []Finding{{Severity: SeverityOK, Message: fmt.Sprintf("    Fixed: Removed leftover occupancy %s.", path.Skill)}}
+	case engine.RepairFailed:
+		return []Finding{{Severity: SeverityError, Message: fmt.Sprintf("    Failed to remove leftover occupancy %s: %s", path.Skill, path.Repair.Err)}}
+	case engine.RepairSkipped:
+		return []Finding{{Severity: SeverityInfo, Message: fmt.Sprintf("    Skipped leftover occupancy %s.", path.Skill)}}
+	default:
+		return nil
 	}
-	for _, failure := range result.FailedLeftoverPaths {
-		if failure.Path.Agent == agent {
-			findings = append(findings, Finding{Severity: SeverityError, Message: fmt.Sprintf("    Failed to remove leftover occupancy %s: %s", failure.Path.Skill, failure.Err)})
-		}
+}
+
+func leftoverEmptyRepairFinding(empty engine.AgentDir) []Finding {
+	switch empty.Repair.Status {
+	case engine.RepairSucceeded:
+		return []Finding{{Severity: SeverityOK, Message: fmt.Sprintf("    Removed leftover empty agent directory %s.", empty.Name)}}
+	case engine.RepairFailed:
+		return []Finding{{Severity: SeverityError, Message: fmt.Sprintf("    Failed to remove leftover %s dir %s: %s", empty.Name, models.ToTildePath(empty.Dir), empty.Repair.Err)}}
+	default:
+		return nil
 	}
-	return findings
 }
 
 func leftoverAgentNames(dirs []engine.AgentDir) []string {

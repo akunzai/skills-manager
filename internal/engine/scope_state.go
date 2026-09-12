@@ -44,6 +44,7 @@ type ScopeStateArtifact struct {
 	Path      string
 	ScopePath string
 	Err       error
+	Repair    ItemRepair
 }
 
 func ListScopeStateArtifacts() ([]ScopeStateArtifact, error) {

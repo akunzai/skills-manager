@@ -514,6 +514,7 @@ type LeftoverPath struct {
 	Skill    string
 	Path     string
 	Dangling bool
+	Repair   ItemRepair
 }
 
 // LeftoverOccupancy is leftover occupancy observed once. ApplyLeftover takes

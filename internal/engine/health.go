@@ -30,12 +30,23 @@ type SkillDrift struct {
 	Copies       []string
 	Foreign      []ForeignAvailabilityPath
 	Unobservable []UnobservableAvailabilityPath
+	Repair       ItemRepair
 }
 
-type HealthFix struct {
-	Agent string
-	Name  string
-	Err   error
+// RepairStatus is what --fix did to one diagnosed item.
+type RepairStatus uint8
+
+const (
+	RepairNotAttempted RepairStatus = iota
+	RepairSucceeded
+	RepairFailed
+	RepairSkipped
+)
+
+// ItemRepair is the outcome of attempting to repair one diagnosed item.
+type ItemRepair struct {
+	Status RepairStatus
+	Err    error
 }
 
 // InvalidSkill is a declared Skill whose folder is on the skills directory but
@@ -60,7 +71,6 @@ type DoctorReport struct {
 	MasterMissing  bool
 	Agents         []AgentHealth
 	Leftover       LeftoverOccupancy
-	LeftoverEmpty  []AgentDir
 	Drift          []SkillDrift
 	Missing        []string
 	Untracked      []string
@@ -71,30 +81,18 @@ type DoctorReport struct {
 	// files instead of directories — what a git client that cannot create
 	// symbolic links leaves behind when a committed Project skills directory
 	// is checked out.
-	Stubs         []string
-	UnknownAgents []UnknownAgentReference
-	StateError    string
-	StaleState    []string
-	CacheRecovery []string
+	Stubs           []string
+	UnknownAgents   []UnknownAgentReference
+	StateError      string
+	StaleState      []string
+	StateRepair     ItemRepair
+	CacheRecovery   []string
+	CacheMigrations []CacheMigrationOutcome
 	// legacyCache holds the migration plans repair executes. Only their
 	// roots are reportable (LegacyCacheRoots); the migration machinery is
 	// an engine concern and stays unexported.
 	legacyCache []legacyCacheMigrationPlan
 	StaleScopes []ScopeStateArtifact
-}
-
-type RepairOutcome struct {
-	RemovedLeftoverPaths []LeftoverPath
-	FailedLeftoverPaths  []LeftoverFailure
-	RemovedLeftover      []AgentDir
-	FailedLeftover       []HealthFix
-	FixedDrift           []string
-	FailedDrift          []HealthFix
-	StateRepaired        bool
-	StateRepairErr       error
-	CacheMigrations      []CacheMigrationOutcome
-	RemovedScopes        []string
-	FailedScopes         []HealthFix
 }
 
 // Doctor diagnoses and optionally repairs one Scope's Skill, Agent directory,
@@ -119,9 +117,10 @@ type Doctor struct {
 // --json flag, can report without re-deriving anything; a Message string here
 // would be cheaper today and unusable for either.
 type DoctorOutcome struct {
-	// Report is the diagnosis. Repair is nil unless Run was asked to fix.
+	// Report is the pre-fix diagnosis. When AttemptedFix is set, repaired
+	// items carry their ItemRepair (or CacheMigrationOutcome) on the value.
 	Report         DoctorReport
-	Repair         *RepairOutcome
+	AttemptedFix   bool
 	Remaining      int
 	RecoveryNeeded bool
 	// Failed is how many repair actions --fix attempted and could not
@@ -191,8 +190,8 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Untracked: len(plan.Untracked)}, err
 		}
 	}
-	result := d.repair(plan, progress, replaceForeign)
-	outcome := DoctorOutcome{Report: plan, Repair: &result, RecoveryNeeded: result.cacheRecoveryNeeded(), Failed: result.repairFailures()}
+	d.repair(&plan, progress, replaceForeign)
+	outcome := DoctorOutcome{Report: plan, AttemptedFix: true, RecoveryNeeded: plan.cacheRecoveryNeeded(), Failed: plan.repairFailures()}
 	after, err := d.diagnose()
 	if err != nil {
 		return outcome, err
@@ -206,12 +205,32 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 // repairFailures counts the repair actions that broke. Every category doctor
 // attempts is listed here, so a new one that forgets to report itself shows up
 // as a Scope that reports a clean-ish 1 while a repair silently failed.
-func (r RepairOutcome) repairFailures() int {
-	failures := len(r.FailedLeftoverPaths) + len(r.FailedLeftover) + len(r.FailedDrift) + len(r.FailedScopes)
-	if r.StateRepairErr != nil {
+func (p DoctorReport) repairFailures() int {
+	failures := 0
+	if p.StateRepair.Status == RepairFailed {
 		failures++
 	}
-	for _, migration := range r.CacheMigrations {
+	for _, path := range p.Leftover.Paths {
+		if path.Repair.Status == RepairFailed {
+			failures++
+		}
+	}
+	for _, empty := range p.Leftover.Empty {
+		if empty.Repair.Status == RepairFailed {
+			failures++
+		}
+	}
+	for _, drift := range p.Drift {
+		if drift.Repair.Status == RepairFailed {
+			failures++
+		}
+	}
+	for _, artifact := range p.StaleScopes {
+		if artifact.Repair.Status == RepairFailed {
+			failures++
+		}
+	}
+	for _, migration := range p.CacheMigrations {
 		if migration.Status == CacheMigrationFailed {
 			failures++
 		}
@@ -219,8 +238,8 @@ func (r RepairOutcome) repairFailures() int {
 	return failures
 }
 
-func (r RepairOutcome) cacheRecoveryNeeded() bool {
-	for _, migration := range r.CacheMigrations {
+func (p DoctorReport) cacheRecoveryNeeded() bool {
+	for _, migration := range p.CacheMigrations {
 		if migration.Status == CacheMigrationRecoveryNeeded {
 			return true
 		}
@@ -304,7 +323,6 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 
 	leftover := d.availability.ObserveLeftover()
 	plan.Leftover = leftover
-	plan.LeftoverEmpty = leftover.Empty
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
 
 	inv, err := LoadInventory(d.cfg, d.skillsDir)
@@ -367,22 +385,18 @@ func (p DoctorReport) issueCount() int {
 
 // repair leaves physical dirs, unmanaged broken links, and missing/untracked/
 // invalid Skills unchanged. Independent repair failures do not stop the run.
-func (d *Doctor) repair(plan DoctorReport, progress DoctorProgress, replaceForeign bool) RepairOutcome {
-	result := RepairOutcome{}
+func (d *Doctor) repair(plan *DoctorReport, progress DoctorProgress, replaceForeign bool) {
 	if d.stateStore != nil {
 		if plan.StateError != "" {
-			result.StateRepairErr = d.stateStore.Prune()
-			result.StateRepaired = result.StateRepairErr == nil
+			plan.StateRepair = itemRepairFromErr(d.stateStore.Prune())
 		} else if len(plan.StaleState) > 0 {
 			keep := make(map[string]struct{})
-			for source, repo := range d.cfg.Remote {
-				_ = source
+			for _, repo := range d.cfg.Remote {
 				for name := range repo.Skills {
 					keep[name] = struct{}{}
 				}
 			}
-			result.StateRepairErr = d.stateStore.PruneSkills(keep)
-			result.StateRepaired = result.StateRepairErr == nil
+			plan.StateRepair = itemRepairFromErr(d.stateStore.PruneSkills(keep))
 		}
 	}
 	total := 0
@@ -400,40 +414,67 @@ func (d *Doctor) repair(plan DoctorReport, progress DoctorProgress, replaceForei
 		}
 	})
 	for _, migration := range migrations {
-		result.CacheMigrations = append(result.CacheMigrations, migration.outcome())
+		plan.CacheMigrations = append(plan.CacheMigrations, migration.outcome())
 	}
-	for _, artifact := range plan.StaleScopes {
+	for i, artifact := range plan.StaleScopes {
 		if err := os.Remove(artifact.Path); err != nil && !os.IsNotExist(err) {
-			result.FailedScopes = append(result.FailedScopes, HealthFix{Name: artifact.Path, Err: err})
+			plan.StaleScopes[i].Repair = itemRepairFromErr(err)
 		} else {
-			result.RemovedScopes = append(result.RemovedScopes, artifact.ScopePath)
+			plan.StaleScopes[i].Repair = ItemRepair{Status: RepairSucceeded}
 		}
 	}
-	leftover := d.availability.ApplyLeftover(plan.Leftover)
-	result.RemovedLeftoverPaths = leftover.RemovedPaths
-	result.FailedLeftoverPaths = leftover.FailedPaths
-	result.RemovedLeftover = leftover.RemovedEmpty
-	for _, failure := range leftover.FailedEmpty {
-		result.FailedLeftover = append(result.FailedLeftover, HealthFix{
-			Agent: failure.Dir.Name,
-			Name:  failure.Dir.Dir,
-			Err:   failure.Err,
-		})
-	}
-	for _, drift := range plan.Drift {
+	plan.Leftover = attachLeftoverRepairs(plan.Leftover, d.availability.ApplyLeftover(plan.Leftover))
+	for i, drift := range plan.Drift {
 		var err error
 		if len(drift.Foreign) > 0 && replaceForeign {
 			err = d.availability.ReplaceForeign(drift.Skill, drift.Foreign)
 		} else {
 			_, err = d.availability.Apply(drift.Skill)
 		}
-		if err != nil {
-			result.FailedDrift = append(result.FailedDrift, HealthFix{Name: drift.Skill, Err: err})
-			continue
-		}
-		result.FixedDrift = append(result.FixedDrift, drift.Skill)
+		plan.Drift[i].Repair = itemRepairFromErr(err)
 	}
-	return result
+}
+
+func itemRepairFromErr(err error) ItemRepair {
+	if err != nil {
+		return ItemRepair{Status: RepairFailed, Err: err}
+	}
+	return ItemRepair{Status: RepairSucceeded}
+}
+
+func leftoverPathKey(path LeftoverPath) string {
+	return path.Agent + "\x00" + path.Skill + "\x00" + path.Path
+}
+
+func attachLeftoverRepairs(occupancy LeftoverOccupancy, result LeftoverApplyResult) LeftoverOccupancy {
+	paths := make(map[string]ItemRepair, len(occupancy.Paths))
+	for _, path := range result.RemovedPaths {
+		paths[leftoverPathKey(path)] = ItemRepair{Status: RepairSucceeded}
+	}
+	for _, path := range result.SkippedPaths {
+		paths[leftoverPathKey(path)] = ItemRepair{Status: RepairSkipped}
+	}
+	for _, failure := range result.FailedPaths {
+		paths[leftoverPathKey(failure.Path)] = itemRepairFromErr(failure.Err)
+	}
+	for i, path := range occupancy.Paths {
+		if repair, ok := paths[leftoverPathKey(path)]; ok {
+			occupancy.Paths[i].Repair = repair
+		}
+	}
+	empty := make(map[string]ItemRepair, len(occupancy.Empty))
+	for _, dir := range result.RemovedEmpty {
+		empty[dir.Dir] = ItemRepair{Status: RepairSucceeded}
+	}
+	for _, failure := range result.FailedEmpty {
+		empty[failure.Dir.Dir] = itemRepairFromErr(failure.Err)
+	}
+	for i, dir := range occupancy.Empty {
+		if repair, ok := empty[dir.Dir]; ok {
+			occupancy.Empty[i].Repair = repair
+		}
+	}
+	return occupancy
 }
 
 // LegacyCacheRoots names the legacy branchless Cache roots doctor found, for
