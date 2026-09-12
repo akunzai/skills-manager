@@ -154,6 +154,23 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 	}
 }
 
+func TestFindingsReportsWorkingLeftoverOccupancyApartFromDangling(t *testing.T) {
+	findings := doctorFindings(engine.DoctorReport{
+		Leftover: engine.LeftoverOccupancy{
+			Paths: []engine.LeftoverPath{
+				{Agent: "codex", Skill: "gone", Path: "/tmp/gone", Dangling: true},
+				{Agent: "codex", Skill: "sample", Path: "/tmp/sample"},
+			},
+		},
+	}, nil)
+	if !containsMessage(findings, "Stale links to removed skills: gone") {
+		t.Fatalf("expected dangling leftover as stale links, got %#v", findings)
+	}
+	if !containsMessage(findings, "Leftover occupancy: managed paths declared Availability does not call for: sample") {
+		t.Fatalf("expected working leftover occupancy, got %#v", findings)
+	}
+}
+
 func containsMessage(findings []Finding, substr string) bool {
 	for _, f := range findings {
 		if strings.Contains(f.Message, substr) {

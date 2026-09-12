@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/engine"
@@ -52,14 +54,7 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Agent directory is not usable: %s (%s)", agent.Name, models.ToTildePath(agent.Dir), agent.Unusable)})
 			continue
 		}
-		if len(agent.Broken) > 0 {
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Broken symlinks: %s", agent.Name, strings.Join(agent.Broken, ", "))})
-			if result != nil {
-				findings = append(findings, agentFixFindings(result.RemovedBroken, result.FailedBroken, agent.Name, "broken symlink", true)...)
-			}
-		} else {
-			add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("  [%s] Symlinks healthy (%s).", agent.Name, models.ToTildePath(agent.Dir))})
-		}
+		add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("  [%s] Symlinks healthy (%s).", agent.Name, models.ToTildePath(agent.Dir))})
 		if len(agent.UnmanagedBroken) > 0 {
 			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: [%s] Unmanaged broken symlinks were left unchanged: %s", agent.Name, strings.Join(agent.UnmanagedBroken, ", "))})
 		}
@@ -76,16 +71,20 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 	// One line for the whole Scope rather than a badge on every row: the
 	// question this answers — why are these real files instead of links — is
 	// asked once.
-	if copied, breakdown := describeCopiedAvailability(p.Agents); copied > 0 {
+	if copied, breakdown := describeCopiedAvailability(p.Drift); copied > 0 {
 		add(Finding{Severity: SeverityInfo, Message: "  " + copiedAvailabilityNotice(copied, breakdown, scopeFlag(p))})
 	}
 
-	for _, stale := range p.StaleUniversal {
-		add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Stale links to removed skills: %s", stale.Agent, strings.Join(stale.Names, ", "))})
+	dangling, live := leftoverPathsByAgent(p.Leftover.Paths)
+	for _, agent := range leftoverAgents(dangling, live) {
+		if names := dangling[agent]; len(names) > 0 {
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Stale links to removed skills: %s", agent, strings.Join(names, ", "))})
+		}
+		if names := live[agent]; len(names) > 0 {
+			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  [%s] Leftover occupancy: managed paths declared Availability does not call for: %s", agent, strings.Join(names, ", "))})
+		}
 		if result != nil {
-			// includeErr is false here, matching pre-refactor behavior: unlike
-			// FailedBroken, FailedStale.Err was never surfaced to the user.
-			findings = append(findings, agentFixFindings(result.RemovedStale, result.FailedStale, stale.Agent, "stale link", false)...)
+			findings = append(findings, leftoverPathFixFindings(result, agent)...)
 		}
 	}
 
@@ -104,6 +103,9 @@ func doctorFindings(p engine.DoctorReport, result *engine.RepairOutcome) []Findi
 
 	if result == nil {
 		for _, d := range p.Drift {
+			if len(d.Broken) > 0 {
+				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; broken links: %s", d.Skill, strings.Join(d.Broken, ", ")), Blank: true})
+			}
 			if len(d.Missing) > 0 {
 				add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; missing links: %s", d.Skill, strings.Join(d.Missing, ", ")), Blank: true})
 			}
@@ -287,24 +289,40 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
-// agentFixFindings renders one agent's Fixed/Failed sub-lines for a repair
-// category (broken symlinks or stale links) — the shape shared by both.
-func agentFixFindings(removed, failed []engine.HealthFix, agent, noun string, includeErr bool) []Finding {
-	var findings []Finding
-	for _, fix := range removed {
-		if fix.Agent == agent {
-			findings = append(findings, Finding{Severity: SeverityOK, Message: fmt.Sprintf("    Fixed: Removed %s %s.", noun, fix.Name)})
+func leftoverPathsByAgent(paths []engine.LeftoverPath) (dangling, live map[string][]string) {
+	dangling = make(map[string][]string)
+	live = make(map[string][]string)
+	for _, path := range paths {
+		if path.Dangling {
+			dangling[path.Agent] = append(dangling[path.Agent], path.Skill)
+		} else {
+			live[path.Agent] = append(live[path.Agent], path.Skill)
 		}
 	}
-	for _, fix := range failed {
-		if fix.Agent != agent {
-			continue
+	return dangling, live
+}
+
+func leftoverAgents(groups ...map[string][]string) []string {
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		for agent := range group {
+			seen[agent] = struct{}{}
 		}
-		msg := fmt.Sprintf("    Failed to remove %s %s", noun, fix.Name)
-		if includeErr {
-			msg = fmt.Sprintf("%s: %s", msg, fix.Err)
+	}
+	return slices.Sorted(maps.Keys(seen))
+}
+
+func leftoverPathFixFindings(result *engine.RepairOutcome, agent string) []Finding {
+	var findings []Finding
+	for _, path := range result.RemovedLeftoverPaths {
+		if path.Agent == agent {
+			findings = append(findings, Finding{Severity: SeverityOK, Message: fmt.Sprintf("    Fixed: Removed leftover occupancy %s.", path.Skill)})
 		}
-		findings = append(findings, Finding{Severity: SeverityError, Message: msg})
+	}
+	for _, failure := range result.FailedLeftoverPaths {
+		if failure.Path.Agent == agent {
+			findings = append(findings, Finding{Severity: SeverityError, Message: fmt.Sprintf("    Failed to remove leftover occupancy %s: %s", failure.Path.Skill, failure.Err)})
+		}
 	}
 	return findings
 }

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/engine"
@@ -37,13 +39,17 @@ func copiedAvailabilityNotice(paths int, breakdown, scopeFlag string) string {
 // describeCopiedAvailability renders the copies Doctor found as a total and a
 // per-Agent breakdown. The breakdown is not decoration: a bare total against a
 // list of Agent names reads as if each held all of them.
-func describeCopiedAvailability(agents []engine.AgentHealth) (total int, breakdown string) {
-	parts := make([]string, 0, len(agents))
-	for _, agent := range agents {
-		if n := len(agent.Copies); n > 0 {
-			total += n
-			parts = append(parts, fmt.Sprintf("%s %d", agent.Name, n))
+func describeCopiedAvailability(drift []engine.SkillDrift) (total int, breakdown string) {
+	perAgent := make(map[string]int)
+	for _, item := range drift {
+		for _, agent := range item.Copies {
+			perAgent[agent]++
+			total++
 		}
+	}
+	parts := make([]string, 0, len(perAgent))
+	for _, agent := range slices.Sorted(maps.Keys(perAgent)) {
+		parts = append(parts, fmt.Sprintf("%s %d", agent, perAgent[agent]))
 	}
 	return total, strings.Join(parts, ", ")
 }

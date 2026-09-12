@@ -204,6 +204,9 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 	if len(item.Drift.Missing) > 0 {
 		fmt.Fprintf(out, "  [Dry-run] Would link %s to %s.\n", item.Name, strings.Join(item.Drift.Missing, ", "))
 	}
+	if len(item.Drift.Broken) > 0 {
+		fmt.Fprintf(out, "  [Dry-run] Would repair broken availability for %s on %s.\n", item.Name, strings.Join(item.Drift.Broken, ", "))
+	}
 	if len(item.Drift.Unexpected) > 0 {
 		fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", item.Name, strings.Join(item.Drift.Unexpected, ", "))
 	}

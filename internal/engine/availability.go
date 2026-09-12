@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"os"
@@ -27,7 +28,6 @@ type Availability struct {
 	skillsDir string
 	known     map[string]string
 	automatic []string
-	links     AgentLinkManager
 }
 
 // Field values for UnknownAgentReference match the skills.json key each names.
@@ -57,7 +57,6 @@ func NewAvailability(cfg *config.Config, skillsDir string) *Availability {
 		skillsDir: skillsDir,
 		known:     models.GetAgentsForSkillsDir(skillsDir),
 		automatic: models.GetAutomaticallyAvailableAgents(skillsDir),
-		links:     NewAgentLinkManager(skillsDir),
 	}
 }
 
@@ -269,7 +268,7 @@ type availabilityState struct {
 	skillName string
 	desired   map[string]struct{}
 	known     map[string]string
-	links     AgentLinkManager
+	skillsDir string
 }
 
 func (a *Availability) state(skillName string) availabilityState {
@@ -277,14 +276,12 @@ func (a *Availability) state(skillName string) availabilityState {
 		skillName: skillName,
 		desired:   agentSet(a.ManagedAgents(skillName)),
 		known:     a.known,
-		links:     a.links,
+		skillsDir: a.skillsDir,
 	}
 }
 
-// isManagedPath reports whether path is a managed symlink or a managed copy
-// of this Skill (the Windows fallback when symlinks aren't available).
 func (s availabilityState) isManagedPath(path string) bool {
-	return s.links.IsManagedPath(path, s.skillName)
+	return isManagedSkillPath(path, s.skillName, s.skillsDir)
 }
 
 func (s availabilityState) drift() AvailabilityDrift {
@@ -315,6 +312,12 @@ func (s availabilityState) drift() AvailabilityDrift {
 				observation.Unobservable = append(observation.Unobservable, describeUnobservableAvailabilityPath(agent, agentDir, linkPath, err))
 			case !s.isManagedPath(linkPath):
 				observation.Foreign = append(observation.Foreign, describeForeignAvailabilityPath(agent, linkPath))
+			case isManagedSkillCopy(linkPath, s.skillName, s.skillsDir):
+				observation.Copies = append(observation.Copies, agent)
+			default:
+				if _, statErr := os.Stat(linkPath); statErr != nil {
+					observation.Broken = append(observation.Broken, agent)
+				}
 			}
 			continue
 		}
@@ -324,6 +327,8 @@ func (s availabilityState) drift() AvailabilityDrift {
 	}
 	slices.Sort(observation.Missing)
 	slices.Sort(observation.Unexpected)
+	slices.Sort(observation.Broken)
+	slices.Sort(observation.Copies)
 	slices.SortFunc(observation.Foreign, func(a, b ForeignAvailabilityPath) int { return strings.Compare(a.Path, b.Path) })
 	slices.SortFunc(observation.Unobservable, func(a, b UnobservableAvailabilityPath) int { return strings.Compare(a.Path, b.Path) })
 	return observation
@@ -345,19 +350,22 @@ func (s availabilityState) apply() ([]string, error) {
 	for agent, agentDir := range s.known {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		if _, shouldLink := s.desired[agent]; shouldLink {
-			if _, err := s.links.EnsureLink(s.skillName, agent); err != nil {
+			if _, err := ensureAgentSymlink(s.skillName, agent, s.skillsDir); err != nil {
 				return copied, err
 			}
 			// Read the outcome back rather than inferring it: a copy left
 			// over from an earlier run is as much a copy as one made now, and
 			// the user's question is why these paths are files at all.
-			if s.links.IsManagedCopy(linkPath, s.skillName) {
+			if isManagedSkillCopy(linkPath, s.skillName, s.skillsDir) {
 				copied = append(copied, agent)
 			}
 			continue
 		}
-		if s.isManagedPath(linkPath) && !s.links.RemoveManagedPath(linkPath, s.skillName) {
-			return copied, fmt.Errorf("failed to remove managed availability path: %s", linkPath)
+		if s.isManagedPath(linkPath) {
+			managed, err := removeManagedSkillPath(linkPath, s.skillName, s.skillsDir)
+			if !managed || (err != nil && !os.IsNotExist(err)) {
+				return copied, fmt.Errorf("failed to remove managed availability path: %s", linkPath)
+			}
 		}
 	}
 	slices.Sort(copied)
@@ -480,12 +488,14 @@ type AvailabilityDrift struct {
 	Skill        string
 	Missing      []string
 	Unexpected   []string
+	Broken       []string
+	Copies       []string
 	Foreign      []ForeignAvailabilityPath
 	Unobservable []UnobservableAvailabilityPath
 }
 
 func (d AvailabilityDrift) Empty() bool {
-	return len(d.Missing) == 0 && len(d.Unexpected) == 0 && len(d.Foreign) == 0 && len(d.Unobservable) == 0
+	return len(d.Missing) == 0 && len(d.Unexpected) == 0 && len(d.Broken) == 0 && len(d.Foreign) == 0 && len(d.Unobservable) == 0
 }
 
 // ObserveAvailability reports Drift for one Skill without touching the
@@ -495,4 +505,151 @@ func (a *Availability) ObserveAvailability(skill string) AvailabilityDrift {
 	observation := a.state(skill).drift()
 	observation.Skill = skill
 	return observation
+}
+
+// LeftoverPath is one managed Availability path that declared Availability
+// does not call for.
+type LeftoverPath struct {
+	Agent    string
+	Skill    string
+	Path     string
+	Dangling bool
+}
+
+// LeftoverOccupancy is leftover occupancy observed once. ApplyLeftover takes
+// this value; filtering it is a pure transformation, not a second observation.
+type LeftoverOccupancy struct {
+	Paths []LeftoverPath
+	Empty []AgentDir
+}
+
+func (o LeftoverOccupancy) WithoutEmpty() LeftoverOccupancy {
+	return LeftoverOccupancy{Paths: slices.Clone(o.Paths)}
+}
+
+func (o LeftoverOccupancy) ForSkills(names []string) LeftoverOccupancy {
+	want := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		want[name] = struct{}{}
+	}
+	var paths []LeftoverPath
+	for _, path := range o.Paths {
+		if _, ok := want[path.Skill]; ok {
+			paths = append(paths, path)
+		}
+	}
+	return LeftoverOccupancy{Paths: paths, Empty: slices.Clone(o.Empty)}
+}
+
+// LeftoverFailure is one leftover path ApplyLeftover could not remove.
+type LeftoverFailure struct {
+	Path LeftoverPath
+	Err  error
+}
+
+// LeftoverEmptyFailure is one leftover empty Agent directory ApplyLeftover
+// could not remove.
+type LeftoverEmptyFailure struct {
+	Dir AgentDir
+	Err error
+}
+
+// LeftoverApplyResult is what ApplyLeftover did with one occupancy snapshot.
+type LeftoverApplyResult struct {
+	RemovedPaths []LeftoverPath
+	SkippedPaths []LeftoverPath
+	FailedPaths  []LeftoverFailure
+	RemovedEmpty []AgentDir
+	FailedEmpty  []LeftoverEmptyFailure
+}
+
+func (a *Availability) declaredSkills() map[string]struct{} {
+	names := make(map[string]struct{})
+	for _, repo := range a.cfg.Remote {
+		for name := range repo.Skills {
+			names[name] = struct{}{}
+		}
+	}
+	for name := range a.cfg.Local {
+		names[name] = struct{}{}
+	}
+	return names
+}
+
+// ObserveLeftover reports leftover occupancy on Agent directories: managed
+// paths on automatically available Agents, managed paths for Skills Config
+// does not declare, and empty Agent directories the current policy does not
+// select.
+func (a *Availability) ObserveLeftover() LeftoverOccupancy {
+	declared := a.declaredSkills()
+	var occupancy LeftoverOccupancy
+	seen := make(map[string]struct{})
+	addDir := func(agent, dir string, include func(string) bool) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") || !include(name) {
+				continue
+			}
+			path := filepath.Join(dir, name)
+			if !isManagedSkillPath(path, name, a.skillsDir) {
+				continue
+			}
+			if _, dup := seen[path]; dup {
+				continue
+			}
+			seen[path] = struct{}{}
+			_, err := os.Stat(path)
+			occupancy.Paths = append(occupancy.Paths, LeftoverPath{
+				Agent: agent, Skill: name, Path: path, Dangling: err != nil,
+			})
+		}
+	}
+	for agent, dir := range models.GetUniversalAgentSkillDirs(a.skillsDir) {
+		if _, known := a.known[agent]; known {
+			continue
+		}
+		addDir(agent, dir, func(string) bool { return true })
+	}
+	for agent, dir := range a.known {
+		addDir(agent, dir, func(name string) bool {
+			_, ok := declared[name]
+			return !ok
+		})
+	}
+	slices.SortFunc(occupancy.Paths, func(a, b LeftoverPath) int {
+		return cmp.Or(cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Skill, b.Skill), cmp.Compare(a.Path, b.Path))
+	})
+	occupancy.Empty = leftoverEmptyAgentDirs(a.known, a.ConfiguredAgentDirs())
+	return occupancy
+}
+
+// ApplyLeftover removes the leftover occupancy in occupancy, revalidating each
+// path immediately before deletion.
+func (a *Availability) ApplyLeftover(occupancy LeftoverOccupancy) LeftoverApplyResult {
+	result := LeftoverApplyResult{}
+	for _, path := range occupancy.Paths {
+		managed, err := removeManagedSkillPath(path.Path, path.Skill, a.skillsDir)
+		if !managed {
+			result.SkippedPaths = append(result.SkippedPaths, path)
+			continue
+		}
+		if err != nil && !os.IsNotExist(err) {
+			result.FailedPaths = append(result.FailedPaths, LeftoverFailure{Path: path, Err: err})
+			continue
+		}
+		result.RemovedPaths = append(result.RemovedPaths, path)
+	}
+	stopAt := models.ScopeRoot(a.skillsDir)
+	for _, empty := range occupancy.Empty {
+		if err := removeEmptyAgentDir(empty.Dir, stopAt); err != nil {
+			result.FailedEmpty = append(result.FailedEmpty, LeftoverEmptyFailure{Dir: empty, Err: err})
+			continue
+		}
+		result.RemovedEmpty = append(result.RemovedEmpty, empty)
+	}
+	return result
 }

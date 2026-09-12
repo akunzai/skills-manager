@@ -82,10 +82,18 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 		return result, err
 	}
 
-	links := NewAgentLinkManager(skillsDir)
+	availability := NewAvailability(cfg, skillsDir)
+	names := make([]string, 0, len(plan.Skills))
+	for _, item := range plan.Skills {
+		names = append(names, item.Name)
+	}
+	leftover := availability.ApplyLeftover(availability.ObserveLeftover().ForSkills(names).WithoutEmpty())
+	removedBySkill := make(map[string][]string)
+	for _, path := range leftover.RemovedPaths {
+		removedBySkill[path.Skill] = append(removedBySkill[path.Skill], path.Agent)
+	}
 	for i, item := range plan.Skills {
-		unlinked := links.RemoveLinks(item.Name)
-		result.Skills[i].Unlinked = unlinked
+		result.Skills[i].Unlinked = removedBySkill[item.Name]
 
 		if _, err := os.Lstat(item.MasterPath); err != nil {
 			if os.IsNotExist(err) {

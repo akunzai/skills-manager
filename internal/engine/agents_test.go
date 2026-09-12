@@ -63,7 +63,7 @@ func TestLeftoverEmptyAgentDirsIgnoresConfiguredAndNonEmpty(t *testing.T) {
 	}
 	configured := map[string]string{"claude-code": claude}
 
-	got := LeftoverEmptyAgentDirs(known, configured)
+	got := leftoverEmptyAgentDirs(known, configured)
 	if len(got) != 1 {
 		t.Fatalf("got %#v; want only crush", got)
 	}
@@ -83,8 +83,8 @@ func TestRemoveEmptyAgentDirPrunesEmptyParentsAndStopsAtHome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(jazzSkills, ""); err != nil {
-		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	if err := removeEmptyAgentDir(jazzSkills, ""); err != nil {
+		t.Fatalf("removeEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".jazz")); !os.IsNotExist(err) {
 		t.Fatal("expected ~/.jazz to be removed")
@@ -106,8 +106,8 @@ func TestRemoveEmptyAgentDirStopsAtXDGConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(crushSkills, ""); err != nil {
-		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	if err := removeEmptyAgentDir(crushSkills, ""); err != nil {
+		t.Fatalf("removeEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(xdg, "crush")); !os.IsNotExist(err) {
 		t.Fatal("expected ~/.config/crush to be removed")
@@ -130,8 +130,8 @@ func TestRemoveEmptyAgentDirLeavesNonEmptyParents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(grokSkills, ""); err != nil {
-		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	if err := removeEmptyAgentDir(grokSkills, ""); err != nil {
+		t.Fatalf("removeEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(grokSkills); !os.IsNotExist(err) {
 		t.Fatal("expected empty skills dir to be removed")
@@ -154,8 +154,8 @@ func TestRemoveEmptyAgentDirDoesNotDeleteNonEmptySkillsDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(skills, ""); err != nil {
-		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	if err := removeEmptyAgentDir(skills, ""); err != nil {
+		t.Fatalf("removeEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(skills, "keep")); err != nil {
 		t.Fatal("non-empty skills dir must not be removed")
@@ -177,8 +177,8 @@ func TestRemoveEmptyAgentDirStopsAtProjectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(cursorSkills, projectRoot); err != nil {
-		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	if err := removeEmptyAgentDir(cursorSkills, projectRoot); err != nil {
+		t.Fatalf("removeEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor")); !os.IsNotExist(err) {
 		t.Fatal("expected leftover .cursor to be removed")
@@ -206,8 +206,8 @@ func TestRemoveEmptyAgentDirKeepsParentsHoldingHiddenEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(cursorSkills, projectRoot); err != nil {
-		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	if err := removeEmptyAgentDir(cursorSkills, projectRoot); err != nil {
+		t.Fatalf("removeEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(cursorSkills); !os.IsNotExist(err) {
 		t.Fatal("expected empty skills dir to be removed")
@@ -229,8 +229,8 @@ func TestRemoveEmptyAgentDirPrunesOutsideHomeWithBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyAgentDir(windsurfSkills, projectRoot); err != nil {
-		t.Fatalf("RemoveEmptyAgentDir: %v", err)
+	if err := removeEmptyAgentDir(windsurfSkills, projectRoot); err != nil {
+		t.Fatalf("removeEmptyAgentDir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".codeium")); !os.IsNotExist(err) {
 		t.Fatal("expected .codeium to be pruned")
@@ -261,7 +261,7 @@ func globalSkillsHome(t *testing.T, skillName string) (string, string) {
 // Universal agents read the skills directory directly, but older versions and
 // setup scripts materialized their directories; links there must not dangle
 // after the skill is removed.
-func TestRemoveAgentSymlinksClearsUniversalAgentLinks(t *testing.T) {
+func TestApplyLeftoverClearsAutomaticallyAvailableManagedPaths(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
 
 	codex := filepath.Join(home, ".codex", "skills")
@@ -275,7 +275,8 @@ func TestRemoveAgentSymlinksClearsUniversalAgentLinks(t *testing.T) {
 		}
 	}
 
-	removed := RemoveAgentSymlinks("alpha", skillsDir)
+	availability := NewAvailability(config.DefaultConfig(), skillsDir)
+	result := availability.ApplyLeftover(availability.ObserveLeftover().ForSkills([]string{"alpha"}).WithoutEmpty())
 
 	for _, dir := range []string{codex, cursor} {
 		if _, err := os.Lstat(filepath.Join(dir, "alpha")); !os.IsNotExist(err) {
@@ -283,8 +284,8 @@ func TestRemoveAgentSymlinksClearsUniversalAgentLinks(t *testing.T) {
 		}
 	}
 	var sawCodex, sawCursor bool
-	for _, name := range removed {
-		switch name {
+	for _, path := range result.RemovedPaths {
+		switch path.Agent {
 		case "codex":
 			sawCodex = true
 		case "cursor":
@@ -292,7 +293,7 @@ func TestRemoveAgentSymlinksClearsUniversalAgentLinks(t *testing.T) {
 		}
 	}
 	if !sawCodex || !sawCursor {
-		t.Fatalf("removed = %v; want codex and cursor reported", removed)
+		t.Fatalf("removed = %#v; want codex and cursor reported", result.RemovedPaths)
 	}
 }
 
@@ -321,8 +322,8 @@ func TestRemoveAgentSymlinksLeavesUnmanagedEntriesAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	RemoveAgentSymlinks("alpha", skillsDir)
-	RemoveAgentSymlinks("beta", skillsDir)
+	availability := NewAvailability(config.DefaultConfig(), skillsDir)
+	availability.ApplyLeftover(availability.ObserveLeftover().ForSkills([]string{"alpha", "beta"}).WithoutEmpty())
 
 	if _, err := os.Stat(keep); err != nil {
 		t.Fatalf("a real directory must never be removed: %v", err)
@@ -359,7 +360,7 @@ func TestDiagnoseAgentDirHealthClassifiesEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	health := DiagnoseAgentDirHealth(agentDir, skillsDir)
+	health := diagnoseAgentDirHealth(agentDir, skillsDir)
 
 	if want := (AgentDirHealth{
 		Broken:          []string{"removed"},
@@ -381,7 +382,7 @@ func TestDiagnoseAgentDirHealthReportsManagedCopiesApartFromPhysicalDirs(t *test
 		t.Fatal(err)
 	}
 
-	health := DiagnoseAgentDirHealth(agentDir, skillsDir)
+	health := diagnoseAgentDirHealth(agentDir, skillsDir)
 
 	if !reflect.DeepEqual(health.Copies, []string{"alpha"}) {
 		t.Fatalf("Copies = %#v; want [alpha]", health.Copies)
@@ -393,13 +394,13 @@ func TestDiagnoseAgentDirHealthReportsManagedCopiesApartFromPhysicalDirs(t *test
 
 func TestDiagnoseAgentDirHealthOnMissingDirReportsNothing(t *testing.T) {
 	_, skillsDir := globalSkillsHome(t, "alpha")
-	health := DiagnoseAgentDirHealth(filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
+	health := diagnoseAgentDirHealth(filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
 	if !reflect.DeepEqual(health, AgentDirHealth{}) {
 		t.Fatalf("got %#v; want nothing for a missing agent dir", health)
 	}
 }
 
-func TestFindStaleManagedLinksReportsOnlyDanglingManagedLinks(t *testing.T) {
+func TestObserveLeftoverReportsDanglingAutomaticallyAvailablePaths(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "healthy")
 	if err := os.MkdirAll(filepath.Join(skillsDir, "healthy"), 0755); err != nil {
 		t.Fatal(err)
@@ -416,17 +417,23 @@ func TestFindStaleManagedLinksReportsOnlyDanglingManagedLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stale := FindStaleManagedLinks(agentDir, skillsDir)
-	if len(stale) != 1 || stale[0] != "removed" {
-		t.Fatalf("stale = %v; want [removed]", stale)
+	occupancy := NewAvailability(config.DefaultConfig(), skillsDir).ObserveLeftover()
+	var dangling, live []string
+	for _, path := range occupancy.Paths {
+		if path.Agent != "gemini-cli" {
+			continue
+		}
+		if path.Dangling {
+			dangling = append(dangling, path.Skill)
+		} else {
+			live = append(live, path.Skill)
+		}
 	}
-}
-
-func TestFindStaleManagedLinksOnMissingDirReportsNothing(t *testing.T) {
-	_, skillsDir := globalSkillsHome(t, "alpha")
-	stale := FindStaleManagedLinks(filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
-	if stale != nil {
-		t.Fatalf("stale = %v; want nil for a missing agent dir", stale)
+	if len(dangling) != 1 || dangling[0] != "removed" {
+		t.Fatalf("dangling = %v; want [removed]", dangling)
+	}
+	if len(live) != 1 || live[0] != "healthy" {
+		t.Fatalf("live = %v; want [healthy]", live)
 	}
 }
 
@@ -451,39 +458,43 @@ func TestIsManagedSkillLinkAcceptsDanglingAndAbsoluteForms(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !IsManagedSkillLink(rel, "alpha", skillsDir) {
+	if !isManagedSkillLink(rel, "alpha", skillsDir) {
 		t.Error("relative link to the master skill should be managed")
 	}
-	if !IsManagedSkillLink(abs, "alpha", skillsDir) {
+	if !isManagedSkillLink(abs, "alpha", skillsDir) {
 		t.Error("absolute link to the master skill should be managed")
 	}
-	if !IsManagedSkillLink(dangling, "removed", skillsDir) {
+	if !isManagedSkillLink(dangling, "removed", skillsDir) {
 		t.Error("dangling link to a removed master skill should be managed")
 	}
-	if IsManagedSkillLink(rel, "beta", skillsDir) {
+	if isManagedSkillLink(rel, "beta", skillsDir) {
 		t.Error("a link naming a different skill must not be managed")
 	}
-	if IsManagedSkillLink(filepath.Join(skillsDir, "alpha"), "alpha", skillsDir) {
+	if isManagedSkillLink(filepath.Join(skillsDir, "alpha"), "alpha", skillsDir) {
 		t.Error("a real directory must never be reported as a managed link")
 	}
 }
 
-func TestAgentLinkManager(t *testing.T) {
+func TestAvailabilityApplyCreatesAndClearsLinkableAgentPath(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
-	manager := NewAgentLinkManager(skillsDir)
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
+	availability := NewAvailability(cfg, skillsDir)
 
-	linked, err := manager.EnsureLink("alpha", "claude")
-	if err != nil || !linked {
-		t.Fatalf("EnsureLink() = %v, %v; want true, nil", linked, err)
+	if _, err := availability.Apply("alpha"); err != nil {
+		t.Fatal(err)
 	}
-
 	claudeLink := filepath.Join(home, ".claude", "skills", "alpha")
-	if !manager.IsManagedLink(claudeLink, "alpha") {
+	if !isManagedSkillLink(claudeLink, "alpha", skillsDir) {
 		t.Error("expected claudeLink to be a managed link")
 	}
-
-	removed := manager.RemoveLinks("alpha")
-	if len(removed) == 0 {
-		t.Error("expected RemoveLinks to remove claude link")
+	cfg.Settings.DefaultAgents = []string{"continue"}
+	availability = NewAvailability(cfg, skillsDir)
+	if _, err := availability.Apply("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(claudeLink); err == nil {
+		t.Error("expected Apply to remove the undeclared Claude path")
 	}
 }

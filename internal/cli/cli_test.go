@@ -14,6 +14,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/pflag"
@@ -290,9 +291,7 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{"claude", "continue"} {
-		if _, err := engine.EnsureAgentSymlink("sample", agent, skillsDir); err != nil {
-			t.Fatal(err)
-		}
+		plantManagedAgentLink(t, skillsDir, "sample", agent)
 	}
 	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
 	continueLink := filepath.Join(project, ".continue", "skills", "sample")
@@ -303,18 +302,16 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
 		t.Fatalf("excluded Claude link still exists: %v", err)
 	}
-	if !engine.IsManagedSkillLink(continueLink, "sample", skillsDir) {
+	if !isSymlink(continueLink) {
 		t.Fatal("Continue link should remain")
 	}
 
-	if _, err := engine.EnsureAgentSymlink("sample", "claude", skillsDir); err != nil {
-		t.Fatal(err)
-	}
+	plantManagedAgentLink(t, skillsDir, "sample", "claude")
 	dryRunOut, _ := runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if !strings.Contains(dryRunOut, "Would unlink sample from claude-code") {
 		t.Fatalf("dry-run did not preview availability drift:\n%s", dryRunOut)
 	}
-	if !engine.IsManagedSkillLink(claudeLink, "sample", skillsDir) {
+	if !isSymlink(claudeLink) {
 		t.Fatal("dry-run removed an excluded link")
 	}
 	doctorOut, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
@@ -350,13 +347,9 @@ func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
 	}
 
 	for _, agent := range []string{"claude", "augment"} {
-		if _, err := engine.EnsureAgentSymlink("configured", agent, skillsDir); err != nil {
-			t.Fatal(err)
-		}
+		plantManagedAgentLink(t, skillsDir, "configured", agent)
 	}
-	if _, err := engine.EnsureAgentSymlink("orphan", "augment", skillsDir); err != nil {
-		t.Fatal(err)
-	}
+	plantManagedAgentLink(t, skillsDir, "orphan", "augment")
 	independent := filepath.Join(home, ".continue", "skills", "configured")
 	if err := os.MkdirAll(independent, 0755); err != nil {
 		t.Fatal(err)
@@ -413,12 +406,8 @@ func TestCLIPruneSkillsOnlyKeepsConfiguredSkillLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := engine.EnsureAgentSymlink("configured", "augment", skillsDir); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.EnsureAgentSymlink("orphan", "augment", skillsDir); err != nil {
-		t.Fatal(err)
-	}
+	plantManagedAgentLink(t, skillsDir, "configured", "augment")
+	plantManagedAgentLink(t, skillsDir, "orphan", "augment")
 
 	if _, err := runCLI(t, "prune", "--skills-only", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
 		t.Fatal(err)
@@ -637,6 +626,30 @@ func isolateHome(t *testing.T) string {
 	t.Setenv("AUTOHAND_HOME", "")
 	t.Setenv("GROK_HOME", "")
 	return home
+}
+
+func plantManagedAgentLink(t *testing.T, skillsDir, skill, agent string) {
+	t.Helper()
+	agents := models.GetAgentsForSkillsDir(skillsDir)
+	dir, ok := agents[models.NormalizeAgentName(agent)]
+	if !ok {
+		t.Fatalf("unknown agent %q", agent)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(dir, filepath.Join(skillsDir, skill))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rel, filepath.Join(dir, skill)); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+}
+
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
 // resetSubcommandFlags clears flag state on every subcommand. Commands are
@@ -1322,9 +1335,7 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	}
 
 	claudeSkills := filepath.Join(project, ".claude", "skills")
-	if _, err := engine.EnsureAgentSymlink("alpha", "claude", skillsDir); err != nil {
-		t.Fatal(err)
-	}
+	plantManagedAgentLink(t, skillsDir, "alpha", "claude")
 	// A healthy managed link and a dangling symlink.
 	brokenTarget, err := filepath.Rel(claudeSkills, filepath.Join(skillsDir, "broken"))
 	if err != nil {
@@ -1344,7 +1355,7 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(claudeSkills, "broken")); !os.IsNotExist(err) {
 		t.Fatal("broken symlink should have been removed")
 	}
-	if !engine.IsManagedSkillLink(filepath.Join(claudeSkills, "alpha"), "alpha", skillsDir) {
+	if !isSymlink(filepath.Join(claudeSkills, "alpha")) {
 		t.Fatal("healthy managed link should remain")
 	}
 }
@@ -1528,7 +1539,7 @@ func TestCLIDoctorFixReplacesConfirmedForeignAvailabilityPath(t *testing.T) {
 			t.Fatalf("interactive prompt output missing %q:\n%s", want, out)
 		}
 	}
-	if !engine.IsManagedSkillLink(foreignPath, "sample", skillsDir) {
+	if !isSymlink(foreignPath) {
 		t.Fatalf("doctor --fix did not replace %s with managed Availability", foreignPath)
 	}
 }

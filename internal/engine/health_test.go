@@ -62,6 +62,61 @@ func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
 	}
 }
 
+func TestDoctorRunCountsWorkingLeftoverOccupancy(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	source := filepath.Join(project, "src", "sample")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddLocalSymlinkEntry(cfg, "sample", source, "")
+	if _, err := NewAvailability(cfg, skillsDir).Apply("sample"); err != nil {
+		t.Fatal(err)
+	}
+	codex := filepath.Join(project, ".codex", "skills")
+	if err := os.MkdirAll(codex, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "sample"), filepath.Join(codex, "sample")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	doctor := NewDoctor(cfg, skillsDir)
+	outcome, err := doctor.Run(false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outcome.Report.Leftover.Paths) != 1 || outcome.Report.Leftover.Paths[0].Agent != "codex" {
+		t.Fatalf("Leftover.Paths = %#v; want the live Codex path", outcome.Report.Leftover.Paths)
+	}
+	if outcome.Remaining != 1 {
+		t.Fatalf("Remaining = %d; working leftover occupancy must count", outcome.Remaining)
+	}
+
+	fixed, err := doctor.Run(true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fixed.Remaining != 0 {
+		t.Fatalf("Remaining after --fix = %d; want 0", fixed.Remaining)
+	}
+	if _, err := os.Lstat(filepath.Join(codex, "sample")); !os.IsNotExist(err) {
+		t.Fatal("working leftover path should have been removed")
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); err != nil {
+		t.Fatal("declared Availability must remain")
+	}
+}
+
 func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()

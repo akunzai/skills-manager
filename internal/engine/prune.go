@@ -82,33 +82,26 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 	}
 
 	if includeSkills || includeConfiguredLinks {
-		agentLinks := NewAgentLinkManager(skillsDir)
+		availability := NewAvailability(cfg, skillsDir)
 		links := make(map[string]PruneLink)
-		addManagedLinks := func(skill string, predicate func(string) bool) {
-			for agent, dir := range pruneAgentDirs(skillsDir) {
-				if !predicate(agent) {
-					continue
-				}
-				path := filepath.Join(dir, skill)
-				if agentLinks.IsManagedPath(path, skill) {
-					links[path] = PruneLink{Agent: agent, Path: path}
-				}
-			}
-		}
 		if includeConfiguredLinks {
+			agentDirs := models.GetAgentsForSkillsDir(skillsDir)
 			for _, item := range inv {
 				if isUntracked(item) {
 					continue
 				}
-				targets := make(map[string]bool)
-				for _, agent := range item.Agents {
-					targets[agent] = true
+				for _, agent := range availability.ObserveAvailability(item.Name).Unexpected {
+					path := filepath.Join(agentDirs[agent], item.Name)
+					links[path] = PruneLink{Agent: agent, Path: path}
 				}
-				addManagedLinks(item.Name, func(agent string) bool { return !targets[agent] })
 			}
 		}
-		for skill := range orphans {
-			addManagedLinks(skill, func(string) bool { return true })
+		leftover := availability.ObserveLeftover().WithoutEmpty()
+		if !includeConfiguredLinks {
+			leftover = leftover.ForSkills(slices.Collect(maps.Keys(orphans)))
+		}
+		for _, path := range leftover.Paths {
+			links[path.Path] = PruneLink{Agent: path.Agent, Path: path.Path}
 		}
 		plan.Unconfigured = append(plan.Unconfigured, slices.Collect(maps.Values(links))...)
 	}
@@ -117,16 +110,6 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 	slices.Sort(plan.StateSkills)
 	slices.SortFunc(plan.Unconfigured, func(a, b PruneLink) int { return cmp.Compare(a.Path, b.Path) })
 	return plan, nil
-}
-
-func pruneAgentDirs(skillsDir string) map[string]string {
-	dirs := models.GetAgentsForSkillsDir(skillsDir)
-	for agent, dir := range models.GetUniversalAgentSkillDirs(skillsDir) {
-		if _, exists := dirs[agent]; !exists {
-			dirs[agent] = dir
-		}
-	}
-	return dirs
 }
 
 // ApplyPrunePlan removes every planned entry, continuing after failures. Each
