@@ -58,7 +58,7 @@ func newDoctorCmd() *cobra.Command {
 				progress = startDoctorProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Rebuilding %s Cache...", event.Index, event.Total, event.Source))
 			}, approve)
 			progress.Stop()
-			printHealthReport(out, doctorFindings(outcome.Report, outcome.Repair))
+			printHealthReport(out, doctorFindings(outcome.Report, outcome.AttemptedFix))
 			if runErr != nil {
 				return runErr
 			}

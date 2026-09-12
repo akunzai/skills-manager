@@ -51,7 +51,7 @@ func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
 	if !slices.Contains(outcome.Report.Untracked, "orphan") {
 		t.Fatalf("Untracked = %#v; want orphan", outcome.Report.Untracked)
 	}
-	if len(outcome.Report.LeftoverEmpty) == 0 {
+	if len(outcome.Report.Leftover.Empty) == 0 {
 		t.Fatal("diagnosis did not report the leftover empty agent directory")
 	}
 	if outcome.Remaining != 1 {
@@ -108,6 +108,9 @@ func TestDoctorRunCountsWorkingLeftoverOccupancy(t *testing.T) {
 	}
 	if fixed.Remaining != 0 {
 		t.Fatalf("Remaining after --fix = %d; want 0", fixed.Remaining)
+	}
+	if len(fixed.Report.Leftover.Paths) != 1 || fixed.Report.Leftover.Paths[0].Repair.Status != RepairSucceeded {
+		t.Fatalf("leftover path repair = %#v; want Succeeded on the Codex path", fixed.Report.Leftover.Paths)
 	}
 	if _, err := os.Lstat(filepath.Join(codex, "sample")); !os.IsNotExist(err) {
 		t.Fatal("working leftover path should have been removed")
@@ -169,8 +172,8 @@ func TestDoctorRunFixesThenRediagnosesFilesystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome.Repair == nil || len(outcome.Repair.RemovedLeftover) == 0 {
-		t.Fatalf("Repair = %#v; want a removed leftover directory", outcome.Repair)
+	if !outcome.AttemptedFix || leftoverEmptyRepairStatus(outcome.Report, RepairSucceeded) == 0 {
+		t.Fatalf("Report.Leftover.Empty = %#v; want a removed leftover directory", outcome.Report.Leftover.Empty)
 	}
 	if outcome.Remaining != 0 {
 		t.Fatalf("Remaining = %d; want actual post-fix state to be healthy", outcome.Remaining)
@@ -338,8 +341,8 @@ func TestDoctorRunPreservesLegacyCacheWhenRebuildFails(t *testing.T) {
 	if got := GetLocalRepoCommit(legacy); got == "" {
 		t.Fatal("doctor --fix removed the legacy Cache after its replacement failed")
 	}
-	if !hasCacheMigration(outcome.Repair, CacheMigrationFailed) {
-		t.Fatalf("Repair = %#v; want a failed Cache migration", outcome.Repair)
+	if !hasCacheMigration(outcome.Report.CacheMigrations, CacheMigrationFailed) {
+		t.Fatalf("CacheMigrations = %#v; want a failed Cache migration", outcome.Report.CacheMigrations)
 	}
 }
 
@@ -383,8 +386,8 @@ func TestDoctorRunKeepsInstalledCacheAndReportsRecoveryWhenBackupCleanupFails(t 
 	if GetLocalRepoCommit(resolveCacheRepo("owner/repo", origin, branch, cacheDir).Dir) == "" {
 		t.Fatal("installed branch-aware Cache must stay in place")
 	}
-	if !hasCacheMigration(outcome.Repair, CacheMigrationRecoveryNeeded) {
-		t.Fatalf("Repair = %#v; want a Cache migration needing manual recovery", outcome.Repair)
+	if !hasCacheMigration(outcome.Report.CacheMigrations, CacheMigrationRecoveryNeeded) {
+		t.Fatalf("CacheMigrations = %#v; want a Cache migration needing manual recovery", outcome.Report.CacheMigrations)
 	}
 }
 
@@ -448,11 +451,11 @@ func TestDoctorRunRestoresLegacyCacheWhenReplacementRenameFails(t *testing.T) {
 	if GetLocalRepoCommit(legacy) == "" {
 		t.Fatal("legacy Cache was not restored after replacement rename failed")
 	}
-	if !hasCacheMigration(outcome.Repair, CacheMigrationFailed) {
-		t.Fatalf("Repair = %#v; want a failed Cache migration", outcome.Repair)
+	if !hasCacheMigration(outcome.Report.CacheMigrations, CacheMigrationFailed) {
+		t.Fatalf("CacheMigrations = %#v; want a failed Cache migration", outcome.Report.CacheMigrations)
 	}
-	if hasCacheMigration(outcome.Repair, CacheMigrationRecoveryNeeded) {
-		t.Fatalf("successful rollback must not require manual recovery: %#v", outcome.Repair)
+	if hasCacheMigration(outcome.Report.CacheMigrations, CacheMigrationRecoveryNeeded) {
+		t.Fatalf("successful rollback must not require manual recovery: %#v", outcome.Report.CacheMigrations)
 	}
 }
 
@@ -476,7 +479,7 @@ func TestDoctorRunPreservesArtifactsWhenReplacementAndRollbackRenameFail(t *test
 	if outcome.Remaining != 2 {
 		t.Fatalf("Remaining = %d; want backup and staging recovery artifacts", outcome.Remaining)
 	}
-	artifacts := strings.Join(cacheMigrationArtifacts(outcome.Repair, CacheMigrationRecoveryNeeded), " ")
+	artifacts := strings.Join(cacheMigrationArtifacts(outcome.Report.CacheMigrations, CacheMigrationRecoveryNeeded), " ")
 	if artifacts == "" ||
 		!strings.Contains(artifacts, ".legacy-cache-") ||
 		!strings.Contains(artifacts, ".doctor-cache-") {
@@ -609,7 +612,7 @@ func TestDoctorRunPropagatesInventoryErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected inventory error")
 	}
-	if outcome.Report.SkillsDir != "" || outcome.Repair != nil {
+	if outcome.Report.SkillsDir != "" || outcome.AttemptedFix {
 		t.Fatalf("outcome = %#v; want no partial report when Run fails", outcome)
 	}
 }
@@ -623,11 +626,29 @@ func hasUnknownAgent(refs []UnknownAgentReference, skill, field, agent string) b
 	return false
 }
 
-func hasCacheMigration(repair *RepairOutcome, status CacheMigrationStatus) bool {
-	if repair == nil {
-		return false
+func TestAttachLeftoverRepairsRecordsSkip(t *testing.T) {
+	path := LeftoverPath{Agent: "codex", Skill: "sample", Path: "/tmp/sample"}
+	got := attachLeftoverRepairs(
+		LeftoverOccupancy{Paths: []LeftoverPath{path}},
+		LeftoverApplyResult{SkippedPaths: []LeftoverPath{path}},
+	)
+	if got.Paths[0].Repair.Status != RepairSkipped {
+		t.Fatalf("repair = %#v; want Skipped", got.Paths[0].Repair)
 	}
-	for _, migration := range repair.CacheMigrations {
+}
+
+func leftoverEmptyRepairStatus(report DoctorReport, status RepairStatus) int {
+	n := 0
+	for _, empty := range report.Leftover.Empty {
+		if empty.Repair.Status == status {
+			n++
+		}
+	}
+	return n
+}
+
+func hasCacheMigration(migrations []CacheMigrationOutcome, status CacheMigrationStatus) bool {
+	for _, migration := range migrations {
 		if migration.Status == status {
 			return true
 		}
@@ -635,12 +656,9 @@ func hasCacheMigration(repair *RepairOutcome, status CacheMigrationStatus) bool 
 	return false
 }
 
-func cacheMigrationArtifacts(repair *RepairOutcome, status CacheMigrationStatus) []string {
-	if repair == nil {
-		return nil
-	}
+func cacheMigrationArtifacts(migrations []CacheMigrationOutcome, status CacheMigrationStatus) []string {
 	var artifacts []string
-	for _, migration := range repair.CacheMigrations {
+	for _, migration := range migrations {
 		if migration.Status == status {
 			artifacts = append(artifacts, migration.Artifacts...)
 		}

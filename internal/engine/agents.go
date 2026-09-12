@@ -12,8 +12,9 @@ import (
 
 // AgentDir is a known harness skills directory.
 type AgentDir struct {
-	Name string
-	Dir  string
+	Name   string
+	Dir    string
+	Repair ItemRepair
 }
 
 // AgentDirHealth is one Agent skills directory classified in a single pass.
