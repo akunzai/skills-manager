@@ -53,7 +53,7 @@ characters — they live in history and get searched by tooling.
 <details>
 <summary>Technical details</summary>
 
-implementation notes, the commands run, lessons learned
+implementation notes, verification, lessons learned
 
 </details>
 ```
