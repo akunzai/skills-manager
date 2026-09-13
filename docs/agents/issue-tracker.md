@@ -39,8 +39,9 @@ Use a concise descriptive title with no Conventional Commit prefix.
 <details>
 <summary>Technical details</summary>
 
-suspected cause, related code paths, repro commands, log excerpts,
-the Scope and skills.json involved
+<everything an implementer needs — for example, suspected cause, related
+code paths, repro commands, log excerpts, the Scope and skills.json
+involved>
 
 </details>
 ```
@@ -78,7 +79,8 @@ code the change must produce where one applies>
 <details>
 <summary>Technical details</summary>
 
-related code paths, prior art, log excerpts, open questions
+<only background — for example, related code paths, prior art, log
+excerpts, open questions>
 
 </details>
 ```
