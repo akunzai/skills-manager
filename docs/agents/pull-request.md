@@ -19,6 +19,9 @@ characters — they live in history and get searched by tooling.
   it still gets one label.
 - Run `mise run check` before opening anything. See
   `docs/agents/verification.md`.
+- Link a tracked issue with `Closes #<n>` only when merge should auto-close
+  it. If there is no tracked issue, never leave an unlinked `Closes #` or an
+  empty Related Issue heading in the description.
 - **Do not open a request, draft included, without the developer asking.**
 
 ## Description shape
