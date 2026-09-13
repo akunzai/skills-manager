@@ -45,14 +45,15 @@ characters — they live in history and get searched by tooling.
    rewritten to point at the uploaded asset. Only when capture is
    genuinely impossible, leave a named placeholder comment such as
    `<!-- recording pending: the add prompt with two sources -->`.
-3. A collapsed technical trailer holding affected paths, implementation
-   notes, verification commands, and log excerpts:
+3. A collapsed technical trailer holding implementation notes, verification,
+   and lessons learned. Skip affected paths — the forge's own diff view
+   already shows those:
 
 ```markdown
 <details>
 <summary>Technical details</summary>
 
-affected paths, implementation notes, the commands run, log excerpts
+implementation notes, the commands run, lessons learned
 
 </details>
 ```
