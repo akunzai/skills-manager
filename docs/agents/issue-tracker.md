@@ -25,7 +25,7 @@ Use a concise descriptive title with no Conventional Commit prefix.
    the reader cannot otherwise locate the issue.
 2. Add a visual GitHub renders inline — a terminal capture for wrong CLI
    output or a broken prompt, a Mermaid diagram for a Sync, Freshness, or
-   Availability flow. Skip formats the description editor cannot render,
+   Availability flow. In a Mermaid label, write a path parameter as `:id`, not `{id}`, and break lines with `<br/>`, not `\n`. Skip formats the description editor cannot render,
    such as a link to an external artifact or a raw HTML or SVG file.
    Upload it with the repeatable `--attach` flag
    (`gh issue create --attach './bug.png#The blocked sync output'`); alt
