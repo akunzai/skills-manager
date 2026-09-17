@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/models"
@@ -121,8 +122,18 @@ func gitOpErr(action, repoURL, stdout, stderr string, err error) error {
 }
 
 // RunGit executes a git command directly without passing through a shell.
+// On Windows, Git defaults core.longpaths to false, which fails checkouts when
+// path lengths exceed 260 characters (MAX_PATH). We inject -c core.longpaths=true
+// to ensure transparent long-path support.
+// References:
+//   - https://git-scm.com/docs/git-config#Documentation/git-config.txt-corelongpaths
+//   - https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation
 func RunGit(cwd string, args ...string) (string, string, error) {
-	cmd := exec.Command("git", args...)
+	cmdArgs := args
+	if runtime.GOOS == "windows" {
+		cmdArgs = append([]string{"-c", "core.longpaths=true"}, args...)
+	}
+	cmd := exec.Command("git", cmdArgs...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -166,6 +177,9 @@ func EnsureGitRepo(
 
 	gitDir := filepath.Join(repo.Dir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
+		if runtime.GOOS == "windows" {
+			_, _, _ = RunGit(repo.Dir, "config", "core.longpaths", "true")
+		}
 		if forceUpdate {
 			ref := repo.Branch
 			if ref == "" {
@@ -194,6 +208,9 @@ func EnsureGitRepo(
 	_ = RemoveAll(repo.Dir)
 
 	cloneArgs := []string{"clone", "--depth", "1"}
+	if runtime.GOOS == "windows" {
+		cloneArgs = append(cloneArgs, "-c", "core.longpaths=true")
+	}
 	if repo.Branch != "" {
 		cloneArgs = append(cloneArgs, "--branch", repo.Branch)
 	}
