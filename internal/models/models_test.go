@@ -17,6 +17,7 @@ func TestNormalizeAgentName(t *testing.T) {
 		{"gemini", "gemini-cli"},
 		{"antigravity", "antigravity-cli"},
 		{"vibe", "mistral-vibe"},
+		{"muse", "muse-code"},
 		{"roo-code", "roo"},
 		{"unknown-agent", "unknown-agent"},
 	}
@@ -58,6 +59,18 @@ func TestIsUniversalAgentIsScopeAware(t *testing.T) {
 		}
 	}
 
+	// grok is the inverse split of antigravity-cli: Global reads
+	// ~/.agents/skills; Project uses ./.grok/skills.
+	if !IsUniversalAgent("grok", "") {
+		t.Errorf("expected grok to be universal at Global Scope")
+	}
+	if IsUniversalAgent("grok", projectSkillsDir) {
+		t.Errorf("expected grok to not be universal at Project Scope")
+	}
+	if !IsUniversalAgent("muse", "") || !IsUniversalAgent("muse-code", projectSkillsDir) {
+		t.Errorf("expected muse-code to be universal in both Scopes")
+	}
+
 	// cline reads its own directory in every Scope (docs.cline.bot), not
 	// .agents/skills, so it must never be universal.
 	if IsUniversalAgent("cline", "") || IsUniversalAgent("cline", projectSkillsDir) {
@@ -67,16 +80,29 @@ func TestIsUniversalAgentIsScopeAware(t *testing.T) {
 
 func TestGetAutomaticallyAvailableAgentsIsScopeAwareAndSorted(t *testing.T) {
 	project := GetAutomaticallyAvailableAgents(filepath.Join(t.TempDir(), ".agents", "skills"))
-	for _, want := range []string{"antigravity-cli", "codex", "replit"} {
+	for _, want := range []string{"antigravity-cli", "codex", "muse-code", "replit"} {
 		if !slices.Contains(project, want) {
 			t.Fatalf("Project Automatically available Agents missing %q: %#v", want, project)
 		}
+	}
+	if slices.Contains(project, "grok") {
+		t.Fatalf("grok is Global-only Automatically available: %#v", project)
 	}
 	if slices.Contains(project, "universal") {
 		t.Fatalf("filter alias must not be reported as an Agent: %#v", project)
 	}
 	if !slices.IsSorted(project) {
 		t.Fatalf("Agents are not sorted: %#v", project)
+	}
+
+	global := GetAutomaticallyAvailableAgents("")
+	for _, want := range []string{"codex", "grok", "muse-code"} {
+		if !slices.Contains(global, want) {
+			t.Fatalf("Global Automatically available Agents missing %q: %#v", want, global)
+		}
+	}
+	if slices.Contains(global, "antigravity-cli") {
+		t.Fatalf("antigravity-cli is Project-only Automatically available: %#v", global)
 	}
 }
 
@@ -109,6 +135,12 @@ func TestNoAgentIsBothKnownAndUniversalInSameScope(t *testing.T) {
 	for agent := range knownProject {
 		if IsUniversalAgent(agent, projectSkillsDir) {
 			t.Errorf("%s is both a known Project agent dir and universal at Project Scope", agent)
+		}
+	}
+
+	for agent := range GetKnownAgents() {
+		if IsUniversalAgent(agent, "") {
+			t.Errorf("%s is both a known Global agent dir and universal at Global Scope", agent)
 		}
 	}
 }
@@ -149,6 +181,12 @@ func TestGetKnownAgentsIncludesReclassifiedGlobalAgents(t *testing.T) {
 	if _, ok := got["github-copilot"]; ok {
 		t.Errorf("github-copilot should not be a Global known dir; it is Automatically available")
 	}
+	if _, ok := got["grok"]; ok {
+		t.Errorf("grok should not be a Global known dir; it is Automatically available")
+	}
+	if _, ok := got["muse-code"]; ok {
+		t.Errorf("muse-code should not be a Global known dir; it is Automatically available")
+	}
 }
 
 func TestGetProjectKnownAgentsOmitsCursorButIncludesFirebender(t *testing.T) {
@@ -158,9 +196,16 @@ func TestGetProjectKnownAgentsOmitsCursorButIncludesFirebender(t *testing.T) {
 	if _, ok := agents["cursor"]; ok {
 		t.Errorf("cursor should not be a Project linkable dir; it reads .agents/skills directly in both Scopes")
 	}
-	want := filepath.Join(projectRoot, ".firebender", "skills")
-	if agents["firebender"] != want {
-		t.Errorf(`GetProjectKnownAgents()["firebender"] = %q; want %q`, agents["firebender"], want)
+	if _, ok := agents["muse-code"]; ok {
+		t.Errorf("muse-code should not be a Project linkable dir; it reads .agents/skills directly")
+	}
+	wantFirebender := filepath.Join(projectRoot, ".firebender", "skills")
+	if agents["firebender"] != wantFirebender {
+		t.Errorf(`GetProjectKnownAgents()["firebender"] = %q; want %q`, agents["firebender"], wantFirebender)
+	}
+	wantGrok := filepath.Join(projectRoot, ".grok", "skills")
+	if agents["grok"] != wantGrok {
+		t.Errorf(`GetProjectKnownAgents()["grok"] = %q; want %q`, agents["grok"], wantGrok)
 	}
 }
 
@@ -175,6 +220,24 @@ func TestGetKnownAgentsHonorsPerAgentEnvOverrides(t *testing.T) {
 	want := filepath.Join(claudeDir, "skills")
 	if got["claude-code"] != want {
 		t.Errorf(`GetKnownAgents()["claude-code"] = %q; want %q`, got["claude-code"], want)
+	}
+}
+
+func TestGetUniversalAgentSkillDirsHonorsGrokAndMuseRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	xdg := filepath.Join(home, "xdg-config")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	grokHome := filepath.Join(home, "custom-grok")
+	t.Setenv("GROK_HOME", grokHome)
+
+	got := GetUniversalAgentSkillDirs("")
+	if got["grok"] != filepath.Join(grokHome, "skills") {
+		t.Errorf(`GetUniversalAgentSkillDirs()["grok"] = %q; want under GROK_HOME`, got["grok"])
+	}
+	if got["muse-code"] != filepath.Join(xdg, "muse", "skills") {
+		t.Errorf(`GetUniversalAgentSkillDirs()["muse-code"] = %q; want under XDG_CONFIG_HOME/muse`, got["muse-code"])
 	}
 }
 

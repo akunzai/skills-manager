@@ -142,12 +142,16 @@ func GetProjectRootFromSkillsDir(skillsDir string) string {
 // GetProjectKnownAgents returns mapping of agent names to their project-level
 // skills directory. Cursor is not here: it reads project .agents/skills
 // directly, same as at Global Scope (cursor.com/docs/skills#skill-directories).
+// Grok is here for Project only: Global reads ~/.agents/skills
+// (docs.x.ai/build/features/skills-plugins-marketplaces); Project discovers
+// ./.grok/skills instead.
 func GetProjectKnownAgents(projectRoot string) map[string]string {
 	return map[string]string{
 		"claude-code": filepath.Join(projectRoot, ".claude", "skills"),
 		"continue":    filepath.Join(projectRoot, ".continue", "skills"),
 		"cline":       filepath.Join(projectRoot, ".cline", "skills"),
 		"firebender":  filepath.Join(projectRoot, ".firebender", "skills"),
+		"grok":        filepath.Join(projectRoot, ".grok", "skills"),
 		"roo":         filepath.Join(projectRoot, ".roo", "skills"),
 		"windsurf":    filepath.Join(projectRoot, ".codeium", "windsurf", "skills"),
 	}
@@ -198,12 +202,15 @@ func GetUniversalAgentSkillDirs(skillsDir string) map[string]string {
 		}
 	}
 	xdgConfig := ResolveEnvPath("XDG_CONFIG_HOME", "~/.config")
+	grokHome := ResolveEnvPath("GROK_HOME", "~/.grok")
 	return map[string]string{
 		"amp":            ExpandUser("~/.amp/skills"),
 		"codex":          ExpandUser("~/.codex/skills"),
 		"cursor":         ExpandUser("~/.cursor/skills"),
 		"gemini-cli":     ExpandUser("~/.gemini/skills"),
 		"github-copilot": ExpandUser("~/.copilot/skills"),
+		"grok":           filepath.Join(grokHome, "skills"),
+		"muse-code":      filepath.Join(xdgConfig, "muse", "skills"),
 		"opencode":       filepath.Join(xdgConfig, "opencode", "skills"),
 		"zed":            filepath.Join(xdgConfig, "zed", "skills"),
 	}
@@ -292,7 +299,6 @@ func GetKnownAgents() map[string]string {
 	vibeHome := ResolveEnvPath("VIBE_HOME", "~/.vibe")
 	hermesHome := ResolveEnvPath("HERMES_HOME", "~/.hermes")
 	autohandHome := ResolveEnvPath("AUTOHAND_HOME", "~/.autohand")
-	grokHome := ResolveEnvPath("GROK_HOME", "~/.grok")
 
 	openclawDir := ExpandUser("~/.openclaw/skills")
 	if _, err := os.Stat(ExpandUser("~/.clawdbot")); err == nil {
@@ -301,7 +307,7 @@ func GetKnownAgents() map[string]string {
 		openclawDir = ExpandUser("~/.moltbot/skills")
 	}
 
-	known := make(map[string]string, len(knownAgentSkillDirTemplates)+8)
+	known := make(map[string]string, len(knownAgentSkillDirTemplates)+7)
 	for agent, template := range knownAgentSkillDirTemplates {
 		known[agent] = ExpandUser(template)
 	}
@@ -310,7 +316,6 @@ func GetKnownAgents() map[string]string {
 	known["claude-code"] = filepath.Join(claudeHome, "skills")
 	known["devin"] = filepath.Join(xdgConfig, "devin", "skills")
 	known["goose"] = filepath.Join(xdgConfig, "goose", "skills")
-	known["grok"] = filepath.Join(grokHome, "skills")
 	known["hermes-agent"] = filepath.Join(hermesHome, "skills")
 	known["mistral-vibe"] = filepath.Join(vibeHome, "skills")
 	known["openclaw"] = openclawDir
@@ -342,8 +347,14 @@ const scopeBoth = scopeGlobal | scopeProject
 //     ~/.gemini/antigravity-cli/skills instead — a different tool from the
 //     Antigravity IDE, which reads ~/.gemini/skills
 //     (antigravity.google/docs/cli/plugins#sharing-global-skills).
+//   - grok: Global reads ~/.agents/skills; Project discovers ./.grok/skills
+//     (docs.x.ai/build/features/skills-plugins-marketplaces).
 //   - replit: confirmed only for Project (docs.replit.com); Replit Agent runs
 //     in the cloud with no local Global skills directory to read.
+//
+// muse-code reads the master skills directory in both Scopes and keeps a
+// leftover-only user root at $XDG_CONFIG_HOME/muse/skills
+// (dev.meta.ai/docs/muse-code/extending/).
 var universalAgentScopes = map[string]agentScope{
 	"amp":             scopeBoth,
 	"antigravity-cli": scopeProject,
@@ -351,7 +362,9 @@ var universalAgentScopes = map[string]agentScope{
 	"cursor":          scopeBoth,
 	"gemini-cli":      scopeBoth,
 	"github-copilot":  scopeBoth,
+	"grok":            scopeGlobal,
 	"kimi-code-cli":   scopeBoth,
+	"muse-code":       scopeBoth,
 	"opencode":        scopeBoth,
 	"replit":          scopeProject,
 	"warp":            scopeBoth,
@@ -388,6 +401,7 @@ var AgentAliases = map[string]string{
 	"kimi":        "kimi-code-cli",
 	"kimi-code":   "kimi-code-cli",
 	"copilot":     "github-copilot",
+	"muse":        "muse-code",
 }
 
 func NormalizeAgentName(name string) string {
