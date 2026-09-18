@@ -34,7 +34,7 @@ func copyFallbackScope(t *testing.T) (cfg *config.Config, skillsDir, cacheDir, o
 	cacheDir = filepath.Join(root, "cache")
 	origin = filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	cfg = config.DefaultConfig()

@@ -87,7 +87,7 @@ func TestInspectFreshnessClassifiesRemoteSkillContent(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	cachePath, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir)
+	cachePath, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestSyncUsesCacheBaselineAndProtectsLocalDrift(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err != nil {
@@ -259,5 +259,71 @@ func TestSyncMissingCacheFailsWithoutNetworkAndContinues(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(filepath.Join(root, "skills", "local")); statErr != nil {
 		t.Fatalf("unrelated local Skill did not converge: %v", statErr)
+	}
+}
+
+// Another Scope's update left the Cache at the remote commit without this
+// Scope's Skill. Freshness asks for an update, and update adds the path to
+// the sparse checkout rather than leaving Sync blocked (ADR 0004).
+func TestUpdateCompletesCacheMissingADeclaredSkill(t *testing.T) {
+	origin, url := writeSparseOrigin(t)
+	branch := mustGit(t, origin, "symbolic-ref", "--short", "HEAD")
+	cacheDir := t.TempDir()
+	repoDir, err := EnsureGitRepo("owner/repo", url, branch, false, cacheDir, "skills/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: url, Branch: branch, Skills: map[string]string{"alpha": "skills/alpha", "beta": "skills/beta"}}
+
+	status := newRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir).ObserveFreshness()
+	if status.RemoteStatus != RemoteCacheIncomplete {
+		t.Fatalf("status = %q (%s); want %q", status.RemoteStatus, status.Error, RemoteCacheIncomplete)
+	}
+	snapshot := FreshnessSnapshot{Repositories: []FreshnessRepository{status}}
+	if kinds := snapshot.DispositionKinds(); !reflect.DeepEqual(kinds, []FreshnessDispositionKind{FreshnessUpdate}) {
+		t.Fatalf("dispositions = %v", kinds)
+	}
+
+	result, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Errors) != 0 || len(result.UpdatedRepos) != 1 {
+		t.Fatalf("update result = %#v", result)
+	}
+	assertCachePaths(t, repoDir, []string{"skills/alpha/notes.txt", "skills/beta/reference.txt"}, []string{"fixtures"})
+	if status := newRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir).ObserveFreshness(); status.RemoteStatus != RemoteUpToDate {
+		t.Fatalf("status after update = %q", status.RemoteStatus)
+	}
+}
+
+// Sync must not Materialize a Skill the sparse checkout does not cover, even
+// when part of its directory is on disk (ADR 0004).
+func TestInspectFreshnessTreatsUncoveredSkillAsMissingFromCache(t *testing.T) {
+	_, url := writeSparseOrigin(t)
+	cacheDir := t.TempDir()
+	repoDir, err := EnsureGitRepo("owner/repo", url, "", false, cacheDir, "skills/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An add interrupted during discovery leaves beta's SKILL.md alone on disk.
+	state, err := readSparseState(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkOutSkillFiles(repoDir, state); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: url, Skills: map[string]string{"root": ".", "beta": "skills/beta"}}
+	snapshot, err := InspectFreshness(cfg, filepath.Join(t.TempDir(), "skills"), cacheDir, FreshnessOptions{ObserveScope: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, skill := range snapshot.Repositories[0].Skills {
+		if skill.Status != SkillUnverified {
+			t.Errorf("%s status = %q; want %q", skill.Name, skill.Status, SkillUnverified)
+		}
 	}
 }

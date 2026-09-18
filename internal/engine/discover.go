@@ -1,7 +1,8 @@
 package engine
 
 import (
-	"bytes"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -55,6 +56,29 @@ var IgnoredScanDirs = map[string]bool{
 type DiscoveredSkills map[string][]string
 
 func DiscoverSkillsInRepo(repoDir, scope string) (DiscoveredSkills, error) {
+	return discoverSkills(repoDir, scope, fileBundleIdentity(repoDir))
+}
+
+// discoverRemoteSkills discovers Skills in a Cache whose sparse checkout holds
+// only SKILL.md files (withSkillFiles), so duplicate candidates are
+// compared by their committed tree rather than the files on disk.
+func discoverRemoteSkills(repoDir, scope string) (DiscoveredSkills, error) {
+	var found DiscoveredSkills
+	err := withSkillFiles(repoDir, func() error {
+		var err error
+		found, err = discoverSkills(repoDir, scope, gitTreeIdentity(repoDir))
+		// A committed directory holding no SKILL.md is not on disk at all.
+		if errors.Is(err, os.ErrNotExist) {
+			if kind, _, gitErr := RunGit(repoDir, "cat-file", "-t", "HEAD:"+filepath.ToSlash(filepath.Clean(scope))); gitErr == nil && kind == "tree" {
+				found, err = DiscoveredSkills{}, nil
+			}
+		}
+		return err
+	})
+	return found, err
+}
+
+func discoverSkills(repoDir, scope string, identity bundleIdentity) (DiscoveredSkills, error) {
 	scanRoot, err := discoveryRoot(repoDir, scope)
 	if err != nil {
 		return nil, err
@@ -106,7 +130,7 @@ func DiscoverSkillsInRepo(repoDir, scope string) (DiscoveredSkills, error) {
 	for _, name := range slices.Sorted(maps.Keys(foundPaths)) {
 		paths := foundPaths[name]
 		slices.Sort(paths)
-		found[name] = canonicalizeSkillCandidates(repoDir, name, paths)
+		found[name] = canonicalizeSkillCandidates(name, paths, identity)
 	}
 
 	return found, nil
@@ -138,28 +162,67 @@ type bundleEntry struct {
 	linkTarget string
 }
 
-func canonicalizeSkillCandidates(repoDir, name string, paths []string) []string {
+// bundleIdentity names the content of the Skill bundle at a repository-relative
+// path; candidates with equal identities are the same Skill.
+type bundleIdentity func(relPath string) (string, error)
+
+// fileBundleIdentity digests the bundle as it is on disk, including file
+// modes and symlink targets.
+func fileBundleIdentity(repoDir string) bundleIdentity {
+	return func(relPath string) (string, error) {
+		entries, err := readSkillBundle(filepath.Join(repoDir, filepath.FromSlash(relPath)))
+		if err != nil {
+			return "", err
+		}
+		h := sha256.New()
+		for _, entry := range entries {
+			fmt.Fprintf(h, "%s\x00%o\x00%s\x00%d\x00", entry.path, uint32(entry.mode), entry.linkTarget, len(entry.content))
+			h.Write(entry.content)
+		}
+		return fmt.Sprintf("%x", h.Sum(nil)), nil
+	}
+}
+
+// gitTreeIdentity is the committed tree ID, which already covers content,
+// executable bits, and symlink targets.
+func gitTreeIdentity(repoDir string) bundleIdentity {
+	return func(relPath string) (string, error) {
+		if relPath == "." {
+			relPath = ""
+		}
+		stdout, stderr, err := RunGit(repoDir, "rev-parse", "HEAD:"+relPath)
+		if err != nil {
+			return "", gitOpErr("resolve tree", relPath, stdout, stderr, err)
+		}
+		return stdout, nil
+	}
+}
+
+func canonicalizeSkillCandidates(name string, paths []string, identity bundleIdentity) []string {
+	if len(paths) == 1 {
+		return paths
+	}
 	type bundleGroup struct {
-		entries []bundleEntry
-		paths   []string
+		identity string
+		paths    []string
 	}
 	groups := make([]bundleGroup, 0, len(paths))
 	for _, path := range paths {
-		entries, err := readSkillBundle(filepath.Join(repoDir, filepath.FromSlash(path)))
+		id, err := identity(path)
 		if err != nil {
 			groups = append(groups, bundleGroup{paths: []string{path}})
 			continue
 		}
 		matched := false
 		for i := range groups {
-			if groups[i].entries != nil && equalBundleEntries(groups[i].entries, entries) {
+			if groups[i].identity != "" && groups[i].identity == id {
 				groups[i].paths = append(groups[i].paths, path)
 				matched = true
 				break
 			}
 		}
 		if !matched {
-			groups = append(groups, bundleGroup{entries: entries, paths: []string{path}})
+			groups = append(groups, bundleGroup{identity: id, paths: []string{path}})
 		}
 	}
 
@@ -198,18 +261,6 @@ func readSkillBundle(root string) ([]bundleEntry, error) {
 		return nil
 	})
 	return entries, err
-}
-
-func equalBundleEntries(a, b []bundleEntry) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].path != b[i].path || a[i].mode != b[i].mode || a[i].linkTarget != b[i].linkTarget || !bytes.Equal(a[i].content, b[i].content) {
-			return false
-		}
-	}
-	return true
 }
 
 func canonicalSkillPath(name string, paths []string) string {

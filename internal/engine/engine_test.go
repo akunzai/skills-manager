@@ -1146,7 +1146,7 @@ func TestUpdateRemoteSkillsDoesNotReconcileAvailability(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
@@ -1187,7 +1187,7 @@ func TestUpdateRemoteSkillsDryRunDoesNotApplyAvailabilityDrift(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
@@ -1219,7 +1219,7 @@ func TestUpdateRemoteSkillsIgnoresUnmanagedAvailabilityPath(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
@@ -1280,7 +1280,7 @@ func TestSyncPlanApplyReportsLiveRemoteSourceLifecycle(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	var live []SyncEvent

@@ -23,6 +23,10 @@ const (
 	RemoteUpToDate        RemoteFreshnessStatus = "up_to_date"
 	RemoteUpdateAvailable RemoteFreshnessStatus = "update_available"
 	RemoteNotCached       RemoteFreshnessStatus = "not_cached"
+	// RemoteCacheIncomplete is a Cache at the remote commit whose sparse
+	// checkout lacks a declared Skill, typically one another Scope's update
+	// did not need. Update adds the path; Sync cannot, since it stays offline.
+	RemoteCacheIncomplete RemoteFreshnessStatus = "cache_incomplete"
 	RemoteError           RemoteFreshnessStatus = "error"
 )
 
@@ -76,7 +80,7 @@ func (s FreshnessSnapshot) Dispositions() []FreshnessDisposition {
 	}
 	for _, repository := range s.Repositories {
 		switch repository.RemoteStatus {
-		case RemoteUpdateAvailable, RemoteNotCached:
+		case RemoteUpdateAvailable, RemoteNotCached, RemoteCacheIncomplete:
 			add(FreshnessUpdate, string(repository.RemoteStatus), repository.Source, "")
 		case RemoteError:
 			add(FreshnessUpdate, string(repository.RemoteStatus), repository.Source, "")
@@ -186,8 +190,15 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 		source := snapshot.Repositories[i].Source
 		repoInfo := cfg.Remote[source]
 		cachePath := snapshot.Repositories[i].CachePath
+		// A Skill outside the sparse checkout may still have a directory on
+		// disk: a root Skill's root files, or SKILL.md files an interrupted
+		// add left behind. Either is missing from the Cache, not content.
+		sparse, sparseErr := readSparseState(cachePath)
 		for _, name := range sortedSkillKeys(repoInfo.Skills) {
 			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cachePath, skillsDir, state.Skills[name])
+			if snapshot.Repositories[i].LocalSHA != "" && sparseErr == nil && len(sparse.missing([]string{skill.Subpath})) > 0 {
+				skill.Status = SkillUnverified
+			}
 			if snapshot.Repositories[i].LocalSHA == "" {
 				skill.Status = SkillUnverified
 				skill.BaselineRecorded = false

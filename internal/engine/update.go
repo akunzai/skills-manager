@@ -112,7 +112,9 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		}
 	}
 	var refresh []string
+	incomplete := make(map[string]bool)
 	for _, status := range snapshot.Repositories {
+		incomplete[status.Source] = status.RemoteStatus == RemoteCacheIncomplete
 		source := status.Source
 		_, update := needsUpdate[source]
 		if !force && !update {
@@ -131,7 +133,10 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 			result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, DryRun: true})
 			continue
 		}
-		dir, refreshErr := newRemoteSource(source, repositories[source], cacheDir).refresh(true)
+		// A Cache that only lacks a declared Skill is already at the remote
+		// commit; adding the path is enough.
+		fetch := force || !incomplete[source]
+		dir, refreshErr := newRemoteSource(source, repositories[source], cacheDir).refresh(fetch)
 		if refreshErr != nil {
 			message := refreshErr.Error()
 			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})

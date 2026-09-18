@@ -93,6 +93,10 @@ type DoctorReport struct {
 	// an engine concern and stays unexported.
 	legacyCache []legacyCacheMigrationPlan
 	StaleScopes []ScopeStateArtifact
+	// GitError is why the git on PATH cannot maintain the sparse Cache
+	// (missing, or older than CheckGitVersion accepts). Only diagnosed when
+	// the Scope declares a remote Source.
+	GitError string
 }
 
 // Doctor diagnoses and optionally repairs one Scope's Skill, Agent directory,
@@ -290,6 +294,11 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			}
 		}
 	}
+	if len(d.cfg.Remote) > 0 {
+		if err := checkGitVersion(); err != nil {
+			plan.GitError = err.Error()
+		}
+	}
 	legacyCache, cacheRecovery, err := d.cacheMigration.detect()
 	if err != nil {
 		return DoctorReport{}, err
@@ -377,6 +386,9 @@ func (p DoctorReport) issueCount() int {
 	n += len(p.Missing) + len(p.Invalid) + len(p.Stubs) + len(p.IllegalLocal)
 	n += len(p.UnknownAgents)
 	if p.StateError != "" {
+		n++
+	}
+	if p.GitError != "" {
 		n++
 	}
 	n += len(p.StaleState) + len(p.legacyCache) + len(p.CacheRecovery) + len(p.StaleScopes)

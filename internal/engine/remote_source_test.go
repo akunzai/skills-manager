@@ -49,3 +49,47 @@ func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
 	}
 }
+
+// Add discovers every Skill from its SKILL.md alone, compares duplicate
+// candidates by committed tree, and leaves the Cache's cone as it was.
+func TestPrepareRemoteSourceDiscoversFromSkillMDOnly(t *testing.T) {
+	_, url := writeSparseOrigin(t)
+	repoDir, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := DiscoveredSkills{"alpha": {"skills/alpha"}, "beta": {"skills/beta"}}
+	if !reflect.DeepEqual(discovered, want) {
+		t.Fatalf("discovered = %#v; want %#v", discovered, want)
+	}
+	assertCachePaths(t, repoDir, []string{"README.md"}, []string{"skills", "mirror", "fixtures"})
+}
+
+func TestPrepareRemoteSourceKeepsDivergentMirrorsApart(t *testing.T) {
+	origin, url := writeSparseOrigin(t)
+	if err := os.WriteFile(filepath.Join(origin, "mirror", "alpha", "notes.txt"), []byte("diverged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, origin, "commit", "-am", "diverge")
+	_, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := discovered["alpha"]; !reflect.DeepEqual(got, []string{"mirror/alpha", "skills/alpha"}) {
+		t.Fatalf("alpha candidates = %#v", got)
+	}
+}
+
+func TestPrepareRemoteSourceScopedToDirectoryWithoutSkills(t *testing.T) {
+	_, url := writeSparseOrigin(t)
+	_, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "fixtures")
+	if err != nil {
+		t.Fatalf("a committed directory without Skills is not an error: %v", err)
+	}
+	if len(discovered) != 0 {
+		t.Fatalf("discovered = %#v", discovered)
+	}
+	if _, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "absent"); err == nil {
+		t.Fatal("a directory the commit does not have must still fail")
+	}
+}

@@ -162,6 +162,10 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 	if p.StateError != "" {
 		add(Finding{Severity: SeverityError, Message: "Corrupted Scope state: " + p.StateError, Blank: true})
 	}
+	if p.GitError != "" {
+		add(Finding{Severity: SeverityError, Message: "Remote Sources cannot be fetched: " + p.GitError, Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: install or upgrade git, then run 'skills update%s'.", scopeFlag(p))})
+	}
 	if len(p.StaleState) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: "Obsolete Scope state entries: " + strings.Join(p.StaleState, ", "), Blank: true})
 	}

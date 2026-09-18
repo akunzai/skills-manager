@@ -286,6 +286,18 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		}
 	}
 
+	if plan.Source.Kind == AddSourceRemote {
+		// Discovery refreshed the Cache without knowing this Scope's Config,
+		// so the Skills it already declares from the Source go back in too.
+		subpaths := declaredSubpaths(cfg.Remote[plan.Source.Key])
+		for _, name := range names {
+			subpaths = append(subpaths, plan.Skills[name])
+		}
+		if err := ensureSparsePaths(plan.Source.RepoDir, subpaths); err != nil {
+			return AddResult{}, fmt.Errorf("fetch selected Skills into the Cache: %w", err)
+		}
+	}
+
 	for _, name := range names {
 		subpath := plan.Skills[name]
 		switch plan.Source.Kind {
