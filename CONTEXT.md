@@ -73,7 +73,7 @@ Putting one Skill from its Source onto the Scope skills directory (copy, symlink
 _Avoid_: install (when you mean the disk write only), checkout, restore
 
 **Cache**:
-The cloned git working copy used to Materialize remote Skills.
+The git working copy used to Materialize remote Skills: a sparse partial clone that checks out only the Skill subpaths declared from it, shared by every Scope.
 _Avoid_: vendor, tmp clone
 
 **Freshness**:

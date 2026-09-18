@@ -27,15 +27,25 @@ func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir, scope str
 	if err != nil {
 		return "", nil, fmt.Errorf("refresh Source %s: %w", key, err)
 	}
-	discovered, err := DiscoverSkillsInRepo(repoDir, scope)
+	discovered, err := discoverRemoteSkills(repoDir, scope)
 	if err != nil {
 		return "", nil, fmt.Errorf("discover Skills in %s: %w", key, err)
 	}
 	return repoDir, discovered, nil
 }
 
+// refresh fetches the Source when force is set, and always makes sure the
+// Cache's sparse checkout covers every Skill this Scope declares from it.
 func (s remoteSource) refresh(force bool) (string, error) {
-	return EnsureGitRepo(s.key, s.repo.URL, s.repo.Branch, force, s.cacheDir)
+	return EnsureGitRepo(s.key, s.repo.URL, s.repo.Branch, force, s.cacheDir, declaredSubpaths(s.repo)...)
+}
+
+func declaredSubpaths(repo config.RemoteRepo) []string {
+	paths := make([]string, 0, len(repo.Skills))
+	for _, name := range sortedSkillKeys(repo.Skills) {
+		paths = append(paths, repo.Skills[name])
+	}
+	return paths
 }
 
 // ObserveFreshness queries local and remote git commit SHAs.
@@ -80,6 +90,14 @@ func (s remoteSource) ObserveFreshness() FreshnessRepository {
 		}
 		if status != RemoteError && localSHA != remoteSHA {
 			status = RemoteUpdateAvailable
+		}
+		if status == RemoteUpToDate {
+			missing, err := missingSparsePaths(repo.Dir, declaredSubpaths(s.repo))
+			if err != nil {
+				status, errorMessage = RemoteError, err.Error()
+			} else if len(missing) > 0 {
+				status = RemoteCacheIncomplete
+			}
 		}
 	}
 

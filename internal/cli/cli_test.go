@@ -287,7 +287,7 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{"claude", "continue"} {
@@ -908,7 +908,7 @@ func TestCLISyncExitCodes(t *testing.T) {
 	}
 
 	// 0: everything declared is in place.
-	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
@@ -991,7 +991,7 @@ func TestCLISyncInteractiveUnknownBaselineCancelsBeforeWrites(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	cachePath, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir)
+	cachePath, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2341,7 +2341,7 @@ func copiedAvailabilityScope(t *testing.T) (configFile, skillsDir, cacheDir stri
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "alpha", "beta"); err != nil {
 		t.Fatal(err)
 	}
 	return configFile, skillsDir, cacheDir
@@ -2430,5 +2430,43 @@ func TestCLIDoctorReportsASkillThatArrivedAsATextStub(t *testing.T) {
 	}
 	if strings.Contains(out, "Installed folder missing SKILL.md: shared") {
 		t.Fatalf("a stub must not also be reported as an invalid folder:\n%s", out)
+	}
+}
+
+// Another Scope's update left the shared Cache without this Scope's Skill:
+// outdated names update, not sync alone, and exits 1 (ADR 0002, ADR 0004).
+func TestCLIOutdatedReportsIncompleteCache(t *testing.T) {
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "alpha")
+	writeCLIGitSkill(t, origin, "beta")
+	branch, _, err := engine.RunGit(origin, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.EnsureGitRepo("owner/repo", origin, branch, false, cacheDir, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "alpha", "alpha", "git", origin)
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "beta", "beta", "git", origin)
+	repo := cfg.Remote["owner/repo"]
+	repo.Branch = branch
+	cfg.Remote["owner/repo"] = repo
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "outdated", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if got := ExitCode(err); err == nil || got != 1 {
+		t.Fatalf("outdated exit code = %d (err=%v); want 1:\n%s", got, err, out)
+	}
+	for _, want := range []string{"Cache: Cache incomplete", "beta: Unverified", "run 'skills update'"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("outdated output lacks %q:\n%s", want, out)
+		}
 	}
 }

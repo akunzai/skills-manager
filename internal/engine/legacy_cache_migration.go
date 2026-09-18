@@ -92,7 +92,7 @@ type legacyCacheMigrationOps struct {
 	removeAll       func(string) error
 	rename          func(string, string) error
 	runGit          func(string, ...string) (string, string, error)
-	ensureGitRepo   func(string, string, string, bool, string) (string, error)
+	ensureGitRepo   func(string, string, string, bool, string, ...string) (string, error)
 	localRepoCommit func(string) string
 	repoFingerprint func(string) string
 }
@@ -204,9 +204,8 @@ func (m *legacyCacheMigrator) applyOne(plan legacyCacheMigrationPlan, onEvent fu
 				result.Err = err
 				return result
 			}
-			stdout, stderr, cloneErr := m.ops.runGit("", "clone", "--local", current.Dir, staged.Dir)
-			if cloneErr != nil {
-				result.Err = gitOpErr("stage existing Cache from", current.Dir, stdout, stderr, cloneErr)
+			if err := m.stageExistingCache(current.Dir, staged.Dir); err != nil {
+				result.Err = err
 				return result
 			}
 			if stdout, stderr, setURLErr := m.ops.runGit(staged.Dir, "remote", "set-url", "origin", current.URL); setURLErr != nil {
@@ -219,7 +218,7 @@ func (m *legacyCacheMigrator) applyOne(plan legacyCacheMigrationPlan, onEvent fu
 					return result
 				}
 			}
-		} else if _, err := m.ops.ensureGitRepo(source, repo.URL, repo.Branch, false, staging); err != nil {
+		} else if _, err := m.ops.ensureGitRepo(source, repo.URL, repo.Branch, false, staging, declaredSubpaths(repo)...); err != nil {
 			result.Err = fmt.Errorf("rebuild Source %s: %w", source, err)
 			return result
 		}
@@ -281,6 +280,29 @@ func (m *legacyCacheMigrator) applyOne(plan legacyCacheMigrationPlan, onEvent fu
 	}
 	result.Status = legacyCacheRebuilt
 	return result
+}
+
+// stageExistingCache copies a branch-aware Cache into staging without the
+// network. A local clone cannot copy a sparse Cache: it would check out the
+// whole tree, and a partial clone lacks the blobs to do it (ADR 0004). Its
+// .git is copied instead and the sparse working tree rebuilt from the blobs
+// already there.
+func (m *legacyCacheMigrator) stageExistingCache(current, staged string) error {
+	if sparse, _ := readSparseState(current); !sparse.marked {
+		stdout, stderr, err := m.ops.runGit("", "clone", "--local", current, staged)
+		if err != nil {
+			return gitOpErr("stage existing Cache from", current, stdout, stderr, err)
+		}
+		return nil
+	}
+	if err := os.CopyFS(filepath.Join(staged, ".git"), os.DirFS(filepath.Join(current, ".git"))); err != nil {
+		return fmt.Errorf("stage existing Cache from %s: %w", current, err)
+	}
+	stdout, stderr, err := m.ops.runGit(staged, "reset", "--hard", "--quiet", "HEAD")
+	if err != nil {
+		return gitOpErr("stage existing Cache from", current, stdout, stderr, err)
+	}
+	return nil
 }
 
 func legacyCacheFingerprint(dir string) string {

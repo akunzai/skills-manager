@@ -380,3 +380,17 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 		t.Fatal("a Scope with no working availability must not report as clean")
 	}
 }
+
+func TestFindingsGitErrorNamesTheScopedUpdate(t *testing.T) {
+	report := engine.DoctorReport{
+		SkillsDir: filepath.Join(t.TempDir(), ".agents", "skills"),
+		GitError:  "git 2.35 or newer is required for the sparse Cache",
+	}
+	findings := doctorFindings(report, false)
+	if !containsMessage(findings, "Remote Sources cannot be fetched: git 2.35 or newer is required") {
+		t.Fatalf("git error not reported: %#v", findings)
+	}
+	if !containsMessage(findings, "Next: install or upgrade git, then run 'skills update -p'.") {
+		t.Fatalf("git error has no Project-scoped next action: %#v", findings)
+	}
+}

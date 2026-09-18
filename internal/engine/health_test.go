@@ -665,3 +665,71 @@ func cacheMigrationArtifacts(migrations []CacheMigrationOutcome, status CacheMig
 	}
 	return artifacts
 }
+
+func TestDoctorReportsGitThatCannotMaintainTheCache(t *testing.T) {
+	previous := gitVersionErr
+	gitVersionErr = func() error { return fmt.Errorf("git 2.35 or newer is required") }
+	t.Cleanup(func() { gitVersionErr = previous })
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, filepath.Join(project, "cache")).Run(false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Report.GitError != "" {
+		t.Fatalf("a Scope without remote Sources does not need git: %q", outcome.Report.GitError)
+	}
+
+	cfg.Remote["owner/repo"] = config.RemoteRepo{Skills: map[string]string{}}
+	outcome, err = NewDoctorWithCache(cfg, skillsDir, filepath.Join(project, "cache")).Run(false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Report.GitError == "" || outcome.Remaining == 0 {
+		t.Fatalf("GitError = %q, Remaining = %d", outcome.Report.GitError, outcome.Remaining)
+	}
+}
+
+// A local clone of a partial clone fails on the blobs it never fetched, so the
+// migration copies a sparse Cache without the network (ADR 0004).
+func TestDoctorRunKeepsSparsePartialCacheWithoutRemoteAccess(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	origin, url := writeSparseOrigin(t)
+	branch := mustGit(t, origin, "symbolic-ref", "--short", "HEAD")
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(root, "cache")
+	mustGit(t, "", "clone", "--no-checkout", url, filepath.Join(cacheDir, "owner", "repo"))
+	current, err := EnsureGitRepo("owner/repo", url, branch, false, cacheDir, "skills/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommit := GetLocalRepoCommit(current)
+
+	cfg := config.DefaultConfig()
+	unavailable := localFileURL(filepath.Join(root, "unavailable"))
+	mustGit(t, current, "remote", "set-url", "origin", unavailable)
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: unavailable, Branch: branch, Skills: map[string]string{"alpha": "skills/alpha"}}
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range outcome.Report.CacheMigrations {
+		if migration.Err != nil {
+			t.Fatalf("migration of %s failed: %v", migration.Root, migration.Err)
+		}
+	}
+	migrated := resolveCacheRepo("owner/repo", unavailable, branch, cacheDir).Dir
+	if got := GetLocalRepoCommit(migrated); got != wantCommit {
+		t.Fatalf("preserved Cache commit = %q; want %q", got, wantCommit)
+	}
+	assertCachePaths(t, migrated, []string{"skills/alpha/notes.txt"}, []string{"skills/beta", "fixtures"})
+}
