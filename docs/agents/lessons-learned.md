@@ -5,7 +5,6 @@ Key development insights, architectural gotchas, and environment nuances discove
 ## CLI & Testing
 
 - **`[cobra/flag-isolation]`**: In Cobra test suites, both persistent flags and subcommand closure targets leak across `RootCmd.Execute()` calls within the same process. Test cases must call `resetRootCmdFlags()` (`cli_test.go`), which walks commands to restore default values and clear `f.Changed`.
-- **`[testing/network-isolation]`**: Calling `ObserveFreshness()` (`engine/remote_source.go`) on unmocked remote source keys without an explicit branch triggers `git ls-remote --symref` to detect the default branch, leaking live network requests into unit tests. Always specify a branch in test fixtures when asserting local cache path logic.
 
 ## Terminal & UI
 
@@ -20,4 +19,3 @@ Key development insights, architectural gotchas, and environment nuances discove
 
 - **`[powershell/windowsapps-stub]`**: On Windows, Microsoft Store App Execution Aliases can create 0-byte stub executables in `PATH`. This causes `Get-Command` to return truthy while execution fails with exit code 9009. When locating external binaries in PowerShell installer scripts, test execution with error suppression (`2>$null`), check `$LASTEXITCODE -eq 0`, and validate output rather than relying solely on `Get-Command`.
 - **`[agents/symlink-discovery-unconfirmed]`**: Codex and the GitHub Copilot CLI are confirmed to follow symlinks for Skill discovery; Claude Code is not — no documentation states it, and a report exists of a half-working state where the model loads a symlinked Skill while the listing command does not show it. So "my skill does not appear" against a `skills doctor` that exits 0 is upstream behaviour to confirm before it is treated as a skills-manager defect.
-- **`[git/windows-longpaths]`**: On Windows, Git defaults `core.longpaths` to `false`. When caching repositories with deep hierarchies or long filenames (e.g. monorepos with snapshot test fixtures), checkout or reset operations fail with `Filename too long` when exceeding 260 characters (`MAX_PATH`). Pass `-c core.longpaths=true` to Git commands and configure `core.longpaths = true` in the cloned cache repository's `.git/config`.
