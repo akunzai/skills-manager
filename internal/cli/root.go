@@ -103,8 +103,13 @@ var RootCmd = &cobra.Command{
 	Long:    `A fast, cross-platform standalone CLI to discover, install, update, and manage skills across AI coding agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).`,
 	Version: updater.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		selfUpdateNoticeCmd = cmd
 		applyOutputStyle(cmd.OutOrStdout())
 		applyErrorOutputStyle(cmd.ErrOrStderr())
+		return nil
+	},
+	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		maybeNotifySelfUpdate(cmd)
 		return nil
 	},
 }
@@ -133,5 +138,12 @@ func init() {
 
 func Execute() error {
 	RootCmd.SilenceErrors = true
-	return RootCmd.Execute()
+	selfUpdateNoticeCmd = nil
+	err := RootCmd.Execute()
+	// Cobra skips PersistentPostRunE when RunE returns. outdated, sync, and
+	// doctor still finished; mention a Self-update without changing that error.
+	if err != nil && selfUpdateNoticeCmd != nil {
+		maybeNotifySelfUpdate(selfUpdateNoticeCmd)
+	}
+	return err
 }

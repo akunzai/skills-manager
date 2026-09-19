@@ -30,6 +30,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Windows Availability mechanism: `docs/adr/0003-windows-availability-is-copied-not-junctioned.md`
 - Sparse Cache: `docs/adr/0004-cache-is-a-sparse-partial-clone.md`
 - Cache is the git seam: `docs/adr/0005-cache-is-the-git-seam.md`
+- Self-update notice: `docs/adr/0006-self-update-notice-is-tty-only.md`
 - Agent skill & guide: `skills-manager/SKILL.md`
 - Gold-standard CLI test: `internal/cli/cli_test.go`
 - Gold-standard engine test: `internal/engine/sync_plan_test.go`

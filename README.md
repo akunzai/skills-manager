@@ -25,6 +25,8 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/akunzai/skills-manager/main/install.ps1 | iex
 ```
 
+To replace this CLI with a newer release later: `skills self-update`. On a terminal, skills mentions a newer release at most once a day.
+
 ## Start with one skill
 
 ```sh

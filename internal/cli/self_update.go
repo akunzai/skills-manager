@@ -21,7 +21,11 @@ func newSelfUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "self-update",
 		Aliases: []string{"self-upgrade"},
-		Short:   "Update skills CLI itself to latest release",
+		Short:   "Replace this CLI with a newer release",
+		Long: `Replace this CLI's own binary with a newer GitHub release.
+
+On an interactive terminal, other commands mention a newer release at most once a day.
+Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talks to GitHub.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
