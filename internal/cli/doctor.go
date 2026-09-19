@@ -20,7 +20,7 @@ var doctorConfirm = tui.PromptConfirm
 func promptReplaceForeignAvailability(out io.Writer, paths []engine.ForeignAvailabilityPath) (bool, error) {
 	fmt.Fprintf(out, "\n%sWarning: Doctor found %d unmanaged Agent path(s) that must be removed:%s\n", colorYellow, len(paths), colorReset)
 	for _, path := range paths {
-		fmt.Fprintf(out, "  %s (%s)\n", models.ToTildePath(path.Path), path.Detail())
+		fmt.Fprintf(out, "  %s (%s)\n", models.ToTildePath(path.Path), foreignAvailabilityDetail(path))
 	}
 	fmt.Fprintln(out)
 	return doctorConfirm("Replace these paths with managed Availability?", false)

@@ -397,14 +397,6 @@ const (
 	ForeignAvailabilitySymlink   ForeignAvailabilityPathKind = "symlink"
 )
 
-func (p ForeignAvailabilityPath) Detail() string {
-	detail := string(p.Kind)
-	if p.Target != "" {
-		detail += " -> " + models.ToTildePath(p.Target)
-	}
-	return detail
-}
-
 // UnobservableAvailabilityPath is an Availability path whose state could not
 // be read at all. It is deliberately not a ForeignAvailabilityPath: doctor
 // offers to replace a foreign path, and offering to replace something it

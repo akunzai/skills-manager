@@ -77,10 +77,10 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 	dangling, live := leftoverPathsByAgent(p.Leftover.Paths)
 	for _, agent := range leftoverAgents(dangling, live) {
 		if names := dangling[agent]; len(names) > 0 {
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Stale links to removed skills: %s", agent, strings.Join(names, ", "))})
+			add(Finding{Severity: leftoverSeverity(engine.DoctorFindingLeftoverDangling), Message: fmt.Sprintf("  [%s] Stale links to removed skills: %s", agent, strings.Join(names, ", "))})
 		}
 		if names := live[agent]; len(names) > 0 {
-			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  [%s] Leftover occupancy: managed paths declared Availability does not call for: %s", agent, strings.Join(names, ", "))})
+			add(Finding{Severity: leftoverSeverity(engine.DoctorFindingLeftoverLive), Message: fmt.Sprintf("  [%s] Leftover occupancy: managed paths declared Availability does not call for: %s", agent, strings.Join(names, ", "))})
 		}
 		for _, path := range p.Leftover.Paths {
 			if path.Agent == agent {
@@ -261,7 +261,26 @@ func unobservableAvailabilityFinding(skill string, unobservable engine.Unobserva
 }
 
 func foreignAvailabilityFinding(skill string, foreign engine.ForeignAvailabilityPath) string {
-	return fmt.Sprintf("Availability drift for %s; occupied path for %s: %s (%s)", skill, foreign.Agent, models.ToTildePath(foreign.Path), foreign.Detail())
+	return fmt.Sprintf("Availability drift for %s; occupied path for %s: %s (%s)", skill, foreign.Agent, models.ToTildePath(foreign.Path), foreignAvailabilityDetail(foreign))
+}
+
+func foreignAvailabilityDetail(foreign engine.ForeignAvailabilityPath) string {
+	detail := string(foreign.Kind)
+	if foreign.Target != "" {
+		detail += " -> " + models.ToTildePath(foreign.Target)
+	}
+	return detail
+}
+
+func leftoverSeverity(kind engine.DoctorFindingKind) Severity {
+	switch kind {
+	case engine.DoctorFindingLeftoverDangling:
+		return SeverityError
+	case engine.DoctorFindingLeftoverLive:
+		return SeverityWarning
+	default:
+		return SeverityWarning
+	}
 }
 
 func shellQuotePath(path string) string {
@@ -280,9 +299,10 @@ func leftoverPathsByAgent(paths []engine.LeftoverPath) (dangling, live map[strin
 	dangling = make(map[string][]string)
 	live = make(map[string][]string)
 	for _, path := range paths {
-		if path.Dangling {
+		switch path.FindingKind() {
+		case engine.DoctorFindingLeftoverDangling:
 			dangling[path.Agent] = append(dangling[path.Agent], path.Skill)
-		} else {
+		case engine.DoctorFindingLeftoverLive:
 			live[path.Agent] = append(live[path.Agent], path.Skill)
 		}
 	}
