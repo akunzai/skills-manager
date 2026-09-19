@@ -364,34 +364,15 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	return plan, nil
 }
 
-// IssueCount is the number of issues doctor reports without --fix.
-// Untracked Skills are warnings only.
+// issueCount is Remaining: how many classified findings still stand in the
+// way of a matching Scope. It counts findings(), not a second field walk.
 func (p DoctorReport) issueCount() int {
 	n := 0
-	if p.MasterMissing {
-		n++
-	}
-	for _, a := range p.Agents {
-		n += len(a.UnmanagedBroken) + len(a.Physical)
-		if a.Unusable != "" {
+	for _, kind := range p.findings() {
+		if kind.CountsAsIssue() {
 			n++
 		}
 	}
-	n += len(p.Leftover.Paths) + len(p.Leftover.Empty)
-	for _, d := range p.Drift {
-		n += len(d.Missing) + len(d.Unexpected) + len(d.Broken) + len(d.Foreign) + len(d.Unobservable)
-	}
-	// Copies are not counted: Availability applied by copying is a working
-	// Scope by another mechanism, not Drift to reconcile (ADR-0002).
-	n += len(p.Missing) + len(p.Invalid) + len(p.Stubs) + len(p.IllegalLocal)
-	n += len(p.UnknownAgents)
-	if p.StateError != "" {
-		n++
-	}
-	if p.GitError != "" {
-		n++
-	}
-	n += len(p.StaleState) + len(p.legacyCache) + len(p.CacheRecovery) + len(p.StaleScopes)
 	return n
 }
 

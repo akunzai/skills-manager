@@ -733,3 +733,119 @@ func TestDoctorRunKeepsSparsePartialCacheWithoutRemoteAccess(t *testing.T) {
 	}
 	assertCachePaths(t, migrated, []string{"skills/alpha/notes.txt"}, []string{"skills/beta", "fixtures"})
 }
+
+func TestLeftoverPathFindingKindSplitsDanglingFromLive(t *testing.T) {
+	if got := (LeftoverPath{Dangling: true}).FindingKind(); got != DoctorFindingLeftoverDangling {
+		t.Fatalf("dangling leftover kind = %q; want %q", got, DoctorFindingLeftoverDangling)
+	}
+	if got := (LeftoverPath{}).FindingKind(); got != DoctorFindingLeftoverLive {
+		t.Fatalf("live leftover kind = %q; want %q", got, DoctorFindingLeftoverLive)
+	}
+}
+
+func TestDoctorFindingKindCountsAsIssue(t *testing.T) {
+	tests := []struct {
+		kind DoctorFindingKind
+		want bool
+	}{
+		{findingUntracked, false},
+		{findingUntrackedLink, false},
+		{findingUnknownAgent, true},
+		{DoctorFindingLeftoverDangling, true},
+		{DoctorFindingLeftoverLive, true},
+	}
+	for _, tt := range tests {
+		if got := tt.kind.CountsAsIssue(); got != tt.want {
+			t.Errorf("%q.CountsAsIssue() = %v; want %v", tt.kind, got, tt.want)
+		}
+	}
+}
+
+func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
+	report := DoctorReport{
+		MasterMissing: true,
+		Agents: []AgentHealth{
+			{Unusable: "not a directory"},
+			{UnmanagedBroken: []string{"a", "b"}, Physical: []string{"c"}},
+		},
+		Leftover: LeftoverOccupancy{
+			Paths: []LeftoverPath{
+				{Agent: "codex", Skill: "gone", Dangling: true},
+				{Agent: "codex", Skill: "sample"},
+			},
+			Empty: []AgentDir{{Name: "continue"}},
+		},
+		Drift: []SkillDrift{{
+			Missing:      []string{"claude-code"},
+			Unexpected:   []string{"codex"},
+			Broken:       []string{"gemini"},
+			Copies:       []string{"copied-must-not-count"},
+			Foreign:      []ForeignAvailabilityPath{{Agent: "claude-code"}},
+			Unobservable: []UnobservableAvailabilityPath{{Agent: "claude-code"}},
+		}},
+		Missing:        []string{"missing"},
+		Untracked:      []string{"orphan"},
+		UntrackedLinks: []string{"orphan-link"},
+		IllegalLocal:   []IllegalLocalSource{{Name: "loop"}},
+		Invalid:        []InvalidSkill{{Name: "broken"}},
+		Stubs:          []string{"stub"},
+		UnknownAgents:  []UnknownAgentReference{{Agent: "nope"}},
+		StateError:     "corrupt",
+		StaleState:     []string{"old"},
+		GitError:       "git too old",
+		CacheRecovery:  []string{"artifact"},
+		StaleScopes:    []ScopeStateArtifact{{ScopePath: "gone"}},
+		legacyCache:    []legacyCacheMigrationPlan{{Root: "legacy"}},
+	}
+
+	got := make(map[DoctorFindingKind]int)
+	issues := 0
+	for _, kind := range report.findings() {
+		got[kind]++
+		if kind.CountsAsIssue() {
+			issues++
+		}
+	}
+	want := map[DoctorFindingKind]int{
+		findingMasterMissing:          1,
+		findingAgentUnusable:          1,
+		findingAgentUnmanagedBroken:   2,
+		findingAgentPhysical:          1,
+		DoctorFindingLeftoverDangling: 1,
+		DoctorFindingLeftoverLive:     1,
+		findingLeftoverEmpty:          1,
+		findingDriftMissing:           1,
+		findingDriftUnexpected:        1,
+		findingDriftBroken:            1,
+		findingDriftForeign:           1,
+		findingDriftUnobservable:      1,
+		findingMissingSkill:           1,
+		findingUntracked:              1,
+		findingUntrackedLink:          1,
+		findingIllegalLocal:           1,
+		findingInvalid:                1,
+		findingStub:                   1,
+		findingUnknownAgent:           1,
+		findingStateError:             1,
+		findingGitError:               1,
+		findingStaleState:             1,
+		findingLegacyCache:            1,
+		findingCacheRecovery:          1,
+		findingStaleScope:             1,
+	}
+	for kind, n := range want {
+		if got[kind] != n {
+			t.Errorf("kind %q count = %d; want %d", kind, got[kind], n)
+		}
+		delete(got, kind)
+	}
+	if len(got) != 0 {
+		t.Errorf("unexpected finding kinds: %v", got)
+	}
+	if issues != 24 {
+		t.Errorf("CountsAsIssue total = %d; want 24", issues)
+	}
+	if report.issueCount() != 24 {
+		t.Errorf("issueCount = %d; want 24", report.issueCount())
+	}
+}

@@ -168,6 +168,27 @@ func TestFindingsReportsWorkingLeftoverOccupancyApartFromDangling(t *testing.T) 
 	if !containsMessage(findings, "Leftover occupancy: managed paths declared Availability does not call for: sample") {
 		t.Fatalf("expected working leftover occupancy, got %#v", findings)
 	}
+	if leftoverSeverity(engine.DoctorFindingLeftoverDangling) != SeverityError {
+		t.Errorf("dangling leftover kind severity = %v; want Error", leftoverSeverity(engine.DoctorFindingLeftoverDangling))
+	}
+	if leftoverSeverity(engine.DoctorFindingLeftoverLive) != SeverityWarning {
+		t.Errorf("live leftover kind severity = %v; want Warning", leftoverSeverity(engine.DoctorFindingLeftoverLive))
+	}
+	if finding, ok := findingWith(findings, "Stale links to removed skills"); !ok || finding.Severity != leftoverSeverity(engine.DoctorFindingLeftoverDangling) {
+		t.Errorf("dangling leftover finding = %#v; want Error from leftover-dangling", finding)
+	}
+	if finding, ok := findingWith(findings, "Leftover occupancy:"); !ok || finding.Severity != leftoverSeverity(engine.DoctorFindingLeftoverLive) {
+		t.Errorf("live leftover finding = %#v; want Warning from leftover-live", finding)
+	}
+}
+
+func findingWith(findings []Finding, substr string) (Finding, bool) {
+	for _, f := range findings {
+		if strings.Contains(f.Message, substr) {
+			return f, true
+		}
+	}
+	return Finding{}, false
 }
 
 func containsMessage(findings []Finding, substr string) bool {
