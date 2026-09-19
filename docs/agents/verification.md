@@ -123,6 +123,7 @@ agents can run the gate in the same clone at once.
   file.
 - Test output: paste the failing package and test name, not the whole
   `-v` run.
+- UI locale: not applicable, the CLI has one language (English).
 
 **This document is where the capture rules live**, and
 `docs/agents/pull-request.md` points here rather than restating them. A
