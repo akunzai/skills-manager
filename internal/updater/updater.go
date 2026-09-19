@@ -222,8 +222,12 @@ func FindMatchingAsset(assets []ReleaseAsset) *ReleaseAsset {
 }
 
 func CheckSelfUpdate(targetVersion string) (*SelfUpdateInfo, error) {
+	return CheckSelfUpdateWithTimeout(targetVersion, 10)
+}
+
+func CheckSelfUpdateWithTimeout(targetVersion string, timeoutSec int) (*SelfUpdateInfo, error) {
 	currentV := Version
-	rel, err := FetchReleaseInfo(targetVersion, 10)
+	rel, err := FetchReleaseInfo(targetVersion, timeoutSec)
 	if err != nil {
 		return nil, err
 	}

@@ -90,7 +90,11 @@ _Avoid_: harness (in user-facing copy), tool, IDE
 
 **Update**:
 Refreshing remote Sources into the shared Cache only. Does not Materialize Skills or apply Availability. This supersedes the pre-0.8.0 definition recorded in #60.
-_Avoid_: upgrade, pull (when you mean this command)
+_Avoid_: upgrade, pull (when you mean this command), Self-update
+
+**Self-update**:
+Replacement of this CLI's own binary by a newer published release.
+_Avoid_: Update, upgrade (when you mean this or the Source command)
 
 **Doctor**:
 Diagnosis and optional repair of one Scope's Skill, Agent directory, and Availability health.
