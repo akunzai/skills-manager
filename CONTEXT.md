@@ -1,6 +1,6 @@
 # Skills Manager
 
-A control point for skills shared across coding agents. Users always know where a skill comes from, which Scope owns it, and where it is available.
+A control point for skills shared across AI agents. Users always know where a skill comes from, which Scope owns it, and where it is available.
 
 ## Language
 
@@ -85,7 +85,7 @@ Recommended next actions derived from one Freshness snapshot. Dispositions are o
 _Avoid_: command, operation, side effect
 
 **Agent**:
-A coding harness that can load Skills (Claude Code, Copilot, Codex, …).
+A harness that can load Skills (Claude Code, Copilot, Codex, …).
 _Avoid_: harness (in user-facing copy), tool, IDE
 
 **Update**:

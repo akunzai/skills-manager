@@ -3,12 +3,12 @@
 [![CI](https://github.com/akunzai/skills-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/akunzai/skills-manager/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-24292f.svg)](LICENSE)
 
-One source of truth for skills across Claude Code, Codex, Google Antigravity CLI, and other coding agents.
+One source of truth for skills across Claude Code, Codex, Google Antigravity CLI, and other AI agents.
 
 Skills Manager installs skills once, records the result in `skills.json`, and keeps each agent's availability in sync. It ships as a standalone Go binary and uses the system `git` (2.35 or newer) only when a remote repository needs updating.
 
 <p align="center">
-  <img src="website/demo.gif" alt="Installing a skill, listing it, and inspecting its agent availability with Skills Manager" width="880">
+  <img src="website/demo.gif" alt="Adding the agent-skills catalog, listing availability, and confirming an offline sync with Skills Manager" width="880">
 </p>
 
 ## Install
@@ -155,7 +155,7 @@ When upgrading from a legacy branchless Cache layout, `skills doctor --fix` may 
     "skills-manager": {
       "type": "command",
       "command": "skills guide --install",
-      "description": "Skills Manager CLI guide for AI coding agents"
+      "description": "Skills Manager CLI guide for AI agents"
     }
   }
 }
