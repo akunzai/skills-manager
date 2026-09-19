@@ -35,10 +35,6 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Gold-standard CLI test: `internal/cli/cli_test.go`
 - Gold-standard engine test: `internal/engine/sync_plan_test.go`
 
-## Claude Code Compatibility
-
-`CLAUDE.md` is a symbolic link pointing to `AGENTS.md`. Edit `AGENTS.md` directly.
-
 ## Prevent Recurrence
 
 - **Candidate**: Name who hits this again, in which file, on what change. No such scenario, nothing to propose.
