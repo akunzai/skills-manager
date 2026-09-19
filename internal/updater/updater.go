@@ -20,7 +20,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-var Version = "0.12.2"
+var Version = "0.13.0"
 var GitHubRepo = "akunzai/skills-manager"
 
 type ReleaseAsset struct {

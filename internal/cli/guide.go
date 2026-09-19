@@ -64,7 +64,7 @@ With --install, materializes the skill to the Scope skills directory, registers 
 			cfg.Local["skills-manager"] = config.LocalEntry{
 				Type:        "command",
 				Command:     installCmd,
-				Description: "Skills Manager CLI guide for AI coding agents",
+				Description: "Skills Manager CLI guide for AI agents",
 			}
 
 			if err := config.SaveConfig(cfg, scope.ConfigPath); err != nil {

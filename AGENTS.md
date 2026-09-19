@@ -1,6 +1,6 @@
 # Skills Manager Developer Guidelines
 
-Skills manager CLI (`skills` / `skills-manager`) for AI coding agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).
+Skills manager CLI (`skills` / `skills-manager`) for AI agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).
 
 This project is written in Go (>=1.27) and compiled to standalone cross-platform binaries with zero language runtime dependencies (uses system `git` for remote repository operations).
 

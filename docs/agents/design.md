@@ -4,7 +4,7 @@ Long-term principles for user-visible CLI output, interactive prompts, and the R
 
 ## Product thesis
 
-Skills Manager is the quiet control point for skills shared across coding agents. Users should always be able to tell where a skill comes from, which scope owns it, and where it is available.
+Skills Manager is the quiet control point for skills shared across AI agents. Users should always be able to tell where a skill comes from, which scope owns it, and where it is available.
 
 The experience is compact, ordered, and recognizable through language and information structure rather than decoration.
 

@@ -1,11 +1,11 @@
 ---
 name: skills-manager
-description: Manage AI agent skills across coding agents via the skills CLI. Triggers when adding skills (Git, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated), diagnosing health issues (doctor, prune), or configuring availability policies.
+description: Manage skills across AI agents via the skills CLI. Triggers when adding skills (Git, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated), diagnosing health issues (doctor, prune), or configuring availability policies.
 ---
 
 # Skills Manager
 
-A control point for skills shared across coding agents (Claude Code, Google Antigravity, GitHub Copilot CLI, OpenAI Codex, etc.). Manages central skill materialization and per-agent availability through a single source of truth (`skills.json`).
+A control point for skills shared across AI agents (Claude Code, Google Antigravity, GitHub Copilot CLI, OpenAI Codex, etc.). Manages central skill materialization and per-agent availability through a single source of truth (`skills.json`).
 
 ## Core Invariants
 

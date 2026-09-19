@@ -626,6 +626,8 @@ func isolateHome(t *testing.T) string {
 	t.Setenv("HERMES_HOME", "")
 	t.Setenv("AUTOHAND_HOME", "")
 	t.Setenv("GROK_HOME", "")
+	t.Setenv(updater.SkipSelfUpdateCheckEnv, "")
+	t.Setenv("SKILLS_CACHE_DIR", "")
 	return home
 }
 

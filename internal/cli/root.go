@@ -99,8 +99,8 @@ func ResolveScope() Scope {
 
 var RootCmd = &cobra.Command{
 	Use:     "skills",
-	Short:   "Skills manager for AI coding agents",
-	Long:    `A fast, cross-platform standalone CLI to discover, install, update, and manage skills across AI coding agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).`,
+	Short:   "Skills manager for AI agents",
+	Long:    `A fast, cross-platform standalone CLI to discover, install, update, and manage skills across AI agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).`,
 	Version: updater.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		selfUpdateNoticeCmd = cmd
