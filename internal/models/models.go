@@ -1,6 +1,7 @@
 package models
 
 import (
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -139,13 +140,13 @@ func GetProjectRootFromSkillsDir(skillsDir string) string {
 	return parent
 }
 
-// GetProjectKnownAgents returns mapping of agent names to their project-level
+// projectKnownAgents returns mapping of agent names to their project-level
 // skills directory. Cursor is not here: it reads project .agents/skills
 // directly, same as at Global Scope (cursor.com/docs/skills#skill-directories).
 // Grok is here for Project only: Global reads ~/.agents/skills
 // (docs.x.ai/build/features/skills-plugins-marketplaces); Project discovers
 // ./.grok/skills instead.
-func GetProjectKnownAgents(projectRoot string) map[string]string {
+func projectKnownAgents(projectRoot string) map[string]string {
 	return map[string]string{
 		"claude-code": filepath.Join(projectRoot, ".claude", "skills"),
 		"continue":    filepath.Join(projectRoot, ".continue", "skills"),
@@ -167,31 +168,62 @@ func IsGlobalSkillsDir(skillsDir string) bool {
 	return filepath.Clean(absSkills) == filepath.Clean(absGlobal)
 }
 
-// GetAgentsForSkillsDir returns the appropriate agent mapping (global or project-scoped).
-func GetAgentsForSkillsDir(skillsDir string) map[string]string {
+// Agents is the Agent directory knowledge for one Scope: linkable known
+// directories, Automatically available Agents, and leftover roots earlier
+// versions may have written.
+type Agents struct {
+	known     map[string]string
+	automatic []string
+	leftover  map[string]string
+}
+
+// ForSkillsDir returns Agent knowledge for the Scope that skillsDir belongs to.
+func ForSkillsDir(skillsDir string) Agents {
 	if skillsDir == "" {
 		skillsDir = DefaultSkillsDir()
 	}
+	var known map[string]string
 	if IsGlobalSkillsDir(skillsDir) {
-		return GetKnownAgents()
+		known = knownAgents()
+	} else {
+		known = projectKnownAgents(GetProjectRootFromSkillsDir(skillsDir))
 	}
-	projectRoot := GetProjectRootFromSkillsDir(skillsDir)
-	return GetProjectKnownAgents(projectRoot)
+	leftover := leftoverAgentSkillDirs(skillsDir)
+	for agent := range known {
+		delete(leftover, agent)
+	}
+	return Agents{known: known, automatic: automaticallyAvailableAgents(skillsDir), leftover: leftover}
 }
 
-// GetUniversalAgentSkillDirs returns skills directories that Automatically
+func (a Agents) KnownDirs() map[string]string {
+	return maps.Clone(a.known)
+}
+
+func (a Agents) Automatic() []string {
+	return slices.Clone(a.automatic)
+}
+
+func (a Agents) IsAutomatic(name string) bool {
+	return slices.Contains(a.automatic, NormalizeAgentName(name))
+}
+
+func (a Agents) LeftoverRoots() map[string]string {
+	return maps.Clone(a.leftover)
+}
+
+// leftoverAgentSkillDirs returns skills directories that Automatically
 // available agents may have had materialized for them. skills-manager never
 // creates these — those agents read the master skills directory directly in
 // every Scope they hold that status — but earlier versions and external setup
 // scripts did, and links left behind there still have to be cleaned up when a
 // skill goes away. An agent that is Automatically available in only one Scope
 // (see universalAgentScopes) is a real, actively-managed known dir in the
-// other, so it belongs in GetKnownAgents/GetProjectKnownAgents instead.
+// other, so it belongs in knownAgents/projectKnownAgents instead.
 //
 // These paths are conventions, not guarantees. Callers must only ever act on a
 // symlink that resolves into the master skills directory, so a path that turns
 // out to be wrong simply matches nothing.
-func GetUniversalAgentSkillDirs(skillsDir string) map[string]string {
+func leftoverAgentSkillDirs(skillsDir string) map[string]string {
 	if skillsDir == "" {
 		skillsDir = DefaultSkillsDir()
 	}
@@ -216,9 +248,7 @@ func GetUniversalAgentSkillDirs(skillsDir string) map[string]string {
 	}
 }
 
-// GetAutomaticallyAvailableAgents returns the Agents that read the central
-// skills directory directly in the Scope that skillsDir belongs to.
-func GetAutomaticallyAvailableAgents(skillsDir string) []string {
+func automaticallyAvailableAgents(skillsDir string) []string {
 	want := scopeProject
 	if IsGlobalSkillsDir(skillsDir) {
 		want = scopeGlobal
@@ -237,7 +267,7 @@ func GetAutomaticallyAvailableAgents(skillsDir string) []string {
 // fixed path under the user's home directory: pure data, expanded with
 // ExpandUser and nothing else. Agents that need a per-agent environment
 // override, an XDG_CONFIG_HOME-relative path, or filesystem probing carry
-// that logic explicitly in GetKnownAgents instead of hiding it in this table.
+// that logic explicitly in knownAgents instead of hiding it in this table.
 var knownAgentSkillDirTemplates = map[string]string{
 	"adal":            "~/.adal/skills",
 	"aider-desk":      "~/.aider-desk/skills",
@@ -292,8 +322,7 @@ var knownAgentSkillDirTemplates = map[string]string{
 	"zencoder":        "~/.zencoder/skills",
 }
 
-// GetKnownAgents returns mapping of non-universal agent names to their global skills directory.
-func GetKnownAgents() map[string]string {
+func knownAgents() map[string]string {
 	xdgConfig := ResolveEnvPath("XDG_CONFIG_HOME", "~/.config")
 	claudeHome := ResolveEnvPath("CLAUDE_CONFIG_DIR", "~/.claude")
 	vibeHome := ResolveEnvPath("VIBE_HOME", "~/.vibe")
@@ -325,7 +354,7 @@ func GetKnownAgents() map[string]string {
 
 // agentScope is which Scope(s) an Automatically available Agent holds that
 // status in. An Agent absent from universalAgentScopes needs a linkable
-// directory (GetKnownAgents / GetProjectKnownAgents) in every Scope instead.
+// directory (knownAgents / projectKnownAgents) in every Scope instead.
 type agentScope int
 
 const (
@@ -372,7 +401,7 @@ var universalAgentScopes = map[string]agentScope{
 	"universal":       scopeBoth,
 }
 
-var AgentAliases = map[string]string{
+var agentAliases = map[string]string{
 	// Non-universal aliases
 	"claude":    "claude-code",
 	"roo-code":  "roo",
@@ -406,24 +435,10 @@ var AgentAliases = map[string]string{
 
 func NormalizeAgentName(name string) string {
 	low := strings.ToLower(strings.TrimSpace(name))
-	if canonical, ok := AgentAliases[low]; ok {
+	if canonical, ok := agentAliases[low]; ok {
 		return canonical
 	}
 	return low
-}
-
-// IsUniversalAgent reports whether name is Automatically available in the
-// Scope skillsDir belongs to, so it needs no Availability link there.
-func IsUniversalAgent(name, skillsDir string) bool {
-	norm := NormalizeAgentName(name)
-	scopes, ok := universalAgentScopes[norm]
-	if !ok {
-		return false
-	}
-	if IsGlobalSkillsDir(skillsDir) {
-		return scopes&scopeGlobal != 0
-	}
-	return scopes&scopeProject != 0
 }
 
 type ParsedRepoSource struct {

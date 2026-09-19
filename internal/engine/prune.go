@@ -88,7 +88,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		availability := NewAvailability(cfg, skillsDir)
 		links := make(map[string]PruneLink)
 		if includeConfiguredLinks {
-			agentDirs := models.GetAgentsForSkillsDir(skillsDir)
+			agentDirs := models.ForSkillsDir(skillsDir).KnownDirs()
 			observeUnexpected := func(name string) {
 				for _, agent := range availability.ObserveAvailability(name).Unexpected {
 					path := filepath.Join(agentDirs[agent], name)

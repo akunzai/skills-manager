@@ -26,8 +26,7 @@ func agentSet(agents []string) map[string]struct{} {
 type Availability struct {
 	cfg       *config.Config
 	skillsDir string
-	known     map[string]string
-	automatic []string
+	agents    models.Agents
 }
 
 // Field values for UnknownAgentReference match the skills.json key each names.
@@ -55,8 +54,7 @@ func NewAvailability(cfg *config.Config, skillsDir string) *Availability {
 	return &Availability{
 		cfg:       cfg,
 		skillsDir: skillsDir,
-		known:     models.GetAgentsForSkillsDir(skillsDir),
-		automatic: models.GetAutomaticallyAvailableAgents(skillsDir),
+		agents:    models.ForSkillsDir(skillsDir),
 	}
 }
 
@@ -72,6 +70,7 @@ func (a *Availability) ManagedAgents(skill string) []string {
 	candidates := slices.Concat(defaults, override.Include)
 	seen := make(map[string]struct{}, len(candidates))
 	managed := make([]string, 0, len(candidates))
+	known := a.agents.KnownDirs()
 	for _, candidate := range candidates {
 		norm := models.NormalizeAgentName(candidate)
 		if _, duplicate := seen[norm]; duplicate {
@@ -81,7 +80,7 @@ func (a *Availability) ManagedAgents(skill string) []string {
 		if _, skip := excluded[norm]; skip {
 			continue
 		}
-		if _, known := a.known[norm]; known {
+		if _, ok := known[norm]; ok {
 			managed = append(managed, norm)
 		}
 	}
@@ -90,11 +89,11 @@ func (a *Availability) ManagedAgents(skill string) []string {
 }
 
 func (a *Availability) AutomaticallyAvailable() []string {
-	return slices.Clone(a.automatic)
+	return a.agents.Automatic()
 }
 
 func (a *Availability) ManageableAgents() []string {
-	return slices.Sorted(maps.Keys(a.known))
+	return slices.Sorted(maps.Keys(a.agents.KnownDirs()))
 }
 
 // ValidateManagedAgents normalizes a requested policy mutation and rejects
@@ -102,12 +101,13 @@ func (a *Availability) ManageableAgents() []string {
 func (a *Availability) ValidateManagedAgents(agents []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(agents))
 	normalized := make([]string, 0, len(agents))
+	known := a.agents.KnownDirs()
 	for _, value := range agents {
 		agent := models.NormalizeAgentName(value)
-		if models.IsUniversalAgent(agent, a.skillsDir) {
+		if a.agents.IsAutomatic(agent) {
 			return nil, fmt.Errorf("%s is automatically available and does not need an agent policy", agent)
 		}
-		if _, ok := a.known[agent]; !ok {
+		if _, ok := known[agent]; !ok {
 			return nil, fmt.Errorf("unknown agent %q for this scope", value)
 		}
 		if _, duplicate := seen[agent]; duplicate {
@@ -124,10 +124,11 @@ func (a *Availability) ValidateManagedAgents(agents []string) ([]string, error) 
 // or a per-Skill Include. Exclude does not make the directory unmanaged.
 func (a *Availability) ConfiguredAgentDirs() map[string]string {
 	out := make(map[string]string)
+	known := a.agents.KnownDirs()
 	add := func(names []string) {
 		for _, name := range names {
 			norm := models.NormalizeAgentName(name)
-			if dir, ok := a.known[norm]; ok {
+			if dir, ok := known[norm]; ok {
 				out[norm] = dir
 			}
 		}
@@ -145,10 +146,10 @@ func (a *Availability) ConfiguredAgentDirs() map[string]string {
 
 func (a *Availability) recognized(name string) bool {
 	norm := models.NormalizeAgentName(name)
-	if _, ok := a.known[norm]; ok {
+	if _, ok := a.agents.KnownDirs()[norm]; ok {
 		return true
 	}
-	return models.IsUniversalAgent(norm, a.skillsDir)
+	return a.agents.IsAutomatic(norm)
 }
 
 func (a *Availability) UnknownAgentReferences() []UnknownAgentReference {
@@ -245,7 +246,7 @@ func (a *Availability) SetManagedAgents(skill string, selected []string) error {
 	selectedSet := agentSet(selected)
 	a.FollowDefaults(skill)
 	defaults := agentSet(a.ManagedAgents(skill))
-	known := slices.Sorted(maps.Keys(a.known))
+	known := slices.Sorted(maps.Keys(a.agents.KnownDirs()))
 	var include, exclude []string
 	for _, agent := range known {
 		_, chosen := selectedSet[agent]
@@ -275,7 +276,7 @@ func (a *Availability) state(skillName string) availabilityState {
 	return availabilityState{
 		skillName: skillName,
 		desired:   agentSet(a.ManagedAgents(skillName)),
-		known:     a.known,
+		known:     a.agents.KnownDirs(),
 		skillsDir: a.skillsDir,
 	}
 }
@@ -609,13 +610,11 @@ func (a *Availability) ObserveLeftover() LeftoverOccupancy {
 			})
 		}
 	}
-	for agent, dir := range models.GetUniversalAgentSkillDirs(a.skillsDir) {
-		if _, known := a.known[agent]; known {
-			continue
-		}
+	knownDirs := a.agents.KnownDirs()
+	for agent, dir := range a.agents.LeftoverRoots() {
 		addDir(agent, dir, func(string) bool { return true })
 	}
-	for agent, dir := range a.known {
+	for agent, dir := range knownDirs {
 		addDir(agent, dir, func(name string) bool {
 			_, ok := declared[name]
 			return !ok
@@ -624,7 +623,7 @@ func (a *Availability) ObserveLeftover() LeftoverOccupancy {
 	slices.SortFunc(occupancy.Paths, func(a, b LeftoverPath) int {
 		return cmp.Or(cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Skill, b.Skill), cmp.Compare(a.Path, b.Path))
 	})
-	occupancy.Empty = leftoverEmptyAgentDirs(a.known, a.ConfiguredAgentDirs())
+	occupancy.Empty = leftoverEmptyAgentDirs(knownDirs, a.ConfiguredAgentDirs())
 	return occupancy
 }
 
