@@ -34,7 +34,7 @@ func copyFallbackScope(t *testing.T) (cfg *config.Config, skillsDir, cacheDir, o
 	cacheDir = filepath.Join(root, "cache")
 	origin = filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	cfg = config.DefaultConfig()
@@ -126,7 +126,7 @@ func TestSyncRebuildsAManagedCopyWhenTheSkillChanged(t *testing.T) {
 
 	mustWriteScopeStateTestFile(t, filepath.Join(origin, "sample", "SKILL.md"), []byte("# Sample v2\n"))
 	for _, args := range [][]string{{"add", "."}, {"commit", "-m", "v2"}} {
-		if stdout, stderr, err := RunGit(origin, args...); err != nil {
+		if stdout, stderr, err := runGit(origin, args...); err != nil {
 			t.Fatalf("git %v: %v\n%s\n%s", args, err, stdout, stderr)
 		}
 	}

@@ -136,14 +136,14 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		// A Cache that only lacks a declared Skill is already at the remote
 		// commit; adding the path is enough.
 		fetch := force || !incomplete[source]
-		dir, refreshErr := newRemoteSource(source, repositories[source], cacheDir).refresh(fetch)
+		dir, refreshErr := NewCache(source, repositories[source].URL, repositories[source].Branch, cacheDir).Refresh(fetch, declaredSubpaths(repositories[source])...)
 		if refreshErr != nil {
 			message := refreshErr.Error()
 			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})
 			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: message})
 			continue
 		}
-		sha := GetLocalRepoCommit(dir)
+		sha := localRepoCommit(dir)
 		result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, NewSHA: sha})
 		emitUpdate(progress, UpdateEvent{Kind: UpdateRepoDone, Source: source, NewSHA: sha})
 	}

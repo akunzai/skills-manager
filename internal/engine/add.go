@@ -357,7 +357,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 				Kind:       SyncItemRemote,
 				Source:     plan.Source.Key,
 				CachePath:  plan.Source.RepoDir,
-				LocalSHA:   GetLocalRepoCommit(plan.Source.RepoDir),
+				LocalSHA:   localRepoCommit(plan.Source.RepoDir),
 				NeedsWrite: true,
 				Freshness: SkillFreshness{
 					Name:      name,

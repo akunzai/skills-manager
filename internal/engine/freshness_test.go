@@ -87,7 +87,7 @@ func TestInspectFreshnessClassifiesRemoteSkillContent(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	cachePath, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample")
+	cachePath, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,30 +165,25 @@ func TestInspectFreshnessReportsUnverifiedWithoutCache(t *testing.T) {
 func TestInspectFreshnessClassifiesSkillsAgainstObservedCache(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
-	resolved := filepath.Join(root, "resolved-cache")
-	if err := os.MkdirAll(filepath.Join(resolved, "sample"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(resolved, "sample", "SKILL.md"), []byte("# Cached\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	old := observeRemoteSource
-	t.Cleanup(func() { observeRemoteSource = old })
-	observeRemoteSource = func(source string, _ config.RemoteRepo, _ string) FreshnessRepository {
-		return FreshnessRepository{Source: source, CachePath: resolved, LocalSHA: "abc", RemoteStatus: RemoteUpToDate}
-	}
-
-	cfg := config.DefaultConfig()
-	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", filepath.Join(root, "origin"))
-	snapshot, err := InspectFreshness(cfg, filepath.Join(root, "skills"), filepath.Join(root, "cache"), FreshnessOptions{ObserveRemote: true, ObserveScope: true})
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	cacheDir := filepath.Join(root, "cache")
+	repoDir, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Repositories[0].CachePath != resolved {
+
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	snapshot, err := InspectFreshness(cfg, filepath.Join(root, "skills"), cacheDir, FreshnessOptions{ObserveRemote: true, ObserveScope: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Repositories[0].CachePath != repoDir {
 		t.Fatalf("repository CachePath = %q", snapshot.Repositories[0].CachePath)
 	}
 	skill := snapshot.Repositories[0].Skills[0]
-	if skill.CachePath != filepath.Join(resolved, "sample") {
+	if skill.CachePath != filepath.Join(repoDir, "sample") {
 		t.Fatalf("skill CachePath = %q; want classification against observed Cache", skill.CachePath)
 	}
 	if skill.Status != SkillMissing {
@@ -203,7 +198,7 @@ func TestSyncUsesCacheBaselineAndProtectsLocalDrift(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err != nil {
@@ -213,10 +208,10 @@ func TestSyncUsesCacheBaselineAndProtectsLocalDrift(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(origin, "sample", "SKILL.md"), []byte("# Cached v2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := RunGit(origin, "add", "."); err != nil {
+	if _, _, err := runGit(origin, "add", "."); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := RunGit(origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "v2"); err != nil {
+	if _, _, err := runGit(origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "v2"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
@@ -269,14 +264,14 @@ func TestUpdateCompletesCacheMissingADeclaredSkill(t *testing.T) {
 	origin, url := writeSparseOrigin(t)
 	branch := mustGit(t, origin, "symbolic-ref", "--short", "HEAD")
 	cacheDir := t.TempDir()
-	repoDir, err := EnsureGitRepo("owner/repo", url, branch, false, cacheDir, "skills/alpha")
+	repoDir, err := NewCache("owner/repo", url, branch, cacheDir).Refresh(false, "skills/alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
 	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: url, Branch: branch, Skills: map[string]string{"alpha": "skills/alpha", "beta": "skills/beta"}}
 
-	status := newRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir).ObserveFreshness()
+	status := observeRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir)
 	if status.RemoteStatus != RemoteCacheIncomplete {
 		t.Fatalf("status = %q (%s); want %q", status.RemoteStatus, status.Error, RemoteCacheIncomplete)
 	}
@@ -293,7 +288,7 @@ func TestUpdateCompletesCacheMissingADeclaredSkill(t *testing.T) {
 		t.Fatalf("update result = %#v", result)
 	}
 	assertCachePaths(t, repoDir, []string{"skills/alpha/notes.txt", "skills/beta/reference.txt"}, []string{"fixtures"})
-	if status := newRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir).ObserveFreshness(); status.RemoteStatus != RemoteUpToDate {
+	if status := observeRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir); status.RemoteStatus != RemoteUpToDate {
 		t.Fatalf("status after update = %q", status.RemoteStatus)
 	}
 }
@@ -303,7 +298,7 @@ func TestUpdateCompletesCacheMissingADeclaredSkill(t *testing.T) {
 func TestInspectFreshnessTreatsUncoveredSkillAsMissingFromCache(t *testing.T) {
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
-	repoDir, err := EnsureGitRepo("owner/repo", url, "", false, cacheDir, "skills/alpha")
+	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,4 +321,40 @@ func TestInspectFreshnessTreatsUncoveredSkillAsMissingFromCache(t *testing.T) {
 			t.Errorf("%s status = %q; want %q", skill.Name, skill.Status, SkillUnverified)
 		}
 	}
+}
+
+func TestFreshnessFromCache(t *testing.T) {
+	origin := t.TempDir()
+	writeLocalGitSkill(t, origin, "sample")
+	cache := NewCache("owner/repo", origin, "", filepath.Join(t.TempDir(), "cache"))
+	if _, err := cache.Refresh(false, "sample"); err != nil {
+		t.Fatal(err)
+	}
+	upToDate := freshnessFromCache(cache.observe("sample"))
+	if upToDate.RemoteStatus != RemoteUpToDate {
+		t.Fatalf("covered Cache RemoteStatus = %q; want %q", upToDate.RemoteStatus, RemoteUpToDate)
+	}
+	if upToDate.LocalSHA == "" || upToDate.LocalSHA != upToDate.RemoteSHA {
+		t.Fatalf("SHAs local=%q remote=%q", upToDate.LocalSHA, upToDate.RemoteSHA)
+	}
+	incomplete := freshnessFromCache(cache.observe("sample", "absent"))
+	if incomplete.RemoteStatus != RemoteCacheIncomplete {
+		t.Fatalf("uncovered path RemoteStatus = %q; want %q", incomplete.RemoteStatus, RemoteCacheIncomplete)
+	}
+}
+
+func TestCacheCoverMaterializesSkillFiles(t *testing.T) {
+	origin := t.TempDir()
+	writeLocalGitSkill(t, origin, "alpha")
+	writeLocalGitSkill(t, origin, "beta")
+	cache := NewCache("owner/repo", origin, "", filepath.Join(t.TempDir(), "cache"))
+	repoDir, err := cache.Refresh(false, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCachePaths(t, repoDir, []string{"alpha/SKILL.md"}, []string{"beta/SKILL.md"})
+	if err := cache.Cover("beta"); err != nil {
+		t.Fatal(err)
+	}
+	assertCachePaths(t, repoDir, []string{"alpha/SKILL.md", "beta/SKILL.md"}, nil)
 }

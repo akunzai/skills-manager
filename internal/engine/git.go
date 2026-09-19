@@ -47,14 +47,14 @@ func recordDefaultBranch(source, url, cacheDir, branch string) error {
 	return os.WriteFile(path, []byte(branch+"\n"), 0o644)
 }
 
-func GetRemoteDefaultBranch(source, url string) (string, error) {
+func remoteDefaultBranch(source, url string) (string, error) {
 	branch, _, err := getRemoteDefaultBranchCommit(source, url)
 	return branch, err
 }
 
 func getRemoteDefaultBranchCommit(source, url string) (string, string, error) {
 	repo := resolveCacheRepo(source, url, "", "")
-	stdout, stderr, err := RunGit("", "ls-remote", "--symref", repo.URL, "HEAD")
+	stdout, stderr, err := runGit("", "ls-remote", "--symref", repo.URL, "HEAD")
 	if err != nil {
 		return "", "", gitOpErr("query default branch of", repo.URL, stdout, stderr, err)
 	}
@@ -126,14 +126,14 @@ func gitOpErr(action, repoURL, stdout, stderr string, err error) error {
 	return fmt.Errorf("failed to %s %s: %s", action, repoURL, msg)
 }
 
-// RunGit executes a git command directly without passing through a shell.
+// runGit executes a git command directly without passing through a shell.
 // On Windows, Git defaults core.longpaths to false, which fails checkouts when
 // path lengths exceed 260 characters (MAX_PATH). We inject -c core.longpaths=true
 // to ensure transparent long-path support.
 // References:
 //   - https://git-scm.com/docs/git-config#Documentation/git-config.txt-corelongpaths
 //   - https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation
-func RunGit(cwd string, args ...string) (string, string, error) {
+func runGit(cwd string, args ...string) (string, string, error) {
 	cmdArgs := args
 	if runtime.GOOS == "windows" {
 		cmdArgs = append([]string{"-c", "core.longpaths=true"}, args...)
@@ -157,11 +157,11 @@ func RunGit(cwd string, args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
-// EnsureGitRepo clones or refreshes one Source's Cache and makes sure the
+// ensureGitRepo clones or refreshes one Source's Cache and makes sure the
 // declared Skill subpaths are in its sparse checkout. The Cache is a blobless,
 // sparse clone so paths no Scope declares are never written to disk; only
 // '.' (a Skill at the repository root) needs the whole tree.
-func EnsureGitRepo(
+func ensureGitRepo(
 	source string,
 	url string,
 	branch string,
@@ -180,7 +180,7 @@ func EnsureGitRepo(
 	resolvedDefault := false
 	if requestedBranch == "" {
 		var err error
-		requestedBranch, err = GetRemoteDefaultBranch(source, url)
+		requestedBranch, err = remoteDefaultBranch(source, url)
 		if err != nil {
 			return "", err
 		}
@@ -191,7 +191,7 @@ func EnsureGitRepo(
 	gitDir := filepath.Join(repo.Dir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
 		if runtime.GOOS == "windows" {
-			_, _, _ = RunGit(repo.Dir, "config", "core.longpaths", "true")
+			_, _, _ = runGit(repo.Dir, "config", "core.longpaths", "true")
 		}
 		if forceUpdate {
 			// Narrow the working tree before the reset writes a new commit, so
@@ -204,11 +204,11 @@ func EnsureGitRepo(
 			if ref == "" {
 				ref = "HEAD"
 			}
-			stdout, stderr, err := RunGit(repo.Dir, "fetch", "--depth", "1", "origin", ref)
+			stdout, stderr, err := runGit(repo.Dir, "fetch", "--depth", "1", "origin", ref)
 			if err != nil {
 				return "", gitOpErr("fetch", repo.URL, stdout, stderr, err)
 			}
-			stdout, stderr, err = RunGit(repo.Dir, "reset", "--hard", "FETCH_HEAD")
+			stdout, stderr, err = runGit(repo.Dir, "reset", "--hard", "FETCH_HEAD")
 			if err != nil {
 				return "", gitOpErr("reset", repo.URL, stdout, stderr, err)
 			}
@@ -242,7 +242,7 @@ func EnsureGitRepo(
 	}
 	cloneArgs = append(cloneArgs, repo.URL, repo.Dir)
 
-	stdout, stderr, err := RunGit("", cloneArgs...)
+	stdout, stderr, err := runGit("", cloneArgs...)
 	if err != nil {
 		return "", gitOpErr("clone", repo.URL, stdout, stderr, err)
 	}
@@ -269,7 +269,7 @@ const minGitMajor, minGitMinor = 2, 35
 // gitVersionErr is a variable so a test can stand in for an unsupported git;
 // no engine test runs in parallel, so swapping it is race-free.
 var gitVersionErr = sync.OnceValue(func() error {
-	stdout, stderr, err := RunGit("", "version")
+	stdout, stderr, err := runGit("", "version")
 	if err != nil {
 		return gitOpErr("run", "git version", stdout, stderr, err)
 	}
@@ -316,7 +316,7 @@ func parseGitVersion(output string) (int, int, bool) {
 const sparseCacheKey = "skills-manager.sparseCache"
 
 func markSparseCache(repoDir string) error {
-	stdout, stderr, err := RunGit(repoDir, "config", sparseCacheKey, "true")
+	stdout, stderr, err := runGit(repoDir, "config", sparseCacheKey, "true")
 	if err != nil {
 		return gitOpErr("mark sparse Cache", repoDir, stdout, stderr, err)
 	}
@@ -334,13 +334,13 @@ type sparseState struct {
 }
 
 func readSparseState(repoDir string) (sparseState, error) {
-	marked, _, _ := RunGit(repoDir, "config", "--bool", sparseCacheKey)
-	enabled, _, _ := RunGit(repoDir, "config", "--bool", "core.sparseCheckout")
+	marked, _, _ := runGit(repoDir, "config", "--bool", sparseCacheKey)
+	enabled, _, _ := runGit(repoDir, "config", "--bool", "core.sparseCheckout")
 	if enabled != "true" {
 		return sparseState{marked: marked == "true"}, nil
 	}
-	cone, _, _ := RunGit(repoDir, "config", "--bool", "core.sparseCheckoutCone")
-	stdout, stderr, err := RunGit(repoDir, "sparse-checkout", "list")
+	cone, _, _ := runGit(repoDir, "config", "--bool", "core.sparseCheckoutCone")
+	stdout, stderr, err := runGit(repoDir, "sparse-checkout", "list")
 	if err != nil {
 		return sparseState{}, gitOpErr("list sparse checkout of", repoDir, stdout, stderr, err)
 	}
@@ -478,7 +478,7 @@ func normalizeSparseCheckout(repoDir string, keepFull bool) error {
 
 func setSparseCone(repoDir string, dirs []string) error {
 	args := append([]string{"sparse-checkout", "set", "--cone"}, dirs...)
-	stdout, stderr, err := RunGit(repoDir, args...)
+	stdout, stderr, err := runGit(repoDir, args...)
 	if err != nil {
 		return gitOpErr("set sparse checkout of", repoDir, stdout, stderr, err)
 	}
@@ -499,7 +499,7 @@ func ensureSparsePaths(repoDir string, paths []string) error {
 		return err
 	}
 	if slices.Contains(paths, ".") {
-		stdout, stderr, err := RunGit(repoDir, "sparse-checkout", "disable")
+		stdout, stderr, err := runGit(repoDir, "sparse-checkout", "disable")
 		if err != nil {
 			return gitOpErr("disable sparse checkout of", repoDir, stdout, stderr, err)
 		}
@@ -515,7 +515,7 @@ func ensureSparsePaths(repoDir string, paths []string) error {
 	if len(missing) == 0 {
 		return nil
 	}
-	stdout, stderr, err := RunGit(repoDir, append([]string{"sparse-checkout", "add"}, missing...)...)
+	stdout, stderr, err := runGit(repoDir, append([]string{"sparse-checkout", "add"}, missing...)...)
 	if err != nil {
 		return gitOpErr("add sparse checkout paths to", repoDir, stdout, stderr, err)
 	}
@@ -532,7 +532,7 @@ func checkOutSkillFiles(repoDir string, state sparseState) error {
 	}
 	// SKILL.md is matched case-insensitively, as DiscoverSkillsInRepo does.
 	patterns = append(patterns, "[Ss][Kk][Ii][Ll][Ll].[Mm][Dd]")
-	stdout, stderr, err := RunGit(repoDir, append([]string{"sparse-checkout", "set", "--no-cone"}, patterns...)...)
+	stdout, stderr, err := runGit(repoDir, append([]string{"sparse-checkout", "set", "--no-cone"}, patterns...)...)
 	if err != nil {
 		return gitOpErr("check out SKILL.md files in", repoDir, stdout, stderr, err)
 	}
@@ -561,19 +561,19 @@ func withSkillFiles(repoDir string, discover func() error) error {
 	return discoverErr
 }
 
-func GetLocalRepoCommit(repoDest string) string {
+func localRepoCommit(repoDest string) string {
 	gitDir := filepath.Join(repoDest, ".git")
 	if _, err := os.Stat(gitDir); err != nil {
 		return ""
 	}
-	stdout, _, err := RunGit(repoDest, "rev-parse", "HEAD")
+	stdout, _, err := runGit(repoDest, "rev-parse", "HEAD")
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(stdout)
 }
 
-func GetRemoteRepoCommitResult(source, url, branch string) (string, error) {
+func remoteRepoCommit(source, url, branch string) (string, error) {
 	repo := resolveCacheRepo(source, url, branch, "")
 	refTarget := repo.Branch
 	if refTarget == "" {
@@ -582,7 +582,7 @@ func GetRemoteRepoCommitResult(source, url, branch string) (string, error) {
 		refTarget = "refs/heads/" + refTarget
 	}
 
-	stdout, stderr, err := RunGit("", "ls-remote", repo.URL, refTarget)
+	stdout, stderr, err := runGit("", "ls-remote", repo.URL, refTarget)
 	if err != nil || stdout == "" {
 		if err != nil {
 			return "", gitOpErr("query", repo.URL, stdout, stderr, err)

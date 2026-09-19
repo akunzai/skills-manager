@@ -173,7 +173,7 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 
 	cfg := config.DefaultConfig()
-	repoDir, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir)
+	repoDir, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"add", "."}, {"commit", "-m", "v2"}} {
-		if _, _, err := RunGit(origin, args...); err != nil {
+		if _, _, err := runGit(origin, args...); err != nil {
 			t.Fatal(err)
 		}
 	}

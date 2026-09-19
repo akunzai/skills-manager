@@ -768,37 +768,23 @@ func TestObserveRemoteFreshnessSourceParsing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		res := newRemoteSource(tt.source, config.RemoteRepo{
-			Branch: "main",
-			Skills: map[string]string{"foo": "skills/foo"},
-		}, tmpCache).ObserveFreshness()
-
-		if filepath.Dir(res.CachePath) != tt.expectedDest {
-			t.Errorf("ObserveFreshness(%q).CachePath parent = %q; want %q", tt.source, filepath.Dir(res.CachePath), tt.expectedDest)
+		res := NewCache(tt.source, "", "main", tmpCache).repo()
+		if filepath.Dir(res.Dir) != tt.expectedDest {
+			t.Errorf("Cache(%q).dir parent = %q; want %q", tt.source, filepath.Dir(res.Dir), tt.expectedDest)
 		}
 	}
 }
 
-func TestUpdateChecksRemoteSourcesInParallel(t *testing.T) {
-	oldCheck := observeRemoteSource
-	entered := make(chan string, 3)
+func TestForEachBoundedRunsConcurrently(t *testing.T) {
+	entered := make(chan int, 3)
 	release := make(chan struct{})
-	observeRemoteSource = func(source string, _ config.RemoteRepo, _ string) FreshnessRepository {
-		entered <- source
-		<-release
-		return FreshnessRepository{Source: source, RemoteStatus: RemoteUpToDate}
-	}
-	t.Cleanup(func() { observeRemoteSource = oldCheck })
-
-	cfg := config.DefaultConfig()
-	for _, source := range []string{"owner/one", "owner/two", "owner/three"} {
-		cfg.Remote[source] = config.RemoteRepo{Skills: map[string]string{"sample": "sample"}}
-	}
-	cacheDir := t.TempDir()
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		_, err := UpdateRemoteSkills(cfg, nil, false, true, cacheDir, nil)
-		done <- err
+		forEachBounded([]int{1, 2, 3}, 3, func(i int, _ int) {
+			entered <- i
+			<-release
+		})
+		close(done)
 	}()
 	for range 2 {
 		select {
@@ -806,13 +792,11 @@ func TestUpdateChecksRemoteSourcesInParallel(t *testing.T) {
 		case <-time.After(time.Second):
 			close(release)
 			<-done
-			t.Fatal("Update checked remote Sources sequentially")
+			t.Fatal("forEachBounded ran sequentially")
 		}
 	}
 	close(release)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
+	<-done
 }
 
 func TestResolveCacheRepoDefaultsURLBranchAndDir(t *testing.T) {
@@ -851,12 +835,12 @@ func TestEnsureGitRepoRecordsResolvedDefaultBranchIdentity(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	branch, err := GetRemoteDefaultBranch("owner/repo", origin)
+	branch, err := remoteDefaultBranch("owner/repo", origin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cacheDir := filepath.Join(root, "cache")
-	unspecified, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir)
+	unspecified, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -869,10 +853,10 @@ func TestEnsureGitRepoRecordsResolvedDefaultBranchIdentity(t *testing.T) {
 	}
 }
 
-func TestGetRemoteDefaultBranchCommit(t *testing.T) {
+func TestRemoteDefaultBranchCommit(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	wantBranch, _, err := RunGit(origin, "branch", "--show-current")
+	wantBranch, _, err := runGit(origin, "branch", "--show-current")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -884,7 +868,7 @@ func TestGetRemoteDefaultBranchCommit(t *testing.T) {
 	if branch != wantBranch {
 		t.Fatalf("branch = %q; want %q", branch, wantBranch)
 	}
-	if want := GetLocalRepoCommit(origin); commit != want {
+	if want := localRepoCommit(origin); commit != want {
 		t.Fatalf("commit = %q; want %q", commit, want)
 	}
 }
@@ -892,20 +876,20 @@ func TestGetRemoteDefaultBranchCommit(t *testing.T) {
 func TestGetRemoteRepoCommitMatchesExactBranch(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	want := GetLocalRepoCommit(origin)
-	branch, _, err := RunGit(origin, "branch", "--show-current")
+	want := localRepoCommit(origin)
+	branch, _, err := runGit(origin, "branch", "--show-current")
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoy, _, err := RunGit(origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit-tree", "HEAD^{tree}", "-m", "decoy")
+	decoy, _, err := runGit(origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit-tree", "HEAD^{tree}", "-m", "decoy")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := RunGit(origin, "update-ref", "refs/for/"+branch, decoy); err != nil {
+	if _, _, err := runGit(origin, "update-ref", "refs/for/"+branch, decoy); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := GetRemoteRepoCommitResult("owner/repo", origin, branch)
+	got, err := remoteRepoCommit("owner/repo", origin, branch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,26 +903,26 @@ func TestUpdateDetectsChangedRemoteDefaultBranch(t *testing.T) {
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
 	cacheDir := filepath.Join(root, "cache")
-	first, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir)
+	first, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := RunGit(origin, "checkout", "-b", "next"); err != nil {
+	if _, _, err := runGit(origin, "checkout", "-b", "next"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(origin, "sample", "SKILL.md"), []byte("# Next\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := RunGit(origin, "add", "."); err != nil {
+	if _, _, err := runGit(origin, "add", "."); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := RunGit(origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "next"); err != nil {
+	if _, _, err := runGit(origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "next"); err != nil {
 		t.Fatal(err)
 	}
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	status := newRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir).ObserveFreshness()
+	status := observeRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir)
 	if status.RemoteStatus != RemoteNotCached || status.Branch != "next" {
 		t.Fatalf("status = %#v", status)
 	}
@@ -949,7 +933,7 @@ func TestUpdateDetectsChangedRemoteDefaultBranch(t *testing.T) {
 	if second == first {
 		t.Fatal("changed default branch reused the old Cache identity")
 	}
-	if got := GetLocalRepoCommit(second); got == "" {
+	if got := localRepoCommit(second); got == "" {
 		t.Fatal("new default branch Cache was not created")
 	}
 }
@@ -1017,22 +1001,33 @@ func TestUpdateRemoteSkillsDryRun(t *testing.T) {
 }
 
 func TestUpdateRemoteSkillsDryRunTreatsRemoteErrorAsIntendedRefresh(t *testing.T) {
-	old := observeRemoteSource
-	t.Cleanup(func() { observeRemoteSource = old })
-	observeRemoteSource = func(source string, _ config.RemoteRepo, _ string) FreshnessRepository {
-		if source == "owner/broken" {
-			return FreshnessRepository{Source: source, RemoteStatus: RemoteError, Error: "ls-remote failed"}
-		}
-		return FreshnessRepository{Source: source, RemoteStatus: RemoteUpToDate, LocalSHA: "abc"}
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "other")
+	branch, _, err := runGit(origin, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(root, "cache")
+	if _, err := NewCache("owner/current", origin, branch, cacheDir).Refresh(false, "other"); err != nil {
+		t.Fatal(err)
 	}
 
 	cfg := config.DefaultConfig()
-	cfg.Remote["owner/broken"] = config.RemoteRepo{Branch: "main", Skills: map[string]string{"sample": "sample"}}
-	cfg.Remote["owner/current"] = config.RemoteRepo{Branch: "main", Skills: map[string]string{"other": "other"}}
+	cfg.Remote["owner/broken"] = config.RemoteRepo{
+		URL:    filepath.Join(root, "missing.git"),
+		Branch: "main",
+		Skills: map[string]string{"sample": "sample"},
+	}
+	cfg.Remote["owner/current"] = config.RemoteRepo{
+		URL:    origin,
+		Branch: branch,
+		Skills: map[string]string{"other": "other"},
+	}
 
 	var check UpdateEvent
 	var kinds []string
-	result, err := UpdateRemoteSkills(cfg, nil, false, true, t.TempDir(), func(ev UpdateEvent) {
+	result, err := UpdateRemoteSkills(cfg, nil, false, true, cacheDir, func(ev UpdateEvent) {
 		kinds = append(kinds, ev.Kind)
 		if ev.Kind == UpdateCheckDone {
 			check = ev
@@ -1059,12 +1054,6 @@ func TestUpdateRemoteSkillsDryRunTreatsRemoteErrorAsIntendedRefresh(t *testing.T
 }
 
 func TestUpdateRemoteSkillsRefreshFailureAfterRemoteError(t *testing.T) {
-	old := observeRemoteSource
-	t.Cleanup(func() { observeRemoteSource = old })
-	observeRemoteSource = func(source string, _ config.RemoteRepo, _ string) FreshnessRepository {
-		return FreshnessRepository{Source: source, RemoteStatus: RemoteError, Error: "ls-remote failed"}
-	}
-
 	cfg := config.DefaultConfig()
 	cfg.Remote["owner/broken"] = config.RemoteRepo{
 		URL:    filepath.Join(t.TempDir(), "missing.git"),
@@ -1146,7 +1135,7 @@ func TestUpdateRemoteSkillsDoesNotReconcileAvailability(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
@@ -1187,7 +1176,7 @@ func TestUpdateRemoteSkillsDryRunDoesNotApplyAvailabilityDrift(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
@@ -1219,7 +1208,7 @@ func TestUpdateRemoteSkillsIgnoresUnmanagedAvailabilityPath(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
@@ -1280,7 +1269,7 @@ func TestSyncPlanApplyReportsLiveRemoteSourceLifecycle(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	var live []SyncEvent
@@ -1513,7 +1502,7 @@ func writeLocalGitSkill(t *testing.T, repo, skill string) {
 		{"add", "."},
 		{"commit", "-m", "init"},
 	} {
-		stdout, stderr, err := RunGit(repo, args...)
+		stdout, stderr, err := runGit(repo, args...)
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s\n%s", args, err, stdout, stderr)
 		}

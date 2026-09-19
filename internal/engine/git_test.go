@@ -18,12 +18,12 @@ func TestEnsureGitRepoConfiguresLongpathsOnWindows(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 
 	cacheDir := filepath.Join(root, "cache")
-	repoDir, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir)
+	repoDir, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false)
 	if err != nil {
 		t.Fatalf("EnsureGitRepo failed: %v", err)
 	}
 
-	val, _, err := RunGit(repoDir, "config", "--local", "--get", "core.longpaths")
+	val, _, err := runGit(repoDir, "config", "--local", "--get", "core.longpaths")
 	if err != nil {
 		t.Fatalf("git config core.longpaths failed: %v", err)
 	}
@@ -33,16 +33,16 @@ func TestEnsureGitRepoConfiguresLongpathsOnWindows(t *testing.T) {
 
 	// Test update path on existing repo
 	// Remove the config key first to simulate an older cache repo
-	if _, _, err := RunGit(repoDir, "config", "--local", "--unset", "core.longpaths"); err != nil {
+	if _, _, err := runGit(repoDir, "config", "--local", "--unset", "core.longpaths"); err != nil {
 		t.Fatalf("failed to unset core.longpaths: %v", err)
 	}
 
 	// Calling EnsureGitRepo again should re-apply core.longpaths on Windows
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false); err != nil {
 		t.Fatalf("EnsureGitRepo update failed: %v", err)
 	}
 
-	valAfter, _, err := RunGit(repoDir, "config", "--local", "--get", "core.longpaths")
+	valAfter, _, err := runGit(repoDir, "config", "--local", "--get", "core.longpaths")
 	if err != nil {
 		t.Fatalf("git config core.longpaths failed after update: %v", err)
 	}
@@ -122,7 +122,7 @@ func writeSparseOrigin(t *testing.T) (string, string) {
 
 func mustGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	stdout, stderr, err := RunGit(dir, args...)
+	stdout, stderr, err := runGit(dir, args...)
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s\n%s", args, err, stdout, stderr)
 	}
@@ -145,7 +145,7 @@ func assertCachePaths(t *testing.T, repoDir string, present, absent []string) {
 
 func TestEnsureGitRepoChecksOutOnlyDeclaredSkills(t *testing.T) {
 	_, url := writeSparseOrigin(t)
-	repoDir, err := EnsureGitRepo("owner/repo", url, "", false, t.TempDir(), "skills/alpha")
+	repoDir, err := NewCache("owner/repo", url, "", t.TempDir()).Refresh(false, "skills/alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,10 +168,10 @@ func TestEnsureGitRepoChecksOutOnlyDeclaredSkills(t *testing.T) {
 func TestEnsureGitRepoAddsSubpathsWithoutRemovingOthers(t *testing.T) {
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
-	if _, err := EnsureGitRepo("owner/repo", url, "", false, cacheDir, "skills/alpha"); err != nil {
+	if _, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	repoDir, err := EnsureGitRepo("owner/repo", url, "", true, cacheDir, "skills/beta/")
+	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(true, "skills/beta/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestEnsureGitRepoChecksOutWholeTreeForRootSkill(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, ".")
 	cacheDir := t.TempDir()
-	repoDir, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, ".")
+	repoDir, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestEnsureGitRepoNarrowsFullCacheOnRefresh(t *testing.T) {
 	}
 	mustGit(t, "", "clone", origin, cache.Dir)
 
-	repoDir, err := EnsureGitRepo("owner/repo", origin, branch, true, cacheDir, "alpha")
+	repoDir, err := NewCache("owner/repo", origin, branch, cacheDir).Refresh(true, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestEnsureGitRepoNarrowsFullCacheOnRefresh(t *testing.T) {
 
 func TestWithSkillFilesChecksOutOnlySkillMDThenRestoresCone(t *testing.T) {
 	_, url := writeSparseOrigin(t)
-	repoDir, err := EnsureGitRepo("owner/repo", url, "", false, t.TempDir(), "skills/alpha")
+	repoDir, err := NewCache("owner/repo", url, "", t.TempDir()).Refresh(false, "skills/alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestWithSkillFilesChecksOutOnlySkillMDThenRestoresCone(t *testing.T) {
 func TestEnsureGitRepoRestoresConeAfterInterruptedDiscovery(t *testing.T) {
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
-	repoDir, err := EnsureGitRepo("owner/repo", url, "", false, cacheDir, "skills/alpha")
+	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestEnsureGitRepoRestoresConeAfterInterruptedDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := EnsureGitRepo("owner/repo", url, "", false, cacheDir, "skills/beta"); err != nil {
+	if _, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/beta"); err != nil {
 		t.Fatal(err)
 	}
 	assertCachePaths(t, repoDir,
@@ -285,10 +285,10 @@ func TestDirPatternRoundTripsGlobCharacters(t *testing.T) {
 func TestEnsureGitRepoKeepsRootSkillCheckoutForOtherScopes(t *testing.T) {
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
-	if _, err := EnsureGitRepo("owner/repo", url, "", false, cacheDir, "."); err != nil {
+	if _, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "."); err != nil {
 		t.Fatal(err)
 	}
-	repoDir, err := EnsureGitRepo("owner/repo", url, "", true, cacheDir, "skills/alpha")
+	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(true, "skills/alpha")
 	if err != nil {
 		t.Fatal(err)
 	}

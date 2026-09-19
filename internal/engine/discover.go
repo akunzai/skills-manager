@@ -62,14 +62,14 @@ func DiscoverSkillsInRepo(repoDir, scope string) (DiscoveredSkills, error) {
 // discoverRemoteSkills discovers Skills in a Cache whose sparse checkout holds
 // only SKILL.md files (withSkillFiles), so duplicate candidates are
 // compared by their committed tree rather than the files on disk.
-func discoverRemoteSkills(repoDir, scope string) (DiscoveredSkills, error) {
+func discoverRemoteSkills(cache Cache, scope string) (DiscoveredSkills, error) {
 	var found DiscoveredSkills
-	err := withSkillFiles(repoDir, func() error {
+	err := cache.withSkillFiles(func(repoDir string) error {
 		var err error
 		found, err = discoverSkills(repoDir, scope, gitTreeIdentity(repoDir))
 		// A committed directory holding no SKILL.md is not on disk at all.
 		if errors.Is(err, os.ErrNotExist) {
-			if kind, _, gitErr := RunGit(repoDir, "cat-file", "-t", "HEAD:"+filepath.ToSlash(filepath.Clean(scope))); gitErr == nil && kind == "tree" {
+			if kind, _, gitErr := runGit(repoDir, "cat-file", "-t", "HEAD:"+filepath.ToSlash(filepath.Clean(scope))); gitErr == nil && kind == "tree" {
 				found, err = DiscoveredSkills{}, nil
 			}
 		}
@@ -190,7 +190,7 @@ func gitTreeIdentity(repoDir string) bundleIdentity {
 		if relPath == "." {
 			relPath = ""
 		}
-		stdout, stderr, err := RunGit(repoDir, "rev-parse", "HEAD:"+relPath)
+		stdout, stderr, err := runGit(repoDir, "rev-parse", "HEAD:"+relPath)
 		if err != nil {
 			return "", gitOpErr("resolve tree", relPath, stdout, stderr, err)
 		}
