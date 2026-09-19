@@ -66,7 +66,7 @@ _Avoid_: restore, install (when you mean the whole declared state)
 
 **Sync plan**:
 Every declared Skill of one Scope observed once, with the action each takes and what blocks it. The same plan carries from preview through confirmation to apply, so the user's answer is a pure transformation of it rather than a second observation. A Freshness disposition recommends which command to reach for; a Sync plan decides what happens to each Skill.
-_Avoid_: diff, changeset, transaction
+_Avoid_: diff, changeset, transaction. An Add of selected Skills from one Source is not a Sync plan.
 
 **Materialize**:
 Putting one Skill from its Source onto the Scope skills directory (copy, symlink, or command).
