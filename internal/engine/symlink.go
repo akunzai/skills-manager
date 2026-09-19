@@ -225,7 +225,7 @@ func ensureAgentSymlink(
 		skillsDir = models.DefaultSkillsDir()
 	}
 	normAgent := models.NormalizeAgentName(agentName)
-	knownAgents := models.GetAgentsForSkillsDir(skillsDir)
+	knownAgents := models.ForSkillsDir(skillsDir).KnownDirs()
 	agentDir, ok := knownAgents[normAgent]
 	if !ok {
 		return false, nil

@@ -631,7 +631,7 @@ func isolateHome(t *testing.T) string {
 
 func plantManagedAgentLink(t *testing.T, skillsDir, skill, agent string) {
 	t.Helper()
-	agents := models.GetAgentsForSkillsDir(skillsDir)
+	agents := models.ForSkillsDir(skillsDir).KnownDirs()
 	dir, ok := agents[models.NormalizeAgentName(agent)]
 	if !ok {
 		t.Fatalf("unknown agent %q", agent)
