@@ -274,3 +274,63 @@ func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 		t.Fatalf("an installed command Skill must not keep the gate red: %#v", plan.Pending(SyncDecision{}))
 	}
 }
+
+func TestPlanRemoteItem(t *testing.T) {
+	drift := AvailabilityDrift{Skill: "sample", Missing: []string{"codex"}}
+	skill := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: "sample", ScopePath: "/scope/sample"}
+	for _, tc := range []struct {
+		name      string
+		status    SkillFreshnessStatus
+		err       string
+		wantWrite bool
+		wantBlock SyncBlock
+		wantErr   bool
+	}{
+		{name: "just declared", wantWrite: true},
+		{name: "in sync", status: SkillInSync},
+		{name: "missing", status: SkillMissing, wantWrite: true},
+		{name: "cache update", status: SkillCacheUpdateAvailable, wantWrite: true},
+		{name: "unknown baseline", status: SkillUnknownBaseline, wantWrite: true, wantBlock: SyncBlockUnknownBaseline},
+		{name: "local drift", status: SkillLocalDrift, wantBlock: SyncBlockLocalDrift},
+		{name: "unverified", status: SkillUnverified, wantBlock: SyncBlockCacheMissing},
+		{name: "error", status: SkillError, err: "boom", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			freshness := skill
+			freshness.Status = tc.status
+			freshness.Error = tc.err
+			item := planRemoteItem("owner/repo", "/cache/repo", "abc123", freshness, drift)
+			if item.Kind != SyncItemRemote || item.Name != "sample" || item.Source != "owner/repo" {
+				t.Fatalf("identity = %+v", item)
+			}
+			if item.CachePath != "/cache/repo" || item.LocalSHA != "abc123" {
+				t.Fatalf("CachePath=%q LocalSHA=%q", item.CachePath, item.LocalSHA)
+			}
+			if !reflect.DeepEqual(item.Freshness, freshness) {
+				t.Fatalf("Freshness = %+v; want %+v", item.Freshness, freshness)
+			}
+			if !reflect.DeepEqual(item.Drift, drift) {
+				t.Fatalf("Drift = %+v; want %+v", item.Drift, drift)
+			}
+			if item.NeedsWrite != tc.wantWrite {
+				t.Fatalf("NeedsWrite = %v; want %v", item.NeedsWrite, tc.wantWrite)
+			}
+			if item.Block != tc.wantBlock {
+				t.Fatalf("Block = %q; want %q", item.Block, tc.wantBlock)
+			}
+			if tc.wantErr {
+				if item.Err == "" {
+					t.Fatal("Err is empty; want the classified error")
+				}
+			} else if item.Err != "" {
+				t.Fatalf("Err = %q; want empty", item.Err)
+			}
+			if tc.status == "" {
+				action, block := item.Resolve(SyncDecision{})
+				if action != SyncActionMaterialize || block != SyncBlockNone {
+					t.Fatalf("just-declared Resolve = %q, %q; want materialize", action, block)
+				}
+			}
+		})
+	}
+}

@@ -167,34 +167,10 @@ func PlanSync(cfg *config.Config, skillsDir, cacheDir string) (*SyncPlan, error)
 	for _, repository := range snapshot.Repositories {
 		plan.Sources = append(plan.Sources, repository.Source)
 		for _, skill := range repository.Skills {
-			item := SyncPlanItem{
-				Name:       skill.Name,
-				Kind:       SyncItemRemote,
-				Source:     repository.Source,
-				Drift:      availability.ObserveAvailability(skill.Name),
-				Freshness:  skill,
-				CachePath:  repository.CachePath,
-				LocalSHA:   repository.LocalSHA,
-				NeedsWrite: skill.Status == SkillMissing || skill.Status == SkillCacheUpdateAvailable || skill.Status == SkillUnknownBaseline,
-			}
-			switch skill.Status {
-			case SkillLocalDrift:
-				item.Block = SyncBlockLocalDrift
-			case SkillUnknownBaseline:
-				item.Block = SyncBlockUnknownBaseline
-			}
-			// A Cache that was never fetched is a Block: Update is the way
-			// out, and no decision here can substitute for it. A Cache that
-			// cannot be read is a genuine failure.
-			if err := skill.validateCache(); err != nil {
-				if skill.Status == SkillUnverified {
-					item.Block = SyncBlockCacheMissing
-					item.BlockReason = err.Error()
-				} else {
-					item.Err = err.Error()
-				}
-			}
-			plan.Items = append(plan.Items, item)
+			plan.Items = append(plan.Items, planRemoteItem(
+				repository.Source, repository.CachePath, repository.LocalSHA,
+				skill, availability.ObserveAvailability(skill.Name),
+			))
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Local)) {
@@ -210,6 +186,45 @@ func PlanSync(cfg *config.Config, skillsDir, cacheDir string) (*SyncPlan, error)
 		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, availability.ObserveAvailability(name), name))
 	}
 	return plan, nil
+}
+
+// planRemoteItem builds one remote Sync plan item from an observation.
+// A SkillFreshness with no Status is a just-declared Skill: Materialize is
+// required, and Drift or an unknown baseline do not block (Add). Classified
+// Status is Sync reconciling an existing declaration.
+func planRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	item := SyncPlanItem{
+		Name:      skill.Name,
+		Kind:      SyncItemRemote,
+		Source:    source,
+		Drift:     drift,
+		Freshness: skill,
+		CachePath: cachePath,
+		LocalSHA:  localSHA,
+	}
+	if skill.Status == "" {
+		item.NeedsWrite = true
+		return item
+	}
+	item.NeedsWrite = skill.Status == SkillMissing || skill.Status == SkillCacheUpdateAvailable || skill.Status == SkillUnknownBaseline
+	switch skill.Status {
+	case SkillLocalDrift:
+		item.Block = SyncBlockLocalDrift
+	case SkillUnknownBaseline:
+		item.Block = SyncBlockUnknownBaseline
+	}
+	// A Cache that was never fetched is a Block: Update is the way
+	// out, and no decision here can substitute for it. A Cache that
+	// cannot be read is a genuine failure.
+	if err := skill.validateCache(); err != nil {
+		if skill.Status == SkillUnverified {
+			item.Block = SyncBlockCacheMissing
+			item.BlockReason = err.Error()
+		} else {
+			item.Err = err.Error()
+		}
+	}
+	return item
 }
 
 // planLocalItem observes one declared local Skill. Add reuses it so a newly

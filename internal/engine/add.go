@@ -352,20 +352,12 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		)
 		switch plan.Source.Kind {
 		case AddSourceRemote:
-			item := SyncPlanItem{
-				Name:       name,
-				Kind:       SyncItemRemote,
-				Source:     plan.Source.Key,
-				CachePath:  plan.Source.RepoDir,
-				LocalSHA:   localRepoCommit(plan.Source.RepoDir),
-				NeedsWrite: true,
-				Freshness: SkillFreshness{
-					Name:      name,
-					Source:    plan.Source.Key,
-					Subpath:   subpath,
-					ScopePath: filepath.Join(plan.SkillsDir, name),
-				},
-			}
+			item := planRemoteItem(plan.Source.Key, plan.Source.RepoDir, localRepoCommit(plan.Source.RepoDir), SkillFreshness{
+				Name:      name,
+				Source:    plan.Source.Key,
+				Subpath:   subpath,
+				ScopePath: filepath.Join(plan.SkillsDir, name),
+			}, availability.ObserveAvailability(name))
 			outcome, applyErr = applyRemoteItem(availability, plan.SkillsDir, item, SyncDecision{}, state, stateStore, nil)
 		case AddSourceSymlink, AddSourceCommand:
 			item := planLocalItem(cfg, plan.SkillsDir, availability.ObserveAvailability(name), name)
