@@ -113,9 +113,9 @@ func newLegacyCacheMigrator(cfg *config.Config, cacheDir string) *legacyCacheMig
 			remove:          os.Remove,
 			removeAll:       RemoveAll,
 			rename:          os.Rename,
-			runGit:          RunGit,
-			ensureGitRepo:   EnsureGitRepo,
-			localRepoCommit: GetLocalRepoCommit,
+			runGit:          runGit,
+			ensureGitRepo:   ensureGitRepo,
+			localRepoCommit: localRepoCommit,
 			repoFingerprint: legacyCacheFingerprint,
 		},
 	}
@@ -306,8 +306,8 @@ func (m *legacyCacheMigrator) stageExistingCache(current, staged string) error {
 }
 
 func legacyCacheFingerprint(dir string) string {
-	commit := GetLocalRepoCommit(dir)
-	status, _, err := RunGit(dir, "status", "--porcelain=v1", "--untracked-files=all")
+	commit := localRepoCommit(dir)
+	status, _, err := runGit(dir, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil {
 		return commit + "\x00unreadable"
 	}

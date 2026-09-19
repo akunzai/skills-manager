@@ -164,9 +164,10 @@ func InspectFreshness(cfg *config.Config, skillsDir, cacheDir string, options Fr
 		snapshot.Repositories = observeRemoteFreshness(cfg.Remote, cacheDir, options.Workers)
 	} else {
 		for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
-			cache := resolveCacheRepo(source, cfg.Remote[source].URL, cfg.Remote[source].Branch, cacheDir)
+			repo := cfg.Remote[source]
+			cache := NewCache(source, repo.URL, repo.Branch, cacheDir).repo()
 			snapshot.Repositories = append(snapshot.Repositories, FreshnessRepository{
-				Source: source, URL: cache.URL, Branch: cache.Branch, CachePath: cache.Dir, LocalSHA: GetLocalRepoCommit(cache.Dir),
+				Source: source, URL: cache.URL, Branch: cache.Branch, CachePath: cache.Dir, LocalSHA: localRepoCommit(cache.Dir),
 			})
 		}
 	}
@@ -227,24 +228,62 @@ func observeRemoteFreshness(repositories map[string]config.RemoteRepo, cacheDir 
 		tasks = append(tasks, task{source, repo})
 	}
 	results := make([]FreshnessRepository, len(tasks))
-	sem := make(chan struct{}, workers)
-	var wg sync.WaitGroup
-	for i, current := range tasks {
-		wg.Go(func() {
-			sem <- struct{}{}
-			results[i] = observeRemoteSource(current.source, current.repo, cacheDir)
-			<-sem
-		})
-	}
-	wg.Wait()
+	forEachBounded(tasks, workers, func(i int, current task) {
+		results[i] = observeRemoteSource(current.source, current.repo, cacheDir)
+	})
 	slices.SortFunc(results, func(a, b FreshnessRepository) int {
 		return cmp.Compare(strings.ToLower(a.Source), strings.ToLower(b.Source))
 	})
 	return results
 }
 
-var observeRemoteSource = func(source string, repo config.RemoteRepo, cacheDir string) FreshnessRepository {
-	return newRemoteSource(source, repo, cacheDir).ObserveFreshness()
+func forEachBounded[T any](items []T, workers int, fn func(int, T)) {
+	if workers <= 0 {
+		workers = 8
+	}
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i, item := range items {
+		wg.Go(func() {
+			sem <- struct{}{}
+			fn(i, item)
+			<-sem
+		})
+	}
+	wg.Wait()
+}
+
+func observeRemoteSource(source string, repo config.RemoteRepo, cacheDir string) FreshnessRepository {
+	return freshnessFromCache(NewCache(source, repo.URL, repo.Branch, cacheDir).observe(declaredSubpaths(repo)...))
+}
+
+func freshnessFromCache(f cacheFacts) FreshnessRepository {
+	status := RemoteUpToDate
+	if f.err != "" {
+		status = RemoteError
+	}
+	if f.localSHA == "" {
+		if status != RemoteError {
+			status = RemoteNotCached
+		}
+	} else if status != RemoteError {
+		if f.localSHA != f.remoteSHA {
+			status = RemoteUpdateAvailable
+		}
+		if status == RemoteUpToDate && len(f.missing) > 0 {
+			status = RemoteCacheIncomplete
+		}
+	}
+	return FreshnessRepository{
+		Source:       f.source,
+		URL:          f.url,
+		Branch:       f.branch,
+		RemoteStatus: status,
+		LocalSHA:     f.localSHA,
+		RemoteSHA:    f.remoteSHA,
+		CachePath:    f.dir,
+		Error:        f.err,
+	}
 }
 
 func classifyRemoteSkill(source, name, subpath, cacheDir, skillsDir string, applied AppliedSkillState) SkillFreshness {

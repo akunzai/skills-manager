@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -287,7 +288,7 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{"claude", "continue"} {
@@ -908,7 +909,7 @@ func TestCLISyncExitCodes(t *testing.T) {
 	}
 
 	// 0: everything declared is in place.
-	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
@@ -991,7 +992,7 @@ func TestCLISyncInteractiveUnknownBaselineCancelsBeforeWrites(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	cachePath, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample")
+	cachePath, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1066,10 +1067,21 @@ func writeCLIGitSkill(t *testing.T, repo, name string) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"}} {
-		if _, stderr, err := engine.RunGit(repo, args...); err != nil {
-			t.Fatalf("git %v: %s: %v", args, stderr, err)
-		}
+		cliRunGit(t, repo, args...)
 	}
+}
+
+func cliRunGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %s: %v", args, out, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestCLIConfigSetGetAndClear(t *testing.T) {
@@ -1373,9 +1385,7 @@ func TestCLIDoctorFixShowsProgressWhileRebuildingLegacyCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	cacheDir := filepath.Join(root, "cache")
-	if _, _, err := engine.RunGit("", "clone", origin, filepath.Join(cacheDir, "owner", "repo")); err != nil {
-		t.Fatal(err)
-	}
+	cliRunGit(t, "", "clone", origin, filepath.Join(cacheDir, "owner", "repo"))
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	configFile := filepath.Join(root, "skills.json")
@@ -2341,7 +2351,7 @@ func copiedAvailabilityScope(t *testing.T) (configFile, skillsDir, cacheDir stri
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "alpha", "beta"); err != nil {
+	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "alpha", "beta"); err != nil {
 		t.Fatal(err)
 	}
 	return configFile, skillsDir, cacheDir
@@ -2443,11 +2453,8 @@ func TestCLIOutdatedReportsIncompleteCache(t *testing.T) {
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
 	writeCLIGitSkill(t, origin, "alpha")
 	writeCLIGitSkill(t, origin, "beta")
-	branch, _, err := engine.RunGit(origin, "symbolic-ref", "--short", "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.EnsureGitRepo("owner/repo", origin, branch, false, cacheDir, "alpha"); err != nil {
+	branch := cliRunGit(t, origin, "symbolic-ref", "--short", "HEAD")
+	if _, err := engine.NewCache("owner/repo", origin, branch, cacheDir).Refresh(false, "alpha"); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()

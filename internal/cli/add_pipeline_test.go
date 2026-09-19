@@ -169,9 +169,7 @@ func TestNewRemoteIntakeAppliesTreeURLScopeBeforeDiscovery(t *testing.T) {
 		{"add", "."},
 		{"commit", "-m", "init"},
 	} {
-		if _, stderr, err := engine.RunGit(origin, args...); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, stderr)
-		}
+		cliRunGit(t, origin, args...)
 	}
 
 	cmd := testCmd()

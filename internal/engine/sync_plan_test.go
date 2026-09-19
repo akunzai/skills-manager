@@ -60,7 +60,7 @@ func planSyncFixture(t *testing.T) (cfg *config.Config, root, skillsDir, cacheDi
 	cacheDir = filepath.Join(root, "cache")
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "sample"); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,7 +104,7 @@ func TestSyncPlanResolvesEachDecision(t *testing.T) {
 	writeLocalGitSkill(t, origin, "drifted")
 	writeLocalGitSkill(t, origin, "unknown")
 	writeLocalGitSkill(t, origin, "missing")
-	if _, err := EnsureGitRepo("owner/repo", origin, "", false, cacheDir, "drifted", "unknown", "missing"); err != nil {
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "drifted", "unknown", "missing"); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()

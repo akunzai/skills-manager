@@ -73,8 +73,8 @@ Putting one Skill from its Source onto the Scope skills directory (copy, symlink
 _Avoid_: install (when you mean the disk write only), checkout, restore
 
 **Cache**:
-The git working copy used to Materialize remote Skills: a sparse partial clone that checks out only the Skill subpaths declared from it, shared by every Scope.
-_Avoid_: vendor, tmp clone
+One remote Source's sparse-partial-clone working copy, from which that Source's Skills are Materialized. Every Scope shares the same Cache for a given Source.
+_Avoid_: vendor, tmp clone, cache directory (that is where Caches live, not a Cache)
 
 **Freshness**:
 The observed relationship between a remote Source, its Cache, and the Materialized Skill in a Scope. Remote Source observation is optional so Freshness can be evaluated without network access.
