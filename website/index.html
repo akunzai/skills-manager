@@ -19,12 +19,13 @@
 <meta name="twitter:image" content="https://akunzai.github.io/skills-manager/demo.gif" />
 
 <script>
-  (function() {
+  // Apply a saved theme before first paint so the page does not flash.
+  try {
     const saved = localStorage.getItem('theme');
-    if (saved) {
-      document.documentElement.setAttribute('data-theme', saved);
+    if (saved === 'light' || saved === 'dark') {
+      document.documentElement.dataset.theme = saved;
     }
-  })();
+  } catch (e) {}
 </script>
 
 <style>
@@ -52,6 +53,7 @@
 
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
+      color-scheme: light;
       --bg: #f7f8fa;
       --bg-elev: #ffffff;
       --border: #d8dce6;
@@ -73,6 +75,7 @@
   }
 
   html[data-theme="light"] {
+    color-scheme: light;
     --bg: #f7f8fa;
     --bg-elev: #ffffff;
     --border: #d8dce6;
@@ -93,6 +96,7 @@
   }
 
   html[data-theme="dark"] {
+    color-scheme: dark;
     --bg: #111318;
     --bg-elev: #161922;
     --border: #282e3f;
@@ -329,8 +333,8 @@
   <div class="wrap">
     <div class="top-bar">
       <div class="logo"><span class="br">&gt;_ </span>skills</div>
-      <button id="theme-toggle" class="theme-btn" type="button" aria-label="Toggle theme">
-        <span class="theme-icon">◐</span>
+      <button id="theme-toggle" class="theme-btn" type="button">
+        <span class="theme-icon" aria-hidden="true">◐</span>
         <span class="theme-label">Theme</span>
       </button>
     </div>
@@ -647,50 +651,45 @@
 </footer>
 
 <script>
-  (function() {
+  (function () {
+    const root = document.documentElement;
     const btn = document.getElementById('theme-toggle');
-    const label = btn.querySelector('.theme-label');
     const icon = btn.querySelector('.theme-icon');
+    const label = btn.querySelector('.theme-label');
+    const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+    const system = () => (systemDark.matches ? 'dark' : 'light');
+    const modes = {
+      auto: { icon: '◐', label: 'Auto' },
+      light: { icon: '○', label: 'Light' },
+      dark: { icon: '●', label: 'Dark' },
+    };
 
-    function updateButton() {
-      const current = document.documentElement.getAttribute('data-theme');
-      if (current === 'light') {
-        icon.textContent = '○';
-        label.textContent = 'Light';
-      } else if (current === 'dark') {
-        icon.textContent = '●';
-        label.textContent = 'Dark';
-      } else {
-        icon.textContent = '◐';
-        label.textContent = 'Auto';
-      }
+    function render() {
+      const mode = modes[root.dataset.theme || 'auto'];
+      icon.textContent = mode.icon;
+      label.textContent = mode.label;
+      btn.setAttribute('aria-label', 'Theme: ' + mode.label);
     }
 
-    btn.addEventListener('click', function() {
-      const current = document.documentElement.getAttribute('data-theme');
-      let next;
-      if (!current) {
-        // From Auto -> toggle opposite of system preference
-        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        next = isDark ? 'light' : 'dark';
-      } else if (current === 'light') {
-        next = 'dark';
-      } else {
-        // From dark -> back to Auto
-        next = null;
-      }
-
+    // Auto -> the opposite of the system -> the same as the system -> Auto,
+    // so the first two clicks always change what the page looks like.
+    btn.addEventListener('click', () => {
+      const saved = root.dataset.theme;
+      const next = !saved
+        ? (system() === 'dark' ? 'light' : 'dark')
+        : saved !== system() ? system() : null;
       if (next) {
-        document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('theme', next);
+        root.dataset.theme = next;
       } else {
-        document.documentElement.removeAttribute('data-theme');
-        localStorage.removeItem('theme');
+        delete root.dataset.theme;
       }
-      updateButton();
+      try {
+        if (next) localStorage.setItem('theme', next);
+        else localStorage.removeItem('theme');
+      } catch (e) {}
+      render();
     });
-
-    updateButton();
+    render();
   })();
 </script>
 
