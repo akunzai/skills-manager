@@ -1253,6 +1253,9 @@ func TestUpdateRemoteSkillsReportsAggregateRefreshLifecycle(t *testing.T) {
 // does, not about the seam between the two phases.
 func applyPlan(t *testing.T, cfg *config.Config, skillsDir, cacheDir string, decision SyncDecision, onProgress func(SyncEvent)) (*SyncReport, error) {
 	t.Helper()
+	if os.Getenv("XDG_STATE_HOME") == "" {
+		t.Setenv("XDG_STATE_HOME", t.TempDir())
+	}
 	plan, err := PlanSync(cfg, skillsDir, cacheDir)
 	if err != nil {
 		t.Fatalf("PlanSync: %v", err)
