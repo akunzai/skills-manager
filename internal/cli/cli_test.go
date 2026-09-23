@@ -211,6 +211,7 @@ func TestCLIOutdatedNoRemoteReposPrintsThroughCapturedOutput(t *testing.T) {
 
 func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 	resetRootCmdFlags()
+	isolateHome(t)
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
@@ -241,6 +242,7 @@ func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 
 func TestCLISyncPrintsCommandFailed(t *testing.T) {
 	resetRootCmdFlags()
+	isolateHome(t)
 	project := t.TempDir()
 	configFile := filepath.Join(project, ".agents", "skills.json")
 	skillsDir := filepath.Join(project, ".agents", "skills")
@@ -268,6 +270,7 @@ func TestCLISyncPrintsCommandFailed(t *testing.T) {
 
 func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	resetRootCmdFlags()
+	isolateHome(t)
 	project := t.TempDir()
 	configFile := filepath.Join(project, ".agents", "skills.json")
 	skillsDir := filepath.Join(project, ".agents", "skills")
@@ -315,12 +318,12 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	if !isSymlink(claudeLink) {
 		t.Fatal("dry-run removed an excluded link")
 	}
-	doctorOut, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
+	doctorOut, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err == nil || !strings.Contains(doctorOut, "unexpected links: claude-code") {
 		t.Fatalf("doctor did not report availability drift: err=%v\n%s", err, doctorOut)
 	}
-	if _, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir); err != nil {
-		t.Fatalf("doctor --fix: %v", err)
+	if out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatalf("doctor --fix: %v\n%s", err, out)
 	}
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
 		t.Fatalf("doctor --fix left excluded link: %v", err)
@@ -1376,6 +1379,7 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 
 func TestCLIDoctorFixShowsProgressWhileRebuildingLegacyCache(t *testing.T) {
 	resetRootCmdFlags()
+	isolateHome(t)
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeCLIGitSkill(t, origin, "sample")

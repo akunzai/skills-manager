@@ -23,6 +23,7 @@ func TestPrepareRemoteSourceRefreshesCacheAndDiscoversSkills(t *testing.T) {
 }
 
 func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	cacheDir := filepath.Join(project, "cache")
 	cfg := config.DefaultConfig()
