@@ -351,7 +351,7 @@ func (s availabilityState) apply() ([]string, error) {
 	for agent, agentDir := range s.known {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		if _, shouldLink := s.desired[agent]; shouldLink {
-			if _, err := ensureAgentSymlink(s.skillName, agent, s.skillsDir); err != nil {
+			if err := s.link(agent); err != nil {
 				return copied, err
 			}
 			// Read the outcome back rather than inferring it: a copy left

@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-
-	"github.com/akunzai/skills-manager/internal/models"
 )
 
 const managedCopyMarker = ".skills-manager-copy"
@@ -216,31 +214,25 @@ func replaceManagedCopy(src, dst string) error {
 	return installAtomically(staging, dst, "managed copy")
 }
 
-func ensureAgentSymlink(
-	skillName string,
-	agentName string,
-	skillsDir string,
-) (bool, error) {
-	if skillsDir == "" {
-		skillsDir = models.DefaultSkillsDir()
-	}
-	normAgent := models.NormalizeAgentName(agentName)
-	knownAgents := models.ForSkillsDir(skillsDir).KnownDirs()
-	agentDir, ok := knownAgents[normAgent]
+// link makes agent's Availability for the Skill a link into the skills
+// directory, or reconciles the managed copy already standing in for one.
+func (s availabilityState) link(agent string) error {
+	agentDir, ok := s.known[agent]
 	if !ok {
-		return false, nil
+		return nil
 	}
+	skillName, skillsDir := s.skillName, s.skillsDir
 
 	masterSkillPath := filepath.Join(skillsDir, skillName)
 	if _, err := os.Stat(masterSkillPath); err != nil {
 		// Also check if master is a symlink
 		if _, lErr := os.Lstat(masterSkillPath); lErr != nil {
-			return false, nil
+			return nil
 		}
 	}
 
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		return false, fmt.Errorf("failed to create agent dir %s: %w", agentDir, err)
+		return fmt.Errorf("failed to create agent dir %s: %w", agentDir, err)
 	}
 
 	agentLink := filepath.Join(agentDir, skillName)
@@ -257,35 +249,26 @@ func ensureAgentSymlink(
 			live := err == nil && (target == relTarget || filepath.Clean(target) == filepath.Clean(masterSkillPath))
 			if live {
 				if _, statErr := os.Stat(agentLink); statErr == nil {
-					return true, nil
+					return nil
 				}
 			}
 			if isManagedSkillLink(agentLink, skillName, skillsDir) {
 				if err := os.Remove(agentLink); err != nil {
-					return false, err
+					return err
 				}
 			} else if isManagedSkillCopy(agentLink, skillName, skillsDir) {
-				if err := reconcileManagedCopy(masterSkillPath, relTarget, agentLink); err != nil {
-					return false, err
-				}
-				return true, nil
+				return reconcileManagedCopy(masterSkillPath, relTarget, agentLink)
 			} else {
-				return false, fmt.Errorf("agent path already exists and is not a managed link: %s", agentLink)
+				return fmt.Errorf("agent path already exists and is not a managed link: %s", agentLink)
 			}
 		} else if isManagedSkillCopy(agentLink, skillName, skillsDir) {
-			if err := reconcileManagedCopy(masterSkillPath, relTarget, agentLink); err != nil {
-				return false, err
-			}
-			return true, nil
+			return reconcileManagedCopy(masterSkillPath, relTarget, agentLink)
 		} else {
-			return false, fmt.Errorf("agent path already exists and is not a managed link: %s", agentLink)
+			return fmt.Errorf("agent path already exists and is not a managed link: %s", agentLink)
 		}
 	}
 
-	if err := CreateSymlink(relTarget, agentLink, true); err != nil {
-		return false, err
-	}
-	return true, nil
+	return CreateSymlink(relTarget, agentLink, true)
 }
 
 // removeManagedSkillPath reports both whether path was Availability this tool
@@ -317,11 +300,7 @@ func isManagedSkillCopy(path, skillName, skillsDir string) bool {
 	if !ok {
 		return false
 	}
-	base := skillsDir
-	if base == "" {
-		base = models.DefaultSkillsDir()
-	}
-	expected, err1 := filepath.Abs(filepath.Join(base, skillName))
+	expected, err1 := filepath.Abs(filepath.Join(skillsDir, skillName))
 	source, err2 := filepath.Abs(marked)
 	return err1 == nil && err2 == nil && filepath.Clean(source) == filepath.Clean(expected)
 }
@@ -335,11 +314,7 @@ func isManagedSkillLink(linkPath string, skillName string, skillsDir string) boo
 	if err != nil {
 		return false
 	}
-	base := skillsDir
-	if base == "" {
-		base = models.DefaultSkillsDir()
-	}
-	master := filepath.Join(base, skillName)
+	master := filepath.Join(skillsDir, skillName)
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(filepath.Dir(linkPath), target)
 	}

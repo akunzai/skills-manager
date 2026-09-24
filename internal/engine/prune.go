@@ -126,6 +126,9 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 // managed link is revalidated immediately before removal, since it can change
 // while an interactive confirmation prompt is open.
 func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
+	if skillsDir == "" {
+		skillsDir = models.DefaultSkillsDir()
+	}
 	result := PruneResult{}
 	var errs []error
 	for _, link := range plan.Unconfigured {

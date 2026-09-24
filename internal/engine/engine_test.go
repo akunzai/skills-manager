@@ -443,13 +443,13 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 	_ = os.MkdirAll(skillDir, 0755)
 	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Test Skill"), 0644)
 
-	// 1. Ensure project-level symlink for claude-code
-	created, err := ensureAgentSymlink("test-skill", "claude", skillsDir)
-	if err != nil {
-		t.Fatalf("ensureAgentSymlink failed: %v", err)
-	}
-	if !created {
-		t.Fatalf("expected symlink to be created")
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	availability := NewAvailability(cfg, skillsDir)
+
+	// 1. Apply creates the project-level symlink for claude-code
+	if _, err := availability.Apply("test-skill"); err != nil {
+		t.Fatalf("Apply failed: %v", err)
 	}
 
 	claudeLink := filepath.Join(tmpProjectDir, ".claude", "skills", "test-skill")
@@ -457,9 +457,6 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 		t.Fatalf("expected symlink at %s", claudeLink)
 	}
 
-	cfg := config.DefaultConfig()
-	cfg.Settings.DefaultAgents = []string{"claude"}
-	availability := NewAvailability(cfg, skillsDir)
 	result := availability.ApplyLeftover(availability.ObserveAgentDirs().Leftover.ForSkills([]string{"test-skill"}).WithoutEmpty())
 	if len(result.RemovedPaths) == 0 {
 		t.Errorf("expected at least 1 leftover path removed")
@@ -646,9 +643,7 @@ func TestApplyRemovePlanDropsConfigBeforeMaster(t *testing.T) {
 	if err := config.SaveConfig(cfg, configPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ensureAgentSymlink("sample", "claude", skillsDir); err != nil {
-		t.Fatal(err)
-	}
+	plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "sample")
 
 	plan := BuildRemovePlan(cfg, skillsDir, []string{"sample"})
 	if len(plan.Skills) != 1 || !plan.Skills[0].InConfig || !plan.Skills[0].MasterExists {
@@ -1141,10 +1136,8 @@ func TestUpdateRemoteSkillsDoesNotReconcileAvailability(t *testing.T) {
 	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
 		t.Fatal(err)
 	}
-	for _, agent := range []string{"claude", "continue"} {
-		if _, err := ensureAgentSymlink("sample", agent, skillsDir); err != nil {
-			t.Fatal(err)
-		}
+	for _, agent := range []string{".claude", ".continue"} {
+		plantManagedLink(t, skillsDir, filepath.Join(project, agent, "skills"), "sample")
 	}
 
 	result, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil)
@@ -1182,10 +1175,8 @@ func TestUpdateRemoteSkillsDryRunDoesNotApplyAvailabilityDrift(t *testing.T) {
 	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
 		t.Fatal(err)
 	}
-	for _, agent := range []string{"claude", "continue"} {
-		if _, err := ensureAgentSymlink("sample", agent, skillsDir); err != nil {
-			t.Fatal(err)
-		}
+	for _, agent := range []string{".claude", ".continue"} {
+		plantManagedLink(t, skillsDir, filepath.Join(project, agent, "skills"), "sample")
 	}
 
 	_, err := UpdateRemoteSkills(cfg, nil, false, true, cacheDir, nil)
@@ -1363,10 +1354,8 @@ func TestSyncPlanApplyCommandFailureStillAppliesAvailability(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
 	config.AddLocalCommandEntry(cfg, "sample", "exit 1", "", "")
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	for _, agent := range []string{"claude", "continue"} {
-		if _, err := ensureAgentSymlink("sample", agent, skillsDir); err != nil {
-			t.Fatal(err)
-		}
+	for _, agent := range []string{".claude", ".continue"} {
+		plantManagedLink(t, skillsDir, filepath.Join(project, agent, "skills"), "sample")
 	}
 
 	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, nil)
@@ -1407,10 +1396,8 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	for _, agent := range []string{"claude", "continue"} {
-		if _, err := ensureAgentSymlink("sample", agent, skillsDir); err != nil {
-			t.Fatal(err)
-		}
+	for _, agent := range []string{".claude", ".continue"} {
+		plantManagedLink(t, skillsDir, filepath.Join(project, agent, "skills"), "sample")
 	}
 
 	plan := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, AddAvailabilityIntent{})
