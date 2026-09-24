@@ -707,6 +707,37 @@ func TestApplyRemovePlanSavesConfigWhenMasterMissing(t *testing.T) {
 	}
 }
 
+// An unreadable Scope state leaves baselines alone but must not stop prune
+// from clearing everything else.
+func TestBuildPrunePlanProceedsPastUnreadableScopeState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "orphan", "SKILL.md"), []byte("# Orphan\n"))
+	link := plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "orphan")
+	statePath, bad := writeUnreadableScopeState(t, skillsDir)
+
+	plan, err := BuildPrunePlan(config.DefaultConfig(), skillsDir, true, true)
+	if err != nil {
+		t.Fatalf("BuildPrunePlan error = %v; an unreadable Scope state must not stop prune", err)
+	}
+	if plan.StateError == "" {
+		t.Fatal("StateError is empty; want why stale baselines were not cleared")
+	}
+	if len(plan.Unconfigured) != 1 || plan.Unconfigured[0].Path != link {
+		t.Fatalf("Unconfigured = %#v; want the leftover link", plan.Unconfigured)
+	}
+	if _, err := ApplyPrunePlan(plan, skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatal("the leftover link must still be pruned")
+	}
+	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+	}
+}
+
 func TestApplyPrunePlanLeavesLinkReplacedAfterPlanning(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")

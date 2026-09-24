@@ -284,10 +284,16 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 			fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
 		case engine.SyncStateFailed:
 			if ev.Skill == "" {
-				fmt.Fprintf(out, "  %sFailed to read the Scope baseline: %s%s\n", colorRed, ev.Err, colorReset)
+				printScopeStateUnreadable(out, ev.Err)
 				break
 			}
 			fmt.Fprintf(out, "  %sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 		}
 	}
+}
+
+// printScopeStateUnreadable is the one sentence every command prints when the
+// Scope state cannot be read and baselines go unrecorded.
+func printScopeStateUnreadable(out io.Writer, reason string) {
+	fmt.Fprintf(out, "  %sFailed to read the Scope baseline: %s%s\n", colorRed, reason, colorReset)
 }

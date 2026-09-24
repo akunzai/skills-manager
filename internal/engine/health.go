@@ -280,12 +280,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		if err != nil {
 			plan.StateError = err.Error()
 		} else {
-			for name := range state.Skills {
-				if _, _, declared := config.FindSkillSource(d.cfg, name); !declared {
-					plan.StaleState = append(plan.StaleState, name)
-				}
-			}
-			slices.Sort(plan.StaleState)
+			plan.StaleState = staleBaselines(d.cfg, state)
 		}
 	}
 	artifacts, artifactErr := ListScopeStateArtifacts()
@@ -407,13 +402,7 @@ func (d *Doctor) repair(plan *DoctorReport, progress DoctorProgress, replaceFore
 		if plan.StateError != "" {
 			plan.StateRepair = itemRepairFromErr(d.stateStore.Prune())
 		} else if len(plan.StaleState) > 0 {
-			keep := make(map[string]struct{})
-			for _, repo := range d.cfg.Remote {
-				for name := range repo.Skills {
-					keep[name] = struct{}{}
-				}
-			}
-			plan.StateRepair = itemRepairFromErr(d.stateStore.PruneSkills(keep))
+			plan.StateRepair = itemRepairFromErr(d.stateStore.PruneSkills(remoteSkillNames(d.cfg)))
 		}
 	}
 	total := 0

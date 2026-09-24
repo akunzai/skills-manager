@@ -81,6 +81,13 @@ func newRmCmd() *cobra.Command {
 			plan := engine.BuildRemovePlan(cfg, skillsDir, skillsToRemove)
 			result, applyErr := engine.ApplyRemovePlan(plan, cfg, configPath, skillsDir)
 			printRemoveResult(out, result)
+			if result.StateError != "" {
+				printScopeStateUnreadable(out, result.StateError)
+				if err := result.Err(); err != nil {
+					return err
+				}
+				return exitError{message: "Scope baselines were not forgotten", code: 2}
+			}
 			if applyErr != nil {
 				return applyErr
 			}

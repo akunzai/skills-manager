@@ -189,6 +189,41 @@ func TestCLIRmPrintsRemovalSummaryThroughCapturedOutput(t *testing.T) {
 	}
 }
 
+// An unreadable Scope state keeps rm from forgetting the baseline, not from
+// removing the Skill: it says why and exits 2.
+func TestCLIRmReportsUnreadableScopeState(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, "skills.json")
+	skillsDir := filepath.Join(home, "skills")
+	cacheDir := filepath.Join(home, ".cache")
+	localSkillDir := filepath.Join(home, "my-local-skill")
+	if err := os.MkdirAll(localSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte("# My Skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCLI(t, "add", "--symlink", localSkillDir, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatalf("add --symlink: %v\n%s", err, out)
+	}
+	statePath, bad := makeScopeStateUnreadable(t)
+
+	out, err := runCLI(t, "rm", "my-local-skill", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err == nil || ExitCode(err) != 2 {
+		t.Fatalf("rm error = %v (exit %d); want exit 2\n%s", err, ExitCode(err), out)
+	}
+	if !strings.Contains(out, "Failed to read the Scope baseline: ") {
+		t.Fatalf("output does not report the unreadable Scope state:\n%s", out)
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "my-local-skill")); !os.IsNotExist(err) {
+		t.Fatal("the Skill must still be removed")
+	}
+	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+	}
+}
+
 // outdated previously wrote with raw fmt.Printf/Println. Assert its no-remote
 // early exit is now capturable without requiring network access.
 func TestCLIOutdatedNoRemoteReposPrintsThroughCapturedOutput(t *testing.T) {
@@ -467,6 +502,21 @@ func TestSelectedPrunePlanExpandsMasterSkillsAndKeepsIndividualLinks(t *testing.
 		{Agent: "continue", Skill: "configured", Path: "/agents/continue/configured"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected links = %v; want %v", got, want)
+	}
+}
+
+// Stale baselines are not a prompt option; confirming any prune clears them,
+// as --yes does.
+func TestSelectedPrunePlanKeepsStaleBaselines(t *testing.T) {
+	plan := engine.PrunePlan{
+		UntrackedSkills: []string{"orphan"},
+		StateSkills:     []string{"gone"},
+	}
+
+	selected := selectedPrunePlan(plan, []string{pruneMasterKey("orphan")})
+
+	if got, want := selected.StateSkills, []string{"gone"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected StateSkills = %v; want %v", got, want)
 	}
 }
 
@@ -2183,6 +2233,43 @@ func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
 	}
 }
 
+// An unreadable Scope state leaves baselines alone but must not stop prune:
+// everything else is removed, then prune says why and exits 2.
+func TestCLIPruneProceedsPastUnreadableScopeState(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	source := filepath.Join(home, "elsewhere", "orphan")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(skillsDir, "orphan")); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+	statePath, bad := makeScopeStateUnreadable(t)
+
+	out, err := runCLI(t, "prune", "--yes", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil || ExitCode(err) != 2 {
+		t.Fatalf("prune --yes error = %v (exit %d); want exit 2\n%s", err, ExitCode(err), out)
+	}
+	if !strings.Contains(out, "Removed master skill: orphan") {
+		t.Fatalf("prune must still remove the untracked link:\n%s", out)
+	}
+	if !strings.Contains(out, "Failed to read the Scope baseline: ") {
+		t.Fatalf("output does not report the unreadable Scope state:\n%s", out)
+	}
+	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+	}
+}
+
 // The summary line used to promise that --fix or Sync would repair every
 // counted issue. An invalid folder is counted and neither repairs it, so the
 // line now points at the per-finding next actions instead.
@@ -2577,6 +2664,51 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	}
 	if out, err := run("sync"); err != nil {
 		t.Fatalf("sync after rm should converge: %v\n%s", err, out)
+	}
+}
+
+// makeScopeStateUnreadable puts a regular file where the Scope state directory
+// belongs, so every Scope's state fails to open. It returns the file's path
+// and bytes so a test can check nothing rewrote it.
+func makeScopeStateUnreadable(t *testing.T) (string, []byte) {
+	t.Helper()
+	path := filepath.Join(os.Getenv("XDG_STATE_HOME"), "skills-manager", "scope-state")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bad := []byte("not a directory")
+	if err := os.WriteFile(path, bad, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path, bad
+}
+
+// ADR-0002 counts a baseline that could not be recorded as a failure: Add
+// still applies the Skill, then says why and exits 2.
+func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	statePath, bad := makeScopeStateUnreadable(t)
+
+	out, err := runCLI(t, "add", "owner/repo", "--url", origin, "--skill", "sample", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err == nil || ExitCode(err) != 2 {
+		t.Fatalf("add error = %v (exit %d); want exit 2\n%s", err, ExitCode(err), out)
+	}
+	if !strings.Contains(out, "Failed to read the Scope baseline: ") {
+		t.Fatalf("output does not report the unreadable Scope state:\n%s", out)
+	}
+	if !strings.Contains(out, "Added 1 skill(s) [sample]") {
+		t.Fatalf("output does not report the applied Skill:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatalf("the Skill must still be Materialized: %v", err)
+	}
+	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
 	}
 }
 

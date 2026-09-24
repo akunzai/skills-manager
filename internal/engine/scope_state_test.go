@@ -232,6 +232,19 @@ func TestScopeStateStoreCleanupDoesNotCreateMissingArtifact(t *testing.T) {
 	}
 }
 
+// writeUnreadableScopeState plants a Scope state for skillsDir that does not
+// decode, returning its path and bytes.
+func writeUnreadableScopeState(t *testing.T, skillsDir string) (string, []byte) {
+	t.Helper()
+	store, err := NewScopeStateStore(skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := []byte("{not json")
+	mustWriteScopeStateTestFile(t, store.Path(), bad)
+	return store.Path(), bad
+}
+
 func mustWriteScopeStateTestFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

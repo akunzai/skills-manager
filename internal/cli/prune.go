@@ -57,15 +57,25 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 	if err != nil {
 		return fmt.Errorf("build prune plan: %w", err)
 	}
+	// An unreadable Scope state leaves its baselines alone; prune still does
+	// everything else, then reports it once.
+	stateError := plan.StateError
+	finish := func() error {
+		if stateError == "" {
+			return nil
+		}
+		printScopeStateUnreadable(cmd.OutOrStdout(), stateError)
+		return exitError{message: "stale Scope baselines were not pruned", code: 2}
+	}
 	if len(plan.AllUntracked()) == 0 && len(plan.Unconfigured) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "Nothing to prune.")
-		return nil
+		return finish()
 	}
 
 	if options.dryRun {
 		printPrunePlan(cmd, plan)
 		fmt.Fprintln(cmd.OutOrStdout(), "Dry run complete.")
-		return nil
+		return finish()
 	}
 	var skippedReal []string
 	if !options.yes {
@@ -94,7 +104,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 
 	if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 {
 		printPruneSkippedReal(cmd, skippedReal)
-		return nil
+		return finish()
 	}
 
 	result, applyErr := engine.ApplyPrunePlan(plan, skillsDir)
@@ -104,9 +114,12 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		for _, failure := range result.Failures {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to prune %s: %v\n", models.ToTildePath(failure.Path), failure.Err)
 		}
+		if stateError != "" {
+			printScopeStateUnreadable(cmd.OutOrStdout(), stateError)
+		}
 		return fmt.Errorf("prune completed with failures: %w", applyErr)
 	}
-	return nil
+	return finish()
 }
 
 func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
@@ -215,7 +228,8 @@ func selectedPrunePlan(plan engine.PrunePlan, selected []string) engine.PrunePla
 	for _, key := range selected {
 		selectedSet[key] = true
 	}
-	result := engine.PrunePlan{}
+	// Stale baselines are not offered; confirming any prune clears them.
+	result := engine.PrunePlan{StateSkills: plan.StateSkills}
 	selectedMasters := make(map[string]bool)
 	for _, skill := range plan.AllUntracked() {
 		if selectedSet[pruneMasterKey(skill)] {

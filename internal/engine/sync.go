@@ -205,22 +205,26 @@ func (plan *SyncPlan) openState() (ScopeState, *ScopeStateStore) {
 	if plan.StateError != "" {
 		return ScopeState{}, nil
 	}
-	return openScopeState(plan.skillsDir)
+	state, store, _ := openScopeState(plan.skillsDir)
+	return state, store
 }
 
-func openScopeState(skillsDir string) (ScopeState, *ScopeStateStore) {
+// openScopeState loads the Scope state for recording baselines. When it
+// cannot be read the store is nil, which disables recording, and the error
+// says why so the caller can report it.
+func openScopeState(skillsDir string) (ScopeState, *ScopeStateStore, error) {
 	store, err := NewScopeStateStore(skillsDir)
 	if err != nil {
-		return ScopeState{}, nil
+		return ScopeState{}, nil, err
 	}
 	state, err := store.Load()
 	if err != nil {
-		return ScopeState{}, nil
+		return ScopeState{}, nil, err
 	}
 	if state.Skills == nil {
 		state.Skills = make(map[string]AppliedSkillState)
 	}
-	return state, store
+	return state, store, nil
 }
 
 // applyLocalItem Materializes one local Skill and applies its Availability. A

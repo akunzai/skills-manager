@@ -279,6 +279,9 @@ type AddSkillEvent struct {
 type AddResult struct {
 	AddedSkills []string
 	ConfigPath  string
+	// StateError is why the Scope state could not be read. The Skills are
+	// applied but their baselines are not recorded.
+	StateError string
 }
 
 // ApplyAddPlan records all selected Skills in Config, saves Config,
@@ -351,7 +354,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		return AddResult{}, err
 	}
 
-	state, stateStore := openScopeState(plan.SkillsDir)
+	state, stateStore, stateErr := openScopeState(plan.SkillsDir)
 	for _, name := range names {
 		subpath := plan.Skills[name]
 		if onProgress != nil {
@@ -397,5 +400,10 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		}
 	}
 
-	return AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}, nil
+	result := AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}
+	if stateErr != nil && plan.Source.Kind == AddSourceRemote {
+		result.StateError = stateErr.Error()
+		return result, fmt.Errorf("added Skills but did not record their baselines: %w", stateErr)
+	}
+	return result, nil
 }

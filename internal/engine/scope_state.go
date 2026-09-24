@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/akunzai/skills-manager/internal/config"
 	"strings"
 )
 
@@ -210,6 +212,31 @@ func (s *ScopeStateStore) Prune() error {
 		return fmt.Errorf("remove Scope state: %w", err)
 	}
 	return nil
+}
+
+// staleBaselines names the baselines in state whose Skill Config does not
+// declare as remote, sorted. Only a remote Skill has a baseline, so one now
+// declared local is as stale as one not declared at all.
+func staleBaselines(cfg *config.Config, state ScopeState) []string {
+	remote := remoteSkillNames(cfg)
+	var stale []string
+	for name := range state.Skills {
+		if _, ok := remote[name]; !ok {
+			stale = append(stale, name)
+		}
+	}
+	slices.Sort(stale)
+	return stale
+}
+
+func remoteSkillNames(cfg *config.Config) map[string]struct{} {
+	names := make(map[string]struct{})
+	for _, repo := range cfg.Remote {
+		for name := range repo.Skills {
+			names[name] = struct{}{}
+		}
+	}
+	return names
 }
 
 func (s *ScopeStateStore) emptyState() ScopeState {

@@ -17,6 +17,9 @@ type PrunePlan struct {
 	UntrackedDirs   []string
 	Unconfigured    []ManagedAgentPath
 	StateSkills     []string
+	// StateError is why the Scope state could not be read. Its stale
+	// baselines are left alone; everything else is still pruned.
+	StateError string
 }
 
 func (p PrunePlan) AllUntracked() []string {
@@ -55,18 +58,10 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		return PrunePlan{}, err
 	}
 	plan := PrunePlan{}
-	store, err := NewScopeStateStore(skillsDir)
-	if err != nil {
-		return PrunePlan{}, err
-	}
-	state, err := store.Load()
-	if err != nil {
-		return PrunePlan{}, err
-	}
-	for name := range state.Skills {
-		if _, _, declared := config.FindSkillSource(cfg, name); !declared {
-			plan.StateSkills = append(plan.StateSkills, name)
-		}
+	if state, _, err := openScopeState(skillsDir); err != nil {
+		plan.StateError = err.Error()
+	} else {
+		plan.StateSkills = staleBaselines(cfg, state)
 	}
 	if includeSkills {
 		plan.UntrackedSkills = inv.UntrackedLinks()
