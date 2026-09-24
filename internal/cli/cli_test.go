@@ -631,12 +631,7 @@ func isolateHome(t *testing.T) string {
 	t.Setenv("GROK_HOME", "")
 	t.Setenv(updater.SkipSelfUpdateCheckEnv, "")
 	t.Setenv("SKILLS_CACHE_DIR", "")
-	// The new HOME hides the global core.autocrlf=false that CI's Windows job
-	// sets, so the runner's system autocrlf=true would check fixtures out as
-	// CRLF and every LF-written master would read as drift.
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
-	t.Setenv("GIT_CONFIG_VALUE_0", "false")
+	// Git config isolation, core.autocrlf included, is TestMain's.
 	return home
 }
 

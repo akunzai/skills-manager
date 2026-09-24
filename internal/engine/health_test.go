@@ -232,9 +232,7 @@ func TestDoctorRunRecordsDefaultBranchForInferredSourceURL(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "url."+localFileURL(origin)+".insteadOf")
-	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/owner/repo.git")
+	setGitConfig(t, "url."+localFileURL(origin)+".insteadOf", "https://github.com/owner/repo.git")
 
 	cacheDir := filepath.Join(root, "cache")
 	legacy := filepath.Join(cacheDir, "owner", "repo")
