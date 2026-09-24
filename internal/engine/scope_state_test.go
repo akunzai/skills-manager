@@ -67,7 +67,7 @@ func TestScopeStateStoreRoundTripsVersionedStateAtCanonicalScopeKey(t *testing.T
 		t.Fatal(err)
 	}
 
-	store, err := NewScopeStateStore(filepath.Join(aliasDir, "skills.json"))
+	store, err := newScopeStateStore(filepath.Join(aliasDir, "skills.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestScopeStateStoreRoundTripsVersionedStateAtCanonicalScopeKey(t *testing.T
 
 func TestScopeStateStoreMissingStateLoadsEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := NewScopeStateStore(filepath.Join(t.TempDir(), "skills.json"))
+	store, err := newScopeStateStore(filepath.Join(t.TempDir(), "skills.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,11 +142,11 @@ func TestScopeStateStoreCanonicalizesExistingParentOfMissingScopePath(t *testing
 	if err := os.Symlink(realDir, aliasDir); err != nil {
 		t.Fatal(err)
 	}
-	realStore, err := NewScopeStateStore(filepath.Join(realDir, "skills.json"))
+	realStore, err := newScopeStateStore(filepath.Join(realDir, "skills.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliasStore, err := NewScopeStateStore(filepath.Join(aliasDir, "skills.json"))
+	aliasStore, err := newScopeStateStore(filepath.Join(aliasDir, "skills.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestScopeStateStoreCanonicalizesExistingParentOfMissingScopePath(t *testing
 
 func TestScopeStateStoreCorruptLoadReturnsErrorAndPreservesArtifact(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := NewScopeStateStore(filepath.Join(t.TempDir(), "skills.json"))
+	store, err := newScopeStateStore(filepath.Join(t.TempDir(), "skills.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,56 +180,17 @@ func TestScopeStateStoreCorruptLoadReturnsErrorAndPreservesArtifact(t *testing.T
 	}
 }
 
-func TestScopeStateStoreDeleteSkillAndPrune(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := NewScopeStateStore(filepath.Join(t.TempDir(), "skills.json"))
+// writeUnreadableScopeState plants a Scope state for skillsDir that does not
+// decode, returning its path and bytes.
+func writeUnreadableScopeState(t *testing.T, skillsDir string) (string, []byte) {
+	t.Helper()
+	store, err := newScopeStateStore(skillsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial := ScopeState{Skills: map[string]AppliedSkillState{
-		"keep":   {Source: "source"},
-		"remove": {Source: "source"},
-		"stale":  {Source: "source"},
-	}}
-	if err := store.Save(initial); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.DeleteSkill("remove"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.PruneSkills(map[string]struct{}{"keep": {}}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := store.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := got.Skills["keep"]; !ok || len(got.Skills) != 1 {
-		t.Fatalf("Skills = %#v, want only keep", got.Skills)
-	}
-	if err := store.Prune(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(store.Path()); !os.IsNotExist(err) {
-		t.Fatalf("state artifact still exists: %v", err)
-	}
-}
-
-func TestScopeStateStoreCleanupDoesNotCreateMissingArtifact(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := NewScopeStateStore(filepath.Join(t.TempDir(), "skills.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.DeleteSkill("absent"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.PruneSkills(nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(store.Path()); !os.IsNotExist(err) {
-		t.Fatalf("cleanup created missing state artifact: %v", err)
-	}
+	bad := []byte("{not json")
+	mustWriteScopeStateTestFile(t, store.Path(), bad)
+	return store.Path(), bad
 }
 
 func mustWriteScopeStateTestFile(t *testing.T, path string, data []byte) {

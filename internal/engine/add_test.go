@@ -206,6 +206,35 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 	}
 }
 
+// An unreadable Scope state must not stop Add from applying the Skill, nor
+// pass silently: the next Sync would find no Baseline and block the Skill.
+func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	repoDir := filepath.Join(project, "repo")
+	mustWriteScopeStateTestFile(t, filepath.Join(repoDir, "sample", "SKILL.md"), []byte("# Sample\n"))
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	statePath, bad := writeUnreadableScopeState(t, skillsDir)
+
+	cfg := config.DefaultConfig()
+	plan := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
+		NewRemoteAddSource("owner/repo", "git", "", repoDir),
+		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	result, err := ApplyAddPlan(plan, cfg, nil)
+	if err == nil {
+		t.Fatal("ApplyAddPlan error = nil; want the unrecorded Baseline reported")
+	}
+	if result.StateError == "" {
+		t.Fatal("StateError is empty; want why the Baseline was not recorded")
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatalf("the Skill must still be Materialized: %v", err)
+	}
+	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+	}
+}
+
 func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()

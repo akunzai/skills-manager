@@ -194,10 +194,14 @@ func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
 	result, err := engine.ApplyAddPlan(plan, cfg, func(ev engine.AddSkillEvent) {
 		fmt.Fprintf(out, "  %s\n", intake.progressLine(ev.Name, ev.Subpath))
 	})
-	if err != nil {
+	if err != nil && result.StateError == "" {
 		return err
 	}
 
 	fmt.Fprintf(out, "\n%sAdded %d skill(s) [%s] and updated %s.%s\n\n", colorGreen, len(result.AddedSkills), strings.Join(result.AddedSkills, ", "), filepath.Base(configPath), colorReset)
+	if result.StateError != "" {
+		printScopeStateUnreadable(out, result.StateError)
+		return exitError{message: "Baselines were not recorded", code: 2}
+	}
 	return nil
 }

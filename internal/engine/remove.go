@@ -35,6 +35,9 @@ type RemoveSkillResult struct {
 // RemoveResult is the observable outcome of applying a RemovePlan.
 type RemoveResult struct {
 	Skills []RemoveSkillResult
+	// StateError is why the Scope state could not be read. The Skills are
+	// removed but their Baselines are not forgotten.
+	StateError string
 }
 
 func (r RemoveResult) Err() error {
@@ -108,14 +111,13 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 		}
 		result.Skills[i].RemovedMaster = true
 	}
-	store, stateErr := NewScopeStateStore(skillsDir)
-	if stateErr != nil {
-		return result, errors.Join(result.Err(), stateErr)
+	baselines := OpenBaselines(skillsDir)
+	if stateErr := baselines.Err(); stateErr != nil {
+		result.StateError = stateErr.Error()
+		return result, errors.Join(result.Err(), fmt.Errorf("removed Skills but did not forget their Baselines: %w", stateErr))
 	}
-	for _, item := range plan.Skills {
-		if stateErr := store.DeleteSkill(item.Name); stateErr != nil {
-			return result, errors.Join(result.Err(), stateErr)
-		}
+	if err := baselines.Forget(names...); err != nil {
+		return result, errors.Join(result.Err(), err)
 	}
 	return result, result.Err()
 }

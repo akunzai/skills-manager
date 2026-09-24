@@ -33,9 +33,9 @@ type ScopeState struct {
 	Skills    map[string]AppliedSkillState `json:"skills"`
 }
 
-// ScopeStateStore addresses applied state by the SHA-256 of a canonical Scope
+// scopeStateStore addresses applied state by the SHA-256 of a canonical Scope
 // path. Artifacts live outside Project checkouts in the XDG state directory.
-type ScopeStateStore struct {
+type scopeStateStore struct {
 	scopePath string
 	path      string
 }
@@ -75,8 +75,8 @@ func ListScopeStateArtifacts() ([]ScopeStateArtifact, error) {
 	return artifacts, nil
 }
 
-// NewScopeStateStore constructs the store for scopePath.
-func NewScopeStateStore(scopePath string) (*ScopeStateStore, error) {
+// newScopeStateStore constructs the store for scopePath.
+func newScopeStateStore(scopePath string) (*scopeStateStore, error) {
 	canonical, err := canonicalScopePath(scopePath)
 	if err != nil {
 		return nil, err
@@ -86,7 +86,7 @@ func NewScopeStateStore(scopePath string) (*ScopeStateStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ScopeStateStore{
+	return &scopeStateStore{
 		scopePath: canonical,
 		path:      filepath.Join(stateDir, hex.EncodeToString(sum[:])+".json"),
 	}, nil
@@ -94,11 +94,11 @@ func NewScopeStateStore(scopePath string) (*ScopeStateStore, error) {
 
 // Path returns the local artifact path. It is intended for diagnosis and
 // explicit repair; callers should otherwise use Load and Save.
-func (s *ScopeStateStore) Path() string { return s.path }
+func (s *scopeStateStore) Path() string { return s.path }
 
 // Load reads the Scope state. A missing artifact is an empty versioned state.
 // Invalid artifacts are returned as errors and are never rewritten.
-func (s *ScopeStateStore) Load() (ScopeState, error) {
+func (s *scopeStateStore) Load() (ScopeState, error) {
 	empty := s.emptyState()
 	f, err := os.Open(s.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -130,7 +130,7 @@ func (s *ScopeStateStore) Load() (ScopeState, error) {
 }
 
 // Save atomically replaces the Scope artifact with state.
-func (s *ScopeStateStore) Save(state ScopeState) error {
+func (s *scopeStateStore) Save(state ScopeState) error {
 	state.Version = ScopeStateVersion
 	state.ScopePath = s.scopePath
 	if state.Skills == nil {
@@ -170,65 +170,21 @@ func (s *ScopeStateStore) Save(state ScopeState) error {
 	return nil
 }
 
-// DeleteSkill removes one Skill's applied baseline while retaining the Scope
-// artifact. Corrupt state is preserved and returned as an error.
-func (s *ScopeStateStore) DeleteSkill(name string) error {
-	exists, err := s.exists()
-	if err != nil || !exists {
-		return err
-	}
-	state, err := s.Load()
-	if err != nil {
-		return err
-	}
-	delete(state.Skills, name)
-	return s.Save(state)
-}
-
-// PruneSkills removes baselines not present in keep.
-func (s *ScopeStateStore) PruneSkills(keep map[string]struct{}) error {
-	exists, err := s.exists()
-	if err != nil || !exists {
-		return err
-	}
-	state, err := s.Load()
-	if err != nil {
-		return err
-	}
-	for name := range state.Skills {
-		if _, ok := keep[name]; !ok {
-			delete(state.Skills, name)
-		}
-	}
-	return s.Save(state)
-}
-
 // Prune removes this Scope's entire applied-state entry. Missing entries are
 // already pruned.
-func (s *ScopeStateStore) Prune() error {
+func (s *scopeStateStore) Prune() error {
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove Scope state: %w", err)
 	}
 	return nil
 }
 
-func (s *ScopeStateStore) emptyState() ScopeState {
+func (s *scopeStateStore) emptyState() ScopeState {
 	return ScopeState{
 		Version:   ScopeStateVersion,
 		ScopePath: s.scopePath,
 		Skills:    make(map[string]AppliedSkillState),
 	}
-}
-
-func (s *ScopeStateStore) exists() (bool, error) {
-	_, err := os.Stat(s.path)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	return false, fmt.Errorf("inspect Scope state: %w", err)
 }
 
 // DigestSkillTree reduces DigestSkillContent's per-file map to one digest of

@@ -222,7 +222,7 @@ func TestSyncFollowsASkillRenamedUpstream(t *testing.T) {
 	if err != nil || !strings.Contains(string(got), "replaces: old") {
 		t.Fatalf("new Skill not Materialized: %q %v", got, err)
 	}
-	store, err := NewScopeStateStore(f.skillsDir)
+	store, err := newScopeStateStore(f.skillsDir)
 	if err != nil {
 		t.Fatal(err)
 	}

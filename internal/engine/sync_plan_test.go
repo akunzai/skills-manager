@@ -122,7 +122,7 @@ func TestSyncPlanResolvesEachDecision(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillsDir, "unknown", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewScopeStateStore(skillsDir)
+	store, err := newScopeStateStore(skillsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +244,46 @@ func TestSyncApplyContinuesAfterMaterializeFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "good", "SKILL.md")); err != nil {
 		t.Fatal("good Skill was not Materialized after prior failure")
+	}
+}
+
+// A Scope state that became unreadable after the plan read it is reported
+// once, like one the plan could not read: the Skill is still applied, its
+// Baseline is not recorded, and the state is left as it is.
+func TestSyncApplyReportsScopeStateUnreadableSincePlanning(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	repoDir := filepath.Join(project, "repo")
+	mustWriteScopeStateTestFile(t, filepath.Join(repoDir, "good", "SKILL.md"), []byte("# Good\n"))
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "good", "good", "git", "")
+	plan := &SyncPlan{
+		Sources: []string{"owner/repo"},
+		Items: []SyncPlanItem{{
+			Name: "good", Kind: SyncItemRemote, Source: "owner/repo",
+			CachePath: repoDir, NeedsWrite: true,
+			Freshness: SkillFreshness{Name: "good", Source: "owner/repo", Subpath: "good", ScopePath: filepath.Join(skillsDir, "good")},
+		}},
+		cfg:          cfg,
+		skillsDir:    skillsDir,
+		availability: NewAvailability(cfg, skillsDir),
+	}
+	statePath, bad := writeUnreadableScopeState(t, skillsDir)
+
+	var kinds []string
+	report, err := plan.Apply(SyncDecision{}, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Failed != 1 || !slices.Contains(kinds, SyncStateFailed) {
+		t.Fatalf("failed=%d events=%#v; want one Scope state failure", report.Failed, kinds)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "good", "SKILL.md")); err != nil {
+		t.Fatalf("the Skill must still be Materialized: %v", err)
+	}
+	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
 	}
 }
 

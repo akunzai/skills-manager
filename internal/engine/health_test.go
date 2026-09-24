@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -243,6 +244,57 @@ func TestDoctorRunReportsUnexpectedLinkOfAbsentSkill(t *testing.T) {
 				t.Fatal("--fix must not link a Skill that is not present")
 			}
 		})
+	}
+}
+
+// Only a remote Skill has a Baseline. An entry whose name is not declared
+// remote — undeclared, or now declared local — is stale for Doctor's
+// diagnosis, its --fix and prune alike.
+func TestStaleBaselinesAreEntriesNotDeclaredRemote(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "remote", "remote", "github", "")
+	config.AddLocalSymlinkEntry(cfg, "local", filepath.Join(project, "src", "local"), "")
+	store, err := newScopeStateStore(skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ScopeState{Skills: map[string]AppliedSkillState{
+		"remote": {Source: "owner/repo"}, "local": {Source: "owner/repo"}, "gone": {Source: "owner/repo"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"gone", "local"}
+
+	plan, err := BuildPrunePlan(cfg, skillsDir, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(plan.StateSkills, want) {
+		t.Fatalf("prune StateSkills = %v; want %v", plan.StateSkills, want)
+	}
+	doctor := NewDoctor(cfg, skillsDir)
+	outcome, err := doctor.Run(false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(outcome.Report.StaleState, want) {
+		t.Fatalf("Doctor StaleState = %v; want %v", outcome.Report.StaleState, want)
+	}
+	if _, err := doctor.Run(true, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := slices.Sorted(maps.Keys(state.Skills)); !slices.Equal(got, []string{"remote"}) {
+		t.Fatalf("Baselines after --fix = %v; want [remote]", got)
 	}
 }
 

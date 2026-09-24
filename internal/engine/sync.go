@@ -104,11 +104,11 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 			return report, fmt.Errorf("failed to create skills dir: %w", err)
 		}
 	}
-	if plan.StateError != "" {
-		emit(SyncEvent{Kind: SyncStateFailed, Err: plan.StateError})
+	baselines := plan.openBaselines()
+	if err := baselines.Err(); err != nil {
+		emit(SyncEvent{Kind: SyncStateFailed, Err: err.Error()})
 		report.tally(SyncFailed)
 	}
-	state, stateStore := plan.openState()
 	report.Configured = plan.Names()
 
 	for _, source := range plan.Sources {
@@ -119,11 +119,11 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 				report.Unknown = append(report.Unknown, item.Freshness)
 			}
 			if action, _ := item.Resolve(decision); action == SyncActionRename {
-				report.tally(plan.applyRename(item, state, stateStore, emit))
+				report.tally(plan.applyRename(item, baselines, emit))
 				report.Configured = config.GetConfiguredSkillNames(plan.cfg)
 				continue
 			}
-			outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, item, decision, state, stateStore, emit)
+			outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, item, decision, baselines, emit)
 			report.tally(outcome)
 		}
 	}
@@ -143,7 +143,7 @@ func emitSync(emit func(SyncEvent), ev SyncEvent) {
 
 // applyRemoteItem Materializes one remote Skill, applies its Availability, and
 // records the baseline it was applied from. Add and Sync share this path.
-func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlanItem, decision SyncDecision, state ScopeState, stateStore *ScopeStateStore, emit func(SyncEvent)) (SyncOutcome, error) {
+func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlanItem, decision SyncDecision, baselines *Baselines, emit func(SyncEvent)) (SyncOutcome, error) {
 	if item.Block == SyncBlockCacheMissing {
 		emitSync(emit, SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.BlockReason})
 		return SyncBlocked, fmt.Errorf("%s", item.BlockReason)
@@ -180,47 +180,21 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 	if len(copied) > 0 {
 		emitSync(emit, SyncEvent{Kind: SyncAvailabilityCopied, Source: item.Source, Skill: item.Name, Agents: copied})
 	}
-	if stateStore == nil {
-		return SyncDone, nil
-	}
-	skill := item.Freshness
-	digests, err := DigestSkillContent(skill.ScopePath)
-	if err != nil {
-		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
-		return SyncFailed, err
-	}
-	skill.CacheDigests = digests
-	state.Skills[item.Name] = skill.appliedState(item.CachePath, item.LocalSHA)
-	if err := stateStore.Save(state); err != nil {
+	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA); err != nil {
 		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
 		return SyncFailed, err
 	}
 	return SyncDone, nil
 }
 
-// openState prepares the Scope state for recording applied baselines. A Scope
-// state that could not be read is reported by the plan and disables recording
-// rather than stopping the Sync.
-func (plan *SyncPlan) openState() (ScopeState, *ScopeStateStore) {
+// openBaselines opens the Scope's Baselines for recording. A Scope state the
+// plan could not read stays unreadable for the whole Sync, even if it has since
+// become readable, so Sync records against the state it planned from.
+func (plan *SyncPlan) openBaselines() *Baselines {
 	if plan.StateError != "" {
-		return ScopeState{}, nil
+		return &Baselines{err: errors.New(plan.StateError)}
 	}
-	return openScopeState(plan.skillsDir)
-}
-
-func openScopeState(skillsDir string) (ScopeState, *ScopeStateStore) {
-	store, err := NewScopeStateStore(skillsDir)
-	if err != nil {
-		return ScopeState{}, nil
-	}
-	state, err := store.Load()
-	if err != nil {
-		return ScopeState{}, nil
-	}
-	if state.Skills == nil {
-		state.Skills = make(map[string]AppliedSkillState)
-	}
-	return state, store
+	return OpenBaselines(plan.skillsDir)
 }
 
 // applyLocalItem Materializes one local Skill and applies its Availability. A
@@ -277,7 +251,7 @@ func itemNames(items []SyncPlanItem) []string {
 // it; the old copy then shows up as Untracked rather than being lost. The old
 // copy's Availability and baseline go with it, then the new Skill is applied
 // exactly as Sync applies any Skill.
-func (plan *SyncPlan) applyRename(item SyncPlanItem, state ScopeState, stateStore *ScopeStateStore, emit func(SyncEvent)) SyncOutcome {
+func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit func(SyncEvent)) SyncOutcome {
 	old, skill := item.Name, item.Freshness
 	fail := func(err error) SyncOutcome {
 		emitSync(emit, SyncEvent{Kind: SyncRenameFailed, Source: item.Source, Skill: old, Target: skill.RenamedTo, Err: err.Error()})
@@ -306,11 +280,8 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, state ScopeState, stateStor
 	if err := RemoveAll(skill.ScopePath); err != nil && !os.IsNotExist(err) {
 		return fail(err)
 	}
-	if stateStore != nil {
-		delete(state.Skills, old)
-		if err := stateStore.Save(state); err != nil {
-			return fail(err)
-		}
+	if err := baselines.Forget(old); err != nil {
+		return fail(err)
 	}
 	emitSync(emit, SyncEvent{Kind: SyncRenamed, Source: item.Source, Skill: old, Target: skill.RenamedTo})
 	if item.RenameTargetDeclared {
@@ -323,6 +294,6 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, state ScopeState, stateStor
 		ScopePath: filepath.Join(plan.skillsDir, skill.RenamedTo),
 		CachePath: filepath.Join(item.CachePath, filepath.FromSlash(skill.RenamedSubpath)),
 	}, plan.availability.ObserveAvailability(skill.RenamedTo))
-	outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, state, stateStore, emit)
+	outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
 	return outcome
 }

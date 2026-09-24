@@ -203,13 +203,9 @@ func InspectFreshness(cfg *config.Config, skillsDir, cacheDir string, options Fr
 }
 
 func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, skillsDir string) (*FreshnessSnapshot, error) {
-	store, err := NewScopeStateStore(skillsDir)
-	if err != nil {
-		return nil, err
-	}
-	state, stateErr := store.Load()
+	baselines := OpenBaselines(skillsDir)
+	stateErr := baselines.Err()
 	if stateErr != nil {
-		state = store.emptyState()
 		snapshot.StateError = stateErr.Error()
 	}
 	for i := range snapshot.Repositories {
@@ -221,7 +217,8 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 		// add left behind. Either is missing from the Cache, not content.
 		sparse, sparseErr := readSparseState(cachePath)
 		for _, name := range sortedSkillKeys(repoInfo.Skills) {
-			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cachePath, skillsDir, state.Skills[name])
+			applied, _ := baselines.Applied(name)
+			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cachePath, skillsDir, applied)
 			if snapshot.Repositories[i].LocalSHA != "" && sparseErr == nil && len(sparse.missing([]string{skill.Subpath})) > 0 {
 				skill.Status = SkillUnverified
 			}
@@ -236,7 +233,7 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 			}
 			if skill.Status == SkillUnverified && snapshot.Repositories[i].LocalSHA != "" && !subpathAtHead(cachePath, skill.Subpath) {
 				skill.Status = SkillRemovedUpstream
-				skill.ScopeCopy = observeScopeCopy(skill.ScopePath, state.Skills[name], stateErr == nil)
+				skill.ScopeCopy = baselines.CompareScopeCopy(name, skill.ScopePath)
 			}
 			snapshot.Repositories[i].Skills = append(snapshot.Repositories[i].Skills, skill)
 		}
@@ -268,22 +265,6 @@ func attachReplacements(skills []SkillFreshness, cachePath string, sparse sparse
 		skills[i].RenamedTo = replacement.Name
 		skills[i].RenamedSubpath = replacement.Subpath
 	}
-}
-
-// observeScopeCopy compares a Skill's copy on the Scope skills directory with
-// the baseline Sync last applied there.
-func observeScopeCopy(scopePath string, applied AppliedSkillState, stateRead bool) ScopeCopy {
-	digests, err := DigestSkillContent(scopePath)
-	if errors.Is(err, os.ErrNotExist) || os.IsNotExist(rootPathError(err)) {
-		return ScopeCopyAbsent
-	}
-	if err != nil || !stateRead || applied.Source == "" {
-		return ScopeCopyUnknown
-	}
-	if reflect.DeepEqual(digests, applied.ContentDigests) {
-		return ScopeCopyClean
-	}
-	return ScopeCopyDrift
 }
 
 func observeRemoteFreshness(repositories map[string]config.RemoteRepo, cacheDir string, workers int) []FreshnessRepository {

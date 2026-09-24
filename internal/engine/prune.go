@@ -17,6 +17,9 @@ type PrunePlan struct {
 	UntrackedDirs   []string
 	Unconfigured    []ManagedAgentPath
 	StateSkills     []string
+	// StateError is why the Scope state could not be read. Its stale
+	// Baselines are left alone; everything else is still pruned.
+	StateError string
 }
 
 func (p PrunePlan) AllUntracked() []string {
@@ -55,18 +58,11 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		return PrunePlan{}, err
 	}
 	plan := PrunePlan{}
-	store, err := NewScopeStateStore(skillsDir)
-	if err != nil {
-		return PrunePlan{}, err
-	}
-	state, err := store.Load()
-	if err != nil {
-		return PrunePlan{}, err
-	}
-	for name := range state.Skills {
-		if _, _, declared := config.FindSkillSource(cfg, name); !declared {
-			plan.StateSkills = append(plan.StateSkills, name)
-		}
+	baselines := OpenBaselines(skillsDir)
+	if err := baselines.Err(); err != nil {
+		plan.StateError = err.Error()
+	} else {
+		plan.StateSkills = baselines.Stale(cfg)
 	}
 	if includeSkills {
 		plan.UntrackedSkills = inv.UntrackedLinks()
@@ -127,14 +123,10 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 		}
 		result.RemovedSkills = append(result.RemovedSkills, skill)
 	}
-	store, stateErr := NewScopeStateStore(skillsDir)
-	if stateErr != nil {
-		errs = append(errs, stateErr)
-	} else {
-		for _, skill := range plan.StateSkills {
-			if err := store.DeleteSkill(skill); err != nil {
-				errs = append(errs, err)
-			}
+	if len(plan.StateSkills) > 0 {
+		baselines := OpenBaselines(skillsDir)
+		if err := cmp.Or(baselines.Err(), baselines.Forget(plan.StateSkills...)); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return result, errors.Join(errs...)

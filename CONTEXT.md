@@ -64,6 +64,10 @@ _Avoid_: Drift (no declaration to compare), Inventory (wrong directory), stale, 
 Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability. Sync writes Config only to apply a Rename.
 _Avoid_: restore, install (when you mean the whole declared state)
 
+**Baseline**:
+What Sync last applied a remote Skill's copy on the Scope skills directory from: the copy's content digests, its Source, Cache identity and commit. Drift protection compares that copy with its Baseline. Only a remote Skill has one; the Scope state is the file that holds them.
+_Avoid_: snapshot, lock
+
 **Sync plan**:
 Every declared Skill of one Scope observed once, with the action each takes and what blocks it. The same plan carries from preview through confirmation to apply, so the user's answer is a pure transformation of it rather than a second observation. A Freshness disposition recommends which command to reach for; a Sync plan decides what happens to each Skill.
 _Avoid_: diff, changeset, transaction. An Add of selected Skills from one Source is not a Sync plan.

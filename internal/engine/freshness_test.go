@@ -116,7 +116,7 @@ func TestInspectFreshnessClassifiesRemoteSkillContent(t *testing.T) {
 		t.Fatalf("status = %q", got)
 	}
 
-	store, _ := NewScopeStateStore(skillsDir)
+	store, _ := newScopeStateStore(skillsDir)
 	applied, _ := DigestSkillContent(filepath.Join(skillsDir, "sample"))
 	state, _ := store.Load()
 	state.Skills["sample"] = AppliedSkillState{Source: "owner/repo", CacheIdentity: cachePath, AppliedCommit: "old", ContentDigests: applied}
@@ -357,4 +357,22 @@ func TestCacheCoverMaterializesSkillFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCachePaths(t, repoDir, []string{"alpha/SKILL.md", "beta/SKILL.md"}, nil)
+}
+
+// A Scope state that cannot even be located (no state or home directory) is an
+// unreadable state to Freshness: reported, not fatal.
+func TestInspectFreshnessReportsScopeStateThatCannotBeLocated(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "") // what os.UserHomeDir reads on Windows
+
+	snapshot, err := InspectFreshness(config.DefaultConfig(), skillsDir, filepath.Join(project, "cache"), FreshnessOptions{ObserveScope: true})
+	if err != nil {
+		t.Fatalf("InspectFreshness error = %v; want the state error reported, not fatal", err)
+	}
+	if snapshot.StateError == "" {
+		t.Fatal("StateError is empty; want the Scope state that cannot be located")
+	}
 }
