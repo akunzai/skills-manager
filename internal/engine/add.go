@@ -27,6 +27,7 @@ type AddSource struct {
 	RepoDir     string // cached git repository directory
 	RepoType    string // "github", "gitlab", "git"
 	URL         string // remote clone URL
+	Branch      string // branch or tag to declare; empty follows the default branch
 	LocalPath   string // absolute path to local skill directory
 	Command     string // installer command
 	Check       string // command pre-check
@@ -73,6 +74,25 @@ func isLocalPath(raw string) bool {
 		}
 	}
 	return false
+}
+
+// AddBranch is the branch Add fetches and declares for a remote Source. A
+// Source already declared keeps its branch: asking for a different one is
+// refused rather than silently re-pointing the Skills already declared from
+// it, and asking for none follows the declared one.
+func AddBranch(cfg *config.Config, key, requested string) (string, error) {
+	repo, declared := cfg.Remote[key]
+	if !declared || requested == repo.Branch {
+		return requested, nil
+	}
+	if requested == "" {
+		return repo.Branch, nil
+	}
+	current := "its default branch"
+	if repo.Branch != "" {
+		current = fmt.Sprintf("branch %q", repo.Branch)
+	}
+	return "", fmt.Errorf("Source %s is already declared on %s; remove its Skills with 'skills rm' before adding it on %q", key, current, requested)
 }
 
 func NewRemoteAddSource(key, repoType, url, repoDir string) AddSource {
@@ -303,6 +323,11 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		switch plan.Source.Kind {
 		case AddSourceRemote:
 			config.AddRemoteSkillEntry(cfg, plan.Source.Key, name, subpath, plan.Source.RepoType, plan.Source.URL)
+			if plan.Source.Branch != "" {
+				repo := cfg.Remote[plan.Source.Key]
+				repo.Branch = plan.Source.Branch
+				cfg.Remote[plan.Source.Key] = repo
+			}
 		case AddSourceSymlink:
 			config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(resolvedLocal(subpath), plan.SkillsDir), plan.Source.Description)
 		case AddSourceCommand:

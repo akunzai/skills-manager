@@ -2584,3 +2584,83 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 		t.Fatalf("sync after rm should converge: %v\n%s", err, out)
 	}
 }
+
+func TestCLIAddBranchIsDeclaredAndKept(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	skillFile := filepath.Join(origin, "skills", "sample", "SKILL.md")
+	writeContent := func(content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(skillFile), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(skillFile, []byte("---\nname: sample\n---\n"+content+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cliRunGit(t, origin, "add", "-A")
+		cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", content)
+	}
+	cliRunGit(t, root, "init", origin)
+	writeContent("main")
+	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+	defaultBranch := cliRunGit(t, origin, "symbolic-ref", "--short", "HEAD")
+	cliRunGit(t, origin, "switch", "-c", "dev")
+	writeContent("dev")
+	cliRunGit(t, origin, "switch", defaultBranch)
+	writeContent("main v2")
+
+	scope := []string{"--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
+	run := func(args ...string) (string, error) {
+		t.Helper()
+		resetSubcommandFlags()
+		return runCLI(t, append(args, scope...)...)
+	}
+	scopeContent := func() string {
+		t.Helper()
+		got, err := os.ReadFile(filepath.Join(skillsDir, "sample", "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(strings.TrimPrefix(string(got), "---\nname: sample\n---\n"))
+	}
+
+	if out, err := run("add", "owner/repo", "--url", origin, "--branch", "dev", "--skill", "sample", "-y"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	if cfg, _ := config.LoadConfig(configFile); cfg.Remote["owner/repo"].Branch != "dev" {
+		t.Fatalf("branch not declared: %#v", cfg.Remote["owner/repo"])
+	}
+	if out, err := run("update"); err != nil {
+		t.Fatalf("update: %v\n%s", err, out)
+	}
+	if out, err := run("sync", "--force"); err != nil {
+		t.Fatalf("sync: %v\n%s", err, out)
+	}
+	if got := scopeContent(); got != "dev" {
+		t.Fatalf("after update and sync the Skill reads %q; want dev", got)
+	}
+
+	out, err := run("add", "owner/repo", "--url", origin, "--branch", "v1.0.0", "--skill", "sample", "-y")
+	if err == nil || !strings.Contains(out+err.Error(), `already declared on branch "dev"`) {
+		t.Fatalf("a different branch should be refused: %v\n%s", err, out)
+	}
+	if cfg, _ := config.LoadConfig(configFile); cfg.Remote["owner/repo"].Branch != "dev" {
+		t.Fatalf("a refused add changed Config: %#v", cfg.Remote["owner/repo"])
+	}
+
+	if out, err := run("rm", "sample", "-y"); err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	if out, err := run("add", "owner/repo", "--url", origin, "--branch", "v1.0.0", "--skill", "sample", "-y"); err != nil {
+		t.Fatalf("add on a tag: %v\n%s", err, out)
+	}
+	if out, err := run("outdated"); err != nil {
+		t.Fatalf("a Source on a tag should read as current: %v\n%s", err, out)
+	}
+	if got := scopeContent(); got != "main" {
+		t.Fatalf("tag content = %q; want main", got)
+	}
+}
