@@ -570,22 +570,63 @@ func (a *Availability) declaredSkills() map[string]struct{} {
 	return names
 }
 
-// ObserveLeftover reports leftover occupancy on Agent directories: managed
-// paths on automatically available Agents, managed paths for Skills Config
+// AgentDirObservation is every Agent directory of one Scope read once: the
+// health of each configured directory and the leftover occupancy across all
+// of them.
+type AgentDirObservation struct {
+	Agents   []AgentHealth
+	Leftover LeftoverOccupancy
+}
+
+// ObserveAgentDirs reads each known and leftover-root Agent directory once and
+// classifies its entries under one set of rules. Leftover occupancy is managed
+// paths on Automatically available Agents, managed paths for Skills Config
 // does not declare, and empty Agent directories the current policy does not
-// select.
-func (a *Availability) ObserveLeftover() LeftoverOccupancy {
-	declared := a.declaredSkills()
-	var occupancy LeftoverOccupancy
-	seen := make(map[string]struct{})
-	addDir := func(agent, dir string, include func(string) bool) {
+// select. Agent health covers configured directories only. A real directory on
+// a declared Skill's path reads here as Physical and in ObserveAvailability as
+// Foreign; the caller holding both resolves it.
+func (a *Availability) ObserveAgentDirs() AgentDirObservation {
+	type listing struct {
+		entries []os.DirEntry
+		err     error
+	}
+	listings := make(map[string]listing)
+	readDir := func(dir string) ([]os.DirEntry, error) {
+		if l, ok := listings[dir]; ok {
+			return l.entries, l.err
+		}
 		entries, err := os.ReadDir(dir)
+		listings[dir] = listing{entries, err}
+		return entries, err
+	}
+
+	var observation AgentDirObservation
+	knownDirs := a.agents.KnownDirs()
+	configured := a.ConfiguredAgentDirs()
+	for _, agent := range slices.Sorted(maps.Keys(configured)) {
+		dir := configured[agent]
+		info, err := os.Stat(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err == nil && !info.IsDir() {
+			observation.Agents = append(observation.Agents, AgentHealth{Name: agent, Dir: dir, Unusable: "not a directory"})
+			continue
+		}
+		entries, _ := readDir(dir)
+		observation.Agents = append(observation.Agents, a.agentHealth(agent, dir, entries))
+	}
+
+	declared := a.declaredSkills()
+	seen := make(map[string]struct{})
+	addPaths := func(agent, dir string, include func(string) bool) {
+		entries, err := readDir(dir)
 		if err != nil {
 			return
 		}
 		for _, entry := range entries {
 			name := entry.Name()
-			if strings.HasPrefix(name, ".") || !include(name) {
+			if strings.HasPrefix(name, ".") || a.agents.IsReserved(agent, name) || !include(name) {
 				continue
 			}
 			path := filepath.Join(dir, name)
@@ -597,26 +638,68 @@ func (a *Availability) ObserveLeftover() LeftoverOccupancy {
 			}
 			seen[path] = struct{}{}
 			_, err := os.Stat(path)
-			occupancy.Paths = append(occupancy.Paths, LeftoverPath{
+			observation.Leftover.Paths = append(observation.Leftover.Paths, LeftoverPath{
 				Agent: agent, Skill: name, Path: path, Dangling: err != nil,
 			})
 		}
 	}
-	knownDirs := a.agents.KnownDirs()
 	for agent, dir := range a.agents.LeftoverRoots() {
-		addDir(agent, dir, func(string) bool { return true })
+		addPaths(agent, dir, func(string) bool { return true })
 	}
 	for agent, dir := range knownDirs {
-		addDir(agent, dir, func(name string) bool {
+		addPaths(agent, dir, func(name string) bool {
 			_, ok := declared[name]
 			return !ok
 		})
 	}
-	slices.SortFunc(occupancy.Paths, func(a, b LeftoverPath) int {
+	slices.SortFunc(observation.Leftover.Paths, func(a, b LeftoverPath) int {
 		return cmp.Or(cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Skill, b.Skill), cmp.Compare(a.Path, b.Path))
 	})
-	occupancy.Empty = leftoverEmptyAgentDirs(knownDirs, a.ConfiguredAgentDirs())
-	return occupancy
+
+	for agent, dir := range knownDirs {
+		if _, ok := configured[agent]; ok {
+			continue
+		}
+		// Dot entries (e.g. .DS_Store) are not Skills. A reserved entry is
+		// the Agent's own content, so it keeps the directory.
+		entries, err := readDir(dir)
+		if err == nil && !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return !strings.HasPrefix(e.Name(), ".") }) {
+			observation.Leftover.Empty = append(observation.Leftover.Empty, AgentDir{Name: agent, Dir: dir})
+		}
+	}
+	slices.SortFunc(observation.Leftover.Empty, func(a, b AgentDir) int { return cmp.Compare(a.Name, b.Name) })
+	return observation
+}
+
+// agentHealth classifies the entries of one configured Agent directory:
+// dangling links this tool never created, and real directories that are
+// neither a copy this tool made nor reserved by the Agent.
+func (a *Availability) agentHealth(agent, dir string, entries []os.DirEntry) AgentHealth {
+	health := AgentHealth{Name: agent, Dir: dir}
+	for _, entry := range entries {
+		name := entry.Name()
+		if a.agents.IsReserved(agent, name) {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		fi, err := os.Lstat(path)
+		if err != nil {
+			continue
+		}
+		switch {
+		case fi.Mode()&os.ModeSymlink != 0:
+			// A dangling managed link is Drift or leftover occupancy,
+			// reported with the Skill it belongs to.
+			if _, err := os.Stat(path); err != nil && !isManagedSkillLink(path, name, a.skillsDir) {
+				health.UnmanagedBroken = append(health.UnmanagedBroken, name)
+			}
+		case fi.IsDir() && !strings.HasPrefix(name, "."):
+			if !isManagedSkillCopy(path, name, a.skillsDir) {
+				health.Physical = append(health.Physical, name)
+			}
+		}
+	}
+	return health
 }
 
 // ApplyLeftover removes the leftover occupancy in occupancy, revalidating each

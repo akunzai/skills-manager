@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -310,29 +309,9 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		plan.MasterMissing = true
 	}
 
-	configuredAgents := d.availability.ConfiguredAgentDirs()
-
-	for _, agentName := range slices.Sorted(maps.Keys(configuredAgents)) {
-		agentDir := configuredAgents[agentName]
-		info, err := os.Stat(agentDir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err == nil && !info.IsDir() {
-			plan.Agents = append(plan.Agents, AgentHealth{Name: agentName, Dir: agentDir, Unusable: "not a directory"})
-			continue
-		}
-		health := diagnoseAgentDirHealth(agentName, agentDir, d.skillsDir)
-		plan.Agents = append(plan.Agents, AgentHealth{
-			Name:            agentName,
-			Dir:             agentDir,
-			UnmanagedBroken: health.UnmanagedBroken,
-			Physical:        health.Physical,
-		})
-	}
-
-	leftover := d.availability.ObserveLeftover()
-	plan.Leftover = leftover
+	agentDirs := d.availability.ObserveAgentDirs()
+	plan.Agents = agentDirs.Agents
+	plan.Leftover = agentDirs.Leftover
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
 
 	inv, err := LoadInventory(d.cfg, d.skillsDir)

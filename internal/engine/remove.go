@@ -87,7 +87,7 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 	for _, item := range plan.Skills {
 		names = append(names, item.Name)
 	}
-	leftover := availability.ApplyLeftover(availability.ObserveLeftover().ForSkills(names).WithoutEmpty())
+	leftover := availability.ApplyLeftover(availability.ObserveAgentDirs().Leftover.ForSkills(names).WithoutEmpty())
 	removedBySkill := make(map[string][]string)
 	for _, path := range leftover.RemovedPaths {
 		removedBySkill[path.Skill] = append(removedBySkill[path.Skill], path.Agent)

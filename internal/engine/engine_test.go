@@ -460,7 +460,7 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	availability := NewAvailability(cfg, skillsDir)
-	result := availability.ApplyLeftover(availability.ObserveLeftover().ForSkills([]string{"test-skill"}).WithoutEmpty())
+	result := availability.ApplyLeftover(availability.ObserveAgentDirs().Leftover.ForSkills([]string{"test-skill"}).WithoutEmpty())
 	if len(result.RemovedPaths) == 0 {
 		t.Errorf("expected at least 1 leftover path removed")
 	}

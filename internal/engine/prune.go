@@ -105,7 +105,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 				observeUnexpected(illegal.Name)
 			}
 		}
-		leftover := availability.ObserveLeftover().WithoutEmpty()
+		leftover := availability.ObserveAgentDirs().Leftover.WithoutEmpty()
 		if !includeConfiguredLinks {
 			leftover = leftover.ForSkills(slices.Collect(maps.Keys(orphans)))
 		}
