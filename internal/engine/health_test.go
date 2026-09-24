@@ -120,6 +120,45 @@ func TestDoctorRunCountsWorkingLeftoverOccupancy(t *testing.T) {
 	}
 }
 
+// A real directory where a declared Skill's Availability should be is one
+// finding, not two: it is Foreign, which --fix can replace with consent, and
+// not also a stray Physical directory on the same Agent directory.
+func TestDoctorRunCountsForeignDirectoryOnDeclaredPathOnce(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(project, ".claude", "skills", "sample")
+	if err := os.MkdirAll(foreign, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", ".", "github", "")
+
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths := outcome.Report.foreignAvailabilityPaths(); len(paths) != 1 || paths[0].Path != foreign {
+		t.Fatalf("Foreign = %#v; want the directory on sample's Claude path", paths)
+	}
+	for _, agent := range outcome.Report.Agents {
+		if len(agent.Physical) > 0 {
+			t.Fatalf("%s Physical = %#v; the Foreign directory must not count twice", agent.Name, agent.Physical)
+		}
+	}
+	if outcome.Remaining != 1 {
+		t.Fatalf("Remaining = %d; want 1", outcome.Remaining)
+	}
+}
+
 func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
