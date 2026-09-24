@@ -321,7 +321,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			plan.Agents = append(plan.Agents, AgentHealth{Name: agentName, Dir: agentDir, Unusable: "not a directory"})
 			continue
 		}
-		health := diagnoseAgentDirHealth(agentDir, d.skillsDir)
+		health := diagnoseAgentDirHealth(agentName, agentDir, d.skillsDir)
 		plan.Agents = append(plan.Agents, AgentHealth{
 			Name:            agentName,
 			Dir:             agentDir,

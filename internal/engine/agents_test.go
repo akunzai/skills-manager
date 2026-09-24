@@ -360,7 +360,7 @@ func TestDiagnoseAgentDirHealthClassifiesEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	health := diagnoseAgentDirHealth(agentDir, skillsDir)
+	health := diagnoseAgentDirHealth("codex", agentDir, skillsDir)
 
 	if want := (AgentDirHealth{
 		Broken:          []string{"removed"},
@@ -382,7 +382,7 @@ func TestDiagnoseAgentDirHealthReportsManagedCopiesApartFromPhysicalDirs(t *test
 		t.Fatal(err)
 	}
 
-	health := diagnoseAgentDirHealth(agentDir, skillsDir)
+	health := diagnoseAgentDirHealth("codex", agentDir, skillsDir)
 
 	if !reflect.DeepEqual(health.Copies, []string{"alpha"}) {
 		t.Fatalf("Copies = %#v; want [alpha]", health.Copies)
@@ -392,9 +392,34 @@ func TestDiagnoseAgentDirHealthReportsManagedCopiesApartFromPhysicalDirs(t *test
 	}
 }
 
+// Claude Code downloads the account's claude.ai skills into its own synced
+// directory and reserves the name, so it is the Agent's, not a stray skill.
+// Another Agent has no such reservation.
+func TestDiagnoseAgentDirHealthSkipsDirectoriesTheAgentReserves(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "alpha")
+	claudeDir := filepath.Join(home, ".claude", "skills")
+	codexDir := filepath.Join(home, ".codex", "skills")
+	for _, dir := range []string{
+		filepath.Join(claudeDir, "Synced", "account"),
+		filepath.Join(claudeDir, "manual"),
+		filepath.Join(codexDir, "synced"),
+	} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := diagnoseAgentDirHealth("claude-code", claudeDir, skillsDir).Physical; !reflect.DeepEqual(got, []string{"manual"}) {
+		t.Fatalf("claude-code Physical = %#v; want [manual]", got)
+	}
+	if got := diagnoseAgentDirHealth("codex", codexDir, skillsDir).Physical; !reflect.DeepEqual(got, []string{"synced"}) {
+		t.Fatalf("codex Physical = %#v; want [synced]", got)
+	}
+}
+
 func TestDiagnoseAgentDirHealthOnMissingDirReportsNothing(t *testing.T) {
 	_, skillsDir := globalSkillsHome(t, "alpha")
-	health := diagnoseAgentDirHealth(filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
+	health := diagnoseAgentDirHealth("codex", filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
 	if !reflect.DeepEqual(health, AgentDirHealth{}) {
 		t.Fatalf("got %#v; want nothing for a missing agent dir", health)
 	}
