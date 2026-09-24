@@ -302,7 +302,7 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, state ScopeState, stateStor
 		return fail(err)
 	}
 	plan.availability = NewAvailability(plan.cfg, plan.skillsDir)
-	plan.availability.ApplyLeftover(plan.availability.ObserveLeftover().ForSkills([]string{old}).WithoutEmpty())
+	plan.availability.ApplyLeftover(plan.availability.ObserveAgentDirs().Leftover.ForSkills([]string{old}).WithoutEmpty())
 	if err := RemoveAll(skill.ScopePath); err != nil && !os.IsNotExist(err) {
 		return fail(err)
 	}

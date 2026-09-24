@@ -258,12 +258,12 @@ func plantManagedLink(t *testing.T, skillsDir, agentDir, skill string) string {
 	return link
 }
 
-func TestObserveLeftoverReportsAutomaticallyAvailableManagedPaths(t *testing.T) {
+func TestObserveAgentDirsLeftoverReportsAutomaticallyAvailableManagedPaths(t *testing.T) {
 	availability, _, skillsDir := projectAvailability(t, "sample")
 	project := filepath.Dir(filepath.Dir(skillsDir))
 	link := plantManagedLink(t, skillsDir, filepath.Join(project, ".codex", "skills"), "sample")
 
-	got := availability.ObserveLeftover()
+	got := availability.ObserveAgentDirs().Leftover
 
 	if len(got.Paths) != 1 {
 		t.Fatalf("Paths = %#v; want the Codex leftover", got.Paths)
@@ -274,32 +274,32 @@ func TestObserveLeftoverReportsAutomaticallyAvailableManagedPaths(t *testing.T) 
 	}
 }
 
-func TestObserveLeftoverReportsUndeclaredSkillManagedPaths(t *testing.T) {
+func TestObserveAgentDirsLeftoverReportsUndeclaredSkillManagedPaths(t *testing.T) {
 	availability, _, skillsDir := projectAvailability(t, "sample")
 	project := filepath.Dir(filepath.Dir(skillsDir))
 	link := plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "orphan")
 
-	got := availability.ObserveLeftover()
+	got := availability.ObserveAgentDirs().Leftover
 
 	if len(got.Paths) != 1 || got.Paths[0].Skill != "orphan" || got.Paths[0].Path != link {
 		t.Fatalf("Paths = %#v; want the undeclared Claude leftover", got.Paths)
 	}
 }
 
-func TestObserveLeftoverDoesNotReportDeclaredAvailabilityOnLinkableAgents(t *testing.T) {
+func TestObserveAgentDirsLeftoverDoesNotReportDeclaredAvailabilityOnLinkableAgents(t *testing.T) {
 	availability, _, _ := projectAvailability(t, "sample")
 	if _, err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 
-	got := availability.ObserveLeftover()
+	got := availability.ObserveAgentDirs().Leftover
 
 	if len(got.Paths) != 0 {
 		t.Fatalf("Paths = %#v; declared Availability is Drift, not leftover occupancy", got.Paths)
 	}
 }
 
-func TestObserveLeftoverReportsEmptyUnselectedAgentDirs(t *testing.T) {
+func TestObserveAgentDirsLeftoverReportsEmptyUnselectedAgentDirs(t *testing.T) {
 	availability, _, skillsDir := projectAvailability(t, "sample")
 	project := filepath.Dir(filepath.Dir(skillsDir))
 	continueDir := filepath.Join(project, ".continue", "skills")
@@ -307,7 +307,7 @@ func TestObserveLeftoverReportsEmptyUnselectedAgentDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := availability.ObserveLeftover()
+	got := availability.ObserveAgentDirs().Leftover
 
 	if len(got.Empty) == 0 {
 		t.Fatal("expected leftover empty Continue dir")
@@ -328,7 +328,7 @@ func TestApplyLeftoverRemovesObservedPathsAndSkipsChangedOnes(t *testing.T) {
 	project := filepath.Dir(filepath.Dir(skillsDir))
 	codexDir := filepath.Join(project, ".codex", "skills")
 	link := plantManagedLink(t, skillsDir, codexDir, "sample")
-	occupancy := availability.ObserveLeftover()
+	occupancy := availability.ObserveAgentDirs().Leftover
 	if err := os.Remove(link); err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestApplyLeftoverRemovesEmptyDirsAndLeftoverPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := availability.ApplyLeftover(availability.ObserveLeftover())
+	result := availability.ApplyLeftover(availability.ObserveAgentDirs().Leftover)
 
 	if len(result.RemovedPaths) != 1 || result.RemovedPaths[0].Path != link {
 		t.Fatalf("RemovedPaths = %#v; want gone on Codex", result.RemovedPaths)
@@ -380,7 +380,7 @@ func TestLeftoverOccupancyFiltersArePureTransforms(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, ".continue", "skills"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	full := availability.ObserveLeftover()
+	full := availability.ObserveAgentDirs().Leftover
 	if len(full.Paths) != 2 || len(full.Empty) == 0 {
 		t.Fatalf("occupancy = %#v; want two paths and empty dirs", full)
 	}

@@ -1,10 +1,8 @@
 package engine
 
 import (
-	"cmp"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/models"
@@ -15,92 +13,6 @@ type AgentDir struct {
 	Name   string
 	Dir    string
 	Repair ItemRepair
-}
-
-// AgentDirHealth is one Agent skills directory classified in a single pass.
-// Copies travel with the rest because the same test that keeps a copy out of
-// Physical is what identifies it — computing them separately meant reading
-// every marker on disk twice per doctor run.
-type AgentDirHealth struct {
-	// Broken is a managed symlink whose target has gone missing.
-	Broken []string
-	// UnmanagedBroken is a dangling symlink this tool never created.
-	UnmanagedBroken []string
-	// Physical is a real directory sitting where a managed symlink is
-	// expected, and which is not a copy this tool made.
-	Physical []string
-	// Copies is Availability applied by copying instead of linking.
-	Copies []string
-}
-
-// agentReservedEntries names directories an Agent keeps in its own skills
-// directory for itself. Claude Code downloads the account's claude.ai skills
-// into synced/ and reserves the name in any capitalization
-// (code.claude.com/docs/en/skills).
-var agentReservedEntries = map[string][]string{
-	"claude-code": {"synced"},
-}
-
-func isAgentReservedEntry(agent, name string) bool {
-	return slices.ContainsFunc(agentReservedEntries[agent], func(reserved string) bool {
-		return strings.EqualFold(reserved, name)
-	})
-}
-
-// DiagnoseAgentDirHealth classifies every entry in a configured agent's skills
-// directory. A missing agentDir is not itself unhealthy: it reports nothing.
-func diagnoseAgentDirHealth(agent, agentDir, skillsDir string) AgentDirHealth {
-	var health AgentDirHealth
-	entries, err := os.ReadDir(agentDir)
-	if err != nil {
-		return health
-	}
-
-	for _, entry := range entries {
-		name := entry.Name()
-		fullPath := filepath.Join(agentDir, name)
-
-		fi, err := os.Lstat(fullPath)
-		if err != nil {
-			continue
-		}
-
-		if fi.Mode()&os.ModeSymlink != 0 {
-			if _, err := os.Stat(fullPath); err != nil {
-				if isManagedSkillLink(fullPath, name, skillsDir) {
-					health.Broken = append(health.Broken, name)
-				} else {
-					health.UnmanagedBroken = append(health.UnmanagedBroken, name)
-				}
-			}
-		} else if fi.IsDir() && !strings.HasPrefix(name, ".") && !isAgentReservedEntry(agent, name) {
-			if isManagedSkillCopy(fullPath, name, skillsDir) {
-				health.Copies = append(health.Copies, name)
-			} else {
-				health.Physical = append(health.Physical, name)
-			}
-		}
-	}
-
-	return health
-}
-
-// leftoverEmptyAgentDirs returns known agent skills dirs that exist, are
-// effectively empty, and are not in the configured set.
-func leftoverEmptyAgentDirs(known, configured map[string]string) []AgentDir {
-	var leftover []AgentDir
-	for name, dir := range known {
-		if _, ok := configured[name]; ok {
-			continue
-		}
-		empty, err := isDirEffectivelyEmpty(dir)
-		if err != nil || !empty {
-			continue
-		}
-		leftover = append(leftover, AgentDir{Name: name, Dir: dir})
-	}
-	slices.SortFunc(leftover, func(a, b AgentDir) int { return cmp.Compare(a.Name, b.Name) })
-	return leftover
 }
 
 // RemoveEmptyAgentDir deletes an empty agent skills directory and prunes

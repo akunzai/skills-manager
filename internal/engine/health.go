@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -309,29 +309,9 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		plan.MasterMissing = true
 	}
 
-	configuredAgents := d.availability.ConfiguredAgentDirs()
-
-	for _, agentName := range slices.Sorted(maps.Keys(configuredAgents)) {
-		agentDir := configuredAgents[agentName]
-		info, err := os.Stat(agentDir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err == nil && !info.IsDir() {
-			plan.Agents = append(plan.Agents, AgentHealth{Name: agentName, Dir: agentDir, Unusable: "not a directory"})
-			continue
-		}
-		health := diagnoseAgentDirHealth(agentName, agentDir, d.skillsDir)
-		plan.Agents = append(plan.Agents, AgentHealth{
-			Name:            agentName,
-			Dir:             agentDir,
-			UnmanagedBroken: health.UnmanagedBroken,
-			Physical:        health.Physical,
-		})
-	}
-
-	leftover := d.availability.ObserveLeftover()
-	plan.Leftover = leftover
+	agentDirs := d.availability.ObserveAgentDirs()
+	plan.Agents = agentDirs.Agents
+	plan.Leftover = agentDirs.Leftover
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
 
 	inv, err := LoadInventory(d.cfg, d.skillsDir)
@@ -361,7 +341,25 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			Unobservable: drift.Unobservable,
 		})
 	}
+	plan.Agents = withoutForeignPhysical(plan.Agents, plan.foreignAvailabilityPaths())
 	return plan, nil
+}
+
+// withoutForeignPhysical drops the Physical entries Drift already reports as
+// Foreign. A real directory on a declared Skill's Agent path is one finding,
+// and Foreign is the one --fix can act on.
+func withoutForeignPhysical(agents []AgentHealth, foreign []ForeignAvailabilityPath) []AgentHealth {
+	claimed := make(map[string]struct{}, len(foreign))
+	for _, path := range foreign {
+		claimed[path.Path] = struct{}{}
+	}
+	for i, agent := range agents {
+		agents[i].Physical = slices.DeleteFunc(agent.Physical, func(name string) bool {
+			_, ok := claimed[filepath.Join(agent.Dir, name)]
+			return ok
+		})
+	}
+	return agents
 }
 
 // issueCount is Remaining: how many classified findings still stand in the

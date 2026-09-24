@@ -211,6 +211,22 @@ func (a Agents) LeftoverRoots() map[string]string {
 	return maps.Clone(a.leftover)
 }
 
+// reservedAgentEntries names directories an Agent keeps in its own skills
+// directory for itself. Claude Code downloads the account's claude.ai skills
+// into synced/ and reserves the name in any capitalization
+// (https://code.claude.com/docs/en/skills).
+var reservedAgentEntries = map[string][]string{
+	"claude-code": {"synced"},
+}
+
+// IsReserved reports whether name in agent's skills directory belongs to the
+// Agent itself, so this tool neither reports nor touches it.
+func (a Agents) IsReserved(agent, name string) bool {
+	return slices.ContainsFunc(reservedAgentEntries[NormalizeAgentName(agent)], func(reserved string) bool {
+		return strings.EqualFold(reserved, name)
+	})
+}
+
 // leftoverAgentSkillDirs returns skills directories that Automatically
 // available agents may have had materialized for them. skills-manager never
 // creates these — those agents read the master skills directory directly in

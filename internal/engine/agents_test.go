@@ -45,33 +45,6 @@ func TestAvailabilityConfiguredAgentDirsHonorsInclude(t *testing.T) {
 	}
 }
 
-func TestLeftoverEmptyAgentDirsIgnoresConfiguredAndNonEmpty(t *testing.T) {
-	root := t.TempDir()
-	claude := filepath.Join(root, "claude")
-	crush := filepath.Join(root, "crush")
-	jazz := filepath.Join(root, "jazz")
-	_ = os.MkdirAll(claude, 0755)
-	_ = os.MkdirAll(crush, 0755)
-	_ = os.MkdirAll(jazz, 0755)
-	_ = os.WriteFile(filepath.Join(jazz, "keep"), []byte("x"), 0644)
-
-	known := map[string]string{
-		"claude-code": claude,
-		"crush":       crush,
-		"jazz":        jazz,
-		"missing":     filepath.Join(root, "nope"),
-	}
-	configured := map[string]string{"claude-code": claude}
-
-	got := leftoverEmptyAgentDirs(known, configured)
-	if len(got) != 1 {
-		t.Fatalf("got %#v; want only crush", got)
-	}
-	if got[0].Name != "crush" || got[0].Dir != crush {
-		t.Fatalf("got %#v; want crush at %s", got[0], crush)
-	}
-}
-
 func TestRemoveEmptyAgentDirPrunesEmptyParentsAndStopsAtHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -276,7 +249,7 @@ func TestApplyLeftoverClearsAutomaticallyAvailableManagedPaths(t *testing.T) {
 	}
 
 	availability := NewAvailability(config.DefaultConfig(), skillsDir)
-	result := availability.ApplyLeftover(availability.ObserveLeftover().ForSkills([]string{"alpha"}).WithoutEmpty())
+	result := availability.ApplyLeftover(availability.ObserveAgentDirs().Leftover.ForSkills([]string{"alpha"}).WithoutEmpty())
 
 	for _, dir := range []string{codex, cursor} {
 		if _, err := os.Lstat(filepath.Join(dir, "alpha")); !os.IsNotExist(err) {
@@ -323,7 +296,7 @@ func TestRemoveAgentSymlinksLeavesUnmanagedEntriesAlone(t *testing.T) {
 	}
 
 	availability := NewAvailability(config.DefaultConfig(), skillsDir)
-	availability.ApplyLeftover(availability.ObserveLeftover().ForSkills([]string{"alpha", "beta"}).WithoutEmpty())
+	availability.ApplyLeftover(availability.ObserveAgentDirs().Leftover.ForSkills([]string{"alpha", "beta"}).WithoutEmpty())
 
 	if _, err := os.Stat(keep); err != nil {
 		t.Fatalf("a real directory must never be removed: %v", err)
@@ -333,99 +306,165 @@ func TestRemoveAgentSymlinksLeavesUnmanagedEntriesAlone(t *testing.T) {
 	}
 }
 
-func TestDiagnoseAgentDirHealthClassifiesEntries(t *testing.T) {
-	home, skillsDir := globalSkillsHome(t, "healthy")
-	if err := os.MkdirAll(filepath.Join(skillsDir, "healthy"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	agentDir := filepath.Join(home, ".codex", "skills")
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+// globalAgentDirs returns an Availability for the global Scope whose defaults
+// select agents, so their directories are the configured ones.
+func globalAgentDirs(t *testing.T, skillsDir string, agents ...string) *Availability {
+	t.Helper()
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = agents
+	return NewAvailability(cfg, skillsDir)
+}
 
-	// A healthy managed link: its target still exists.
-	if err := os.Symlink(filepath.Join(skillsDir, "healthy"), filepath.Join(agentDir, "healthy")); err != nil {
-		t.Fatal(err)
+func agentHealthFor(t *testing.T, observation AgentDirObservation, agent string) AgentHealth {
+	t.Helper()
+	for _, health := range observation.Agents {
+		if health.Name == agent {
+			return health
+		}
 	}
-	// A managed link whose target has been removed: broken.
-	if err := os.Symlink(filepath.Join(skillsDir, "removed"), filepath.Join(agentDir, "removed")); err != nil {
-		t.Fatal(err)
-	}
-	// A dangling link this tool never created: unmanagedBroken.
+	t.Fatalf("no health for %s in %#v", agent, observation.Agents)
+	return AgentHealth{}
+}
+
+func TestObserveAgentDirsClassifiesConfiguredEntries(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "healthy")
+	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "alpha", "SKILL.md"), []byte("# Alpha\n"))
+	agentDir := filepath.Join(home, ".config", "goose", "skills")
+
+	plantManagedLink(t, skillsDir, agentDir, "healthy")
+	// A managed link whose target has been removed is leftover occupancy of
+	// the Skill it names, not an Agent directory finding.
+	plantManagedLink(t, skillsDir, agentDir, "removed")
 	if err := os.Symlink(filepath.Join(home, "elsewhere-gone"), filepath.Join(agentDir, "foreign")); err != nil {
 		t.Fatal(err)
 	}
-	// A real directory where a managed link is expected: physical.
 	if err := os.MkdirAll(filepath.Join(agentDir, "manual"), 0755); err != nil {
 		t.Fatal(err)
 	}
-
-	health := diagnoseAgentDirHealth("codex", agentDir, skillsDir)
-
-	if want := (AgentDirHealth{
-		Broken:          []string{"removed"},
-		UnmanagedBroken: []string{"foreign"},
-		Physical:        []string{"manual"},
-	}); !reflect.DeepEqual(health, want) {
-		t.Fatalf("health = %#v; want %#v", health, want)
-	}
-}
-
-// A copy of the Skill named by its own entry is Availability, not a stray
-// directory, and it is classified in the same pass that rules it out of
-// Physical rather than by a second scan of the same markers.
-func TestDiagnoseAgentDirHealthReportsManagedCopiesApartFromPhysicalDirs(t *testing.T) {
-	home, skillsDir := globalSkillsHome(t, "alpha")
-	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "alpha", "SKILL.md"), []byte("# Alpha\n"))
-	agentDir := filepath.Join(home, ".codex", "skills")
+	// A copy this tool made is Availability, not a stray directory.
 	if err := replaceManagedCopy(filepath.Join(skillsDir, "alpha"), filepath.Join(agentDir, "alpha")); err != nil {
 		t.Fatal(err)
 	}
 
-	health := diagnoseAgentDirHealth("codex", agentDir, skillsDir)
+	observation := globalAgentDirs(t, skillsDir, "goose").ObserveAgentDirs()
 
-	if !reflect.DeepEqual(health.Copies, []string{"alpha"}) {
-		t.Fatalf("Copies = %#v; want [alpha]", health.Copies)
+	if got, want := agentHealthFor(t, observation, "goose"), (AgentHealth{
+		Name:            "goose",
+		Dir:             agentDir,
+		UnmanagedBroken: []string{"foreign"},
+		Physical:        []string{"manual"},
+	}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("health = %#v; want %#v", got, want)
 	}
-	if health.Physical != nil {
-		t.Fatalf("a managed copy must not also read as a stray directory: %#v", health.Physical)
+	var dangling []string
+	for _, path := range observation.Leftover.Paths {
+		if path.Dangling {
+			dangling = append(dangling, path.Skill)
+		}
+	}
+	if !reflect.DeepEqual(dangling, []string{"removed"}) {
+		t.Fatalf("dangling leftover = %#v; want [removed]", dangling)
 	}
 }
 
 // Claude Code downloads the account's claude.ai skills into its own synced
-// directory and reserves the name, so it is the Agent's, not a stray skill.
-// Another Agent has no such reservation.
-func TestDiagnoseAgentDirHealthSkipsDirectoriesTheAgentReserves(t *testing.T) {
+// directory and reserves the name in any capitalization, so it is the
+// Agent's: not a stray directory, not leftover occupancy, and content that
+// keeps the directory from being empty. Another Agent has no such reservation.
+func TestObserveAgentDirsLeavesAgentReservedEntriesAlone(t *testing.T) {
+	t.Run("not a stray directory", func(t *testing.T) {
+		home, skillsDir := globalSkillsHome(t, "alpha")
+		claudeDir := filepath.Join(home, ".claude", "skills")
+		gooseDir := filepath.Join(home, ".config", "goose", "skills")
+		for _, dir := range []string{
+			filepath.Join(claudeDir, "Synced", "account"),
+			filepath.Join(claudeDir, "manual"),
+			filepath.Join(gooseDir, "synced"),
+		} {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		observation := globalAgentDirs(t, skillsDir, "claude", "goose").ObserveAgentDirs()
+
+		if got := agentHealthFor(t, observation, "claude-code").Physical; !reflect.DeepEqual(got, []string{"manual"}) {
+			t.Fatalf("claude-code Physical = %#v; want [manual]", got)
+		}
+		if got := agentHealthFor(t, observation, "goose").Physical; !reflect.DeepEqual(got, []string{"synced"}) {
+			t.Fatalf("goose Physical = %#v; want [synced]", got)
+		}
+	})
+
+	t.Run("not leftover occupancy", func(t *testing.T) {
+		home, skillsDir := globalSkillsHome(t, "synced")
+		plantManagedLink(t, skillsDir, filepath.Join(home, ".claude", "skills"), "synced")
+		gooseLink := plantManagedLink(t, skillsDir, filepath.Join(home, ".config", "goose", "skills"), "synced")
+
+		observation := globalAgentDirs(t, skillsDir, "claude", "goose").ObserveAgentDirs()
+
+		if len(observation.Leftover.Paths) != 1 || observation.Leftover.Paths[0].Path != gooseLink {
+			t.Fatalf("Leftover = %#v; want only the goose link", observation.Leftover.Paths)
+		}
+	})
+
+	t.Run("not an empty directory", func(t *testing.T) {
+		home, skillsDir := globalSkillsHome(t, "alpha")
+		if err := os.MkdirAll(filepath.Join(home, ".claude", "skills", "synced"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		observation := globalAgentDirs(t, skillsDir, "goose").ObserveAgentDirs()
+
+		for _, dir := range observation.Leftover.Empty {
+			if dir.Name == "claude-code" {
+				t.Fatalf("Empty = %#v; synced/ is the Agent's own content", observation.Leftover.Empty)
+			}
+		}
+	})
+}
+
+// Only known directories the policy does not select are leftover when empty:
+// a configured one is in use, and one holding anything but dot entries is not
+// empty.
+func TestObserveAgentDirsReportsOnlyUnselectedEmptyDirs(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
-	claudeDir := filepath.Join(home, ".claude", "skills")
-	codexDir := filepath.Join(home, ".codex", "skills")
-	for _, dir := range []string{
-		filepath.Join(claudeDir, "Synced", "account"),
-		filepath.Join(claudeDir, "manual"),
-		filepath.Join(codexDir, "synced"),
-	} {
+	goose := filepath.Join(home, ".config", "goose", "skills")
+	devin := filepath.Join(home, ".config", "devin", "skills")
+	hermes := filepath.Join(home, ".hermes", "skills")
+	for _, dir := range []string{goose, devin, hermes} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	mustWriteScopeStateTestFile(t, filepath.Join(devin, ".DS_Store"), []byte("x"))
+	mustWriteScopeStateTestFile(t, filepath.Join(hermes, "keep"), []byte("x"))
 
-	if got := diagnoseAgentDirHealth("claude-code", claudeDir, skillsDir).Physical; !reflect.DeepEqual(got, []string{"manual"}) {
-		t.Fatalf("claude-code Physical = %#v; want [manual]", got)
-	}
-	if got := diagnoseAgentDirHealth("codex", codexDir, skillsDir).Physical; !reflect.DeepEqual(got, []string{"synced"}) {
-		t.Fatalf("codex Physical = %#v; want [synced]", got)
-	}
-}
+	observation := globalAgentDirs(t, skillsDir, "goose").ObserveAgentDirs()
 
-func TestDiagnoseAgentDirHealthOnMissingDirReportsNothing(t *testing.T) {
-	_, skillsDir := globalSkillsHome(t, "alpha")
-	health := diagnoseAgentDirHealth("codex", filepath.Join(skillsDir, "..", "..", "nope"), skillsDir)
-	if !reflect.DeepEqual(health, AgentDirHealth{}) {
-		t.Fatalf("got %#v; want nothing for a missing agent dir", health)
+	if want := []AgentDir{{Name: "devin", Dir: devin}}; !reflect.DeepEqual(observation.Leftover.Empty, want) {
+		t.Fatalf("Empty = %#v; want %#v", observation.Leftover.Empty, want)
 	}
 }
 
-func TestObserveLeftoverReportsDanglingAutomaticallyAvailablePaths(t *testing.T) {
+func TestObserveAgentDirsReportsUnusableConfiguredDirOnly(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "alpha")
+	goose := filepath.Join(home, ".config", "goose", "skills")
+	mustWriteScopeStateTestFile(t, goose, []byte("not a directory"))
+	// A leftover root is a convention, not a guarantee: unreadable is skipped.
+	mustWriteScopeStateTestFile(t, filepath.Join(home, ".codex", "skills"), []byte("not a directory"))
+
+	observation := globalAgentDirs(t, skillsDir, "claude", "goose").ObserveAgentDirs()
+
+	if want := []AgentHealth{{Name: "goose", Dir: goose, Unusable: "not a directory"}}; !reflect.DeepEqual(observation.Agents, want) {
+		t.Fatalf("Agents = %#v; want only the unusable goose dir (claude's is missing)", observation.Agents)
+	}
+	if len(observation.Leftover.Paths) != 0 {
+		t.Fatalf("Leftover = %#v; want nothing", observation.Leftover.Paths)
+	}
+}
+
+func TestObserveAgentDirsLeftoverReportsDanglingAutomaticallyAvailablePaths(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "healthy")
 	if err := os.MkdirAll(filepath.Join(skillsDir, "healthy"), 0755); err != nil {
 		t.Fatal(err)
@@ -442,7 +481,7 @@ func TestObserveLeftoverReportsDanglingAutomaticallyAvailablePaths(t *testing.T)
 		t.Fatal(err)
 	}
 
-	occupancy := NewAvailability(config.DefaultConfig(), skillsDir).ObserveLeftover()
+	occupancy := NewAvailability(config.DefaultConfig(), skillsDir).ObserveAgentDirs().Leftover
 	var dangling, live []string
 	for _, path := range occupancy.Paths {
 		if path.Agent != "gemini-cli" {
