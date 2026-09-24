@@ -33,9 +33,23 @@ type AgentDirHealth struct {
 	Copies []string
 }
 
+// agentReservedEntries names directories an Agent keeps in its own skills
+// directory for itself. Claude Code downloads the account's claude.ai skills
+// into synced/ and reserves the name in any capitalization
+// (code.claude.com/docs/en/skills).
+var agentReservedEntries = map[string][]string{
+	"claude-code": {"synced"},
+}
+
+func isAgentReservedEntry(agent, name string) bool {
+	return slices.ContainsFunc(agentReservedEntries[agent], func(reserved string) bool {
+		return strings.EqualFold(reserved, name)
+	})
+}
+
 // DiagnoseAgentDirHealth classifies every entry in a configured agent's skills
 // directory. A missing agentDir is not itself unhealthy: it reports nothing.
-func diagnoseAgentDirHealth(agentDir, skillsDir string) AgentDirHealth {
+func diagnoseAgentDirHealth(agent, agentDir, skillsDir string) AgentDirHealth {
 	var health AgentDirHealth
 	entries, err := os.ReadDir(agentDir)
 	if err != nil {
@@ -59,7 +73,7 @@ func diagnoseAgentDirHealth(agentDir, skillsDir string) AgentDirHealth {
 					health.UnmanagedBroken = append(health.UnmanagedBroken, name)
 				}
 			}
-		} else if fi.IsDir() && !strings.HasPrefix(name, ".") {
+		} else if fi.IsDir() && !strings.HasPrefix(name, ".") && !isAgentReservedEntry(agent, name) {
 			if isManagedSkillCopy(fullPath, name, skillsDir) {
 				health.Copies = append(health.Copies, name)
 			} else {
