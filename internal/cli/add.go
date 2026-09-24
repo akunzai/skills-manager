@@ -232,6 +232,13 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 	if branch == "" {
 		branch = parsed.Branch
 	}
+	cfg, err := config.LoadConfig(ResolveScope().ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	if branch, err = engine.AddBranch(cfg, parsed.SourceKey, branch); err != nil {
+		return nil, err
+	}
 	selectionPath := flagPath
 	if selectionPath == "" {
 		selectionPath = parsed.Subpath
@@ -257,8 +264,10 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 	if flagURL != "" || parsed.RepoType != "github" || !strings.HasPrefix(cloneURL, "https://github.com/") {
 		storedURL = cloneURL
 	}
+	source := engine.NewRemoteAddSource(parsed.SourceKey, parsed.RepoType, storedURL, repoDir)
+	source.Branch = branch
 	return &addIntake{
-		source:     engine.NewRemoteAddSource(parsed.SourceKey, parsed.RepoType, storedURL, repoDir),
+		source:     source,
 		discovered: discovered,
 		labels: sourceLabels{
 			displayName:  parsed.SourceKey,

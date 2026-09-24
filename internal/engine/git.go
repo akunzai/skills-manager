@@ -575,27 +575,47 @@ func localRepoCommit(repoDest string) string {
 
 func remoteRepoCommit(source, url, branch string) (string, error) {
 	repo := resolveCacheRepo(source, url, branch, "")
-	refTarget := repo.Branch
-	if refTarget == "" {
-		refTarget = "HEAD"
-	} else {
-		refTarget = "refs/heads/" + refTarget
+	if repo.Branch == "" {
+		return lsRemoteCommit(repo.URL, "HEAD")
 	}
-
-	stdout, stderr, err := runGit("", "ls-remote", repo.URL, refTarget)
-	if err != nil || stdout == "" {
-		if err != nil {
-			return "", gitOpErr("query", repo.URL, stdout, stderr, err)
-		}
-		return "", fmt.Errorf("remote ref %s not found in %s", refTarget, repo.URL)
+	// A declared branch may name a tag (add --branch v1.2.0). A branch wins
+	// when both exist; an annotated tag is peeled to the commit the Cache
+	// checks out, so Freshness compares like with like.
+	refs, err := lsRemote(repo.URL, "refs/heads/"+repo.Branch, "refs/tags/"+repo.Branch, "refs/tags/"+repo.Branch+"^{}")
+	if err != nil {
+		return "", err
 	}
-
-	lines := strings.Split(stdout, "\n")
-	if len(lines) > 0 {
-		parts := strings.Fields(lines[0])
-		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0]), nil
+	for _, ref := range []string{"refs/heads/" + repo.Branch, "refs/tags/" + repo.Branch + "^{}", "refs/tags/" + repo.Branch} {
+		if sha, ok := refs[ref]; ok {
+			return sha, nil
 		}
 	}
-	return "", fmt.Errorf("invalid remote response from %s", repo.URL)
+	return "", fmt.Errorf("remote branch or tag %s not found in %s", repo.Branch, repo.URL)
+}
+
+func lsRemoteCommit(url, ref string) (string, error) {
+	refs, err := lsRemote(url, ref)
+	if err != nil {
+		return "", err
+	}
+	sha, ok := refs[ref]
+	if !ok {
+		return "", fmt.Errorf("remote ref %s not found in %s", ref, url)
+	}
+	return sha, nil
+}
+
+// lsRemote returns the commit each matching ref points at, keyed by ref name.
+func lsRemote(url string, patterns ...string) (map[string]string, error) {
+	stdout, stderr, err := runGit("", append([]string{"ls-remote", url}, patterns...)...)
+	if err != nil {
+		return nil, gitOpErr("query", url, stdout, stderr, err)
+	}
+	refs := make(map[string]string)
+	for _, line := range strings.Split(stdout, "\n") {
+		if parts := strings.Fields(line); len(parts) == 2 {
+			refs[parts[1]] = parts[0]
+		}
+	}
+	return refs, nil
 }

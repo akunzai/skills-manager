@@ -83,6 +83,8 @@ skills -p add akunzai/agent-skills --skill agents-md --yes
 skills -p add --command "playwright-cli install --skills=agents" playwright-cli --yes
 ```
 
+**Pinning a branch or tag**: `skills add <source> --branch <branch-or-tag>` declares the branch in Config, and `update` keeps following it. A Source already declared on another branch is refused; `skills rm` its Skills first.
+
 **Source Replacement & Migration**: If a skill with the same name already exists in Config (or Scope), `skills add` plans a replacement. Pass `-y` to accept the conflict non-interactively; `skills-manager` automatically cleans up the old registration, records the new entry, and reconciles agent availability.
 
 **Completion criterion**: Run `skills ls` (or `skills -p ls`) and verify the skill appears with status `Installed` and expected availability.
