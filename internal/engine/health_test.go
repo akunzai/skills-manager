@@ -159,6 +159,93 @@ func TestDoctorRunCountsForeignDirectoryOnDeclaredPathOnce(t *testing.T) {
 	}
 }
 
+// A declared Skill that is not present on the skills directory — its master
+// missing, or a local Source illegally inside it — can still leave a managed
+// link on an Agent its Availability does not select. That link is Drift prune
+// removes, so Doctor reports it too, and --fix removes it without linking the
+// Skill anywhere new.
+func TestDoctorRunReportsUnexpectedLinkOfAbsentSkill(t *testing.T) {
+	tests := []struct {
+		name    string
+		declare func(t *testing.T, cfg *config.Config, skillsDir string)
+	}{
+		{
+			name: "missing master",
+			declare: func(t *testing.T, cfg *config.Config, skillsDir string) {
+				config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", ".", "github", "")
+			},
+		},
+		{
+			name: "illegal local Source",
+			declare: func(t *testing.T, cfg *config.Config, skillsDir string) {
+				master := filepath.Join(skillsDir, "sample")
+				if err := os.MkdirAll(master, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(master, "SKILL.md"), []byte("# Sample\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				config.AddLocalSymlinkEntry(cfg, "sample", master, "")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			project := t.TempDir()
+			skillsDir := filepath.Join(project, ".agents", "skills")
+			if err := os.MkdirAll(skillsDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.DefaultConfig()
+			cfg.Settings.DefaultAgents = []string{"claude"}
+			tt.declare(t, cfg, skillsDir)
+			link := plantManagedLink(t, skillsDir, filepath.Join(project, ".continue", "skills"), "sample")
+
+			doctor := NewDoctor(cfg, skillsDir)
+			outcome, err := doctor.Run(false, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(outcome.Report.Drift) != 1 || outcome.Report.Drift[0].Skill != "sample" || !slices.Equal(outcome.Report.Drift[0].Unexpected, []string{"continue"}) {
+				t.Fatalf("Drift = %#v; want sample's unexpected Continue link", outcome.Report.Drift)
+			}
+			if outcome.Remaining != 2 {
+				t.Fatalf("Remaining = %d; want 2 (the absent Skill and its unexpected link)", outcome.Remaining)
+			}
+
+			plan, err := BuildPrunePlan(cfg, skillsDir, true, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.Unconfigured) != 1 || plan.Unconfigured[0].Path != link {
+				t.Fatalf("prune Unconfigured = %#v; want the same link Doctor reports", plan.Unconfigured)
+			}
+
+			fixed, err := doctor.Run(true, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fixed.Failed != 0 || fixed.Report.Drift[0].Repair.Status != RepairSucceeded {
+				t.Fatalf("Drift repair = %#v; want Succeeded", fixed.Report.Drift)
+			}
+			after, err := doctor.Run(false, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(after.Report.Drift) != 0 {
+				t.Fatalf("Drift after --fix = %#v; want none", after.Report.Drift)
+			}
+			if _, err := os.Lstat(link); !os.IsNotExist(err) {
+				t.Fatal("--fix must remove the unexpected link")
+			}
+			if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
+				t.Fatal("--fix must not link a Skill that is not present")
+			}
+		})
+	}
+}
+
 func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()

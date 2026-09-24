@@ -299,6 +299,46 @@ func TestObserveAgentDirsLeftoverDoesNotReportDeclaredAvailabilityOnLinkableAgen
 	}
 }
 
+// Unexpected is a managed path of a declared Skill, whatever its master's
+// state, on a known Agent its Availability does not select. A desired path, an
+// undeclared Skill's path (leftover occupancy), an Agent's reserved entry and
+// a dot entry are not.
+func TestObserveAgentDirsReportsUnexpectedPathsOfDeclaredSkills(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	for _, skill := range []string{"sample", "synced", ".hidden", "undeclared"} {
+		if err := os.MkdirAll(filepath.Join(skillsDir, skill), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"continue"}
+	for _, skill := range []string{"sample", "synced", ".hidden", "missing"} {
+		config.AddRemoteSkillEntry(cfg, "owner/repo", skill, skill, "github", "")
+	}
+	claude := filepath.Join(project, ".claude", "skills")
+	continueDir := filepath.Join(project, ".continue", "skills")
+	unexpected := plantManagedLink(t, skillsDir, claude, "sample")
+	missing := plantManagedLink(t, skillsDir, claude, "missing")
+	plantManagedLink(t, skillsDir, claude, "synced")
+	plantManagedLink(t, skillsDir, claude, ".hidden")
+	plantManagedLink(t, skillsDir, continueDir, "sample")
+	undeclared := plantManagedLink(t, skillsDir, claude, "undeclared")
+
+	observation := NewAvailability(cfg, skillsDir).ObserveAgentDirs()
+
+	want := []ManagedAgentPath{
+		{Agent: "claude-code", Skill: "missing", Path: missing},
+		{Agent: "claude-code", Skill: "sample", Path: unexpected},
+	}
+	if !reflect.DeepEqual(observation.Unexpected, want) {
+		t.Fatalf("Unexpected = %#v; want %#v", observation.Unexpected, want)
+	}
+	if len(observation.Leftover.Paths) != 1 || observation.Leftover.Paths[0].Path != undeclared {
+		t.Fatalf("Leftover = %#v; want only the undeclared Skill", observation.Leftover.Paths)
+	}
+}
+
 func TestObserveAgentDirsLeftoverReportsEmptyUnselectedAgentDirs(t *testing.T) {
 	availability, _, skillsDir := projectAvailability(t, "sample")
 	project := filepath.Dir(filepath.Dir(skillsDir))

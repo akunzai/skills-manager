@@ -570,21 +570,34 @@ func (a *Availability) declaredSkills() map[string]struct{} {
 	return names
 }
 
+// ManagedAgentPath is one managed Availability path on an Agent directory.
+type ManagedAgentPath struct {
+	Agent string
+	Skill string
+	Path  string
+}
+
 // AgentDirObservation is every Agent directory of one Scope read once: the
-// health of each configured directory and the leftover occupancy across all
-// of them.
+// health of each configured directory, the leftover occupancy across all of
+// them, and the managed paths of declared Skills on Agents their Availability
+// does not select.
 type AgentDirObservation struct {
-	Agents   []AgentHealth
-	Leftover LeftoverOccupancy
+	Agents     []AgentHealth
+	Leftover   LeftoverOccupancy
+	Unexpected []ManagedAgentPath
 }
 
 // ObserveAgentDirs reads each known and leftover-root Agent directory once and
 // classifies its entries under one set of rules. Leftover occupancy is managed
 // paths on Automatically available Agents, managed paths for Skills Config
 // does not declare, and empty Agent directories the current policy does not
-// select. Agent health covers configured directories only. A real directory on
-// a declared Skill's path reads here as Physical and in ObserveAvailability as
-// Foreign; the caller holding both resolves it.
+// select. Unexpected is the Drift half of the same scan: managed paths of
+// declared Skills, whatever their master's state, on known Agents their
+// Availability does not select. A path on a leftover root is leftover
+// occupancy, never also Unexpected. Agent health covers configured
+// directories only. A real directory on a declared Skill's path reads here as
+// Physical and in ObserveAvailability as Foreign; the caller holding both
+// resolves it.
 func (a *Availability) ObserveAgentDirs() AgentDirObservation {
 	type listing struct {
 		entries []os.DirEntry
@@ -619,14 +632,18 @@ func (a *Availability) ObserveAgentDirs() AgentDirObservation {
 
 	declared := a.declaredSkills()
 	seen := make(map[string]struct{})
-	addPaths := func(agent, dir string, include func(string) bool) {
+	addPaths := func(agent, dir string, leftoverRoot bool) {
 		entries, err := readDir(dir)
 		if err != nil {
 			return
 		}
 		for _, entry := range entries {
 			name := entry.Name()
-			if strings.HasPrefix(name, ".") || a.agents.IsReserved(agent, name) || !include(name) {
+			if strings.HasPrefix(name, ".") || a.agents.IsReserved(agent, name) {
+				continue
+			}
+			_, isDeclared := declared[name]
+			if isDeclared && !leftoverRoot && slices.Contains(a.ManagedAgents(name), agent) {
 				continue
 			}
 			path := filepath.Join(dir, name)
@@ -637,23 +654,29 @@ func (a *Availability) ObserveAgentDirs() AgentDirObservation {
 				continue
 			}
 			seen[path] = struct{}{}
+			if isDeclared && !leftoverRoot {
+				observation.Unexpected = append(observation.Unexpected, ManagedAgentPath{Agent: agent, Skill: name, Path: path})
+				continue
+			}
 			_, err := os.Stat(path)
 			observation.Leftover.Paths = append(observation.Leftover.Paths, LeftoverPath{
 				Agent: agent, Skill: name, Path: path, Dangling: err != nil,
 			})
 		}
 	}
+	// Leftover roots first, so a path on a directory that is both a root and
+	// a known Agent directory is leftover occupancy.
 	for agent, dir := range a.agents.LeftoverRoots() {
-		addPaths(agent, dir, func(string) bool { return true })
+		addPaths(agent, dir, true)
 	}
 	for agent, dir := range knownDirs {
-		addPaths(agent, dir, func(name string) bool {
-			_, ok := declared[name]
-			return !ok
-		})
+		addPaths(agent, dir, false)
 	}
 	slices.SortFunc(observation.Leftover.Paths, func(a, b LeftoverPath) int {
 		return cmp.Or(cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Skill, b.Skill), cmp.Compare(a.Path, b.Path))
+	})
+	slices.SortFunc(observation.Unexpected, func(a, b ManagedAgentPath) int {
+		return cmp.Or(cmp.Compare(a.Skill, b.Skill), cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Path, b.Path))
 	})
 
 	for agent, dir := range knownDirs {
