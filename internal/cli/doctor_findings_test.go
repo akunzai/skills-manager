@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -413,5 +415,94 @@ func TestFindingsGitErrorNamesTheScopedUpdate(t *testing.T) {
 	}
 	if !containsMessage(findings, "Next: install or upgrade git, then run 'skills update -p'.") {
 		t.Fatalf("git error has no Project-scoped next action: %#v", findings)
+	}
+}
+
+// Every exported DoctorReport field reaches the printed report. The engine's
+// TestEveryDoctorReportFieldIsClassified guards Remaining; this guards the
+// other walk: a field doctorFindings never reads is diagnosed and counted,
+// then never shown. A new field fails here until it is set below and its
+// subject is expected in the output.
+func TestDoctorFindingsPrintEveryReportField(t *testing.T) {
+	report := engine.DoctorReport{
+		SkillsDir:     "/scope/skills-dir",
+		MasterMissing: true,
+		Agents: []engine.AgentHealth{
+			{Name: "unusable-agent", Dir: "/scope/unusable", Unusable: "not a directory"},
+			{Name: "goose", Dir: "/scope/goose", UnmanagedBroken: []string{"broken-link"}, Physical: []string{"physical-dir"}},
+		},
+		Leftover: engine.LeftoverOccupancy{
+			Paths: []engine.LeftoverPath{
+				{Agent: "codex", Skill: "dangling-skill", Dangling: true},
+				{Agent: "codex", Skill: "live-skill"},
+			},
+			Empty: []engine.AgentDir{{Name: "empty-agent", Dir: "/scope/empty"}},
+		},
+		Drift: []engine.SkillDrift{{
+			Skill:        "drift-skill",
+			Missing:      []string{"missing-agent"},
+			Unexpected:   []string{"unexpected-agent"},
+			Broken:       []string{"broken-agent"},
+			Foreign:      []engine.ForeignAvailabilityPath{{Agent: "claude-code", Path: "/scope/foreign-path", Kind: engine.ForeignAvailabilityFile}},
+			Unobservable: []engine.UnobservableAvailabilityPath{{Agent: "claude-code", Dir: "/scope", Path: "/scope/unobservable-path", Err: "denied"}},
+		}},
+		Missing:         []string{"missing-skill"},
+		Untracked:       []string{"untracked-skill"},
+		UntrackedLinks:  []string{"untracked-link"},
+		IllegalLocal:    []engine.IllegalLocalSource{{Name: "illegal-skill"}},
+		Invalid:         []engine.InvalidSkill{{Name: "invalid-skill"}},
+		Stubs:           []string{"stub-skill"},
+		UnknownAgents:   []engine.UnknownAgentReference{{Agent: "unknown-agent", Field: "default_agents"}},
+		StateError:      "state-error",
+		StaleState:      []string{"stale-baseline"},
+		StateRepair:     engine.ItemRepair{Status: engine.RepairFailed, Err: errors.New("state-repair-error")},
+		CacheRecovery:   []string{"recovery-artifact"},
+		CacheMigrations: []engine.CacheMigrationOutcome{{Root: "migration-root", Status: engine.CacheMigrationFailed, Err: errors.New("migration-error")}},
+		StaleScopes:     []engine.ScopeStateArtifact{{ScopePath: "stale-scope-path"}},
+		GitError:        "git-error",
+	}
+	want := map[string][]string{
+		"SkillsDir":       {"/scope/skills-dir"},
+		"MasterMissing":   {"Missing master skills directory"},
+		"Agents":          {"unusable-agent", "[goose]", "broken-link", "physical-dir"},
+		"Leftover":        {"[codex]", "dangling-skill", "live-skill", "empty-agent"},
+		"Drift":           {"drift-skill", "missing-agent", "unexpected-agent", "broken-agent", "for claude-code", "foreign-path", "unreadable claude-code path", "unobservable-path"},
+		"Missing":         {"missing-skill"},
+		"Untracked":       {"untracked-skill"},
+		"UntrackedLinks":  {"untracked-link"},
+		"IllegalLocal":    {"illegal-skill"},
+		"Invalid":         {"invalid-skill"},
+		"Stubs":           {"stub-skill"},
+		"UnknownAgents":   {"unknown-agent"},
+		"StateError":      {"state-error"},
+		"StaleState":      {"stale-baseline"},
+		"StateRepair":     {"state-repair-error"},
+		"CacheRecovery":   {"recovery-artifact"},
+		"CacheMigrations": {"migration-root"},
+		"StaleScopes":     {"stale-scope-path"},
+		"GitError":        {"git-error"},
+	}
+
+	var out strings.Builder
+	for _, finding := range doctorFindings(report, false) {
+		out.WriteString(finding.Message + "\n")
+	}
+	fields := reflect.TypeFor[engine.DoctorReport]()
+	value := reflect.ValueOf(report)
+	for i := range fields.NumField() {
+		field := fields.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		subjects, ok := want[field.Name]
+		if !ok || value.Field(i).IsZero() {
+			t.Errorf("DoctorReport.%s is not set and expected here; set it and name what doctorFindings must print for it", field.Name)
+			continue
+		}
+		for _, subject := range subjects {
+			if !strings.Contains(out.String(), subject) {
+				t.Errorf("DoctorReport.%s: output does not mention %q:\n%s", field.Name, subject, out.String())
+			}
+		}
 	}
 }

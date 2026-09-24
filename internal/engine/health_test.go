@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -295,6 +296,33 @@ func TestStaleBaselinesAreEntriesNotDeclaredRemote(t *testing.T) {
 	}
 	if got := slices.Sorted(maps.Keys(state.Skills)); !slices.Equal(got, []string{"remote"}) {
 		t.Fatalf("Baselines after --fix = %v; want [remote]", got)
+	}
+}
+
+// The summary reads UntrackedLinks off the outcome, beside Untracked. --fix
+// leaves untracked links alone today, so this pins that the count is there
+// with and without --fix; it cannot tell a pre-fix count from a post-fix one.
+func TestDoctorRunCountsUntrackedLinks(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	source := filepath.Join(project, "elsewhere", "untracked")
+	mustWriteScopeStateTestFile(t, filepath.Join(source, "SKILL.md"), []byte("# Untracked\n"))
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(skillsDir, "untracked")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	for _, fix := range []bool{false, true} {
+		outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(fix, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if outcome.UntrackedLinks != 1 {
+			t.Fatalf("fix=%v: UntrackedLinks = %d; want 1", fix, outcome.UntrackedLinks)
+		}
 	}
 }
 
@@ -937,8 +965,10 @@ func TestDoctorFindingKindCountsAsIssue(t *testing.T) {
 	}
 }
 
-func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
-	report := DoctorReport{
+// classifiedDoctorReport sets every finding field of a DoctorReport, so each
+// kind findings() can emit is present once or more.
+func classifiedDoctorReport() DoctorReport {
+	return DoctorReport{
 		MasterMissing: true,
 		Agents: []AgentHealth{
 			{Unusable: "not a directory"},
@@ -973,6 +1003,10 @@ func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
 		StaleScopes:    []ScopeStateArtifact{{ScopePath: "gone"}},
 		legacyCache:    []legacyCacheMigrationPlan{{Root: "legacy"}},
 	}
+}
+
+func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
+	report := classifiedDoctorReport()
 
 	got := make(map[DoctorFindingKind]int)
 	issues := 0
@@ -1023,5 +1057,63 @@ func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
 	}
 	if report.issueCount() != 24 {
 		t.Errorf("issueCount = %d; want 24", report.issueCount())
+	}
+}
+
+// Every exported DoctorReport field is either a finding findings() counts or
+// named here as not one. A field added to DoctorReport without either is what
+// used to vanish from Remaining unnoticed; this test is where it is caught.
+func TestEveryDoctorReportFieldIsClassified(t *testing.T) {
+	findingFields := map[string][]DoctorFindingKind{
+		"MasterMissing":  {findingMasterMissing},
+		"Agents":         {findingAgentUnusable, findingAgentUnmanagedBroken, findingAgentPhysical},
+		"Leftover":       {DoctorFindingLeftoverDangling, DoctorFindingLeftoverLive, findingLeftoverEmpty},
+		"Drift":          {findingDriftMissing, findingDriftUnexpected, findingDriftBroken, findingDriftForeign, findingDriftUnobservable},
+		"Missing":        {findingMissingSkill},
+		"Untracked":      {findingUntracked},
+		"UntrackedLinks": {findingUntrackedLink},
+		"IllegalLocal":   {findingIllegalLocal},
+		"Invalid":        {findingInvalid},
+		"Stubs":          {findingStub},
+		"UnknownAgents":  {findingUnknownAgent},
+		"StateError":     {findingStateError},
+		"StaleState":     {findingStaleState},
+		"CacheRecovery":  {findingCacheRecovery},
+		"StaleScopes":    {findingStaleScope},
+		"GitError":       {findingGitError},
+	}
+	nonFindingFields := map[string]string{
+		"SkillsDir":       "names the diagnosed Scope",
+		"StateRepair":     "what --fix did to StateError or StaleState",
+		"CacheMigrations": "what --fix did to legacy Cache entries",
+	}
+
+	full := reflect.ValueOf(classifiedDoctorReport())
+	fields := reflect.TypeFor[DoctorReport]()
+	for i := range fields.NumField() {
+		field := fields.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		want, isFinding := findingFields[field.Name]
+		if _, ok := nonFindingFields[field.Name]; ok == isFinding {
+			t.Errorf("DoctorReport.%s must be in exactly one of findingFields or nonFindingFields here; "+
+				"if it is a finding, add its kinds to DoctorReport.findings() and a line to cli.doctorFindings", field.Name)
+			continue
+		}
+		if !isFinding {
+			continue
+		}
+		var only DoctorReport
+		reflect.ValueOf(&only).Elem().Field(i).Set(full.Field(i))
+		got := make(map[DoctorFindingKind]bool)
+		for _, kind := range only.findings() {
+			got[kind] = true
+		}
+		for _, kind := range want {
+			if !got[kind] {
+				t.Errorf("DoctorReport.%s set alone yields kinds %v; want %s among them", field.Name, got, kind)
+			}
+		}
 	}
 }

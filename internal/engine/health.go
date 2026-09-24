@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
@@ -22,16 +21,11 @@ type AgentHealth struct {
 	Unusable string
 }
 
+// SkillDrift is one declared Skill's Availability Drift as Doctor diagnosed
+// it, with what --fix did about it.
 type SkillDrift struct {
-	Skill        string
-	Source       string
-	Missing      []string
-	Unexpected   []string
-	Broken       []string
-	Copies       []string
-	Foreign      []ForeignAvailabilityPath
-	Unobservable []UnobservableAvailabilityPath
-	Repair       ItemRepair
+	AvailabilityDrift
+	Repair ItemRepair
 	// absentUnexpected holds the Unexpected paths of a declared Skill that is
 	// not present on the skills directory. --fix removes exactly these rather
 	// than Apply, which would link the absent master on the desired Agents.
@@ -141,6 +135,9 @@ type DoctorOutcome struct {
 	// directory. They are not counted in Remaining (see issueCount): they are
 	// occupancy the tool does not manage, not Drift to reconcile.
 	Untracked int
+	// UntrackedLinks is how many leftover symlinks sit on the skills
+	// directory, counted from the same diagnosis as Untracked.
+	UntrackedLinks int
 }
 
 type DoctorEvent struct {
@@ -187,14 +184,14 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 		return DoctorOutcome{}, err
 	}
 	if !fix {
-		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked)}, nil
+		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked), UntrackedLinks: len(plan.UntrackedLinks)}, nil
 	}
 
 	replaceForeign := false
 	if foreign := plan.foreignAvailabilityPaths(); len(foreign) > 0 && approve != nil {
 		replaceForeign, err = approve(foreign)
 		if err != nil {
-			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Untracked: len(plan.Untracked)}, err
+			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Untracked: len(plan.Untracked), UntrackedLinks: len(plan.UntrackedLinks)}, err
 		}
 	}
 	d.repair(&plan, progress, replaceForeign)
@@ -205,6 +202,7 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 	}
 	outcome.Remaining = after.issueCount()
 	outcome.Untracked = len(after.Untracked)
+	outcome.UntrackedLinks = len(after.UntrackedLinks)
 	outcome.RecoveryNeeded = outcome.RecoveryNeeded || len(after.CacheRecovery) > 0
 	return outcome, nil
 }
@@ -260,13 +258,6 @@ func (p DoctorReport) foreignAvailabilityPaths() []ForeignAvailabilityPath {
 		paths = append(paths, drift.Foreign...)
 	}
 	return paths
-}
-
-func availabilitySource(sourceType, source string) string {
-	if strings.HasPrefix(sourceType, "local_") {
-		return "local"
-	}
-	return source
 }
 
 // diagnose records untracked Skills as warnings. Missing Skills and invalid
@@ -328,23 +319,13 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	// declared Skill, the same answer prune acts on; the per-Skill
 	// observation supplies the rest of a present Skill's Drift.
 	for _, s := range inv.declaredPresent() {
-		source := availabilitySource(s.SourceType, s.Source)
 		drift := d.availability.ObserveAvailability(s.Name)
 		drift.Unexpected = agentsOf(unexpected[s.Name])
 		delete(unexpected, s.Name)
 		if drift.Empty() && len(drift.Copies) == 0 {
 			continue
 		}
-		plan.Drift = append(plan.Drift, SkillDrift{
-			Skill:        s.Name,
-			Source:       source,
-			Missing:      drift.Missing,
-			Unexpected:   drift.Unexpected,
-			Broken:       drift.Broken,
-			Copies:       drift.Copies,
-			Foreign:      drift.Foreign,
-			Unobservable: drift.Unobservable,
-		})
+		plan.Drift = append(plan.Drift, SkillDrift{AvailabilityDrift: drift})
 	}
 	for _, item := range inv.SkillItems() {
 		paths, ok := unexpected[item.Name]
@@ -352,10 +333,8 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			continue
 		}
 		plan.Drift = append(plan.Drift, SkillDrift{
-			Skill:            item.Name,
-			Source:           availabilitySource(item.SourceType, item.Source),
-			Unexpected:       agentsOf(paths),
-			absentUnexpected: paths,
+			AvailabilityDrift: AvailabilityDrift{Skill: item.Name, Unexpected: agentsOf(paths)},
+			absentUnexpected:  paths,
 		})
 	}
 	plan.Agents = withoutForeignPhysical(plan.Agents, plan.foreignAvailabilityPaths())
