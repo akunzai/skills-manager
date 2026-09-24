@@ -452,9 +452,9 @@ func TestCLIPruneRequiresYesWithoutTerminal(t *testing.T) {
 func TestSelectedPrunePlanExpandsMasterSkillsAndKeepsIndividualLinks(t *testing.T) {
 	plan := engine.PrunePlan{
 		UntrackedSkills: []string{"orphan"},
-		Unconfigured: []engine.PruneLink{
-			{Agent: "augment", Path: "/agents/augment/orphan"},
-			{Agent: "continue", Path: "/agents/continue/configured"},
+		Unconfigured: []engine.ManagedAgentPath{
+			{Agent: "augment", Skill: "orphan", Path: "/agents/augment/orphan"},
+			{Agent: "continue", Skill: "configured", Path: "/agents/continue/configured"},
 		},
 	}
 
@@ -462,9 +462,9 @@ func TestSelectedPrunePlanExpandsMasterSkillsAndKeepsIndividualLinks(t *testing.
 	if got, want := selected.UntrackedSkills, []string{"orphan"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected master skills = %v; want %v", got, want)
 	}
-	if got, want := selected.Unconfigured, []engine.PruneLink{
-		{Agent: "augment", Path: "/agents/augment/orphan"},
-		{Agent: "continue", Path: "/agents/continue/configured"},
+	if got, want := selected.Unconfigured, []engine.ManagedAgentPath{
+		{Agent: "augment", Skill: "orphan", Path: "/agents/augment/orphan"},
+		{Agent: "continue", Skill: "configured", Path: "/agents/continue/configured"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected links = %v; want %v", got, want)
 	}

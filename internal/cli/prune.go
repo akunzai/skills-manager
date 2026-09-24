@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -186,7 +185,7 @@ func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
 		masterKeys[skill] = key
 		linked := 0
 		for _, link := range plan.Unconfigured {
-			if filepath.Base(link.Path) == skill {
+			if link.Skill == skill {
 				linked++
 			}
 		}
@@ -203,9 +202,9 @@ func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
 	for _, link := range plan.Unconfigured {
 		groups["Agent: "+link.Agent] = append(groups["Agent: "+link.Agent], tui.SelectOption{
 			Key:       pruneLinkKey(link.Path),
-			Title:     filepath.Base(link.Path),
+			Title:     link.Skill,
 			Extra:     models.ToTildePath(link.Path),
-			DependsOn: masterKeys[filepath.Base(link.Path)],
+			DependsOn: masterKeys[link.Skill],
 		})
 	}
 	return tui.PromptOrderedGroupedMultiSelect("Select items to prune:", groups, []string{pruneMasterGroup})
@@ -225,7 +224,7 @@ func selectedPrunePlan(plan engine.PrunePlan, selected []string) engine.PrunePla
 		}
 	}
 	for _, link := range plan.Unconfigured {
-		if selectedSet[pruneLinkKey(link.Path)] || selectedMasters[filepath.Base(link.Path)] {
+		if selectedSet[pruneLinkKey(link.Path)] || selectedMasters[link.Skill] {
 			result.Unconfigured = append(result.Unconfigured, link)
 		}
 	}

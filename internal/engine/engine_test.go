@@ -721,7 +721,7 @@ func TestApplyPrunePlanLeavesLinkReplacedAfterPlanning(t *testing.T) {
 	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "alpha"), link); err != nil {
 		t.Fatal(err)
 	}
-	plan := PrunePlan{Unconfigured: []PruneLink{{Agent: "claude-code", Path: link}}}
+	plan := PrunePlan{Unconfigured: []ManagedAgentPath{{Agent: "claude-code", Skill: "alpha", Path: link}}}
 	if err := os.Remove(link); err != nil {
 		t.Fatal(err)
 	}

@@ -500,12 +500,17 @@ func (a *Availability) ObserveAvailability(skill string) AvailabilityDrift {
 	return observation
 }
 
+// ManagedAgentPath is one managed Availability path on an Agent directory.
+type ManagedAgentPath struct {
+	Agent string
+	Skill string
+	Path  string
+}
+
 // LeftoverPath is one managed Availability path that declared Availability
 // does not call for.
 type LeftoverPath struct {
-	Agent    string
-	Skill    string
-	Path     string
+	ManagedAgentPath
 	Dangling bool
 	Repair   ItemRepair
 }
@@ -568,13 +573,6 @@ func (a *Availability) declaredSkills() map[string]struct{} {
 		names[name] = struct{}{}
 	}
 	return names
-}
-
-// ManagedAgentPath is one managed Availability path on an Agent directory.
-type ManagedAgentPath struct {
-	Agent string
-	Skill string
-	Path  string
 }
 
 // AgentDirObservation is every Agent directory of one Scope read once: the
