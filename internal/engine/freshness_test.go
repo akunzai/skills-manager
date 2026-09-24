@@ -366,6 +366,7 @@ func TestInspectFreshnessReportsScopeStateThatCannotBeLocated(t *testing.T) {
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	t.Setenv("XDG_STATE_HOME", "")
 	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "") // what os.UserHomeDir reads on Windows
 
 	snapshot, err := InspectFreshness(config.DefaultConfig(), skillsDir, filepath.Join(project, "cache"), FreshnessOptions{ObserveScope: true})
 	if err != nil {

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -207,7 +209,7 @@ func TestCLIRmReportsUnreadableScopeState(t *testing.T) {
 	if out, err := runCLI(t, "add", "--symlink", localSkillDir, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("add --symlink: %v\n%s", err, out)
 	}
-	statePath, bad := makeScopeStateUnreadable(t)
+	statePath, bad := makeScopeStateUnreadable(t, skillsDir)
 
 	out, err := runCLI(t, "rm", "my-local-skill", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err == nil || ExitCode(err) != 2 {
@@ -2253,7 +2255,7 @@ func TestCLIPruneProceedsPastUnreadableScopeState(t *testing.T) {
 	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
 		t.Fatal(err)
 	}
-	statePath, bad := makeScopeStateUnreadable(t)
+	statePath, bad := makeScopeStateUnreadable(t, skillsDir)
 
 	out, err := runCLI(t, "prune", "--yes", "--config", configFile, "--skills-dir", skillsDir)
 	if err == nil || ExitCode(err) != 2 {
@@ -2667,17 +2669,32 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	}
 }
 
-// makeScopeStateUnreadable puts a regular file where the Scope state directory
-// belongs, so every Scope's state fails to open. It returns the file's path
-// and bytes so a test can check nothing rewrote it.
-func makeScopeStateUnreadable(t *testing.T) (string, []byte) {
+// makeScopeStateUnreadable writes a Scope state for skillsDir that does not
+// decode, at the path the engine keys it by: the SHA-256 of the canonical
+// skills directory. It returns the path and bytes so a test can check nothing
+// rewrote it. A file standing in for the state directory would not do: on
+// Windows opening a child of a file is ERROR_PATH_NOT_FOUND, which reads as a
+// missing (empty) state rather than an unreadable one.
+func makeScopeStateUnreadable(t *testing.T, skillsDir string) (string, []byte) {
 	t.Helper()
-	path := filepath.Join(os.Getenv("XDG_STATE_HOME"), "skills-manager", "scope-state")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	abs, err := filepath.Abs(skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(canonical)))
+	path := filepath.Join(os.Getenv("XDG_STATE_HOME"), "skills-manager", "scope-state", hex.EncodeToString(sum[:])+".json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bad := []byte("not a directory")
-	if err := os.WriteFile(path, bad, 0o644); err != nil {
+	bad := []byte("{not json")
+	if err := os.WriteFile(path, bad, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path, bad
@@ -2692,7 +2709,7 @@ func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
 	writeCLIGitSkill(t, origin, "sample")
-	statePath, bad := makeScopeStateUnreadable(t)
+	statePath, bad := makeScopeStateUnreadable(t, skillsDir)
 
 	out, err := runCLI(t, "add", "owner/repo", "--url", origin, "--skill", "sample", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err == nil || ExitCode(err) != 2 {
