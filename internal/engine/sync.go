@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+
+	"github.com/akunzai/skills-manager/internal/config"
 )
 
 const (
@@ -22,6 +25,8 @@ const (
 	SyncCommandStart       = "command_start"
 	SyncCommandFailed      = "command_failed"
 	SyncSkipped            = "skipped"
+	SyncRenamed            = "renamed"
+	SyncRenameFailed       = "rename_failed"
 )
 
 // SyncOutcome is what became of one declared Skill. Blocked and Failed ask
@@ -113,6 +118,11 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 			if item.Block == SyncBlockUnknownBaseline {
 				report.Unknown = append(report.Unknown, item.Freshness)
 			}
+			if action, _ := item.Resolve(decision); action == SyncActionRename {
+				report.tally(plan.applyRename(item, state, stateStore, emit))
+				report.Configured = config.GetConfiguredSkillNames(plan.cfg)
+				continue
+			}
 			outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, item, decision, state, stateStore, emit)
 			report.tally(outcome)
 		}
@@ -144,7 +154,11 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 	}
 	action, block := item.Resolve(decision)
 	if action == SyncActionSkip {
-		emitSync(emit, SyncEvent{Kind: SyncSkipped, Source: item.Source, Skill: item.Name, Err: string(block)})
+		reason := string(block)
+		if item.BlockReason != "" {
+			reason += ": " + item.BlockReason
+		}
+		emitSync(emit, SyncEvent{Kind: SyncSkipped, Source: item.Source, Skill: item.Name, Err: reason})
 		return SyncBlocked, fmt.Errorf("%s", block)
 	}
 	if action == SyncActionMaterialize {
@@ -256,4 +270,59 @@ func itemNames(items []SyncPlanItem) []string {
 		names = append(names, item.Name)
 	}
 	return names
+}
+
+// applyRename migrates one renamed Skill (ADR 0007). Config is saved first, so
+// an interruption leaves the new name declared and the next Sync Materializes
+// it; the old copy then shows up as Untracked rather than being lost. The old
+// copy's Availability and baseline go with it, then the new Skill is applied
+// exactly as Sync applies any Skill.
+func (plan *SyncPlan) applyRename(item SyncPlanItem, state ScopeState, stateStore *ScopeStateStore, emit func(SyncEvent)) SyncOutcome {
+	old, skill := item.Name, item.Freshness
+	fail := func(err error) SyncOutcome {
+		emitSync(emit, SyncEvent{Kind: SyncRenameFailed, Source: item.Source, Skill: old, Target: skill.RenamedTo, Err: err.Error()})
+		return SyncFailed
+	}
+	if plan.configPath == "" {
+		return fail(errors.New("no Config path to record the rename in"))
+	}
+	repo := plan.cfg.Remote[item.Source]
+	delete(repo.Skills, old)
+	if !item.RenameTargetDeclared {
+		repo.Skills[skill.RenamedTo] = skill.RenamedSubpath
+	}
+	plan.cfg.Remote[item.Source] = repo
+	if override, ok := plan.cfg.Settings.Availability[old]; ok {
+		if _, taken := plan.cfg.Settings.Availability[skill.RenamedTo]; !taken && !item.RenameTargetDeclared {
+			plan.cfg.Settings.Availability[skill.RenamedTo] = override
+		}
+		delete(plan.cfg.Settings.Availability, old)
+	}
+	if err := config.SaveConfig(plan.cfg, plan.configPath); err != nil {
+		return fail(err)
+	}
+	plan.availability = NewAvailability(plan.cfg, plan.skillsDir)
+	plan.availability.ApplyLeftover(plan.availability.ObserveLeftover().ForSkills([]string{old}).WithoutEmpty())
+	if err := RemoveAll(skill.ScopePath); err != nil && !os.IsNotExist(err) {
+		return fail(err)
+	}
+	if stateStore != nil {
+		delete(state.Skills, old)
+		if err := stateStore.Save(state); err != nil {
+			return fail(err)
+		}
+	}
+	emitSync(emit, SyncEvent{Kind: SyncRenamed, Source: item.Source, Skill: old, Target: skill.RenamedTo})
+	if item.RenameTargetDeclared {
+		return SyncDone
+	}
+	renamed := planRemoteItem(item.Source, item.CachePath, item.LocalSHA, SkillFreshness{
+		Name:      skill.RenamedTo,
+		Source:    item.Source,
+		Subpath:   skill.RenamedSubpath,
+		ScopePath: filepath.Join(plan.skillsDir, skill.RenamedTo),
+		CachePath: filepath.Join(item.CachePath, filepath.FromSlash(skill.RenamedSubpath)),
+	}, plan.availability.ObserveAvailability(skill.RenamedTo))
+	outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, state, stateStore, emit)
+	return outcome
 }

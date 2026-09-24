@@ -2489,3 +2489,98 @@ func TestCLIOutdatedReportsIncompleteCache(t *testing.T) {
 		}
 	}
 }
+
+func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeSkill := func(name, frontmatter string) {
+		t.Helper()
+		dir := filepath.Join(origin, "skills", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: "+name+"\n"+frontmatter+"---\n# Skill\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commit := func(message string) {
+		t.Helper()
+		cliRunGit(t, origin, "add", "-A")
+		cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", message)
+	}
+	writeSkill("old", "")
+	writeSkill("gone", "")
+	cliRunGit(t, root, "init", origin)
+	commit("initial")
+	branch := cliRunGit(t, origin, "symbolic-ref", "--short", "HEAD")
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{Type: "git", URL: origin, Branch: branch, Skills: map[string]string{"old": "skills/old", "gone": "skills/gone"}}
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	scope := []string{"--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
+	run := func(args ...string) (string, error) {
+		t.Helper()
+		resetSubcommandFlags()
+		return runCLI(t, append(args, scope...)...)
+	}
+	if out, err := run("update"); err != nil {
+		t.Fatalf("update: %v\n%s", err, out)
+	}
+	if out, err := run("sync"); err != nil {
+		t.Fatalf("sync: %v\n%s", err, out)
+	}
+
+	if err := os.RemoveAll(filepath.Join(origin, "skills")); err != nil {
+		t.Fatal(err)
+	}
+	writeSkill("new", "metadata:\n  replaces: old\n")
+	commit("rename old, remove gone")
+
+	out, err := run("update")
+	if err != nil || !strings.Contains(out, "old was renamed to") || !strings.Contains(out, "new") {
+		t.Fatalf("update should report the rename: %v\n%s", err, out)
+	}
+	out, err = run("outdated")
+	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed") || !strings.Contains(out, "→ ") || !strings.Contains(out, "run 'skills rm gone'") {
+		t.Fatalf("outdated should show the rename and the removal: %v\n%s", err, out)
+	}
+	out, err = run("sync", "--dry-run")
+	if ExitCode(err) != 1 || !strings.Contains(out, "Would rename old to new") {
+		t.Fatalf("dry-run should preview the rename: %v\n%s", err, out)
+	}
+	if loaded, _ := config.LoadConfig(configFile); len(loaded.Remote["owner/repo"].Skills) != 2 || loaded.Remote["owner/repo"].Skills["old"] == "" {
+		t.Fatalf("dry-run changed Config: %#v", loaded.Remote)
+	}
+
+	out, err = run("sync")
+	if ExitCode(err) != 1 {
+		t.Fatalf("the removed Skill still blocks, so sync exits 1: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Renamed old") || !strings.Contains(out, "no longer in Source owner/repo; run 'skills rm gone'") {
+		t.Fatalf("sync should rename old and name rm for gone:\n%s", out)
+	}
+	if strings.Contains(out, "--force") || strings.Contains(out, "run 'skills update' first") {
+		t.Fatalf("sync advice must not send the user to --force or update:\n%s", out)
+	}
+	loaded, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded.Remote["owner/repo"].Skills, map[string]string{"new": "skills/new", "gone": "skills/gone"}) {
+		t.Fatalf("Config after rename = %#v", loaded.Remote["owner/repo"].Skills)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "new", "SKILL.md")); err != nil {
+		t.Fatalf("new Skill not synced: %v", err)
+	}
+
+	if out, err := run("rm", "gone"); err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	if out, err := run("sync"); err != nil {
+		t.Fatalf("sync after rm should converge: %v\n%s", err, out)
+	}
+}

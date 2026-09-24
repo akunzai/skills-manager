@@ -79,7 +79,7 @@ func TestPlanSyncWritesNothing(t *testing.T) {
 	cfg, root, skillsDir, cacheDir, checkMarker := planSyncFixture(t)
 	before := treeSnapshot(t, root)
 
-	plan, err := PlanSync(cfg, skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestSyncPlanResolvesEachDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanSync(cfg, skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"codex"}
 	config.AddLocalCommandEntry(cfg, "tool", "install-tool", "which tool", "")
 
-	plan, err := PlanSync(cfg, skillsDir, t.TempDir())
+	plan, err := PlanSync(cfg, "", skillsDir, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 	}
 
 	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "tool", "SKILL.md"), []byte("# Tool\n"))
-	plan, err = PlanSync(cfg, skillsDir, t.TempDir())
+	plan, err = PlanSync(cfg, "", skillsDir, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

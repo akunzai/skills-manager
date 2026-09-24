@@ -88,6 +88,8 @@ func newUpdateCmd() *cobra.Command {
 						shaStr = fmt.Sprintf(" (%s)", ev.NewSHA[:7])
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
+				case engine.UpdateRenamed:
+					fmt.Fprintf(cmd.OutOrStdout(), "      %s%s was renamed to %s%s%s in %s.%s\n", colorCyan, ev.From, colorBold, ev.To, colorReset+colorCyan, ev.Source, colorReset)
 				case engine.UpdateRepoError:
 					progress.Stop()
 					progress = nil
@@ -118,7 +120,9 @@ func newUpdateCmd() *cobra.Command {
 				skipMsg = fmt.Sprintf(" (%d Source Cache(s) were already up to date)", totalSkipped)
 			}
 
-			if totalUpdated > 0 {
+			if len(result.Renamed) > 0 && totalUpdated == 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sFound %d renamed skill(s).%s\nRun 'skills sync' to apply the rename to this Scope.\n\n", colorBold, colorGreen, len(result.Renamed), colorReset)
+			} else if totalUpdated > 0 {
 				if flagDryRun {
 					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sDry run complete: %d Source Cache(s) would be refreshed.%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
 				} else {

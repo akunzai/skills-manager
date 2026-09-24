@@ -88,8 +88,10 @@ func (s FreshnessSnapshot) Dispositions() []FreshnessDisposition {
 		}
 		for _, skill := range repository.Skills {
 			switch skill.Status {
-			case SkillMissing, SkillCacheUpdateAvailable, SkillUnknownBaseline, SkillUnverified:
+			case SkillMissing, SkillCacheUpdateAvailable, SkillUnknownBaseline, SkillUnverified, SkillRenamed:
 				add(FreshnessSync, string(skill.Status), repository.Source, skill.Name)
+			case SkillRemovedUpstream:
+				add(FreshnessInvestigate, string(skill.Status), repository.Source, skill.Name)
 			case SkillLocalDrift:
 				add(FreshnessSync, string(skill.Status), repository.Source, skill.Name)
 				add(FreshnessProtectDrift, string(skill.Status), repository.Source, skill.Name)
@@ -135,7 +137,25 @@ const (
 	SkillLocalDrift           SkillFreshnessStatus = "local_drift"
 	SkillUnknownBaseline      SkillFreshnessStatus = "unknown_baseline"
 	SkillUnverified           SkillFreshnessStatus = "unverified"
-	SkillError                SkillFreshnessStatus = "error"
+	// SkillRenamed is a Skill its Source no longer has, while a Skill the
+	// Cache covers declares it replaces it (ADR 0007). Sync migrates it.
+	SkillRenamed SkillFreshnessStatus = "renamed"
+	// SkillRemovedUpstream is a Skill its Source no longer has, with no
+	// covered replacement. Only rm resolves it.
+	SkillRemovedUpstream SkillFreshnessStatus = "removed_upstream"
+	SkillError           SkillFreshnessStatus = "error"
+)
+
+// ScopeCopy is how a renamed Skill's copy on the Scope skills directory
+// compares with the baseline Sync last applied, which decides whether Sync
+// may remove it.
+type ScopeCopy string
+
+const (
+	ScopeCopyAbsent  ScopeCopy = "absent"
+	ScopeCopyClean   ScopeCopy = "clean"
+	ScopeCopyDrift   ScopeCopy = "local_drift"
+	ScopeCopyUnknown ScopeCopy = "unknown_baseline"
 )
 
 type ContentChanges struct {
@@ -153,9 +173,14 @@ type SkillFreshness struct {
 	Status           SkillFreshnessStatus `json:"status"`
 	BaselineRecorded bool                 `json:"baseline_recorded"`
 	Changes          ContentChanges       `json:"changes,omitempty"`
-	CacheDigests     map[string]string    `json:"-"`
-	ScopeDigests     map[string]string    `json:"-"`
-	Error            string               `json:"error,omitempty"`
+	// RenamedTo and RenamedSubpath name the replacement of a renamed Skill;
+	// ScopeCopy is the state of the old copy Sync would remove.
+	RenamedTo      string            `json:"renamed_to,omitempty"`
+	RenamedSubpath string            `json:"renamed_subpath,omitempty"`
+	ScopeCopy      ScopeCopy         `json:"scope_copy,omitempty"`
+	CacheDigests   map[string]string `json:"-"`
+	ScopeDigests   map[string]string `json:"-"`
+	Error          string            `json:"error,omitempty"`
 }
 
 func InspectFreshness(cfg *config.Config, skillsDir, cacheDir string, options FreshnessOptions) (*FreshnessSnapshot, error) {
@@ -209,10 +234,56 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 				skill.Status = SkillUnknownBaseline
 				skill.BaselineRecorded = false
 			}
+			if skill.Status == SkillUnverified && snapshot.Repositories[i].LocalSHA != "" && !subpathAtHead(cachePath, skill.Subpath) {
+				skill.Status = SkillRemovedUpstream
+				skill.ScopeCopy = observeScopeCopy(skill.ScopePath, state.Skills[name], stateErr == nil)
+			}
 			snapshot.Repositories[i].Skills = append(snapshot.Repositories[i].Skills, skill)
 		}
+		attachReplacements(snapshot.Repositories[i].Skills, cachePath, sparse, sparseErr)
 	}
 	return snapshot, nil
+}
+
+// attachReplacements marks a removed Skill renamed when a Skill the sparse
+// checkout covers declares it replaces it. Everything read here is already on
+// disk, so Freshness stays offline (ADR 0007).
+func attachReplacements(skills []SkillFreshness, cachePath string, sparse sparseState, sparseErr error) {
+	var removed []string
+	for _, skill := range skills {
+		if skill.Status == SkillRemovedUpstream {
+			removed = append(removed, skill.Name)
+		}
+	}
+	if len(removed) == 0 || sparseErr != nil {
+		return
+	}
+	found := findReplacements(cachePath, removed, sparse.covers)
+	for i := range skills {
+		replacement, ok := found[skills[i].Name]
+		if !ok || skills[i].Status != SkillRemovedUpstream {
+			continue
+		}
+		skills[i].Status = SkillRenamed
+		skills[i].RenamedTo = replacement.Name
+		skills[i].RenamedSubpath = replacement.Subpath
+	}
+}
+
+// observeScopeCopy compares a Skill's copy on the Scope skills directory with
+// the baseline Sync last applied there.
+func observeScopeCopy(scopePath string, applied AppliedSkillState, stateRead bool) ScopeCopy {
+	digests, err := DigestSkillContent(scopePath)
+	if errors.Is(err, os.ErrNotExist) || os.IsNotExist(rootPathError(err)) {
+		return ScopeCopyAbsent
+	}
+	if err != nil || !stateRead || applied.Source == "" {
+		return ScopeCopyUnknown
+	}
+	if reflect.DeepEqual(digests, applied.ContentDigests) {
+		return ScopeCopyClean
+	}
+	return ScopeCopyDrift
 }
 
 func observeRemoteFreshness(repositories map[string]config.RemoteRepo, cacheDir string, workers int) []FreshnessRepository {

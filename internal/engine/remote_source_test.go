@@ -30,7 +30,7 @@ func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: filepath.Join(project, "missing-origin"), Skills: map[string]string{"sample": "sample"}}
 	skillsDir := filepath.Join(project, ".agents", "skills")
 
-	plan, err := PlanSync(cfg, skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
 	if err != nil {
 		t.Fatal(err)
 	}

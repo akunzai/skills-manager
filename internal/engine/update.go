@@ -27,10 +27,20 @@ type UpdateErrorInfo struct {
 	Source string `json:"source"`
 	Error  string `json:"error"`
 }
+
+// RenamedSkillInfo is a declared Skill its Source removed while another Skill
+// declared it replaces it. Update covers the replacement; Sync migrates.
+type RenamedSkillInfo struct {
+	Source  string `json:"source"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Subpath string `json:"subpath"`
+}
 type UpdateResult struct {
-	UpdatedRepos []UpdatedRepoInfo `json:"updated_repos"`
-	SkippedRepos []SkippedRepoInfo `json:"skipped_repos"`
-	Errors       []UpdateErrorInfo `json:"errors"`
+	UpdatedRepos []UpdatedRepoInfo  `json:"updated_repos"`
+	SkippedRepos []SkippedRepoInfo  `json:"skipped_repos"`
+	Renamed      []RenamedSkillInfo `json:"renamed"`
+	Errors       []UpdateErrorInfo  `json:"errors"`
 }
 
 const (
@@ -41,10 +51,12 @@ const (
 	UpdateStart        = "update_start"
 	UpdateRepoDone     = "repo_done"
 	UpdateRepoError    = "repo_error"
+	UpdateRenamed      = "renamed"
 )
 
 type UpdateEvent struct {
 	Kind, Source, NewSHA, Err        string
+	From, To                         string
 	Skills                           []string
 	Index, Total, Outdated, UpToDate int
 	DryRun                           bool
@@ -97,7 +109,7 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 	if err != nil {
 		return nil, err
 	}
-	result := &UpdateResult{UpdatedRepos: []UpdatedRepoInfo{}, SkippedRepos: []SkippedRepoInfo{}, Errors: []UpdateErrorInfo{}}
+	result := &UpdateResult{UpdatedRepos: []UpdatedRepoInfo{}, SkippedRepos: []SkippedRepoInfo{}, Renamed: []RenamedSkillInfo{}, Errors: []UpdateErrorInfo{}}
 	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckStart, Total: len(repositories)})
 	selected := *config.DefaultConfig()
 	selected.Remote = repositories
@@ -150,5 +162,37 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 	if !dryRun && len(refresh) > 0 {
 		emitUpdate(progress, UpdateEvent{Kind: UpdateRefreshDone, Total: len(refresh)})
 	}
+	if !dryRun {
+		followRenames(repositories, cacheDir, result, progress)
+	}
 	return result, nil
+}
+
+// followRenames covers the replacement of every declared Skill its Source no
+// longer has. It also runs for a Cache that was already current, since
+// another Scope's update may have fetched the commit that removed the Skill.
+func followRenames(repositories map[string]config.RemoteRepo, cacheDir string, result *UpdateResult, progress UpdateProgress) {
+	failed := make(map[string]bool)
+	for _, e := range result.Errors {
+		failed[e.Source] = true
+	}
+	for _, source := range slices.Sorted(maps.Keys(repositories)) {
+		repo := repositories[source]
+		cache := NewCache(source, repo.URL, repo.Branch, cacheDir)
+		if failed[source] || localRepoCommit(cache.dir()) == "" {
+			continue
+		}
+		found, err := coverReplacements(cache, repo.Skills)
+		if err != nil {
+			message := fmt.Sprintf("follow renamed Skills: %v", err)
+			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})
+			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: message})
+			continue
+		}
+		for _, old := range slices.Sorted(maps.Keys(found)) {
+			replacement := found[old]
+			result.Renamed = append(result.Renamed, RenamedSkillInfo{Source: source, From: old, To: replacement.Name, Subpath: replacement.Subpath})
+			emitUpdate(progress, UpdateEvent{Kind: UpdateRenamed, Source: source, From: old, To: replacement.Name})
+		}
+	}
 }
