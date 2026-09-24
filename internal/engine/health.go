@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,6 +32,10 @@ type SkillDrift struct {
 	Foreign      []ForeignAvailabilityPath
 	Unobservable []UnobservableAvailabilityPath
 	Repair       ItemRepair
+	// absentUnexpected holds the Unexpected paths of a declared Skill that is
+	// not present on the skills directory. --fix removes exactly these rather
+	// than Apply, which would link the absent master on the desired Agents.
+	absentUnexpected []ManagedAgentPath
 }
 
 // RepairStatus is what --fix did to one diagnosed item.
@@ -312,6 +317,10 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	agentDirs := d.availability.ObserveAgentDirs()
 	plan.Agents = agentDirs.Agents
 	plan.Leftover = agentDirs.Leftover
+	unexpected := make(map[string][]ManagedAgentPath)
+	for _, path := range agentDirs.Unexpected {
+		unexpected[path.Skill] = append(unexpected[path.Skill], path)
+	}
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
 
 	inv, err := LoadInventory(d.cfg, d.skillsDir)
@@ -324,9 +333,14 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	plan.IllegalLocal = inv.IllegalLocal()
 	plan.Invalid = inv.Invalid()
 	plan.Stubs = inv.Stubs()
+	// Unexpected comes from the Agent directory observation for every
+	// declared Skill, the same answer prune acts on; the per-Skill
+	// observation supplies the rest of a present Skill's Drift.
 	for _, s := range inv.declaredPresent() {
 		source := availabilitySource(s.SourceType, s.Source)
 		drift := d.availability.ObserveAvailability(s.Name)
+		drift.Unexpected = agentsOf(unexpected[s.Name])
+		delete(unexpected, s.Name)
 		if drift.Empty() && len(drift.Copies) == 0 {
 			continue
 		}
@@ -339,6 +353,18 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			Copies:       drift.Copies,
 			Foreign:      drift.Foreign,
 			Unobservable: drift.Unobservable,
+		})
+	}
+	for _, item := range inv.SkillItems() {
+		paths, ok := unexpected[item.Name]
+		if !ok {
+			continue
+		}
+		plan.Drift = append(plan.Drift, SkillDrift{
+			Skill:            item.Name,
+			Source:           availabilitySource(item.SourceType, item.Source),
+			Unexpected:       agentsOf(paths),
+			absentUnexpected: paths,
 		})
 	}
 	plan.Agents = withoutForeignPhysical(plan.Agents, plan.foreignAvailabilityPaths())
@@ -417,13 +443,36 @@ func (d *Doctor) repair(plan *DoctorReport, progress DoctorProgress, replaceFore
 	plan.Leftover = attachLeftoverRepairs(plan.Leftover, d.availability.ApplyLeftover(plan.Leftover))
 	for i, drift := range plan.Drift {
 		var err error
-		if len(drift.Foreign) > 0 && replaceForeign {
+		if len(drift.absentUnexpected) > 0 {
+			err = removeManagedAgentPaths(drift.absentUnexpected, d.skillsDir)
+		} else if len(drift.Foreign) > 0 && replaceForeign {
 			err = d.availability.ReplaceForeign(drift.Skill, drift.Foreign)
 		} else {
 			_, err = d.availability.Apply(drift.Skill)
 		}
 		plan.Drift[i].Repair = itemRepairFromErr(err)
 	}
+}
+
+// agentsOf is the Agent of each path, in order.
+func agentsOf(paths []ManagedAgentPath) []string {
+	var agents []string
+	for _, path := range paths {
+		agents = append(agents, path.Agent)
+	}
+	return agents
+}
+
+// removeManagedAgentPaths removes each path that is still a managed path for
+// its Skill, leaving one that changed since it was observed.
+func removeManagedAgentPaths(paths []ManagedAgentPath, skillsDir string) error {
+	var errs []error
+	for _, path := range paths {
+		if _, err := removeManagedSkillPath(path.Path, path.Skill, skillsDir); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func itemRepairFromErr(err error) ItemRepair {
