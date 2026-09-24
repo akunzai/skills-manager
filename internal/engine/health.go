@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
@@ -22,16 +21,11 @@ type AgentHealth struct {
 	Unusable string
 }
 
+// SkillDrift is one declared Skill's Availability Drift as Doctor diagnosed
+// it, with what --fix did about it.
 type SkillDrift struct {
-	Skill        string
-	Source       string
-	Missing      []string
-	Unexpected   []string
-	Broken       []string
-	Copies       []string
-	Foreign      []ForeignAvailabilityPath
-	Unobservable []UnobservableAvailabilityPath
-	Repair       ItemRepair
+	AvailabilityDrift
+	Repair ItemRepair
 	// absentUnexpected holds the Unexpected paths of a declared Skill that is
 	// not present on the skills directory. --fix removes exactly these rather
 	// than Apply, which would link the absent master on the desired Agents.
@@ -262,13 +256,6 @@ func (p DoctorReport) foreignAvailabilityPaths() []ForeignAvailabilityPath {
 	return paths
 }
 
-func availabilitySource(sourceType, source string) string {
-	if strings.HasPrefix(sourceType, "local_") {
-		return "local"
-	}
-	return source
-}
-
 // diagnose records untracked Skills as warnings. Missing Skills and invalid
 // folders are issues but are not repaired.
 func (d *Doctor) diagnose() (DoctorReport, error) {
@@ -328,23 +315,13 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	// declared Skill, the same answer prune acts on; the per-Skill
 	// observation supplies the rest of a present Skill's Drift.
 	for _, s := range inv.declaredPresent() {
-		source := availabilitySource(s.SourceType, s.Source)
 		drift := d.availability.ObserveAvailability(s.Name)
 		drift.Unexpected = agentsOf(unexpected[s.Name])
 		delete(unexpected, s.Name)
 		if drift.Empty() && len(drift.Copies) == 0 {
 			continue
 		}
-		plan.Drift = append(plan.Drift, SkillDrift{
-			Skill:        s.Name,
-			Source:       source,
-			Missing:      drift.Missing,
-			Unexpected:   drift.Unexpected,
-			Broken:       drift.Broken,
-			Copies:       drift.Copies,
-			Foreign:      drift.Foreign,
-			Unobservable: drift.Unobservable,
-		})
+		plan.Drift = append(plan.Drift, SkillDrift{AvailabilityDrift: drift})
 	}
 	for _, item := range inv.SkillItems() {
 		paths, ok := unexpected[item.Name]
@@ -352,10 +329,8 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			continue
 		}
 		plan.Drift = append(plan.Drift, SkillDrift{
-			Skill:            item.Name,
-			Source:           availabilitySource(item.SourceType, item.Source),
-			Unexpected:       agentsOf(paths),
-			absentUnexpected: paths,
+			AvailabilityDrift: AvailabilityDrift{Skill: item.Name, Unexpected: agentsOf(paths)},
+			absentUnexpected:  paths,
 		})
 	}
 	plan.Agents = withoutForeignPhysical(plan.Agents, plan.foreignAvailabilityPaths())
