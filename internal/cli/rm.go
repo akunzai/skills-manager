@@ -86,7 +86,7 @@ func newRmCmd() *cobra.Command {
 				if err := result.Err(); err != nil {
 					return err
 				}
-				return exitError{message: "Scope baselines were not forgotten", code: 2}
+				return exitError{message: "Baselines were not forgotten", code: 2}
 			}
 			if applyErr != nil {
 				return applyErr

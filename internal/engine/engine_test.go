@@ -707,7 +707,7 @@ func TestApplyRemovePlanSavesConfigWhenMasterMissing(t *testing.T) {
 	}
 }
 
-// An unreadable Scope state leaves baselines alone but must not stop prune
+// An unreadable Scope state leaves Baselines alone but must not stop prune
 // from clearing everything else.
 func TestBuildPrunePlanProceedsPastUnreadableScopeState(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -722,7 +722,7 @@ func TestBuildPrunePlanProceedsPastUnreadableScopeState(t *testing.T) {
 		t.Fatalf("BuildPrunePlan error = %v; an unreadable Scope state must not stop prune", err)
 	}
 	if plan.StateError == "" {
-		t.Fatal("StateError is empty; want why stale baselines were not cleared")
+		t.Fatal("StateError is empty; want why stale Baselines were not cleared")
 	}
 	if len(plan.Unconfigured) != 1 || plan.Unconfigured[0].Path != link {
 		t.Fatalf("Unconfigured = %#v; want the leftover link", plan.Unconfigured)

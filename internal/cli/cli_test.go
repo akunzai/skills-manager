@@ -189,7 +189,7 @@ func TestCLIRmPrintsRemovalSummaryThroughCapturedOutput(t *testing.T) {
 	}
 }
 
-// An unreadable Scope state keeps rm from forgetting the baseline, not from
+// An unreadable Scope state keeps rm from forgetting the Baseline, not from
 // removing the Skill: it says why and exits 2.
 func TestCLIRmReportsUnreadableScopeState(t *testing.T) {
 	resetRootCmdFlags()
@@ -505,7 +505,7 @@ func TestSelectedPrunePlanExpandsMasterSkillsAndKeepsIndividualLinks(t *testing.
 	}
 }
 
-// Stale baselines are not a prompt option; confirming any prune clears them,
+// Stale Baselines are not a prompt option; confirming any prune clears them,
 // as --yes does.
 func TestSelectedPrunePlanKeepsStaleBaselines(t *testing.T) {
 	plan := engine.PrunePlan{
@@ -2233,7 +2233,7 @@ func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
 	}
 }
 
-// An unreadable Scope state leaves baselines alone but must not stop prune:
+// An unreadable Scope state leaves Baselines alone but must not stop prune:
 // everything else is removed, then prune says why and exits 2.
 func TestCLIPruneProceedsPastUnreadableScopeState(t *testing.T) {
 	resetRootCmdFlags()
@@ -2683,7 +2683,7 @@ func makeScopeStateUnreadable(t *testing.T) (string, []byte) {
 	return path, bad
 }
 
-// ADR-0002 counts a baseline that could not be recorded as a failure: Add
+// ADR-0002 counts a Baseline that could not be recorded as a failure: Add
 // still applies the Skill, then says why and exits 2.
 func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 	resetSubcommandFlags()

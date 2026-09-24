@@ -247,7 +247,7 @@ func TestDoctorRunReportsUnexpectedLinkOfAbsentSkill(t *testing.T) {
 	}
 }
 
-// Only a remote Skill has a baseline. An entry whose name is not declared
+// Only a remote Skill has a Baseline. An entry whose name is not declared
 // remote — undeclared, or now declared local — is stale for Doctor's
 // diagnosis, its --fix and prune alike.
 func TestStaleBaselinesAreEntriesNotDeclaredRemote(t *testing.T) {
@@ -260,7 +260,7 @@ func TestStaleBaselinesAreEntriesNotDeclaredRemote(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "remote", "remote", "github", "")
 	config.AddLocalSymlinkEntry(cfg, "local", filepath.Join(project, "src", "local"), "")
-	store, err := NewScopeStateStore(skillsDir)
+	store, err := newScopeStateStore(skillsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestStaleBaselinesAreEntriesNotDeclaredRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := slices.Sorted(maps.Keys(state.Skills)); !slices.Equal(got, []string{"remote"}) {
-		t.Fatalf("baselines after --fix = %v; want [remote]", got)
+		t.Fatalf("Baselines after --fix = %v; want [remote]", got)
 	}
 }
 

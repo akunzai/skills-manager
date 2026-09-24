@@ -207,7 +207,7 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 }
 
 // An unreadable Scope state must not stop Add from applying the Skill, nor
-// pass silently: the next Sync would find no baseline and block the Skill.
+// pass silently: the next Sync would find no Baseline and block the Skill.
 func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
@@ -222,10 +222,10 @@ func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err == nil {
-		t.Fatal("ApplyAddPlan error = nil; want the unrecorded baseline reported")
+		t.Fatal("ApplyAddPlan error = nil; want the unrecorded Baseline reported")
 	}
 	if result.StateError == "" {
-		t.Fatal("StateError is empty; want why the baseline was not recorded")
+		t.Fatal("StateError is empty; want why the Baseline was not recorded")
 	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
 		t.Fatalf("the Skill must still be Materialized: %v", err)

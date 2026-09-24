@@ -97,6 +97,7 @@ type DoctorReport struct {
 	// roots are reportable (LegacyCacheRoots); the migration machinery is
 	// an engine concern and stays unexported.
 	legacyCache []legacyCacheMigrationPlan
+	baselines   *Baselines
 	StaleScopes []ScopeStateArtifact
 	// GitError is why the git on PATH cannot maintain the sparse Cache
 	// (missing, or older than CheckGitVersion accepts). Only diagnosed when
@@ -111,7 +112,6 @@ type Doctor struct {
 	skillsDir      string
 	availability   *Availability
 	cacheDir       string
-	stateStore     *ScopeStateStore
 	cacheMigration *legacyCacheMigrator
 }
 
@@ -163,13 +163,11 @@ func NewDoctorWithCache(cfg *config.Config, skillsDir, cacheDir string) *Doctor 
 	// pair from the one its Availability applies would report Drift that is not
 	// there. Deliberate reuse, not a Config carried around inside Availability.
 	availability := NewAvailability(cfg, skillsDir)
-	stateStore, _ := NewScopeStateStore(availability.skillsDir)
 	doctor := &Doctor{
 		cfg:          availability.cfg,
 		skillsDir:    availability.skillsDir,
 		availability: availability,
 		cacheDir:     cacheDirOrDefault(cacheDir),
-		stateStore:   stateStore,
 	}
 	doctor.cacheMigration = newLegacyCacheMigrator(doctor.cfg, doctor.cacheDir)
 	return doctor
@@ -275,13 +273,11 @@ func availabilitySource(sourceType, source string) string {
 // folders are issues but are not repaired.
 func (d *Doctor) diagnose() (DoctorReport, error) {
 	plan := DoctorReport{SkillsDir: d.skillsDir}
-	if d.stateStore != nil {
-		state, err := d.stateStore.Load()
-		if err != nil {
-			plan.StateError = err.Error()
-		} else {
-			plan.StaleState = staleBaselines(d.cfg, state)
-		}
+	plan.baselines = OpenBaselines(d.skillsDir)
+	if err := plan.baselines.Err(); err != nil {
+		plan.StateError = err.Error()
+	} else {
+		plan.StaleState = plan.baselines.Stale(d.cfg)
 	}
 	artifacts, artifactErr := ListScopeStateArtifacts()
 	if artifactErr != nil {
@@ -398,12 +394,10 @@ func (p DoctorReport) issueCount() int {
 // repair leaves physical dirs, unmanaged broken links, and missing/untracked/
 // invalid Skills unchanged. Independent repair failures do not stop the run.
 func (d *Doctor) repair(plan *DoctorReport, progress DoctorProgress, replaceForeign bool) {
-	if d.stateStore != nil {
-		if plan.StateError != "" {
-			plan.StateRepair = itemRepairFromErr(d.stateStore.Prune())
-		} else if len(plan.StaleState) > 0 {
-			plan.StateRepair = itemRepairFromErr(d.stateStore.PruneSkills(remoteSkillNames(d.cfg)))
-		}
+	if plan.StateError != "" {
+		plan.StateRepair = itemRepairFromErr(plan.baselines.Reset())
+	} else if len(plan.StaleState) > 0 {
+		plan.StateRepair = itemRepairFromErr(plan.baselines.ForgetStale(d.cfg))
 	}
 	total := 0
 	for _, migration := range plan.legacyCache {
