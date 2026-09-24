@@ -135,6 +135,9 @@ type DoctorOutcome struct {
 	// directory. They are not counted in Remaining (see issueCount): they are
 	// occupancy the tool does not manage, not Drift to reconcile.
 	Untracked int
+	// UntrackedLinks is how many leftover symlinks sit on the skills
+	// directory, counted from the same diagnosis as Untracked.
+	UntrackedLinks int
 }
 
 type DoctorEvent struct {
@@ -181,14 +184,14 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 		return DoctorOutcome{}, err
 	}
 	if !fix {
-		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked)}, nil
+		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked), UntrackedLinks: len(plan.UntrackedLinks)}, nil
 	}
 
 	replaceForeign := false
 	if foreign := plan.foreignAvailabilityPaths(); len(foreign) > 0 && approve != nil {
 		replaceForeign, err = approve(foreign)
 		if err != nil {
-			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Untracked: len(plan.Untracked)}, err
+			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Untracked: len(plan.Untracked), UntrackedLinks: len(plan.UntrackedLinks)}, err
 		}
 	}
 	d.repair(&plan, progress, replaceForeign)
@@ -199,6 +202,7 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 	}
 	outcome.Remaining = after.issueCount()
 	outcome.Untracked = len(after.Untracked)
+	outcome.UntrackedLinks = len(after.UntrackedLinks)
 	outcome.RecoveryNeeded = outcome.RecoveryNeeded || len(after.CacheRecovery) > 0
 	return outcome, nil
 }

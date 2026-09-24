@@ -299,6 +299,33 @@ func TestStaleBaselinesAreEntriesNotDeclaredRemote(t *testing.T) {
 	}
 }
 
+// The summary reads UntrackedLinks off the outcome, beside Untracked. --fix
+// leaves untracked links alone today, so this pins that the count is there
+// with and without --fix; it cannot tell a pre-fix count from a post-fix one.
+func TestDoctorRunCountsUntrackedLinks(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	source := filepath.Join(project, "elsewhere", "untracked")
+	mustWriteScopeStateTestFile(t, filepath.Join(source, "SKILL.md"), []byte("# Untracked\n"))
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(skillsDir, "untracked")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	for _, fix := range []bool{false, true} {
+		outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(fix, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if outcome.UntrackedLinks != 1 {
+			t.Fatalf("fix=%v: UntrackedLinks = %d; want 1", fix, outcome.UntrackedLinks)
+		}
+	}
+}
+
 func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()

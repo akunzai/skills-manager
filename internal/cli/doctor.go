@@ -70,7 +70,7 @@ func newDoctorCmd() *cobra.Command {
 				// — but saying "top condition" above a standing finding is
 				// what made --fix read as broken.
 				real := outcome.Untracked
-				links := len(outcome.Report.UntrackedLinks)
+				links := outcome.UntrackedLinks
 				switch {
 				case real > 0 && links > 0:
 					fmt.Fprintf(out, "%s%sNo issues detected. %s not in Config; %s can be pruned.%s\n\n", colorBold, colorYellow, untrackedOccupancy(real), leftoverSymlinks(links), colorReset)
