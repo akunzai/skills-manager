@@ -1256,7 +1256,7 @@ func applyPlan(t *testing.T, cfg *config.Config, skillsDir, cacheDir string, dec
 	if os.Getenv("XDG_STATE_HOME") == "" {
 		t.Setenv("XDG_STATE_HOME", t.TempDir())
 	}
-	plan, err := PlanSync(cfg, skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
 	if err != nil {
 		t.Fatalf("PlanSync: %v", err)
 	}

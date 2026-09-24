@@ -65,7 +65,7 @@ completed.`,
 			}
 			fmt.Fprintf(out, "\n%s%sSyncing skills from %s...%s\n\n", colorBold, colorCyan, models.ToTildePath(configPath), colorReset)
 
-			plan, err := engine.PlanSync(cfg, skillsDir, cacheDir)
+			plan, err := engine.PlanSync(cfg, configPath, skillsDir, cacheDir)
 			if err != nil {
 				return err
 			}
@@ -73,7 +73,7 @@ completed.`,
 
 			if flagDryRun {
 				printSyncPlan(out, plan, decision)
-				return reportSyncOutcome(out, plan.FailedCount(), len(plan.Blocked(decision)), len(plan.Pending(decision)), len(plan.Names()), true)
+				return reportSyncOutcome(out, plan.FailedCount(), len(plan.Blocked(decision)), len(plan.Pending(decision)), len(plan.Names()), plan.Forceable(decision), true)
 			}
 
 			if !flagForce && syncIsTerminal() {
@@ -100,7 +100,7 @@ completed.`,
 			if err != nil {
 				return err
 			}
-			return reportSyncOutcome(out, report.Failed, report.Blocked, 0, len(report.Configured), false)
+			return reportSyncOutcome(out, report.Failed, report.Blocked, 0, len(report.Configured), plan.Forceable(decision), false)
 		},
 	}
 
@@ -114,7 +114,7 @@ completed.`,
 // Sync speaks the same three codes as outdated: 0 converged, 1 not converged,
 // 2 the work could not be completed. A blocked Skill is a state to decide on,
 // not an error, so it never reads as a failure.
-func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, dryRun bool) error {
+func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, forceable, dryRun bool) error {
 	if failed > 0 {
 		return exitError{message: fmt.Sprintf("Sync did not converge: %s, %s", countOf(failed, "failure"), countOf(blocked, "blocked skill")), code: 2}
 	}
@@ -127,8 +127,10 @@ func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, 
 			parts = append(parts, countOf(blocked, "blocked skill"))
 		}
 		fmt.Fprintf(out, "\n%s%sSync did not converge. %s.%s\n", colorBold, colorYellow, strings.Join(parts, ", "), colorReset)
-		if blocked > 0 {
+		if blocked > 0 && forceable {
 			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n\n")
+		} else if blocked > 0 {
+			fmt.Fprintf(out, "Next: follow the reason given for each skipped skill above.\n\n")
 		} else {
 			fmt.Fprintf(out, "Next: run 'skills sync'.\n\n")
 		}
@@ -192,7 +194,17 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 		fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(item.SourcePath), item.Name, colorReset)
 		return
 	case action == engine.SyncActionSkip:
-		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, item.Name, block, colorReset)
+		reason := string(block)
+		if item.BlockReason != "" {
+			reason += ": " + item.BlockReason
+		}
+		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, item.Name, reason, colorReset)
+		return
+	case action == engine.SyncActionRename && item.RenameTargetDeclared:
+		fmt.Fprintf(out, "  [Dry-run] Would remove %s, renamed upstream to %s, which is already declared\n", item.Name, item.Freshness.RenamedTo)
+		return
+	case action == engine.SyncActionRename:
+		fmt.Fprintf(out, "  [Dry-run] Would rename %s to %s as its Source declares: sync %s and remove %s\n", item.Name, item.Freshness.RenamedTo, item.Freshness.RenamedTo, item.Name)
 		return
 	case action == engine.SyncActionMaterialize:
 		fmt.Fprintf(out, "  [Dry-run] Would sync %s from %s\n", item.Name, item.Source)
@@ -264,6 +276,10 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 			fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
 		case engine.SyncCommandFailed:
 			fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		case engine.SyncRenamed:
+			fmt.Fprintf(out, "  %sRenamed %s%s%s to %s%s%s, as its Source declares.%s\n", colorGreen, colorBold, ev.Skill, colorReset+colorGreen, colorBold, ev.Target, colorReset+colorGreen, colorReset)
+		case engine.SyncRenameFailed:
+			fmt.Fprintf(out, "  %sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
 		case engine.SyncSkipped:
 			fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
 		case engine.SyncStateFailed:

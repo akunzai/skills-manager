@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -28,6 +29,9 @@ const (
 	SyncActionSymlink     SyncAction = "symlink"
 	SyncActionCommand     SyncAction = "command"
 	SyncActionSkip        SyncAction = "skip"
+	// SyncActionRename migrates a Skill its Source renamed: Config, the new
+	// Skill, and removal of the old copy (ADR 0007).
+	SyncActionRename SyncAction = "rename"
 )
 
 // SyncBlock is what stands between a planned Skill and being written. Only
@@ -41,6 +45,12 @@ const (
 	SyncBlockUnknownBaseline SyncBlock = SyncBlock(SkillUnknownBaseline)
 	SyncBlockSourceMissing   SyncBlock = "source_missing"
 	SyncBlockCacheMissing    SyncBlock = "cache_missing"
+	// SyncBlockRemovedUpstream is a Skill its Source no longer has and no
+	// Skill replaces. Only rm resolves it.
+	SyncBlockRemovedUpstream SyncBlock = "removed_upstream"
+	// SyncBlockRenameOccupied is a rename whose new name is already occupied
+	// on the skills directory by something Config does not declare.
+	SyncBlockRenameOccupied SyncBlock = "rename_target_occupied"
 )
 
 // SyncDecision is the user's answer to the blocks a plan reports. It reaches
@@ -77,6 +87,9 @@ type SyncPlanItem struct {
 	LocalSHA  string
 	// NeedsWrite is set when the Cache is not known to match the Scope copy.
 	NeedsWrite bool
+	// RenameTargetDeclared is set on a rename whose new name the Scope
+	// already declares: the rename only drops the old Skill.
+	RenameTargetDeclared bool
 
 	// Local symlink Skills.
 	SourcePath  string
@@ -95,7 +108,7 @@ type SyncPlanItem struct {
 // Resolve is what this item does under decision.
 func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) {
 	switch item.Block {
-	case SyncBlockSourceMissing, SyncBlockCacheMissing:
+	case SyncBlockSourceMissing, SyncBlockCacheMissing, SyncBlockRemovedUpstream, SyncBlockRenameOccupied:
 		return SyncActionSkip, item.Block
 	case SyncBlockLocalDrift:
 		if !decision.Force {
@@ -112,6 +125,9 @@ func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) 
 	case SyncItemCommand:
 		return SyncActionCommand, SyncBlockNone
 	}
+	if item.Freshness.Status == SkillRenamed {
+		return SyncActionRename, SyncBlockNone
+	}
 	if item.NeedsWrite || decision.Force {
 		return SyncActionMaterialize, SyncBlockNone
 	}
@@ -124,7 +140,7 @@ func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) 
 // planning must not do.
 func (item SyncPlanItem) changes(action SyncAction) bool {
 	switch action {
-	case SyncActionMaterialize:
+	case SyncActionMaterialize, SyncActionRename:
 		return true
 	case SyncActionCommand:
 		return !item.Installed
@@ -143,13 +159,15 @@ type SyncPlan struct {
 	StateError string
 
 	cfg          *config.Config
+	configPath   string
 	skillsDir    string
 	availability *Availability
 }
 
 // PlanSync observes the Scope and derives what Sync would do. It writes
-// nothing, and runs no Skill-supplied command.
-func PlanSync(cfg *config.Config, skillsDir, cacheDir string) (*SyncPlan, error) {
+// nothing, and runs no Skill-supplied command. Apply saves Config to
+// configPath when it migrates a renamed Skill.
+func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*SyncPlan, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
@@ -161,16 +179,21 @@ func PlanSync(cfg *config.Config, skillsDir, cacheDir string) (*SyncPlan, error)
 	plan := &SyncPlan{
 		StateError:   snapshot.StateError,
 		cfg:          cfg,
+		configPath:   configPath,
 		skillsDir:    skillsDir,
 		availability: availability,
 	}
 	for _, repository := range snapshot.Repositories {
 		plan.Sources = append(plan.Sources, repository.Source)
 		for _, skill := range repository.Skills {
-			plan.Items = append(plan.Items, planRemoteItem(
+			item := planRemoteItem(
 				repository.Source, repository.CachePath, repository.LocalSHA,
 				skill, availability.ObserveAvailability(skill.Name),
-			))
+			)
+			if skill.Status == SkillRenamed {
+				item = planRename(cfg, skillsDir, item)
+			}
+			plan.Items = append(plan.Items, item)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Local)) {
@@ -213,6 +236,14 @@ func planRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, dr
 	case SkillUnknownBaseline:
 		item.Block = SyncBlockUnknownBaseline
 	}
+	switch skill.Status {
+	case SkillRemovedUpstream:
+		item.Block = SyncBlockRemovedUpstream
+		item.BlockReason = fmt.Sprintf("no longer in Source %s; run 'skills rm %s'", source, skill.Name)
+		return item
+	case SkillRenamed:
+		return item
+	}
 	// A Cache that was never fetched is a Block: Update is the way
 	// out, and no decision here can substitute for it. A Cache that
 	// cannot be read is a genuine failure.
@@ -222,6 +253,27 @@ func planRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, dr
 			item.BlockReason = err.Error()
 		} else {
 			item.Err = err.Error()
+		}
+	}
+	return item
+}
+
+// planRename decides what stands in the way of migrating a renamed Skill. The
+// old copy is protected like any Scope copy: Drift and an unknown baseline
+// block the whole rename, so Config never names a Skill Sync did not write.
+func planRename(cfg *config.Config, skillsDir string, item SyncPlanItem) SyncPlanItem {
+	skill := item.Freshness
+	_, _, item.RenameTargetDeclared = config.FindSkillSource(cfg, skill.RenamedTo)
+	switch skill.ScopeCopy {
+	case ScopeCopyDrift:
+		item.Block = SyncBlockLocalDrift
+	case ScopeCopyUnknown:
+		item.Block = SyncBlockUnknownBaseline
+	}
+	if !item.RenameTargetDeclared {
+		if _, err := os.Lstat(filepath.Join(skillsDir, skill.RenamedTo)); err == nil {
+			item.Block = SyncBlockRenameOccupied
+			item.BlockReason = fmt.Sprintf("%s is already on %s and not declared in Config", skill.RenamedTo, skillsDir)
 		}
 	}
 	return item
@@ -303,6 +355,18 @@ func (plan *SyncPlan) Blocked(decision SyncDecision) []SyncPlanItem {
 		}
 	}
 	return blocked
+}
+
+// Forceable reports whether --force would lift any block under decision.
+// Other blocks — a missing Cache, a Skill removed upstream, an occupied rename
+// target — each name their own way out.
+func (plan *SyncPlan) Forceable(decision SyncDecision) bool {
+	for _, item := range plan.Blocked(decision) {
+		if item.Block == SyncBlockLocalDrift || item.Block == SyncBlockUnknownBaseline {
+			return true
+		}
+	}
+	return false
 }
 
 // Failed is the Skills whose observation itself did not succeed, plus a Scope

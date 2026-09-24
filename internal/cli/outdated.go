@@ -68,8 +68,14 @@ func printOutdatedReport(cmd *cobra.Command, report *engine.FreshnessSnapshot) {
 		fmt.Fprintln(out)
 		for _, skill := range repository.Skills {
 			note := ""
-			if skill.Status == engine.SkillInSync && !skill.BaselineRecorded {
+			switch {
+			case skill.Status == engine.SkillInSync && !skill.BaselineRecorded:
 				note = fmt.Sprintf(" %s(baseline not recorded)%s", colorDim, colorReset)
+			case skill.Status == engine.SkillRenamed:
+				note = fmt.Sprintf(" → %s%s%s", colorBold, skill.RenamedTo, colorReset)
+				if skill.ScopeCopy == engine.ScopeCopyDrift {
+					note += fmt.Sprintf(" %s(local changes to %s)%s", colorDim, skill.Name, colorReset)
+				}
 			}
 			fmt.Fprintf(out, "  %s%s%s %s: %s%s %s[%s]%s\n", colorDim, treeBranch, colorReset, skill.Name, styledStatus(string(skill.Status)), note, colorDim, models.ToTildePath(skill.ScopePath), colorReset)
 		}
@@ -83,6 +89,11 @@ func printOutdatedReport(cmd *cobra.Command, report *engine.FreshnessSnapshot) {
 			hints = append(hints, "run 'skills sync'")
 		case engine.FreshnessProtectDrift:
 			hints = append(hints, "review local changes, then use 'skills sync --force' if intended")
+		}
+	}
+	for _, disposition := range report.Dispositions() {
+		if disposition.Reason == string(engine.SkillRemovedUpstream) {
+			hints = append(hints, fmt.Sprintf("%s is no longer in %s; run 'skills rm %s'", disposition.Skill, disposition.Source, disposition.Skill))
 		}
 	}
 	if len(hints) > 0 {

@@ -114,6 +114,8 @@ skills -p sync
 skills sync --force
 ```
 
+**Renamed upstream**: When a Source renames a Skill and the new `SKILL.md` declares `metadata: {replaces: <old name>}`, `skills update` reports the rename and `skills sync` migrates it: Config names the new Skill, the new Skill is synced, and the old copy is removed. An edited old copy blocks the rename exactly like protected drift. A Skill removed upstream with no replacement stays blocked; resolve it with `skills rm <name>`, never `--force`.
+
 **Completion criterion**: `skills sync` (or `skills -p sync`) exits `0` (converged).
 
 ### 3. Diagnose and Repair Health (`skills doctor` & `skills prune`)

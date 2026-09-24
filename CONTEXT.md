@@ -61,12 +61,16 @@ On an Agent directory, occupancy this tool's Availability mechanism created (or 
 _Avoid_: Drift (no declaration to compare), Inventory (wrong directory), stale, orphan
 
 **Sync**:
-Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability.
+Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability. Sync writes Config only to apply a Rename.
 _Avoid_: restore, install (when you mean the whole declared state)
 
 **Sync plan**:
 Every declared Skill of one Scope observed once, with the action each takes and what blocks it. The same plan carries from preview through confirmation to apply, so the user's answer is a pure transformation of it rather than a second observation. A Freshness disposition recommends which command to reach for; a Sync plan decides what happens to each Skill.
 _Avoid_: diff, changeset, transaction. An Add of selected Skills from one Source is not a Sync plan.
+
+**Rename**:
+A Source's declaration, through `metadata.replaces` in a Skill's `SKILL.md`, that the Skill takes the place of a Skill it no longer has. Update covers the new Skill in the Cache; Sync moves the Scope's declaration to it and removes the old copy.
+_Avoid_: move, alias, migration (when you mean the declaration)
 
 **Materialize**:
 Putting one Skill from its Source onto the Scope skills directory (copy, symlink, or command).
@@ -89,7 +93,7 @@ A harness that can load Skills (Claude Code, Copilot, Codex, …).
 _Avoid_: harness (in user-facing copy), tool, IDE
 
 **Update**:
-Refreshing remote Sources into the shared Cache only. Does not Materialize Skills or apply Availability. This supersedes the pre-0.8.0 definition recorded in #60.
+Refreshing remote Sources into the shared Cache only, including covering the replacement of a Renamed Skill. Does not Materialize Skills or apply Availability. This supersedes the pre-0.8.0 definition recorded in #60.
 _Avoid_: upgrade, pull (when you mean this command), Self-update
 
 **Self-update**:
