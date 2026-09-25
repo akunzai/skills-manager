@@ -1161,7 +1161,10 @@ func TestCLISyncDryRunNeverEntersApply(t *testing.T) {
 	}
 }
 
-func TestCLISyncInteractiveUnknownBaselineCancelsBeforeWrites(t *testing.T) {
+// Declining to replace a Skill without a baseline leaves it blocked while Sync
+// reconciles the rest: the Scope still does not match its Config, so it exits
+// 1 (ADR-0002), not 2 (#172).
+func TestCLISyncInteractiveUnknownBaselineDeclineLeavesItBlocked(t *testing.T) {
 	resetRootCmdFlags()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
@@ -1188,12 +1191,18 @@ func TestCLISyncInteractiveUnknownBaselineCancelsBeforeWrites(t *testing.T) {
 	syncIsTerminal = func() bool { return true }
 	syncPromptUnknown = func(io.Writer, []engine.SkillFreshness) (bool, error) { return false, nil }
 	t.Cleanup(func() { syncIsTerminal, syncPromptUnknown = oldTerminal, oldPrompt })
-	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err == nil {
-		t.Fatal("cancel should return non-zero")
+	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("sync error = %v (exit %d); want exit 1\n%s", err, ExitCode(err), out)
+	}
+	for _, want := range []string{"Skipped sample: unknown_baseline", "Sync did not converge. 1 blocked skill."} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output does not say %q:\n%s", want, out)
+		}
 	}
 	got, _ := os.ReadFile(manualPath)
 	if string(got) != "manual\n" {
-		t.Fatalf("cancel wrote Scope content: %q", got)
+		t.Fatalf("declining wrote Scope content: %q", got)
 	}
 }
 
