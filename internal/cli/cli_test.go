@@ -614,19 +614,95 @@ func TestSelectedPrunePlanExpandsMasterSkillsAndKeepsIndividualLinks(t *testing.
 	}
 }
 
-// Stale Baselines are not a prompt option; confirming any prune clears them,
-// as --yes does.
-func TestSelectedPrunePlanKeepsStaleBaselines(t *testing.T) {
-	plan := engine.PrunePlan{
-		UntrackedSkills: []string{"orphan"},
-		StateSkills:     []string{"gone"},
-	}
+// Stale Baselines are prune items like any other: the user keeps the ones
+// selected and drops the rest (#179).
+func TestSelectedPrunePlanKeepsSelectedStaleBaselines(t *testing.T) {
+	plan := engine.PrunePlan{StateSkills: []string{"gone", "kept"}}
 
-	selected := selectedPrunePlan(plan, []string{pruneMasterKey("orphan")})
+	selected := selectedPrunePlan(plan, []string{pruneBaselineKey("gone")})
 
 	if got, want := selected.StateSkills, []string{"gone"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected StateSkills = %v; want %v", got, want)
 	}
+}
+
+// staleBaselineScope is an isolated Global Scope whose only prunable item is
+// the Baseline of a Skill Config no longer declares.
+func staleBaselineScope(t *testing.T) (configFile, skillsDir string) {
+	t.Helper()
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile = filepath.Join(home, ".agents", "skills.json")
+	skillsDir = filepath.Join(home, ".agents", "skills")
+	scopeCopy := filepath.Join(skillsDir, "gone")
+	if err := os.MkdirAll(scopeCopy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scopeCopy, "SKILL.md"), []byte("# Gone\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skill := engine.SkillFreshness{Name: "gone", Source: "owner/repo", ScopePath: scopeCopy}
+	if err := engine.OpenBaselines(skillsDir).Record(skill, "cache", "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(scopeCopy); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+	return configFile, skillsDir
+}
+
+// With nothing else to prune, a stale Baseline used to leave prune saying
+// "Nothing to prune." while doctor counted it as an issue (#179).
+func TestCLIPruneClearsStaleBaselinesOnTheirOwn(t *testing.T) {
+	t.Run("dry run lists it", func(t *testing.T) {
+		configFile, skillsDir := staleBaselineScope(t)
+		out, err := runCLI(t, "prune", "--dry-run", "--config", configFile, "--skills-dir", skillsDir)
+		if err != nil {
+			t.Fatalf("prune --dry-run: %v\n%s", err, out)
+		}
+		if strings.Contains(out, "Nothing to prune.") || !strings.Contains(out, "  stale baseline: gone") {
+			t.Fatalf("dry run does not list the stale Baseline:\n%s", out)
+		}
+	})
+	t.Run("--yes clears it", func(t *testing.T) {
+		configFile, skillsDir := staleBaselineScope(t)
+		out, err := runCLI(t, "prune", "--yes", "--config", configFile, "--skills-dir", skillsDir)
+		if err != nil {
+			t.Fatalf("prune --yes: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "Pruned 1 stale Baseline.") || !strings.Contains(out, "  Forgot stale Baseline: gone") {
+			t.Fatalf("prune --yes does not report the cleared Baseline:\n%s", out)
+		}
+		if _, ok := engine.OpenBaselines(skillsDir).Applied("gone"); ok {
+			t.Fatal("the stale Baseline is still recorded")
+		}
+	})
+	// --links-only does not touch Baselines, so it does not read the Scope
+	// state at all and an unreadable one is not its concern.
+	t.Run("--links-only ignores an unreadable Scope state", func(t *testing.T) {
+		configFile, skillsDir := staleBaselineScope(t)
+		makeScopeStateUnreadable(t, skillsDir)
+		out, err := runCLI(t, "prune", "--links-only", "--yes", "--config", configFile, "--skills-dir", skillsDir)
+		if err != nil || strings.Contains(out, "Failed to read the Scope baseline") {
+			t.Fatalf("prune --links-only = %v; want it to leave the Scope state alone\n%s", err, out)
+		}
+	})
+	t.Run("--links-only leaves it", func(t *testing.T) {
+		configFile, skillsDir := staleBaselineScope(t)
+		out, err := runCLI(t, "prune", "--links-only", "--yes", "--config", configFile, "--skills-dir", skillsDir)
+		if err != nil {
+			t.Fatalf("prune --links-only: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "Nothing to prune.") {
+			t.Fatalf("--links-only must leave Baselines alone:\n%s", out)
+		}
+		if _, ok := engine.OpenBaselines(skillsDir).Applied("gone"); !ok {
+			t.Fatal("--links-only cleared a Baseline")
+		}
+	})
 }
 
 func TestSelectedPrunePlanKeepsSelectedEmptyDirsAndDropsUnselected(t *testing.T) {

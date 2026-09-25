@@ -23,6 +23,8 @@ type pruneOptions struct {
 const pruneMasterGroup = "Untracked master skills"
 const pruneEmptyDirGroup = "Leftover empty agent directories"
 
+const pruneBaselineGroup = "Stale Baselines"
+
 func newPruneCmd() *cobra.Command {
 	var options pruneOptions
 	cmd := &cobra.Command{
@@ -68,7 +70,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		printScopeStateUnreadable(cmd.OutOrStdout(), stateError)
 		return exitError{message: "stale Baselines were not pruned", code: 2}
 	}
-	if len(plan.AllUntracked()) == 0 && len(plan.Unconfigured) == 0 && len(plan.EmptyAgentDirs) == 0 {
+	if nothingToPrune(plan) {
 		fmt.Fprintln(cmd.OutOrStdout(), "Nothing to prune.")
 		return finish()
 	}
@@ -93,7 +95,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 			return nil
 		}
 		plan = selectedPrunePlan(plan, selected)
-		if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 && len(plan.EmptyAgentDirs) == 0 {
+		if nothingToPrune(plan) {
 			fmt.Fprintln(cmd.OutOrStdout(), "No items selected. Aborted.")
 			return nil
 		}
@@ -103,7 +105,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		plan.UntrackedDirs = nil
 	}
 
-	if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 && len(plan.EmptyAgentDirs) == 0 {
+	if nothingToPrune(plan) {
 		printPruneSkippedReal(cmd, skippedReal)
 		return finish()
 	}
@@ -123,10 +125,16 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 	return finish()
 }
 
+// nothingToPrune is whether a plan, as planned or as selected, removes
+// nothing at all.
+func nothingToPrune(plan engine.PrunePlan) bool {
+	return len(plan.AllUntracked()) == 0 && len(plan.Unconfigured) == 0 && len(plan.EmptyAgentDirs) == 0 && len(plan.StateSkills) == 0
+}
+
 func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Prune plan: %d untracked master skills; %d unconfigured managed links; %d leftover empty agent directories.\n",
-		len(plan.AllUntracked()), len(plan.Unconfigured), len(plan.EmptyAgentDirs))
+	fmt.Fprintf(out, "Prune plan: %d untracked master skills; %d unconfigured managed links; %d leftover empty agent directories; %d stale Baselines.\n",
+		len(plan.AllUntracked()), len(plan.Unconfigured), len(plan.EmptyAgentDirs), len(plan.StateSkills))
 	agents := make(map[string]struct{})
 	for _, link := range plan.Unconfigured {
 		agents[link.Agent] = struct{}{}
@@ -142,6 +150,9 @@ func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 	}
 	for _, dir := range plan.EmptyAgentDirs {
 		fmt.Fprintf(out, "  empty agent directory: %s (%s)\n", models.ToTildePath(dir.Dir), dir.Name)
+	}
+	for _, name := range plan.StateSkills {
+		fmt.Fprintf(out, "  stale baseline: %s\n", name)
 	}
 }
 
@@ -160,7 +171,7 @@ func printPruneSkippedReal(cmd *cobra.Command, skipped []string) {
 }
 
 func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
-	parts := make([]string, 0, 2)
+	var parts []string
 	if n := len(result.RemovedSkills); n > 0 {
 		label := "untracked master skills"
 		if n == 1 {
@@ -181,6 +192,9 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 			label = "empty agent directory"
 		}
 		parts = append(parts, fmt.Sprintf("%d %s", n, label))
+	}
+	if n := len(result.ForgottenBaselines); n > 0 {
+		parts = append(parts, countOf(n, "stale Baseline"))
 	}
 	if len(parts) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Pruned %s.\n", strings.Join(parts, " and "))
@@ -208,6 +222,9 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 	}
 	for _, dir := range result.SkippedEmptyDirs {
 		fmt.Fprintf(cmd.OutOrStdout(), "  Skipped empty agent directory: %s\n", models.ToTildePath(dir.Dir))
+	}
+	for _, name := range result.ForgottenBaselines {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Forgot stale Baseline: %s\n", name)
 	}
 }
 
@@ -248,6 +265,16 @@ func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
 			Extra: models.ToTildePath(dir.Dir),
 		})
 	}
+	// A stale Baseline only records a Skill Config no longer declares as
+	// remote; clearing it is the expected answer, so it starts selected.
+	for _, name := range plan.StateSkills {
+		groups[pruneBaselineGroup] = append(groups[pruneBaselineGroup], tui.SelectOption{
+			Key:      pruneBaselineKey(name),
+			Title:    name,
+			Extra:    "no longer declared as remote",
+			Selected: true,
+		})
+	}
 	return tui.PromptOrderedGroupedMultiSelect("Select items to prune:", groups, []string{pruneMasterGroup})
 }
 
@@ -256,8 +283,7 @@ func selectedPrunePlan(plan engine.PrunePlan, selected []string) engine.PrunePla
 	for _, key := range selected {
 		selectedSet[key] = true
 	}
-	// Stale Baselines are not offered; confirming any prune clears them.
-	result := engine.PrunePlan{StateSkills: plan.StateSkills}
+	result := engine.PrunePlan{}
 	selectedMasters := make(map[string]bool)
 	for _, skill := range plan.AllUntracked() {
 		if selectedSet[pruneMasterKey(skill)] {
@@ -275,6 +301,11 @@ func selectedPrunePlan(plan engine.PrunePlan, selected []string) engine.PrunePla
 			result.EmptyAgentDirs = append(result.EmptyAgentDirs, dir)
 		}
 	}
+	for _, name := range plan.StateSkills {
+		if selectedSet[pruneBaselineKey(name)] {
+			result.StateSkills = append(result.StateSkills, name)
+		}
+	}
 	return result
 }
 
@@ -288,4 +319,8 @@ func pruneLinkKey(path string) string {
 
 func pruneEmptyDirKey(dir string) string {
 	return "emptydir:" + dir
+}
+
+func pruneBaselineKey(name string) string {
+	return "baseline:" + name
 }

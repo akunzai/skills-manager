@@ -44,7 +44,9 @@ type PruneResult struct {
 	SkippedLinks     []ManagedAgentPath
 	RemovedEmptyDirs []AgentDir
 	SkippedEmptyDirs []AgentDir
-	Failures         []PruneFailure
+	// ForgottenBaselines are the stale Baselines removed from the Scope state.
+	ForgottenBaselines []string
+	Failures           []PruneFailure
 }
 
 // BuildPrunePlan finds untracked master skills and managed links that are no
@@ -65,13 +67,15 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		return PrunePlan{}, err
 	}
 	plan := PrunePlan{}
-	baselines := OpenBaselines(skillsDir)
-	if err := baselines.Err(); err != nil {
-		plan.StateError = err.Error()
-	} else {
-		plan.StateSkills = baselines.Stale(cfg)
-	}
 	if includeSkills {
+		// A stale Baseline is a record about a Skill, so it goes with the
+		// skills directory, not with Agent directory links.
+		baselines := OpenBaselines(skillsDir)
+		if err := baselines.Err(); err != nil {
+			plan.StateError = err.Error()
+		} else {
+			plan.StateSkills = baselines.Stale(cfg)
+		}
 		plan.UntrackedSkills = inv.UntrackedLinks()
 		plan.UntrackedDirs = inv.Untracked()
 	}
@@ -152,6 +156,8 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 		baselines := OpenBaselines(skillsDir)
 		if err := cmp.Or(baselines.Err(), baselines.Forget(plan.StateSkills...)); err != nil {
 			errs = append(errs, err)
+		} else {
+			result.ForgottenBaselines = slices.Clone(plan.StateSkills)
 		}
 	}
 	return result, errors.Join(errs...)
