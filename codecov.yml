@@ -1,0 +1,11 @@
+# Coverage is shown, never gated (docs/agents/pull-request.md), so Codecov's
+# commit statuses pass whatever the coverage does.
+# https://docs.codecov.com/docs/commit-status
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
