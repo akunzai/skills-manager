@@ -82,10 +82,11 @@ completed.`,
 					if promptErr != nil {
 						return promptErr
 					}
-					if !allowUnknown {
-						return fmt.Errorf("Sync cancelled before making changes")
-					}
-					decision.AllowUnknown = true
+					// Declining leaves those Skills blocked, as a Sync without a
+					// terminal would, and Sync still reconciles the rest. The Scope
+					// then does not match its Config: exit 1, not a failure
+					// (ADR-0002).
+					decision.AllowUnknown = allowUnknown
 				}
 			}
 

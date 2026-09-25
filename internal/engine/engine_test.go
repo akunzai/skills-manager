@@ -768,6 +768,89 @@ func TestApplyPrunePlanLeavesLinkReplacedAfterPlanning(t *testing.T) {
 	}
 }
 
+// Doctor already counts and removes a leftover empty Agent directory; prune
+// must list the same one, but only when it is planning configured links.
+func TestBuildPrunePlanListsLeftoverEmptyAgentDirOnlyWithConfiguredLinks(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	continueDir := filepath.Join(project, ".continue", "skills")
+	if err := os.MkdirAll(continueDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+
+	plan, err := BuildPrunePlan(cfg, skillsDir, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []AgentDir{{Name: "continue", Dir: continueDir}}; !reflect.DeepEqual(plan.EmptyAgentDirs, want) {
+		t.Fatalf("EmptyAgentDirs = %#v; want %#v", plan.EmptyAgentDirs, want)
+	}
+
+	skillsOnly, err := BuildPrunePlan(cfg, skillsDir, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skillsOnly.EmptyAgentDirs) != 0 {
+		t.Fatalf("EmptyAgentDirs = %#v; want none with includeConfiguredLinks=false", skillsOnly.EmptyAgentDirs)
+	}
+}
+
+func TestApplyPrunePlanRemovesLeftoverEmptyAgentDir(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	continueDir := filepath.Join(project, ".continue", "skills")
+	if err := os.MkdirAll(continueDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	plan := PrunePlan{EmptyAgentDirs: []AgentDir{{Name: "continue", Dir: continueDir}}}
+
+	result, err := ApplyPrunePlan(plan, skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.RemovedEmptyDirs) != 1 || result.RemovedEmptyDirs[0].Dir != continueDir {
+		t.Fatalf("RemovedEmptyDirs = %#v; want the continue dir", result.RemovedEmptyDirs)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".continue")); !os.IsNotExist(err) {
+		t.Fatal("expected the leftover ~/.continue to be removed")
+	}
+}
+
+// A dir that gained an entry while an interactive confirmation was open must
+// be revalidated and left alone, the same guarantee ApplyPrunePlan already
+// gives a managed link (see TestApplyPrunePlanLeavesLinkReplacedAfterPlanning).
+func TestApplyPrunePlanSkipsEmptyAgentDirThatGainedEntryAfterPlanning(t *testing.T) {
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	continueDir := filepath.Join(project, ".continue", "skills")
+	if err := os.MkdirAll(continueDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	plan := PrunePlan{EmptyAgentDirs: []AgentDir{{Name: "continue", Dir: continueDir}}}
+	if err := os.WriteFile(filepath.Join(continueDir, "SKILL.md"), []byte("# late\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ApplyPrunePlan(plan, skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.RemovedEmptyDirs) != 0 {
+		t.Fatalf("RemovedEmptyDirs = %#v; want none, the dir gained an entry after planning", result.RemovedEmptyDirs)
+	}
+	if len(result.SkippedEmptyDirs) != 1 || result.SkippedEmptyDirs[0].Dir != continueDir {
+		t.Fatalf("SkippedEmptyDirs = %#v; want the continue dir", result.SkippedEmptyDirs)
+	}
+	if _, err := os.Stat(continueDir); err != nil {
+		t.Fatal("a dir that gained an entry after planning must survive")
+	}
+}
+
 func TestObserveRemoteFreshnessSourceParsing(t *testing.T) {
 	tmpCache := t.TempDir()
 

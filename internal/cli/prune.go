@@ -21,6 +21,7 @@ type pruneOptions struct {
 }
 
 const pruneMasterGroup = "Untracked master skills"
+const pruneEmptyDirGroup = "Leftover empty agent directories"
 
 func newPruneCmd() *cobra.Command {
 	var options pruneOptions
@@ -67,7 +68,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		printScopeStateUnreadable(cmd.OutOrStdout(), stateError)
 		return exitError{message: "stale Baselines were not pruned", code: 2}
 	}
-	if len(plan.AllUntracked()) == 0 && len(plan.Unconfigured) == 0 {
+	if len(plan.AllUntracked()) == 0 && len(plan.Unconfigured) == 0 && len(plan.EmptyAgentDirs) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "Nothing to prune.")
 		return finish()
 	}
@@ -92,7 +93,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 			return nil
 		}
 		plan = selectedPrunePlan(plan, selected)
-		if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 {
+		if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 && len(plan.EmptyAgentDirs) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "No items selected. Aborted.")
 			return nil
 		}
@@ -102,7 +103,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		plan.UntrackedDirs = nil
 	}
 
-	if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 {
+	if len(plan.UntrackedSkills) == 0 && len(plan.Unconfigured) == 0 && len(plan.EmptyAgentDirs) == 0 {
 		printPruneSkippedReal(cmd, skippedReal)
 		return finish()
 	}
@@ -124,7 +125,8 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 
 func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Prune plan: %d untracked master skills; %d unconfigured managed links.\n", len(plan.AllUntracked()), len(plan.Unconfigured))
+	fmt.Fprintf(out, "Prune plan: %d untracked master skills; %d unconfigured managed links; %d leftover empty agent directories.\n",
+		len(plan.AllUntracked()), len(plan.Unconfigured), len(plan.EmptyAgentDirs))
 	agents := make(map[string]struct{})
 	for _, link := range plan.Unconfigured {
 		agents[link.Agent] = struct{}{}
@@ -137,6 +139,9 @@ func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
 	}
 	for _, link := range plan.Unconfigured {
 		fmt.Fprintf(out, "  managed link: %s (%s)\n", models.ToTildePath(link.Path), link.Agent)
+	}
+	for _, dir := range plan.EmptyAgentDirs {
+		fmt.Fprintf(out, "  empty agent directory: %s (%s)\n", models.ToTildePath(dir.Dir), dir.Name)
 	}
 }
 
@@ -170,11 +175,21 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 		}
 		parts = append(parts, fmt.Sprintf("%d %s", n, label))
 	}
+	if n := len(result.RemovedEmptyDirs); n > 0 {
+		label := "empty agent directories"
+		if n == 1 {
+			label = "empty agent directory"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", n, label))
+	}
 	if len(parts) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Pruned %s.\n", strings.Join(parts, " and "))
 	}
 	if n := len(result.SkippedLinks); n > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d changed or missing managed links.\n", n)
+	}
+	if n := len(result.SkippedEmptyDirs); n > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d changed or missing empty agent directories.\n", n)
 	}
 	if n := len(result.Failures); n > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Failed to prune %d paths.\n", n)
@@ -187,6 +202,12 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 	}
 	for _, link := range result.SkippedLinks {
 		fmt.Fprintf(cmd.OutOrStdout(), "  Skipped managed link: %s\n", models.ToTildePath(link.Path))
+	}
+	for _, dir := range result.RemovedEmptyDirs {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Removed empty agent directory: %s\n", models.ToTildePath(dir.Dir))
+	}
+	for _, dir := range result.SkippedEmptyDirs {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Skipped empty agent directory: %s\n", models.ToTildePath(dir.Dir))
 	}
 }
 
@@ -220,6 +241,13 @@ func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
 			DependsOn: masterKeys[link.Skill],
 		})
 	}
+	for _, dir := range plan.EmptyAgentDirs {
+		groups[pruneEmptyDirGroup] = append(groups[pruneEmptyDirGroup], tui.SelectOption{
+			Key:   pruneEmptyDirKey(dir.Dir),
+			Title: dir.Name,
+			Extra: models.ToTildePath(dir.Dir),
+		})
+	}
 	return tui.PromptOrderedGroupedMultiSelect("Select items to prune:", groups, []string{pruneMasterGroup})
 }
 
@@ -242,6 +270,11 @@ func selectedPrunePlan(plan engine.PrunePlan, selected []string) engine.PrunePla
 			result.Unconfigured = append(result.Unconfigured, link)
 		}
 	}
+	for _, dir := range plan.EmptyAgentDirs {
+		if selectedSet[pruneEmptyDirKey(dir.Dir)] {
+			result.EmptyAgentDirs = append(result.EmptyAgentDirs, dir)
+		}
+	}
 	return result
 }
 
@@ -251,4 +284,8 @@ func pruneMasterKey(skill string) string {
 
 func pruneLinkKey(path string) string {
 	return "link:" + path
+}
+
+func pruneEmptyDirKey(dir string) string {
+	return "emptydir:" + dir
 }
