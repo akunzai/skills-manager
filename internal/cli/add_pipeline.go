@@ -233,7 +233,7 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName string)
 	}
 	added := fmt.Sprintf("Added %d skill(s) [%s]", len(result.AddedSkills), strings.Join(result.AddedSkills, ", "))
 	if result.Blocked == 0 && result.Failed == 0 {
-		fmt.Fprintf(out, "\n%s%s and updated %s.%s\n\n", colorGreen, added, configName, colorReset)
+		fmt.Fprintf(out, "%s%s and updated %s.%s\n", colorGreen, added, configName, colorReset)
 		return nil
 	}
 	var parts []string
@@ -243,13 +243,12 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName string)
 	if result.Failed > 0 {
 		parts = append(parts, fmt.Sprintf("%d failed", result.Failed))
 	}
-	fmt.Fprintf(out, "\n%s%s to %s; %s.%s\n", colorYellow, added, configName, strings.Join(parts, ", "), colorReset)
+	fmt.Fprintf(out, "%s%s to %s; %s.%s\n", colorYellow, added, configName, strings.Join(parts, ", "), colorReset)
 	// Sync cannot get past an unreadable Scope state either, so it is only
 	// the next step for a Skill that was blocked or failed on its own.
 	if result.StateError == "" || result.Blocked+result.Failed > 1 {
 		fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync'.\n")
 	}
-	fmt.Fprintln(out)
 	if result.Failed > 0 {
 		return exitError{message: fmt.Sprintf("Add did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill")), code: 2}
 	}

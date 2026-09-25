@@ -64,7 +64,6 @@ completed.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "\n%s%sSyncing skills from %s...%s\n\n", colorBold, colorCyan, models.ToTildePath(configPath), colorReset)
 
 			plan, err := engine.PlanSync(cfg, configPath, skillsDir, cacheDir)
 			if err != nil {
@@ -134,21 +133,21 @@ func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, 
 		if blocked > 0 {
 			parts = append(parts, countOf(blocked, "blocked skill"))
 		}
-		fmt.Fprintf(out, "\n%s%sSync did not converge. %s.%s\n", colorBold, colorYellow, strings.Join(parts, ", "), colorReset)
+		fmt.Fprintf(out, "%s%sSync did not converge. %s.%s\n", colorBold, colorYellow, strings.Join(parts, ", "), colorReset)
 		if blocked > 0 && forceable {
-			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n\n")
+			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n")
 		} else if blocked > 0 {
-			fmt.Fprintf(out, "Next: follow the reason given for each skipped skill above.\n\n")
+			fmt.Fprintf(out, "Next: follow the reason given for each skipped skill above.\n")
 		} else {
-			fmt.Fprintf(out, "Next: run 'skills sync'.\n\n")
+			fmt.Fprintf(out, "Next: run 'skills sync'.\n")
 		}
 		return exitError{message: "Scope does not match its Config", code: 1}
 	}
 	if dryRun {
-		fmt.Fprintf(out, "\n%s%sScope already matches its Config. %d skills declared.%s\n\n", colorBold, colorGreen, configured, colorReset)
+		fmt.Fprintf(out, "%s%sScope already matches its Config. %d skills declared.%s\n", colorBold, colorGreen, configured, colorReset)
 		return nil
 	}
-	fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, configured, colorReset)
+	fmt.Fprintf(out, "%s%sSkills sync complete. %d skills configured.%s\n", colorBold, colorGreen, configured, colorReset)
 	return nil
 }
 

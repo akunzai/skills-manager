@@ -1081,10 +1081,9 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The durable per-Source line replaces the progress region's "ok" line.
-	want := "\nRefreshing remote Sources in the shared Cache...\n\n" +
-		"  1 Source Cache update(s) needed, 0 already up to date.\n\n" +
+	want := "  1 Source Cache update(s) needed, 0 already up to date.\n" +
 		"      Updated owner/repo (" + sha + ").\n" +
-		"\nRefreshed 1 Source Cache(s).\nRun 'skills sync' to apply cached content to this Scope.\n\n"
+		"Refreshed 1 Source Cache(s).\nRun 'skills sync' to apply cached content to this Scope.\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout = %q\nwant     %q", got, want)
 	}
@@ -1248,13 +1247,13 @@ func TestCLISyncReportsEachSkillOnceWithoutATerminal(t *testing.T) {
 	if ExitCode(err) != 1 {
 		t.Fatalf("drift should exit 1, got err=%v:\n%s", err, out)
 	}
-	_, body, _ := strings.Cut(out, "...\n\n")
+	body := out
 	// runCLI goes around Execute, which keeps exit 1 from reading as an error.
 	body, _, _ = strings.Cut(body, "Error: ")
 	want := "  Skipped drifted: local_drift\n" +
 		"ok  sample\n" +
-		"\nSync did not converge. 1 blocked skill.\n" +
-		"Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n\n"
+		"Sync did not converge. 1 blocked skill.\n" +
+		"Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n"
 	if body != want {
 		t.Fatalf("output = %q\nwant     %q", body, want)
 	}
@@ -1712,7 +1711,7 @@ func TestCLIDoctorFixReportsEachRebuiltCacheOnceWithoutATerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "\nDiagnosing skills health...\n\nok  owner/repo\n"; !strings.HasPrefix(out, want) {
+	if want := "ok  owner/repo\n"; !strings.HasPrefix(out, want) {
 		t.Fatalf("output = %q; want it to start %q", out, want)
 	}
 }
@@ -3023,7 +3022,7 @@ func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
 	}
 	want := "ok  owner/repo\n" +
 		"ok  sample\n" +
-		"\nAdded 1 skill(s) [sample] and updated skills.json.\n\n"
+		"Added 1 skill(s) [sample] and updated skills.json.\n"
 	if out != want {
 		t.Fatalf("output = %q\nwant     %q", out, want)
 	}

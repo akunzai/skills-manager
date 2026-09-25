@@ -45,14 +45,6 @@ func newUpdateCmd() *cobra.Command {
 
 			targets := args
 
-			if !flagJSON {
-				if flagDryRun {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%s[Dry-run] Checking Cache updates...%s\n\n", colorBold, colorCyan, colorReset)
-				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sRefreshing remote Sources in the shared Cache...%s\n\n", colorBold, colorCyan, colorReset)
-				}
-			}
-
 			// Progress is transient and goes to stderr. Each refreshed Source,
 			// error and rename is permanent and goes to stdout, above the
 			// progress region.
@@ -69,9 +61,9 @@ func newUpdateCmd() *cobra.Command {
 					region.Stop()
 					region = nil
 					if ev.Outdated == 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d Source Caches are already up to date.%s\n\n", colorGreen, ev.UpToDate, colorReset)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d Source Caches are already up to date.%s\n", colorGreen, ev.UpToDate, colorReset)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d Source Cache update(s) needed, %d already up to date.%s\n\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d Source Cache update(s) needed, %d already up to date.%s\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
 					}
 				case engine.UpdateRefreshStart:
 					region = presentation.StartRegion(errOut, "Refreshing "+countOf(ev.Total, "Source"), ev.Total)
@@ -128,18 +120,18 @@ func newUpdateCmd() *cobra.Command {
 			}
 
 			if len(result.Renamed) > 0 && totalUpdated == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sFound %d renamed skill(s).%s\nRun 'skills sync' to apply the rename to this Scope.\n\n", colorBold, colorGreen, len(result.Renamed), colorReset)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s%sFound %d renamed skill(s).%s\nRun 'skills sync' to apply the rename to this Scope.\n", colorBold, colorGreen, len(result.Renamed), colorReset)
 			} else if totalUpdated > 0 {
 				if flagDryRun {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sDry run complete: %d Source Cache(s) would be refreshed.%s%s\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s%sDry run complete: %d Source Cache(s) would be refreshed.%s%s\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sRefreshed %d Source Cache(s).%s%s\nRun 'skills sync' to apply cached content to this Scope.\n\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s%sRefreshed %d Source Cache(s).%s%s\nRun 'skills sync' to apply cached content to this Scope.\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
 				}
 			} else {
 				if len(result.Errors) == 0 {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sEverything is already up to date.%s\n\n", colorBold, colorGreen, colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s%sEverything is already up to date.%s\n", colorBold, colorGreen, colorReset)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s%sUpdate completed with errors.%s\n\n", colorBold, colorYellow, colorReset)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s%sUpdate completed with errors.%s\n", colorBold, colorYellow, colorReset)
 				}
 			}
 

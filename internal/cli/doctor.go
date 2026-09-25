@@ -44,7 +44,6 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(out, "\n%s%sDiagnosing skills health...%s\n\n", colorBold, colorCyan, colorReset)
 			var region *presentation.Region
 			var approve engine.DoctorReplaceForeign
 			if flagFix && doctorIsTerminal() {
@@ -72,7 +71,7 @@ func newDoctorCmd() *cobra.Command {
 				return runErr
 			}
 
-			fmt.Fprintln(out, "\n"+strings.Repeat(tableRule, 60))
+			fmt.Fprintln(out, strings.Repeat(tableRule, 60))
 			if outcome.Remaining == 0 {
 				// Untracked occupancy, unmanaged Agent directories and reserved
 				// names are not issues (ADR-0002: 1 means the Scope does not
@@ -97,21 +96,21 @@ func newDoctorCmd() *cobra.Command {
 					notes = append(notes, countOf(n, "Skill")+" cannot be available to an Agent")
 				}
 				if len(notes) > 0 {
-					fmt.Fprintf(out, "%s%sNo issues detected. %s.%s\n\n", colorBold, colorYellow, strings.Join(notes, "; "), colorReset)
+					fmt.Fprintf(out, "%s%sNo issues detected. %s.%s\n", colorBold, colorYellow, strings.Join(notes, "; "), colorReset)
 				} else {
-					fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n\n", colorBold, colorGreen, colorReset)
+					fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n", colorBold, colorGreen, colorReset)
 				}
 				return nil
 			}
 
 			if outcome.RecoveryNeeded {
-				fmt.Fprintf(out, "%s%sFound %d issue(s). Resolve the reported Cache recovery artifacts, then run 'skills doctor' again.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+				fmt.Fprintf(out, "%s%sFound %d issue(s). Resolve the reported Cache recovery artifacts, then run 'skills doctor' again.%s\n", colorBold, colorYellow, outcome.Remaining, colorReset)
 			} else {
 				// Not every issue is repairable by --fix or Sync — an invalid
 				// folder and an untracked Skill are not — so this line points
 				// at the per-finding next actions instead of promising a
 				// blanket repair it cannot deliver.
-				fmt.Fprintf(out, "%s%sFound %d issue(s). See the next action for each, or run with --fix.%s\n\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+				fmt.Fprintf(out, "%s%sFound %d issue(s). See the next action for each, or run with --fix.%s\n", colorBold, colorYellow, outcome.Remaining, colorReset)
 			}
 			// doctor is ADR-0002's third adopter: findings are a state to act
 			// on, not a command failure, so they exit 1 without the Error:
