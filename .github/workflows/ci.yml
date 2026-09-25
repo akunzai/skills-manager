@@ -43,6 +43,19 @@ jobs:
     name: Test & Build (Windows)
     runs-on: windows-latest
     steps:
+      # C: on hosted Windows runners is far slower than D:, and TEMP (so every
+      # t.TempDir and fixture repository) defaults to C:. The runner context is
+      # not available in job-level env, hence GITHUB_ENV. GOCACHE stays on C;
+      # measured on D, it made the test step slower, not faster.
+      # https://github.com/actions/runner-images/issues/8755
+      - name: Keep temporary files on the D drive
+        shell: bash
+        run: |
+          {
+            echo "TEMP=$RUNNER_TEMP"
+            echo "TMP=$RUNNER_TEMP"
+          } >> "$GITHUB_ENV"
+
       # Without this the checkout arrives as CRLF and a byte-exact assertion
       # ends up testing git rather than the code.
       - name: Keep line endings unchanged

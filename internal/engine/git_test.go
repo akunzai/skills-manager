@@ -144,6 +144,7 @@ func assertCachePaths(t *testing.T, repoDir string, present, absent []string) {
 }
 
 func TestEnsureGitRepoChecksOutOnlyDeclaredSkills(t *testing.T) {
+	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	repoDir, err := NewCache("owner/repo", url, "", t.TempDir()).Refresh(false, "skills/alpha")
 	if err != nil {
@@ -166,6 +167,7 @@ func TestEnsureGitRepoChecksOutOnlyDeclaredSkills(t *testing.T) {
 // The Cache is shared by every Scope: a later Scope's paths join the sparse
 // checkout without evicting an earlier Scope's (ADR 0004).
 func TestEnsureGitRepoAddsSubpathsWithoutRemovingOthers(t *testing.T) {
+	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
 	if _, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/alpha"); err != nil {
@@ -216,6 +218,7 @@ func TestEnsureGitRepoNarrowsFullCacheOnRefresh(t *testing.T) {
 }
 
 func TestWithSkillFilesChecksOutOnlySkillMDThenRestoresCone(t *testing.T) {
+	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	repoDir, err := NewCache("owner/repo", url, "", t.TempDir()).Refresh(false, "skills/alpha")
 	if err != nil {
@@ -241,6 +244,7 @@ func TestWithSkillFilesChecksOutOnlySkillMDThenRestoresCone(t *testing.T) {
 // An add interrupted during discovery leaves the Cache in non-cone mode; the
 // next refresh restores the cone it had.
 func TestEnsureGitRepoRestoresConeAfterInterruptedDiscovery(t *testing.T) {
+	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
 	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/alpha")
@@ -283,6 +287,7 @@ func TestDirPatternRoundTripsGlobCharacters(t *testing.T) {
 // A root Skill's full checkout is deliberate, not an earlier release's full
 // clone, so another Scope's fetching refresh leaves it whole (ADR 0004).
 func TestEnsureGitRepoKeepsRootSkillCheckoutForOtherScopes(t *testing.T) {
+	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
 	if _, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "."); err != nil {

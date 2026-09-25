@@ -46,7 +46,8 @@ type renameFixture struct {
 
 func newRenameFixture(t *testing.T) *renameFixture {
 	t.Helper()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	// No t.Setenv: the tests using this fixture run in parallel. TestMain
+	// already isolates XDG_STATE_HOME, and Scope state is one file per Scope.
 	root := t.TempDir()
 	f := &renameFixture{
 		origin:     filepath.Join(root, "origin"),
@@ -173,6 +174,7 @@ func exists(path string) bool {
 }
 
 func TestSyncFollowsASkillRenamedUpstream(t *testing.T) {
+	t.Parallel()
 	f := newRenameFixture(t)
 	f.renameUpstream(t, "new", "old")
 
@@ -244,6 +246,7 @@ func TestSyncFollowsASkillRenamedUpstream(t *testing.T) {
 // Another Scope's update already fetched the commit that renamed the Skill,
 // so this Scope's update finds its Cache current and must still follow it.
 func TestUpdateFollowsARenameInAnAlreadyCurrentCache(t *testing.T) {
+	t.Parallel()
 	f := newRenameFixture(t)
 	f.renameUpstream(t, "new", "old")
 	other := config.DefaultConfig()
@@ -264,6 +267,7 @@ func TestUpdateFollowsARenameInAnAlreadyCurrentCache(t *testing.T) {
 }
 
 func TestSyncRenameProtectsAnEditedOldCopy(t *testing.T) {
+	t.Parallel()
 	f := newRenameFixture(t)
 	if err := os.WriteFile(filepath.Join(f.skillsDir, "old", "SKILL.md"), []byte("edited\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -297,6 +301,7 @@ func TestSyncRenameProtectsAnEditedOldCopy(t *testing.T) {
 }
 
 func TestSyncRenameToADeclaredSkillOnlyDropsTheOld(t *testing.T) {
+	t.Parallel()
 	f := newRenameFixture(t)
 	f.renameUpstream(t, "new", "old")
 	f.update(t)
@@ -331,6 +336,7 @@ func TestSyncRenameToADeclaredSkillOnlyDropsTheOld(t *testing.T) {
 }
 
 func TestSyncRenameRefusesAnOccupiedTarget(t *testing.T) {
+	t.Parallel()
 	f := newRenameFixture(t)
 	f.renameUpstream(t, "new", "old")
 	f.update(t)
@@ -358,6 +364,7 @@ func TestSyncRenameRefusesAnOccupiedTarget(t *testing.T) {
 }
 
 func TestSyncNamesRmForASkillRemovedUpstream(t *testing.T) {
+	t.Parallel()
 	f := newRenameFixture(t)
 	if err := os.RemoveAll(filepath.Join(f.origin, "skills", "old")); err != nil {
 		t.Fatal(err)
@@ -384,6 +391,7 @@ func TestSyncNamesRmForASkillRemovedUpstream(t *testing.T) {
 }
 
 func TestUpdateMatchesOneOfSeveralReplacedNames(t *testing.T) {
+	t.Parallel()
 	f := newRenameFixture(t)
 	f.renameUpstream(t, "new", "ancient, old")
 	if result := f.update(t); len(result.Renamed) != 1 || result.Renamed[0].To != "new" {
