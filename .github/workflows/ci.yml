@@ -10,6 +10,12 @@ jobs:
   test:
     name: Test & Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Codecov authenticates the upload with this job's OIDC token, so the
+      # repository needs no upload secret.
+      # https://github.com/codecov/codecov-action#using-oidc
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -33,8 +39,22 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # shell: bash turns on pipefail, so a failing test still fails the step
+      # through tee. The unspecified default shell does not.
+      # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
       - name: Run tests
-        run: go test -v -race ./...
+        shell: bash
+        run: go test -v -race -coverprofile=coverage.out ./... | tee test.log
+
+      - name: Report test count and coverage
+        run: scripts/test-stats.sh test.log coverage.out >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage.out
+          disable_search: true
+          use_oidc: true
 
       - name: Build binary
         run: go build -v ./cmd/skills
