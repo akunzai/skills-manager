@@ -415,6 +415,31 @@ func TestApplyLeftoverRemovesEmptyDirsAndLeftoverPaths(t *testing.T) {
 	}
 }
 
+func TestApplyLeftoverSkipsEmptyDirThatGainedAnEntry(t *testing.T) {
+	availability, _, skillsDir := projectAvailability(t, "sample")
+	project := filepath.Dir(filepath.Dir(skillsDir))
+	continueDir := filepath.Join(project, ".continue", "skills")
+	if err := os.MkdirAll(continueDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	occupancy := availability.ObserveAgentDirs().Leftover
+	if err := os.MkdirAll(filepath.Join(continueDir, "hand-made"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := availability.ApplyLeftover(occupancy)
+
+	if len(result.RemovedEmpty) != 0 {
+		t.Fatalf("RemovedEmpty = %#v; a directory that is no longer empty was not removed", result.RemovedEmpty)
+	}
+	if len(result.SkippedEmpty) != 1 || result.SkippedEmpty[0].Dir != continueDir {
+		t.Fatalf("SkippedEmpty = %#v; want continue", result.SkippedEmpty)
+	}
+	if _, err := os.Stat(filepath.Join(continueDir, "hand-made")); err != nil {
+		t.Fatalf("hand-made entry: %v", err)
+	}
+}
+
 func TestLeftoverOccupancyFiltersArePureTransforms(t *testing.T) {
 	availability, _, skillsDir := projectAvailability(t, "sample")
 	project := filepath.Dir(filepath.Dir(skillsDir))

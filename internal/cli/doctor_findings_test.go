@@ -629,3 +629,13 @@ func TestDoctorFindingsPrintEveryReportField(t *testing.T) {
 		}
 	}
 }
+
+// A leftover empty Agent directory that gained an entry before --fix reached
+// it is left in place, and the finding must not claim it was removed.
+func TestLeftoverEmptyRepairFindingReportsSkip(t *testing.T) {
+	got := leftoverEmptyRepairFinding(engine.AgentDir{Name: "continue", Repair: engine.ItemRepair{Status: engine.RepairSkipped}})
+	want := []Finding{{Severity: SeverityInfo, Message: "    Skipped leftover agent directory continue: it is no longer empty."}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("finding = %#v; want %#v", got, want)
+	}
+}

@@ -484,6 +484,9 @@ func attachLeftoverRepairs(occupancy LeftoverOccupancy, result LeftoverApplyResu
 	for _, dir := range result.RemovedEmpty {
 		empty[dir.Dir] = ItemRepair{Status: RepairSucceeded}
 	}
+	for _, dir := range result.SkippedEmpty {
+		empty[dir.Dir] = ItemRepair{Status: RepairSkipped}
+	}
 	for _, failure := range result.FailedEmpty {
 		empty[failure.Dir.Dir] = itemRepairFromErr(failure.Err)
 	}

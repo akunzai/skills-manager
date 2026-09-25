@@ -585,6 +585,7 @@ type LeftoverApplyResult struct {
 	SkippedPaths []LeftoverPath
 	FailedPaths  []LeftoverFailure
 	RemovedEmpty []AgentDir
+	SkippedEmpty []AgentDir
 	FailedEmpty  []LeftoverEmptyFailure
 }
 
@@ -773,6 +774,13 @@ func (a *Availability) ApplyLeftover(occupancy LeftoverOccupancy) LeftoverApplyR
 	}
 	stopAt := models.ScopeRoot(a.skillsDir)
 	for _, empty := range occupancy.Empty {
+		// removeEmptyAgentDir leaves a directory that is no longer empty and
+		// returns nil, so ask first: whatever changed since the observation
+		// owns the directory now.
+		if isEmpty, err := isDirEffectivelyEmpty(empty.Dir); err != nil || !isEmpty {
+			result.SkippedEmpty = append(result.SkippedEmpty, empty)
+			continue
+		}
 		if err := removeEmptyAgentDir(empty.Dir, stopAt); err != nil {
 			result.FailedEmpty = append(result.FailedEmpty, LeftoverEmptyFailure{Dir: empty, Err: err})
 			continue
