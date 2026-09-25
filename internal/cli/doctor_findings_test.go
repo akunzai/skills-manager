@@ -490,7 +490,7 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(filepath.Dir(skillsDir), "local-src", "alpha"), "")
 
 	availability := engine.NewAvailability(cfg, skillsDir)
-	drift := availability.ObserveAvailability("alpha")
+	drift := availability.ObserveOccupancy().Drift("alpha")
 	if drift.Empty() {
 		t.Fatal("an unreadable availability path must not observe as no drift")
 	}
@@ -627,5 +627,15 @@ func TestDoctorFindingsPrintEveryReportField(t *testing.T) {
 				t.Errorf("DoctorReport.%s: output does not mention %q:\n%s", field.Name, subject, out.String())
 			}
 		}
+	}
+}
+
+// A leftover empty Agent directory that gained an entry before --fix reached
+// it is left in place, and the finding must not claim it was removed.
+func TestLeftoverEmptyRepairFindingReportsSkip(t *testing.T) {
+	got := leftoverEmptyRepairFinding(engine.AgentDir{Name: "continue", Repair: engine.ItemRepair{Status: engine.RepairSkipped}})
+	want := []Finding{{Severity: SeverityInfo, Message: "    Skipped leftover agent directory continue: it is no longer empty."}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("finding = %#v; want %#v", got, want)
 	}
 }

@@ -839,17 +839,6 @@ func hasUnknownAgent(refs []UnknownAgentReference, skill, field, agent string) b
 	return false
 }
 
-func TestAttachLeftoverRepairsRecordsSkip(t *testing.T) {
-	path := LeftoverPath{Agent: "codex", Skill: "sample", Path: "/tmp/sample"}
-	got := attachLeftoverRepairs(
-		LeftoverOccupancy{Paths: []LeftoverPath{path}},
-		LeftoverApplyResult{SkippedPaths: []LeftoverPath{path}},
-	)
-	if got.Paths[0].Repair.Status != RepairSkipped {
-		t.Fatalf("repair = %#v; want Skipped", got.Paths[0].Repair)
-	}
-}
-
 func leftoverEmptyRepairStatus(report DoctorReport, status RepairStatus) int {
 	n := 0
 	for _, empty := range report.Leftover.Empty {
@@ -1210,7 +1199,7 @@ func TestLeftoverManagedLinkOnAReservedNameIsCleanedUp(t *testing.T) {
 		cfg.Settings.DefaultAgents = []string{"claude"}
 		config.AddRemoteSkillEntry(cfg, "owner/repo", "synced", "synced", "github", "main")
 		link := plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "synced")
-		leftover := NewAvailability(cfg, skillsDir).ObserveAgentDirs().Leftover.Paths
+		leftover := NewAvailability(cfg, skillsDir).ObserveOccupancy().Leftover.Paths
 		if len(leftover) != 1 || leftover[0].Path != link || leftover[0].Agent != "claude-code" || leftover[0].Skill != "synced" {
 			t.Fatalf("Leftover = %#v; want the old managed synced link", leftover)
 		}

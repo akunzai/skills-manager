@@ -90,10 +90,12 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 	for _, item := range plan.Skills {
 		names = append(names, item.Name)
 	}
-	leftover := availability.ApplyLeftover(availability.ObserveAgentDirs().Leftover.ForSkills(names).WithoutEmpty())
+	leftover := availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills(names).WithoutEmpty())
 	removedBySkill := make(map[string][]string)
-	for _, path := range leftover.RemovedPaths {
-		removedBySkill[path.Skill] = append(removedBySkill[path.Skill], path.Agent)
+	for _, path := range leftover.Paths {
+		if path.Repair.Status == RepairSucceeded {
+			removedBySkill[path.Skill] = append(removedBySkill[path.Skill], path.Agent)
+		}
 	}
 	for i, item := range plan.Skills {
 		result.Skills[i].Unlinked = removedBySkill[item.Name]

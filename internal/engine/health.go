@@ -3,8 +3,6 @@ package engine
 import (
 	"errors"
 	"os"
-	"path/filepath"
-	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
@@ -303,11 +301,11 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		plan.MasterMissing = true
 	}
 
-	agentDirs := d.availability.ObserveAgentDirs()
-	plan.Agents = agentDirs.Agents
-	plan.Leftover = agentDirs.Leftover
+	occupancy := d.availability.ObserveOccupancy()
+	plan.Agents = occupancy.Agents
+	plan.Leftover = occupancy.Leftover
 	unexpected := make(map[string][]ManagedAgentPath)
-	for _, path := range agentDirs.Unexpected {
+	for _, path := range occupancy.Unexpected {
 		unexpected[path.Skill] = append(unexpected[path.Skill], path)
 	}
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
@@ -323,18 +321,16 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	plan.IllegalLocal = inv.IllegalLocal()
 	plan.Invalid = inv.Invalid()
 	plan.Stubs = inv.Stubs()
-	// Unexpected comes from the Agent directory observation for every
-	// declared Skill, the same answer prune acts on; the per-Skill
-	// observation supplies the rest of a present Skill's Drift.
 	for _, s := range inv.declaredPresent() {
-		drift := d.availability.ObserveAvailability(s.Name)
-		drift.Unexpected = agentsOf(unexpected[s.Name])
+		drift := occupancy.Drift(s.Name)
 		delete(unexpected, s.Name)
 		if drift.Empty() && len(drift.Copies) == 0 {
 			continue
 		}
 		plan.Drift = append(plan.Drift, SkillDrift{AvailabilityDrift: drift})
 	}
+	// A declared Skill that is not present has no desired paths to observe,
+	// only Unexpected ones, which --fix removes rather than Apply.
 	for _, item := range inv.SkillItems() {
 		paths, ok := unexpected[item.Name]
 		if !ok {
@@ -345,25 +341,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			absentUnexpected:  paths,
 		})
 	}
-	plan.Agents = withoutForeignPhysical(plan.Agents, plan.foreignAvailabilityPaths())
 	return plan, nil
-}
-
-// withoutForeignPhysical drops the Physical entries Drift already reports as
-// Foreign. A real directory on a declared Skill's Agent path is one finding,
-// and Foreign is the one --fix can act on.
-func withoutForeignPhysical(agents []AgentHealth, foreign []ForeignAvailabilityPath) []AgentHealth {
-	claimed := make(map[string]struct{}, len(foreign))
-	for _, path := range foreign {
-		claimed[path.Path] = struct{}{}
-	}
-	for i, agent := range agents {
-		agents[i].Physical = slices.DeleteFunc(agent.Physical, func(name string) bool {
-			_, ok := claimed[filepath.Join(agent.Dir, name)]
-			return ok
-		})
-	}
-	return agents
 }
 
 // issueCount is Remaining: how many classified findings still stand in the
@@ -418,11 +396,15 @@ func (d *Doctor) repair(plan *DoctorReport, progress DoctorProgress, replaceFore
 			plan.StaleScopes[i].Repair = ItemRepair{Status: RepairSucceeded}
 		}
 	}
-	plan.Leftover = attachLeftoverRepairs(plan.Leftover, d.availability.ApplyLeftover(plan.Leftover))
+	plan.Leftover = d.availability.RemoveLeftover(plan.Leftover)
 	for i, drift := range plan.Drift {
 		var err error
 		if len(drift.absentUnexpected) > 0 {
-			err = removeManagedAgentPaths(drift.absentUnexpected, d.skillsDir)
+			var errs []error
+			for _, repair := range removeManagedPaths(d.skillsDir, drift.absentUnexpected) {
+				errs = append(errs, repair.Err)
+			}
+			err = errors.Join(errs...)
 		} else if len(drift.Foreign) > 0 && replaceForeign {
 			err = d.availability.ReplaceForeign(drift.Skill, drift.Foreign)
 		} else {
@@ -441,58 +423,11 @@ func agentsOf(paths []ManagedAgentPath) []string {
 	return agents
 }
 
-// removeManagedAgentPaths removes each path that is still a managed path for
-// its Skill, leaving one that changed since it was observed.
-func removeManagedAgentPaths(paths []ManagedAgentPath, skillsDir string) error {
-	var errs []error
-	for _, path := range paths {
-		if _, err := removeManagedSkillPath(path.Path, path.Skill, skillsDir); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
 func itemRepairFromErr(err error) ItemRepair {
 	if err != nil {
 		return ItemRepair{Status: RepairFailed, Err: err}
 	}
 	return ItemRepair{Status: RepairSucceeded}
-}
-
-func leftoverPathKey(path LeftoverPath) string {
-	return path.Agent + "\x00" + path.Skill + "\x00" + path.Path
-}
-
-func attachLeftoverRepairs(occupancy LeftoverOccupancy, result LeftoverApplyResult) LeftoverOccupancy {
-	paths := make(map[string]ItemRepair, len(occupancy.Paths))
-	for _, path := range result.RemovedPaths {
-		paths[leftoverPathKey(path)] = ItemRepair{Status: RepairSucceeded}
-	}
-	for _, path := range result.SkippedPaths {
-		paths[leftoverPathKey(path)] = ItemRepair{Status: RepairSkipped}
-	}
-	for _, failure := range result.FailedPaths {
-		paths[leftoverPathKey(failure.Path)] = itemRepairFromErr(failure.Err)
-	}
-	for i, path := range occupancy.Paths {
-		if repair, ok := paths[leftoverPathKey(path)]; ok {
-			occupancy.Paths[i].Repair = repair
-		}
-	}
-	empty := make(map[string]ItemRepair, len(occupancy.Empty))
-	for _, dir := range result.RemovedEmpty {
-		empty[dir.Dir] = ItemRepair{Status: RepairSucceeded}
-	}
-	for _, failure := range result.FailedEmpty {
-		empty[failure.Dir.Dir] = itemRepairFromErr(failure.Err)
-	}
-	for i, dir := range occupancy.Empty {
-		if repair, ok := empty[dir.Dir]; ok {
-			occupancy.Empty[i].Repair = repair
-		}
-	}
-	return occupancy
 }
 
 // LegacyCacheRoots names the legacy branchless Cache roots doctor found, for

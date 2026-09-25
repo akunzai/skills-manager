@@ -457,8 +457,8 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 		t.Fatalf("expected symlink at %s", claudeLink)
 	}
 
-	result := availability.ApplyLeftover(availability.ObserveAgentDirs().Leftover.ForSkills([]string{"test-skill"}).WithoutEmpty())
-	if len(result.RemovedPaths) == 0 {
+	result := availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"test-skill"}).WithoutEmpty())
+	if removed, _ := leftoverRepaired(result, RepairSucceeded); len(removed) == 0 {
 		t.Errorf("expected at least 1 leftover path removed")
 	}
 	if _, err := os.Lstat(claudeLink); err == nil {
@@ -494,6 +494,7 @@ func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "github", "")
 	availability := NewAvailability(cfg, skillsDir)
 	if _, err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
@@ -511,7 +512,7 @@ func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	drift := availability.ObserveAvailability("sample")
+	drift := availability.ObserveOccupancy().Drift("sample")
 	if len(drift.Missing) != 0 || !reflect.DeepEqual(drift.Unexpected, []string{"claude-code"}) {
 		t.Fatalf("drift = %#v", drift)
 	}

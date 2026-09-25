@@ -64,6 +64,10 @@ _Avoid_: Drift (no declaration to compare), Inventory (wrong directory), stale, 
 On an Agent directory, a real directory this tool did not create and Config does not declare. The tool leaves it alone and reports it as a warning, not Drift.
 _Avoid_: Physical, stray, orphan
 
+**Agent directory occupancy**:
+Everything on a Scope's Agent directories, observed once and classified under one rule: Availability paths a declared Skill should have, Unexpected and Foreign paths (Drift), Leftover occupancy, and Unmanaged directories. No path is in two of them. Sync, Doctor, prune, and rm all read this one observation and remove through one step that checks each path again first.
+_Avoid_: agent state, agent scan
+
 **Sync**:
 Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability. Sync writes Config only to apply a Rename.
 _Avoid_: restore, install (when you mean the whole declared state)

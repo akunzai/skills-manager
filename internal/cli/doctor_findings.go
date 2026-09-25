@@ -351,6 +351,8 @@ func leftoverEmptyRepairFinding(empty engine.AgentDir) []Finding {
 		return []Finding{{Severity: SeverityOK, Message: fmt.Sprintf("    Removed leftover empty agent directory %s.", empty.Name)}}
 	case engine.RepairFailed:
 		return []Finding{{Severity: SeverityError, Message: fmt.Sprintf("    Failed to remove leftover %s dir %s: %s", empty.Name, models.ToTildePath(empty.Dir), empty.Repair.Err)}}
+	case engine.RepairSkipped:
+		return []Finding{{Severity: SeverityInfo, Message: fmt.Sprintf("    Skipped leftover agent directory %s: it is no longer empty.", empty.Name)}}
 	default:
 		return nil
 	}
