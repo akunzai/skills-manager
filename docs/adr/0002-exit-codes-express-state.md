@@ -51,6 +51,15 @@ unmanaged agent path, a baseline that could not be recorded.
 A third command adopting this scheme adopts these codes rather than inventing
 its own.
 
+A user backing out of an interactive question before the command has changed
+anything is neither: nothing was left unreconciled and nothing broke. The
+command says it was cancelled, writes nothing, and exits `0`. Declining a
+confirmation the command asks before it starts, such as Add's overwrite
+prompt, is backing out. Declining one that leaves declared Skills blocked,
+such as Sync's unknown-baseline question, is not: the Scope still does not
+match its Config, which is `1`. An interrupt (Ctrl-C) is not an answer to a
+question and stays a failure.
+
 ## Consequences
 
 `sync --dry-run` with pending work now exits `1` where it used to exit `2`.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,31 +36,21 @@ type addRequest struct {
 	agents []string
 }
 
-var addSelectionIsTerminal = tui.IsTerminal
-
-var addPromptSourcePath = func(name string, paths []string) (string, error) {
-	options := make([]tui.SelectOption, 0, len(paths)+1)
-	options = append(options, tui.SelectOption{Title: "Select a Source path"})
-	for _, candidate := range paths {
-		options = append(options, tui.SelectOption{Key: candidate, Title: candidate})
-	}
-	return tui.PromptSelect(fmt.Sprintf("Select a Source path for %s:", name), options, -1)
-}
-
 // resolveSkillsToAdd turns --all/--skill or an interactive prompt
-// into the set of Skills to Add. cancelled reports a user-cancelled
-// selection, which the caller must treat as a successful outcome, not an error.
+// into the set of Skills to Add. Backing out is errAddCancelled; noneChosen
+// reports choosing no Skills, which the caller must treat as a successful
+// outcome, not an error.
 func resolveSkillsToAdd(
 	cmd *cobra.Command,
 	discovered engine.DiscoveredSkills,
 	intake *addIntake,
 	flagAll bool,
 	flagSkills []string,
-	flagYes bool,
-) (skillsToAdd map[string]string, cancelled bool, err error) {
+	prompter addPrompter,
+	interactive bool,
+) (skillsToAdd map[string]string, noneChosen bool, err error) {
 	out := cmd.OutOrStdout()
 	labels := intake.labels
-	interactive := addSelectionIsTerminal() && !flagYes
 	request := engine.AddSelectionRequest{All: flagAll, Skills: flagSkills}
 	answers := engine.AddSelectionAnswers{Paths: make(map[string]string)}
 
@@ -72,25 +63,24 @@ func resolveSkillsToAdd(
 		case engine.AddSelectionResolved:
 			return outcome.Skills, false, nil
 		case engine.AddSelectionCancelled:
-			if outcome.CancelReason == engine.AddSelectionEmpty {
-				fmt.Fprintf(out, "%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
-			} else {
-				fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
+			if outcome.CancelReason != engine.AddSelectionEmpty {
+				return nil, false, errAddCancelled
 			}
+			fmt.Fprintf(out, "%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
 			return nil, true, nil
 		case engine.AddSelectionNeedsPath:
 			if !interactive {
 				return nil, false, fmt.Errorf("duplicate Skill %q requires a Source path: %s; specify a discovery scope with --path <directory> or a repository tree URL", outcome.Skill, strings.Join(outcome.Options, ", "))
 			}
-			chosen, promptErr := addPromptSourcePath(outcome.Skill, outcome.Options)
+			chosen, promptErr := prompter.SelectSourcePath(outcome.Skill, outcome.Options)
+			if errors.Is(promptErr, errAddCancelled) {
+				answers.CancelReason = engine.AddSelectionUserCancelled
+				continue
+			}
 			if promptErr != nil {
 				return nil, false, promptErr
 			}
-			if chosen == "" {
-				answers.CancelReason = engine.AddSelectionUserCancelled
-			} else {
-				answers.Paths[outcome.Skill] = chosen
-			}
+			answers.Paths[outcome.Skill] = chosen
 		case engine.AddSelectionNeedsSkills:
 			if !interactive {
 				fmt.Fprintf(out, "%s%s contains multiple skills:%s %s\n", colorYellow, labels.resourceNoun, colorReset, strings.Join(outcome.Options, ", "))
@@ -113,15 +103,13 @@ func resolveSkillsToAdd(
 			}
 			selectionDirs := selectionSkillsDirs(cmd)
 
-			var chosen []string
-			var promptErr error
-			promptTitle := fmt.Sprintf("Select skills to add from %s:", labels.displayName)
+			var flat []tui.SelectOption
 			if shouldGroup {
 				for _, options := range groups {
 					markInstalledSkills(options, selectionDirs)
 				}
-				chosen, promptErr = tui.PromptGroupedMultiSelect(promptTitle, groups)
 			} else {
+				groups = nil
 				options := make([]tui.SelectOption, 0, len(outcome.Options))
 				for _, skName := range outcome.Options {
 					paths := discovered[skName]
@@ -135,14 +123,15 @@ func resolveSkillsToAdd(
 				slices.SortFunc(options, func(a, b tui.SelectOption) int {
 					return cmp.Compare(a.Key, b.Key)
 				})
-				chosen, promptErr = tui.PromptMultiSelect(promptTitle, options)
+				flat = options
+			}
+			chosen, promptErr := prompter.SelectSkills(fmt.Sprintf("Select skills to add from %s:", labels.displayName), groups, flat)
+			if errors.Is(promptErr, errAddCancelled) {
+				answers.CancelReason = engine.AddSelectionUserCancelled
+				continue
 			}
 			if promptErr != nil {
 				return nil, false, promptErr
-			}
-			if chosen == nil {
-				answers.CancelReason = engine.AddSelectionUserCancelled
-				continue
 			}
 			answers.Skills = chosen
 		}
@@ -150,27 +139,43 @@ func resolveSkillsToAdd(
 }
 
 // run selects Skills, confirms replacements, then declares, Materializes,
-// and applies Availability via BuildAddPlan and ApplyAddPlan.
+// and applies Availability via BuildAddPlan and ApplyAddPlan. Backing out of
+// any question is the user's choice rather than a failure, so it ends here,
+// before anything is written, and succeeds (ADR-0002).
 func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
-	out := cmd.OutOrStdout()
+	err := intake.add(cmd, req)
+	if errors.Is(err, errAddCancelled) {
+		fmt.Fprintf(cmd.OutOrStdout(), "%sOperation cancelled.%s\n", colorYellow, colorReset)
+		return nil
+	}
+	return err
+}
 
-	skillsToAdd, cancelled, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, req.yes)
+func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
+	out := cmd.OutOrStdout()
+	// One answer to "may Add ask?" for every question below: --yes and a
+	// missing terminal both mean take the defaults or fail where there is no
+	// default.
+	prompter := newAddPrompter(cmd)
+	interactive := prompter.Interactive() && !req.yes
+
+	skillsToAdd, noneChosen, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, prompter, interactive)
 	if err != nil {
 		return err
 	}
-	if cancelled {
+	if noneChosen {
 		return nil
 	}
 	if len(skillsToAdd) == 0 {
 		return fmt.Errorf("no matching skills to add")
 	}
 
-	configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, req.yes, req.agents)
+	configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, prompter, interactive, req.agents)
 	if err != nil {
 		return err
 	}
 	req.agents = agents
-	intent, err := promptAddAvailability(cfg, skillsToAdd, skillsDir, req.yes, req.agents)
+	intent, err := promptAddAvailability(cfg, skillsToAdd, skillsDir, prompter, interactive, req.agents)
 	if err != nil {
 		return err
 	}
@@ -178,11 +183,10 @@ func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
 	plan := engine.BuildAddPlan(cfg, configPath, skillsDir, intake.source, skillsToAdd, intent)
 
 	if len(plan.Conflicts) > 0 && !req.yes {
-		if err := promptConfirmConflicts(out, plan.Conflicts); err != nil {
-			if err.Error() == "operation cancelled by user" {
-				fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
-				return nil
-			}
+		if !interactive {
+			return fmt.Errorf("refusing to overwrite %d existing skill(s) without a terminal; rerun with --yes", len(plan.Conflicts))
+		}
+		if err := prompter.ConfirmOverwrite(plan.Conflicts); err != nil {
 			return err
 		}
 	}
