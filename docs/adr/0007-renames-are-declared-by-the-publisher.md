@@ -12,7 +12,7 @@ Rejected:
 
 - **Heuristic matching** by content similarity or name. A wrong guess Materializes a different Skill under the user's declaration, and only the publisher knows the intent.
 - **A user-side mapping in `skills.json`**. It puts the burden on every consumer instead of the one publisher. It may come later as an override for Sources that never declare their renames.
-- **Update rewriting Config**. Update refreshes the shared Cache and reads only the Scope it runs in, so other Scopes sharing the Cache would never see the rename, and Update would stop meaning "Cache only".
+- **The refresh rewriting Config**. A refresh writes the shared Cache but reads only the Scope it runs in, so other Scopes sharing the Cache would never see the rename. The rewrite belongs to Sync, which every Scope runs for itself, through `skills sync` or the Sync that ends `skills update`.
 - **Recording renames in the Cache's git config**. That is a second source of truth for something the Cache content already states.
 
 This extends ADR-0004 (sparse partial clone), whose "Sync stays offline" rule is why detection lives in Update. It does not reopen ADR-0005: the new code reaches git only through Cache and the existing sparse-checkout helpers.

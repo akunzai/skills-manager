@@ -73,41 +73,14 @@ completed.`,
 
 			if flagDryRun {
 				printSyncPlan(out, plan, decision)
-				return reportSyncOutcome(out, plan.FailedCount(), len(plan.Blocked(decision)), len(plan.Pending(decision)), len(plan.Names()), plan.Forceable(decision), true)
+				return reportSyncOutcome(out, plan.FailedCount(), len(plan.Blocked(decision)), len(plan.Pending(decision)), len(plan.Names()), plan.Forceable(decision), true, "skills sync")
 			}
 
-			if !flagForce && syncIsTerminal() {
-				if unknown := plan.Unknown(); len(unknown) > 0 {
-					allowUnknown, promptErr := syncPromptUnknown(out, unknown)
-					if promptErr != nil {
-						return promptErr
-					}
-					// Declining leaves those Skills blocked, as a Sync without a
-					// terminal would, and Sync still reconciles the rest. The Scope
-					// then does not match its Config: exit 1, not a failure
-					// (ADR-0002).
-					decision.AllowUnknown = allowUnknown
-				}
-			}
-
-			// With nothing declared there is no progress to show; a nil region
-			// shows none.
-			var region *presentation.Region
-			if n := len(plan.Items); n > 0 {
-				region = presentation.StartRegion(cmd.ErrOrStderr(), "Syncing "+countOf(n, "Skill"), n)
-			}
-			report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev) })
-			region.Stop()
-			// The flag the user passed, not the shape of --skills-dir (root.go).
-			scopeFlag := ""
-			if scope.IsProject {
-				scopeFlag = " -p"
-			}
-			printCopiedAvailability(out, report, scopeFlag)
+			report, decision, err := applySyncPlan(cmd, out, scope, plan, decision)
 			if err != nil {
 				return err
 			}
-			return reportSyncOutcome(out, report.Failed, report.Blocked, 0, len(report.Configured), plan.Forceable(decision), false)
+			return reportSyncOutcome(out, report.Failed, report.Blocked, 0, len(report.Configured), plan.Forceable(decision), false, "skills sync")
 		},
 	}
 
@@ -117,11 +90,48 @@ completed.`,
 	return cmd
 }
 
+// applySyncPlan asks about unknown baselines when a person is there to answer,
+// then applies plan with progress on stderr. It returns the decision it
+// applied, so the caller can tell whether --force would lift what is left.
+// Sync and update both reconcile a Scope through it.
+func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.SyncPlan, decision engine.SyncDecision) (*engine.SyncReport, engine.SyncDecision, error) {
+	if !decision.Force && syncIsTerminal() {
+		if unknown := plan.Unknown(); len(unknown) > 0 {
+			allowUnknown, promptErr := syncPromptUnknown(out, unknown)
+			if promptErr != nil {
+				return nil, decision, promptErr
+			}
+			// Declining leaves those Skills blocked, as a Sync without a
+			// terminal would, and Sync still reconciles the rest. The Scope
+			// then does not match its Config: exit 1, not a failure
+			// (ADR-0002).
+			decision.AllowUnknown = allowUnknown
+		}
+	}
+
+	// With nothing declared there is no progress to show; a nil region
+	// shows none.
+	var region *presentation.Region
+	if n := len(plan.Items); n > 0 {
+		region = presentation.StartRegion(cmd.ErrOrStderr(), "Syncing "+countOf(n, "Skill"), n)
+	}
+	report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev) })
+	region.Stop()
+	// The flag the user passed, not the shape of --skills-dir (root.go).
+	scopeFlag := ""
+	if scope.IsProject {
+		scopeFlag = " -p"
+	}
+	printCopiedAvailability(out, report, scopeFlag)
+	return report, decision, err
+}
+
 // reportSyncOutcome states where the Scope stands and picks the exit code.
 // Sync speaks the same three codes as outdated: 0 converged, 1 not converged,
-// 2 the work could not be completed. A blocked Skill is a state to decide on,
+// 2 the work could not be completed. next is the command that finishes
+// pending work. A blocked Skill is a state to decide on,
 // not an error, so it never reads as a failure.
-func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, forceable, dryRun bool) error {
+func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, forceable, dryRun bool, next string) error {
 	if failed > 0 {
 		return exitError{message: fmt.Sprintf("Sync did not converge: %s, %s", countOf(failed, "failure"), countOf(blocked, "blocked skill")), code: 2}
 	}
@@ -139,7 +149,7 @@ func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, 
 		} else if blocked > 0 {
 			fmt.Fprintf(out, "Next: follow the reason given for each skipped skill above.\n")
 		} else {
-			fmt.Fprintf(out, "Next: run 'skills sync'.\n")
+			fmt.Fprintf(out, "Next: run '%s'.\n", next)
 		}
 		return exitError{message: "Scope does not match its Config", code: 1}
 	}

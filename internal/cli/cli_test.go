@@ -1026,6 +1026,7 @@ func TestCLIDoctorFixRemovesLeftoverEmptyAgentDirs(t *testing.T) {
 
 func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	resetRootCmdFlags()
+	isolateHome(t)
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
@@ -1042,23 +1043,32 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	var buf bytes.Buffer
 	RootCmd.SetOut(&buf)
 	RootCmd.SetArgs([]string{"update", "--dry-run", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	if err := RootCmd.Execute(); err != nil {
-		t.Fatalf("update --dry-run --json failed: %v", err)
+	// A Source still to refresh means the Scope does not match its Config.
+	if err := RootCmd.Execute(); ExitCode(err) != 1 {
+		t.Fatalf("update --dry-run --json = %v; want exit 1", err)
 	}
 
-	if !strings.Contains(buf.String(), `"updated_repos"`) {
-		t.Fatalf("expected updated_repos in JSON output, got: %s", buf.String())
+	var doc struct {
+		UpdatedRepos []engine.UpdatedRepoInfo `json:"updated_repos"`
+		Sync         *updateSyncJSON          `json:"sync"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("stdout is not one JSON document: %v\n%s", err, buf.String())
+	}
+	if len(doc.UpdatedRepos) != 1 || doc.Sync == nil || doc.Sync.Converged || doc.Sync.Configured != 1 {
+		t.Fatalf("JSON = %s; want the Source to refresh and an unconverged sync", buf.String())
 	}
 	if strings.Contains(buf.String(), `"updated_skills"`) {
 		t.Fatalf("Update JSON still describes updated Skills: %s", buf.String())
 	}
-	if _, err := runCLI(t, "update", "typo", "--dry-run", "--config", configFile, "--cache-dir", cacheDir); err == nil || !strings.Contains(err.Error(), "unknown update target") {
+	if _, err := runCLI(t, "update", "typo", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err == nil || !strings.Contains(err.Error(), "unknown update target") {
 		t.Fatalf("unknown target error = %v", err)
 	}
 }
 
 func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	resetRootCmdFlags()
+	isolateHome(t)
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeCLIGitSkill(t, origin, "sample")
@@ -1076,19 +1086,95 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	RootCmd.SetOut(&stdout)
 	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"update", "--config", configFile, "--cache-dir", filepath.Join(root, "cache")})
+	skillsDir := filepath.Join(root, "skills")
+	RootCmd.SetArgs([]string{"update", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache")})
 	if err := RootCmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	// The durable per-Source line replaces the progress region's "ok" line.
+	// The durable per-Source line replaces the progress region's "ok" line,
+	// and the Sync that follows applies what was refreshed.
 	want := "  1 Source Cache update(s) needed, 0 already up to date.\n" +
 		"      Updated owner/repo (" + sha + ").\n" +
-		"Refreshed 1 Source Cache(s).\nRun 'skills sync' to apply cached content to this Scope.\n"
+		"Refreshed 1 Source Cache(s).\n" +
+		"Skills sync complete. 1 skills configured.\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout = %q\nwant     %q", got, want)
 	}
-	if got := stderr.String(); got != "" {
-		t.Fatalf("stderr = %q; want no progress lines without a terminal", got)
+	if got := stderr.String(); got != "ok  sample\n" {
+		t.Fatalf("stderr = %q; want only Sync's plain line without a terminal", got)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatalf("update did not sync the refreshed Skill: %v", err)
+	}
+
+	// A second run finds nothing to refresh and nothing to sync: one line.
+	resetSubcommandFlags()
+	stdout.Reset()
+	stderr.Reset()
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String() + stderr.String(); got != "Everything is already up to date.\n" {
+		t.Fatalf("converged update printed %q; want one line", got)
+	}
+}
+
+// Update is the one daily command whatever the Config declares: without a
+// remote Source it still syncs the Scope.
+func TestCLIUpdateSyncsAScopeWithoutRemoteSources(t *testing.T) {
+	resetRootCmdFlags()
+	isolateHome(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "src", "local")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: local\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configFile, skillsDir := filepath.Join(root, "scope", "skills.json"), filepath.Join(root, "scope", "skills")
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "local", source, "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "update", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache"))
+	if err != nil || !strings.Contains(out, "Skills sync complete. 1 skills configured.") {
+		t.Fatalf("update = %v; want a sync:\n%s", err, out)
+	}
+	if _, err := os.Readlink(filepath.Join(skillsDir, "local")); err != nil {
+		t.Fatalf("update did not link the local Skill: %v", err)
+	}
+}
+
+// One Source that cannot be fetched does not hold back the others: update
+// still syncs the Scope from the Cache it has, then exits 2 (ADR-0002).
+func TestCLIUpdateSyncsTheRestWhenASourceFailsToFetch(t *testing.T) {
+	resetRootCmdFlags()
+	isolateHome(t)
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	configFile, skillsDir := filepath.Join(root, "scope", "skills.json"), filepath.Join(root, "scope", "skills")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	config.AddRemoteSkillEntry(cfg, "owner/missing", "lost", "lost", "git", filepath.Join(root, "missing"))
+	for _, source := range []string{"owner/repo", "owner/missing"} {
+		repo := cfg.Remote[source]
+		repo.Branch = cliRunGit(t, origin, "symbolic-ref", "--short", "HEAD")
+		cfg.Remote[source] = repo
+	}
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "update", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache"))
+	if ExitCode(err) != 2 || !strings.Contains(out, "Error updating owner/missing") || !strings.Contains(out, "Update completed with errors.") {
+		t.Fatalf("update = %v; want exit 2 naming the failed Source:\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatalf("the fetched Skill was not synced: %v\n%s", err, out)
 	}
 }
 
@@ -1289,44 +1375,65 @@ func TestCLISyncDryRunNeverEntersApply(t *testing.T) {
 // reconciles the rest: the Scope still does not match its Config, so it exits
 // 1 (ADR-0002), not 2 (#172).
 func TestCLISyncInteractiveUnknownBaselineDeclineLeavesItBlocked(t *testing.T) {
-	resetRootCmdFlags()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	root := t.TempDir()
-	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
-	writeCLIGitSkill(t, origin, "sample")
-	cfg := config.DefaultConfig()
-	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	if err := config.SaveConfig(cfg, configFile); err != nil {
-		t.Fatal(err)
-	}
-	cachePath, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.MaterializeRemoteSkill("sample", "sample", cachePath, skillsDir); err != nil {
-		t.Fatal(err)
-	}
-	manualPath := filepath.Join(skillsDir, "sample", "SKILL.md")
-	if err := os.WriteFile(manualPath, []byte("manual\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// Update reaches the same question through its Sync; its JSON
+	// never asks, since stdout belongs to the document.
+	for _, tc := range []struct {
+		args     []string
+		prompted bool
+	}{
+		{[]string{"sync"}, true},
+		{[]string{"update"}, true},
+		{[]string{"update", "--json"}, false},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			resetRootCmdFlags()
+			isolateHome(t)
+			root := t.TempDir()
+			configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+			writeCLIGitSkill(t, origin, "sample")
+			cfg := config.DefaultConfig()
+			config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+			if err := config.SaveConfig(cfg, configFile); err != nil {
+				t.Fatal(err)
+			}
+			cachePath, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := engine.MaterializeRemoteSkill("sample", "sample", cachePath, skillsDir); err != nil {
+				t.Fatal(err)
+			}
+			manualPath := filepath.Join(skillsDir, "sample", "SKILL.md")
+			if err := os.WriteFile(manualPath, []byte("manual\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	oldTerminal, oldPrompt := syncIsTerminal, syncPromptUnknown
-	syncIsTerminal = func() bool { return true }
-	syncPromptUnknown = func(io.Writer, []engine.SkillFreshness) (bool, error) { return false, nil }
-	t.Cleanup(func() { syncIsTerminal, syncPromptUnknown = oldTerminal, oldPrompt })
-	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
-	if err == nil || ExitCode(err) != 1 {
-		t.Fatalf("sync error = %v (exit %d); want exit 1\n%s", err, ExitCode(err), out)
-	}
-	for _, want := range []string{"Skipped sample: unknown_baseline", "Sync did not converge. 1 blocked skill."} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("output does not say %q:\n%s", want, out)
-		}
-	}
-	got, _ := os.ReadFile(manualPath)
-	if string(got) != "manual\n" {
-		t.Fatalf("declining wrote Scope content: %q", got)
+			prompted := false
+			oldTerminal, oldPrompt := syncIsTerminal, syncPromptUnknown
+			syncIsTerminal = func() bool { return true }
+			syncPromptUnknown = func(io.Writer, []engine.SkillFreshness) (bool, error) { prompted = true; return false, nil }
+			t.Cleanup(func() { syncIsTerminal, syncPromptUnknown = oldTerminal, oldPrompt })
+			out, err := runCLI(t, append(tc.args, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)...)
+			if err == nil || ExitCode(err) != 1 {
+				t.Fatalf("error = %v (exit %d); want exit 1\n%s", err, ExitCode(err), out)
+			}
+			if prompted != tc.prompted {
+				t.Fatalf("prompted = %v; want %v\n%s", prompted, tc.prompted, out)
+			}
+			want := []string{"Skipped sample: unknown_baseline", "Sync did not converge. 1 blocked skill."}
+			if !tc.prompted {
+				want = []string{`"blocked": 1`}
+			}
+			for _, w := range want {
+				if !strings.Contains(out, w) {
+					t.Fatalf("output does not say %q:\n%s", w, out)
+				}
+			}
+			got, _ := os.ReadFile(manualPath)
+			if string(got) != "manual\n" {
+				t.Fatalf("declining wrote Scope content: %q", got)
+			}
+		})
 	}
 }
 
@@ -2898,9 +3005,19 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	writeSkill("new", "metadata:\n  replaces: old\n")
 	commit("rename old, remove gone")
 
-	out, err := run("update")
-	if err != nil || !strings.Contains(out, "old was renamed to") || !strings.Contains(out, "new") {
-		t.Fatalf("update should report the rename: %v\n%s", err, out)
+	// Another Scope declaring the same Source updates the shared Cache. Its
+	// update follows the rename in that Scope and leaves this one to Sync.
+	otherConfig, otherSkills := filepath.Join(root, "other", "skills.json"), filepath.Join(root, "other", "skills")
+	if err := config.SaveConfig(cfg, otherConfig); err != nil {
+		t.Fatal(err)
+	}
+	resetSubcommandFlags()
+	out, err := runCLI(t, "update", "--config", otherConfig, "--skills-dir", otherSkills, "--cache-dir", cacheDir)
+	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed old") || !strings.Contains(out, "run 'skills rm gone'") {
+		t.Fatalf("update should follow the rename and leave gone blocked: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(otherSkills, "new", "SKILL.md")); err != nil {
+		t.Fatalf("update did not sync the renamed Skill: %v", err)
 	}
 	out, err = run("outdated")
 	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed") || !strings.Contains(out, "→ ") || !strings.Contains(out, "run 'skills rm gone'") {

@@ -42,6 +42,10 @@ what to do about it, and the `Error:` prefix stays off. `2` is reserved for
 work that genuinely failed. When both are present, `2` wins — a real failure
 must not be masked by "just needs reconciling".
 
+Update ends with a Sync of the Scope it runs in, so it speaks the same codes.
+A Source it could not refresh is `2`, like any other failure, and does not
+stop the rest of the Scope from syncing.
+
 Sync classifies each declared Skill as done, blocked, or failed. Blocked
 covers what the tool deliberately left alone: local drift, an unknown
 baseline, a Cache that was never fetched, a check that did not pass, a missing

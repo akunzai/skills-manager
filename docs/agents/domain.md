@@ -48,4 +48,6 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+> _Contradicts ADR-0004 (Cache is a sparse partial clone), but worth reopening because…_
+
+When the decision is reversed, edit the existing ADR in place to state the new decision. Do not add a superseding ADR; git history keeps the old one.

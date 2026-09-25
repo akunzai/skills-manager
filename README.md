@@ -81,10 +81,9 @@ Teammates restore the declared state with:
 
 ```sh
 skills -p update
-skills -p sync
 ```
 
-`update` and `sync` are deliberately separate. Update uses the Project Config to refresh its declared remote Sources in the shared Cache; Sync then reconciles Project Skills from that Cache without network access.
+Update uses the Project Config to refresh its declared remote Sources in the shared Cache, then reconciles Project Skills from that Cache as `skills -p sync` would. Sync alone does the reconciliation without network access.
 
 Materialized Project Skills are ordinary team-owned files. Commit `.agents/skills/` when every declared skill comes from a remote Source—those are real directories that commit cleanly. Keep it out of version control once a skill is declared from a local directory: that source is a path on one machine, and a git client without symlink support checks the committed link out as a text file instead of the skill.
 
@@ -112,7 +111,7 @@ Universal agents that read the central skills directory directly do not need lin
 | Reconcile the selected Scope from its existing Cache | `skills sync` |
 | Preview reconciliation | `skills sync --dry-run` |
 | Inspect remote → Cache → Scope freshness | `skills outdated` |
-| Refresh remote Sources into the shared Cache | `skills update` |
+| Refresh remote Sources, then sync the Scope | `skills update` |
 | Diagnose drift | `skills doctor` |
 | Repair diagnosed health issues | `skills doctor --fix` |
 | Remove undeclared managed items | `skills prune` |
@@ -121,11 +120,11 @@ Universal agents that read the central skills directory directly do not need lin
 
 Every operational command accepts `-p` (or `--project`). Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
 
-For remote Skills, the normal flow is `skills outdated`, `skills update`, then `skills sync`. Sync protects known local changes and unknown baselines; inspect them first, or explicitly overwrite with `skills sync --force`. `sync --dry-run` is a non-mutating freshness gate: it reports what Sync would do without writing anything, and without running a skill's own commands.
+For remote Skills, the normal flow is `skills outdated`, then `skills update`. When nothing changed, Update prints one line and asks nothing, so it fits a shell startup file. Sync, including the one Update runs, protects known local changes and unknown baselines; inspect them first, or explicitly overwrite with `skills sync --force`. `sync --dry-run` is a non-mutating freshness gate: it reports what Sync would do without writing anything, and without running a skill's own commands.
 
 When upgrading from a legacy branchless Cache layout, `skills doctor --fix` may access the network to rebuild affected Cache entries; it does not run Sync automatically.
 
-`skills sync`, `skills outdated`, and `skills doctor` share one set of exit codes: `0` when the Scope matches its Config, `1` when it does not, and `2` when the work could not be completed. A skill Sync deliberately left alone — protected local changes, an unknown baseline, an uncached Source — is reported as a blocked skill with a next action, and exits `1`. Only a genuine failure, such as a copy that did not complete or an agent path Sync does not manage, exits `2`. Doctor reads the same way: a finding it reports with a next action exits `1`, while Cache recovery artifacts or a repair that failed under `--fix` exit `2`. All three report state and next actions rather than command errors.
+`skills update`, `skills sync`, `skills outdated`, and `skills doctor` share one set of exit codes: `0` when the Scope matches its Config, `1` when it does not, and `2` when the work could not be completed. A skill Sync deliberately left alone — protected local changes, an unknown baseline, an uncached Source — is reported as a blocked skill with a next action, and exits `1`. Only a genuine failure, such as a copy that did not complete or an agent path Sync does not manage, exits `2`. Doctor reads the same way: a finding it reports with a next action exits `1`, while Cache recovery artifacts or a repair that failed under `--fix` exit `2`. All of them report state and next actions rather than command errors.
 
 ## Configuration
 

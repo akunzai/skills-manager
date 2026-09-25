@@ -3,7 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"io"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
@@ -21,7 +21,14 @@ func newUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "update [targets...]",
 		Aliases: []string{"upgrade"},
-		Short:   "Refresh remote Sources in the shared Cache",
+		Short:   "Refresh remote Sources and sync the Scope",
+		Long: `Refresh remote Sources in the shared Cache, then reconcile the selected Scope
+from skills.json, as 'skills sync' would. Sync covers the whole Scope, even when
+targets narrow the refresh.
+
+Exits 0 when the Scope matches its Config, 1 when it does not — a blocked skill
+or, with --dry-run, work still to do — and 2 when the work could not be
+completed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
@@ -34,117 +41,182 @@ func newUpdateCmd() *cobra.Command {
 				return err
 			}
 
-			if len(cfg.Remote) == 0 {
-				if flagJSON {
-					fmt.Fprintln(cmd.OutOrStdout(), `{"updated_repos":[],"skipped_repos":[],"errors":[]}`)
-				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "%sNo remote Sources configured in %s.%s\n", colorYellow, filepath.Base(configPath), colorReset)
-				}
-				return nil
+			// JSON keeps stdout for the document alone: the text below goes
+			// nowhere, and no prompt can wait for an answer.
+			out := cmd.OutOrStdout()
+			if flagJSON {
+				out = io.Discard
 			}
 
-			targets := args
-
-			// Progress is transient and goes to stderr. Each refreshed Source,
-			// error and rename is permanent and goes to stdout, above the
-			// progress region.
-			var region *presentation.Region
-			errOut := cmd.ErrOrStderr()
-			onProgress := func(ev engine.UpdateEvent) {
-				if flagJSON {
-					return
-				}
-				switch ev.Kind {
-				case engine.UpdateCheckStart:
-					region = presentation.StartRegion(errOut, "Checking "+countOf(ev.Total, "Source"), 0)
-				case engine.UpdateCheckDone:
-					region.Stop()
-					region = nil
-					if ev.Outdated == 0 {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d Source Caches are already up to date.%s\n", colorGreen, ev.UpToDate, colorReset)
-					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d Source Cache update(s) needed, %d already up to date.%s\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
-					}
-				case engine.UpdateRefreshStart:
-					region = presentation.StartRegion(errOut, "Refreshing "+countOf(ev.Total, "Source"), ev.Total)
-				case engine.UpdateRefreshDone:
-					region.Stop()
-					region = nil
-				case engine.UpdateStart:
-					if ev.DryRun {
-						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] %s[Dry-run]%s Would refresh %s%s%s\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset)
-					} else {
-						region.Start(presentation.Job{Name: ev.Source, Phase: "fetching"})
-					}
-				case engine.UpdateRepoDone:
-					shaStr := ""
-					if len(ev.NewSHA) >= 7 {
-						shaStr = fmt.Sprintf(" (%s)", ev.NewSHA[:7])
-					}
-					region.DoneWith(ev.Source, func() {
-						fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
-					})
-				case engine.UpdateRenamed:
-					region.Above(func() {
-						fmt.Fprintf(cmd.OutOrStdout(), "      %s%s was renamed to %s%s%s in %s.%s\n", colorCyan, ev.From, colorBold, ev.To, colorReset+colorCyan, ev.Source, colorReset)
-					})
-				case engine.UpdateRepoError:
-					region.Fail(ev.Source)
-					region.Above(func() {
-						fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
-					})
+			result := &engine.UpdateResult{UpdatedRepos: []engine.UpdatedRepoInfo{}, SkippedRepos: []engine.SkippedRepoInfo{}, Renamed: []engine.RenamedSkillInfo{}, Errors: []engine.UpdateErrorInfo{}}
+			if len(cfg.Remote) > 0 {
+				result, err = refreshSources(cmd, out, cfg, args, flagForce, flagDryRun, flagJSON, cacheDir)
+				if err != nil {
+					return err
 				}
 			}
 
-			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, cacheDir, onProgress)
-			region.Stop()
+			plan, err := engine.PlanSync(cfg, configPath, scope.SkillsDir, cacheDir)
 			if err != nil {
 				return err
 			}
+			decision := engine.SyncDecision{}
+			refreshed := len(result.UpdatedRepos)
+			var updateErr error
+			if len(result.Errors) > 0 {
+				updateErr = fmt.Errorf("update completed with %d error(s)", len(result.Errors))
+			}
 
-			if flagJSON {
-				data, _ := json.MarshalIndent(result, "", "  ")
-				fmt.Fprintln(cmd.OutOrStdout(), string(data))
-				if len(result.Errors) > 0 {
-					return fmt.Errorf("update completed with errors")
+			// A Scope that already matches its Config is left alone, so a
+			// shell startup that runs update prints one line and changes nothing.
+			if plan.Fresh(decision) {
+				summary := updateSyncJSON{Configured: len(plan.Names()), Converged: true}
+				switch {
+				case flagJSON:
+					printUpdateJSON(cmd.OutOrStdout(), result, summary)
+				case refreshed == 0 && updateErr == nil:
+					fmt.Fprintf(out, "%s%sEverything is already up to date.%s\n", colorBold, colorGreen, colorReset)
+				case refreshed > 0:
+					printRefreshed(out, refreshed, len(result.SkippedRepos), flagDryRun)
+				}
+				if updateErr != nil {
+					fmt.Fprintf(out, "%s%sUpdate completed with errors.%s\n", colorBold, colorYellow, colorReset)
+					return updateErr
+				}
+				if flagDryRun && refreshed > 0 {
+					fmt.Fprintf(out, "Next: run 'skills update'.\n")
+					return exitError{message: "Scope does not match its Config", code: 1}
 				}
 				return nil
 			}
 
-			totalUpdated := len(result.UpdatedRepos)
-			totalSkipped := len(result.SkippedRepos)
-
-			skipMsg := ""
-			if totalSkipped > 0 {
-				skipMsg = fmt.Sprintf(" (%d Source Cache(s) were already up to date)", totalSkipped)
+			if refreshed > 0 {
+				printRefreshed(out, refreshed, len(result.SkippedRepos), flagDryRun)
 			}
-
-			if len(result.Renamed) > 0 && totalUpdated == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s%sFound %d renamed skill(s).%s\nRun 'skills sync' to apply the rename to this Scope.\n", colorBold, colorGreen, len(result.Renamed), colorReset)
-			} else if totalUpdated > 0 {
-				if flagDryRun {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s%sDry run complete: %d Source Cache(s) would be refreshed.%s%s\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
-				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s%sRefreshed %d Source Cache(s).%s%s\nRun 'skills sync' to apply cached content to this Scope.\n", colorBold, colorGreen, totalUpdated, colorReset, skipMsg)
-				}
+			var summary updateSyncJSON
+			var syncErr error
+			if flagDryRun {
+				printSyncPlan(out, plan, decision)
+				summary = updateSyncJSON{Configured: len(plan.Names()), Pending: len(plan.Pending(decision)), Blocked: len(plan.Blocked(decision)), Failed: plan.FailedCount()}
+				syncErr = reportSyncOutcome(out, summary.Failed, summary.Blocked, summary.Pending, summary.Configured, plan.Forceable(decision), true, "skills update")
 			} else {
-				if len(result.Errors) == 0 {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s%sEverything is already up to date.%s\n", colorBold, colorGreen, colorReset)
+				if flagJSON {
+					// Without a terminal to ask, unknown baselines stay blocked,
+					// as they would for a Sync run from a script.
+					report, applyErr := plan.Apply(decision, nil)
+					if applyErr != nil {
+						return applyErr
+					}
+					summary = updateSyncJSON{Configured: len(report.Configured), Blocked: report.Blocked, Failed: report.Failed}
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s%sUpdate completed with errors.%s\n", colorBold, colorYellow, colorReset)
+					report, applied, applyErr := applySyncPlan(cmd, out, scope, plan, decision)
+					if applyErr != nil {
+						return applyErr
+					}
+					decision = applied
+					summary = updateSyncJSON{Configured: len(report.Configured), Blocked: report.Blocked, Failed: report.Failed}
 				}
+				syncErr = reportSyncOutcome(out, summary.Failed, summary.Blocked, 0, summary.Configured, plan.Forceable(decision), false, "skills update")
 			}
-
-			if len(result.Errors) > 0 {
-				return fmt.Errorf("update completed with %d error(s)", len(result.Errors))
+			summary.Converged = syncErr == nil
+			if flagJSON {
+				printUpdateJSON(cmd.OutOrStdout(), result, summary)
 			}
-			return nil
+			if updateErr != nil {
+				fmt.Fprintf(out, "%s%sUpdate completed with errors.%s\n", colorBold, colorYellow, colorReset)
+				return updateErr
+			}
+			return syncErr
 		},
 	}
 
-	cmd.Flags().BoolVar(&flagForce, "force", false, "Force re-fetch and overwrite even if commit SHA is unchanged")
-	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview updates without making changes")
+	cmd.Flags().BoolVar(&flagForce, "force", false, "Re-fetch the Cache even if the commit SHA is unchanged; local drift stays protected")
+	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview the refresh and the Sync without making changes")
 	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON")
 
 	return cmd
+}
+
+// refreshSources refreshes the declared remote Sources, or only targets, in
+// the shared Cache. Progress is transient and goes to stderr. Each refreshed
+// Source and error is permanent and goes to out, above the progress region. A
+// rename is left to the Sync that follows, which reports what it did with it.
+func refreshSources(cmd *cobra.Command, out io.Writer, cfg *config.Config, targets []string, force, dryRun, quiet bool, cacheDir string) (*engine.UpdateResult, error) {
+	var region *presentation.Region
+	errOut := cmd.ErrOrStderr()
+	onProgress := func(ev engine.UpdateEvent) {
+		if quiet {
+			return
+		}
+		switch ev.Kind {
+		case engine.UpdateCheckStart:
+			region = presentation.StartRegion(errOut, "Checking "+countOf(ev.Total, "Source"), 0)
+		case engine.UpdateCheckDone:
+			region.Stop()
+			region = nil
+			if ev.Outdated > 0 {
+				fmt.Fprintf(out, "  %s%d Source Cache update(s) needed, %d already up to date.%s\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
+			}
+		case engine.UpdateRefreshStart:
+			region = presentation.StartRegion(errOut, "Refreshing "+countOf(ev.Total, "Source"), ev.Total)
+		case engine.UpdateRefreshDone:
+			region.Stop()
+			region = nil
+		case engine.UpdateStart:
+			if ev.DryRun {
+				fmt.Fprintf(out, "  [%d/%d] %s[Dry-run]%s Would refresh %s%s%s\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset)
+			} else {
+				region.Start(presentation.Job{Name: ev.Source, Phase: "fetching"})
+			}
+		case engine.UpdateRepoDone:
+			shaStr := ""
+			if len(ev.NewSHA) >= 7 {
+				shaStr = fmt.Sprintf(" (%s)", ev.NewSHA[:7])
+			}
+			region.DoneWith(ev.Source, func() {
+				fmt.Fprintf(out, "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
+			})
+		case engine.UpdateRepoError:
+			region.Fail(ev.Source)
+			region.Above(func() {
+				fmt.Fprintf(out, "      %sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
+			})
+		}
+	}
+
+	result, err := engine.UpdateRemoteSkills(cfg, targets, force, dryRun, cacheDir, onProgress)
+	region.Stop()
+	return result, err
+}
+
+func printRefreshed(out io.Writer, refreshed, skipped int, dryRun bool) {
+	skipMsg := ""
+	if skipped > 0 {
+		skipMsg = fmt.Sprintf(" (%d Source Cache(s) were already up to date)", skipped)
+	}
+	if dryRun {
+		fmt.Fprintf(out, "%s%sDry run complete: %d Source Cache(s) would be refreshed.%s%s\n", colorBold, colorGreen, refreshed, colorReset, skipMsg)
+		return
+	}
+	fmt.Fprintf(out, "%s%sRefreshed %d Source Cache(s).%s%s\n", colorBold, colorGreen, refreshed, colorReset, skipMsg)
+}
+
+// updateSyncJSON is where the Scope stands after update's Sync. Pending is
+// only ever non-zero under --dry-run.
+type updateSyncJSON struct {
+	Converged  bool `json:"converged"`
+	Configured int  `json:"configured"`
+	Pending    int  `json:"pending"`
+	Blocked    int  `json:"blocked"`
+	Failed     int  `json:"failed"`
+}
+
+// printUpdateJSON keeps the Update document's shape and adds the Sync that
+// followed it.
+func printUpdateJSON(out io.Writer, result *engine.UpdateResult, summary updateSyncJSON) {
+	data, _ := json.MarshalIndent(struct {
+		*engine.UpdateResult
+		Sync updateSyncJSON `json:"sync"`
+	}{result, summary}, "", "  ")
+	fmt.Fprintln(out, string(data))
 }
