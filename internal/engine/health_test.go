@@ -1186,3 +1186,56 @@ func TestDoctorFixLeavesAgentReservedNameAlone(t *testing.T) {
 		t.Fatalf("Remaining = %d, Failed = %d; a reserved name is a warning, not an issue", outcome.Remaining, outcome.Failed)
 	}
 }
+
+// Before v0.15.0 a declared Skill named synced could get a managed link on
+// Claude Code's reserved name. Availability now never selects that path, so
+// the link is leftover occupancy that doctor --fix and prune remove (#178).
+func TestLeftoverManagedLinkOnAReservedNameIsCleanedUp(t *testing.T) {
+	scope := func(t *testing.T) (*config.Config, string, string) {
+		t.Helper()
+		t.Setenv("XDG_STATE_HOME", t.TempDir())
+		project := t.TempDir()
+		skillsDir := filepath.Join(project, ".agents", "skills")
+		mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "synced", "SKILL.md"), []byte("# Synced\n"))
+		cfg := config.DefaultConfig()
+		cfg.Settings.DefaultAgents = []string{"claude"}
+		config.AddRemoteSkillEntry(cfg, "owner/repo", "synced", "synced", "github", "main")
+		link := plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "synced")
+		leftover := NewAvailability(cfg, skillsDir).ObserveAgentDirs().Leftover.Paths
+		if len(leftover) != 1 || leftover[0].Path != link || leftover[0].Agent != "claude-code" || leftover[0].Skill != "synced" {
+			t.Fatalf("Leftover = %#v; want the old managed synced link", leftover)
+		}
+		return cfg, skillsDir, link
+	}
+	assertRemoved := func(t *testing.T, skillsDir, link string) {
+		t.Helper()
+		if _, err := os.Lstat(link); !os.IsNotExist(err) {
+			t.Fatalf("the old managed link survived: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(skillsDir, "synced", "SKILL.md")); err != nil {
+			t.Fatalf("removing the link must not touch the Skill it pointed to: %v", err)
+		}
+	}
+
+	t.Run("doctor --fix", func(t *testing.T) {
+		cfg, skillsDir, link := scope(t)
+		if _, err := NewDoctor(cfg, skillsDir).Run(true, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		assertRemoved(t, skillsDir, link)
+	})
+	t.Run("prune", func(t *testing.T) {
+		cfg, skillsDir, link := scope(t)
+		plan, err := BuildPrunePlan(cfg, skillsDir, true, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Unconfigured) != 1 || plan.Unconfigured[0].Path != link {
+			t.Fatalf("prune Unconfigured = %#v; want the old managed synced link", plan.Unconfigured)
+		}
+		if _, err := ApplyPrunePlan(plan, skillsDir); err != nil {
+			t.Fatal(err)
+		}
+		assertRemoved(t, skillsDir, link)
+	})
+}
