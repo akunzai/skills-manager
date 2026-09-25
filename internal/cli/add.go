@@ -2,7 +2,6 @@ package cli
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -386,9 +385,6 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsD
 		options = append(options, tui.SelectOption{Key: agent, Title: agent, Selected: selected})
 	}
 	selected, err := prompter.SelectAgents(options)
-	if errors.Is(err, errAddCancelled) {
-		return engine.AddAvailabilityIntent{}, fmt.Errorf("operation cancelled by user")
-	}
 	if err != nil {
 		return engine.AddAvailabilityIntent{}, err
 	}

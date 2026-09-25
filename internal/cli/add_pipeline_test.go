@@ -399,7 +399,8 @@ func TestAddRunWithoutPromptsFailsWhereOnlyAnAnswerDecides(t *testing.T) {
 	}
 }
 
-// Backing out of any question writes nothing.
+// Backing out of any question is the user's choice, not a failure: Add says
+// so, writes nothing, and succeeds (ADR-0002).
 func TestAddRunCancellation(t *testing.T) {
 	cancel := func(string, []string) (string, error) { return "", errAddCancelled }
 	tests := []struct {
@@ -407,15 +408,14 @@ func TestAddRunCancellation(t *testing.T) {
 		duplicate bool
 		conflict  bool
 		prompter  fakeAddPrompter
-		wantErr   string
 		wantOut   string
 	}{
 		{name: "Skills", prompter: fakeAddPrompter{skillsErr: errAddCancelled}, wantOut: "Operation cancelled."},
 		{name: "no Skills chosen", prompter: fakeAddPrompter{skills: []string{}}, wantOut: "No skills selected. Aborted."},
 		{name: "Source path", duplicate: true, prompter: fakeAddPrompter{skills: []string{"alpha"}, path: cancel}, wantOut: "Operation cancelled."},
-		{name: "Scope", prompter: fakeAddPrompter{skills: []string{"alpha"}, scopeErr: errAddCancelled}, wantErr: "add cancelled"},
-		{name: "Availability", prompter: fakeAddPrompter{skills: []string{"alpha"}, availErr: errAddCancelled}, wantErr: "add cancelled"},
-		{name: "Agents", prompter: fakeAddPrompter{skills: []string{"alpha"}, customize: true, agentsErr: errAddCancelled}, wantErr: "operation cancelled by user"},
+		{name: "Scope", prompter: fakeAddPrompter{skills: []string{"alpha"}, scopeErr: errAddCancelled}, wantOut: "Operation cancelled."},
+		{name: "Availability", prompter: fakeAddPrompter{skills: []string{"alpha"}, availErr: errAddCancelled}, wantOut: "Operation cancelled."},
+		{name: "Agents", prompter: fakeAddPrompter{skills: []string{"alpha"}, customize: true, agentsErr: errAddCancelled}, wantOut: "Operation cancelled."},
 		{name: "overwrite", conflict: true, prompter: fakeAddPrompter{skills: []string{"alpha"}, overwrite: errAddCancelled}, wantOut: "Operation cancelled."},
 	}
 	for _, tt := range tests {
@@ -431,11 +431,11 @@ func TestAddRunCancellation(t *testing.T) {
 			prompter.interactive = true
 
 			out, err := scope.run(t, &prompter, addRequest{})
-			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || err.Error() != tt.wantErr) {
-				t.Fatalf("error = %v; want %q\n%s", err, tt.wantErr, out)
+			if err != nil {
+				t.Fatalf("error = %v; a cancelled Add succeeds\n%s", err, out)
 			}
-			if !strings.Contains(out, tt.wantOut) {
-				t.Fatalf("output does not say %q:\n%s", tt.wantOut, out)
+			if strings.Count(out, tt.wantOut) != 1 {
+				t.Fatalf("output does not say %q exactly once:\n%s", tt.wantOut, out)
 			}
 			for _, path := range []string{scope.globalConfig, scope.projectConfig} {
 				if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -443,5 +443,21 @@ func TestAddRunCancellation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The exit code a cancelled Add ends with, through the command itself.
+func TestCLIAddCancelledExitsZero(t *testing.T) {
+	scope := newAddRunScope(t)
+	// resetRootCmdFlags marks --global as set, so Scope is not asked here.
+	prompter := &fakeAddPrompter{interactive: true, skills: []string{"alpha"}, availErr: errAddCancelled}
+	useAddPrompter(t, prompter)
+
+	out, err := runCLI(t, "add", "--symlink", scope.source)
+	if err != nil {
+		t.Fatalf("add error = %v (exit %d); want exit 0\n%s", err, ExitCode(err), out)
+	}
+	if !strings.Contains(out, "Operation cancelled.") {
+		t.Fatalf("output does not say it was cancelled (asked %v):\n%q", prompter.asked, out)
 	}
 }

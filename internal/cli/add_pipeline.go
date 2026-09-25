@@ -37,8 +37,9 @@ type addRequest struct {
 }
 
 // resolveSkillsToAdd turns --all/--skill or an interactive prompt
-// into the set of Skills to Add. cancelled reports a user-cancelled
-// selection, which the caller must treat as a successful outcome, not an error.
+// into the set of Skills to Add. Backing out is errAddCancelled; noneChosen
+// reports choosing no Skills, which the caller must treat as a successful
+// outcome, not an error.
 func resolveSkillsToAdd(
 	cmd *cobra.Command,
 	discovered engine.DiscoveredSkills,
@@ -47,7 +48,7 @@ func resolveSkillsToAdd(
 	flagSkills []string,
 	prompter addPrompter,
 	interactive bool,
-) (skillsToAdd map[string]string, cancelled bool, err error) {
+) (skillsToAdd map[string]string, noneChosen bool, err error) {
 	out := cmd.OutOrStdout()
 	labels := intake.labels
 	request := engine.AddSelectionRequest{All: flagAll, Skills: flagSkills}
@@ -62,11 +63,10 @@ func resolveSkillsToAdd(
 		case engine.AddSelectionResolved:
 			return outcome.Skills, false, nil
 		case engine.AddSelectionCancelled:
-			if outcome.CancelReason == engine.AddSelectionEmpty {
-				fmt.Fprintf(out, "%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
-			} else {
-				fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
+			if outcome.CancelReason != engine.AddSelectionEmpty {
+				return nil, false, errAddCancelled
 			}
+			fmt.Fprintf(out, "%sNo skills selected. Aborted.%s\n", colorYellow, colorReset)
 			return nil, true, nil
 		case engine.AddSelectionNeedsPath:
 			if !interactive {
@@ -139,8 +139,19 @@ func resolveSkillsToAdd(
 }
 
 // run selects Skills, confirms replacements, then declares, Materializes,
-// and applies Availability via BuildAddPlan and ApplyAddPlan.
+// and applies Availability via BuildAddPlan and ApplyAddPlan. Backing out of
+// any question is the user's choice rather than a failure, so it ends here,
+// before anything is written, and succeeds (ADR-0002).
 func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
+	err := intake.add(cmd, req)
+	if errors.Is(err, errAddCancelled) {
+		fmt.Fprintf(cmd.OutOrStdout(), "%sOperation cancelled.%s\n", colorYellow, colorReset)
+		return nil
+	}
+	return err
+}
+
+func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	out := cmd.OutOrStdout()
 	// One answer to "may Add ask?" for every question below: --yes and a
 	// missing terminal both mean take the defaults or fail where there is no
@@ -148,11 +159,11 @@ func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
 	prompter := newAddPrompter(cmd)
 	interactive := prompter.Interactive() && !req.yes
 
-	skillsToAdd, cancelled, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, prompter, interactive)
+	skillsToAdd, noneChosen, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, prompter, interactive)
 	if err != nil {
 		return err
 	}
-	if cancelled {
+	if noneChosen {
 		return nil
 	}
 	if len(skillsToAdd) == 0 {
@@ -176,10 +187,6 @@ func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
 			return fmt.Errorf("refusing to overwrite %d existing skill(s) without a terminal; rerun with --yes", len(plan.Conflicts))
 		}
 		if err := prompter.ConfirmOverwrite(plan.Conflicts); err != nil {
-			if errors.Is(err, errAddCancelled) {
-				fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
-				return nil
-			}
 			return err
 		}
 	}
