@@ -5,10 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +22,62 @@ func selectionIntake(dir string) *addIntake {
 			displayName: "test", resourceNoun: "Test source",
 		},
 	}
+}
+
+// fakeAddPrompter answers Add's questions from its fields and records which
+// were asked, in order.
+type fakeAddPrompter struct {
+	interactive bool
+	skills      []string
+	skillsErr   error
+	path        func(skill string, paths []string) (string, error)
+	project     bool
+	scopeErr    error
+	customize   bool
+	availErr    error
+	agents      []string
+	agentsErr   error
+	overwrite   error
+	asked       []string
+}
+
+func (f *fakeAddPrompter) Interactive() bool { return f.interactive }
+
+func (f *fakeAddPrompter) SelectSkills(string, tui.GroupedItems, []tui.SelectOption) ([]string, error) {
+	f.asked = append(f.asked, "skills")
+	return f.skills, f.skillsErr
+}
+
+func (f *fakeAddPrompter) SelectSourcePath(skill string, paths []string) (string, error) {
+	f.asked = append(f.asked, "path")
+	return f.path(skill, paths)
+}
+
+func (f *fakeAddPrompter) SelectScope() (bool, error) {
+	f.asked = append(f.asked, "scope")
+	return f.project, f.scopeErr
+}
+
+func (f *fakeAddPrompter) SelectAvailability() (bool, error) {
+	f.asked = append(f.asked, "availability")
+	return f.customize, f.availErr
+}
+
+func (f *fakeAddPrompter) SelectAgents([]tui.SelectOption) ([]string, error) {
+	f.asked = append(f.asked, "agents")
+	return f.agents, f.agentsErr
+}
+
+func (f *fakeAddPrompter) ConfirmOverwrite([]engine.AddConflict) error {
+	f.asked = append(f.asked, "overwrite")
+	return f.overwrite
+}
+
+func useAddPrompter(t *testing.T, prompter *fakeAddPrompter) {
+	t.Helper()
+	old := newAddPrompter
+	newAddPrompter = func(*cobra.Command) addPrompter { return prompter }
+	t.Cleanup(func() { newAddPrompter = old })
 }
 
 func testCmd() *cobra.Command {
@@ -32,7 +91,7 @@ func TestResolveSkillsToAddAllFlag(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"one": {"skills/one"}, "two": {"skills/two"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, true, nil, true)
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, true, nil, &fakeAddPrompter{}, false)
 	if err != nil || cancelled {
 		t.Fatalf("resolveSkillsToAdd() = %v, %v, %v", got, cancelled, err)
 	}
@@ -57,7 +116,7 @@ func TestResolveSkillsToAddFlagsRejectUnresolvedDuplicatesWithoutTerminal(t *tes
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, true)
+			_, _, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, &fakeAddPrompter{}, false)
 			if err == nil || !strings.Contains(err.Error(), "requires a Source path") {
 				t.Fatalf("error = %v; want unresolved duplicate error", err)
 			}
@@ -66,10 +125,7 @@ func TestResolveSkillsToAddFlagsRejectUnresolvedDuplicatesWithoutTerminal(t *tes
 }
 
 func TestResolveSkillsToAddFlagsPromptForDivergentCandidates(t *testing.T) {
-	oldTerminal, oldPrompt := addSelectionIsTerminal, addPromptSourcePath
-	addSelectionIsTerminal = func() bool { return true }
-	addPromptSourcePath = func(_ string, paths []string) (string, error) { return paths[1], nil }
-	t.Cleanup(func() { addSelectionIsTerminal, addPromptSourcePath = oldTerminal, oldPrompt })
+	prompter := &fakeAddPrompter{interactive: true, path: func(_ string, paths []string) (string, error) { return paths[1], nil }}
 
 	discovered := engine.DiscoveredSkills{
 		"duplicate": {"plugins/duplicate", "skills/duplicate"},
@@ -85,7 +141,7 @@ func TestResolveSkillsToAddFlagsPromptForDivergentCandidates(t *testing.T) {
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, false)
+			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true)
 			if err != nil || cancelled || got["duplicate"] != "skills/duplicate" {
 				t.Fatalf("got=%v cancelled=%v err=%v; want selected Source path", got, cancelled, err)
 			}
@@ -97,7 +153,7 @@ func TestResolveSkillsToAddSkillFlagExactAndCaseInsensitiveMatch(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"Api": {"skills/api"}, "lint": {"skills/lint"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "api"}, true)
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "api"}, &fakeAddPrompter{}, false)
 	if err != nil || cancelled {
 		t.Fatalf("resolveSkillsToAdd() = %v, %v, %v", got, cancelled, err)
 	}
@@ -110,17 +166,14 @@ func TestResolveSkillsToAddSkillFlagUnmatchedFailsAtomically(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"lint": {"skills/lint"}, "api": {"skills/api"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "ghost"}, true)
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "ghost"}, &fakeAddPrompter{}, false)
 	if err == nil || cancelled || got != nil || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("got=%v cancelled=%v err=%v; want atomic not-found error", got, cancelled, err)
 	}
 }
 
 func TestAddRunCancellationPrecedesMutation(t *testing.T) {
-	oldTerminal, oldPrompt := addSelectionIsTerminal, addPromptSourcePath
-	addSelectionIsTerminal = func() bool { return true }
-	addPromptSourcePath = func(string, []string) (string, error) { return "", nil }
-	t.Cleanup(func() { addSelectionIsTerminal, addPromptSourcePath = oldTerminal, oldPrompt })
+	useAddPrompter(t, &fakeAddPrompter{interactive: true, path: func(string, []string) (string, error) { return "", errAddCancelled }})
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -181,5 +234,214 @@ func TestNewRemoteIntakeAppliesTreeURLScopeBeforeDiscovery(t *testing.T) {
 	want := engine.DiscoveredSkills{"one": {"skills/one"}}
 	if !reflect.DeepEqual(intake.discovered, want) {
 		t.Fatalf("discovered = %v, want scoped tree result %v", intake.discovered, want)
+	}
+}
+
+// addRunScope is an isolated home and a Project with a local Source of two
+// Skills, alpha and beta. It returns the Source, and the Global and Project
+// Config and skills directory paths.
+type addRunScope struct {
+	source                      string
+	globalConfig, projectConfig string
+	globalSkills, projectSkills string
+}
+
+func newAddRunScope(t *testing.T) addRunScope {
+	t.Helper()
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	home := isolateHome(t)
+	project := filepath.Join(home, "project")
+	source := filepath.Join(home, "source")
+	for _, name := range []string{"alpha", "beta"} {
+		if err := os.MkdirAll(filepath.Join(source, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(source, name, "SKILL.md"), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(project)
+	global, local := resolveScopeFor(false), resolveScopeFor(true)
+	return addRunScope{
+		source:       source,
+		globalConfig: global.ConfigPath, projectConfig: local.ConfigPath,
+		globalSkills: global.SkillsDir, projectSkills: local.SkillsDir,
+	}
+}
+
+func (s addRunScope) run(t *testing.T, prompter *fakeAddPrompter, req addRequest) (string, error) {
+	t.Helper()
+	useAddPrompter(t, prompter)
+	cmd := testCmd()
+	intake, err := newLocalIntake(cmd, s.source, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = intake.run(cmd, req)
+	return cmd.OutOrStdout().(*bytes.Buffer).String(), err
+}
+
+// plantDuplicate adds a second alpha under plugins/, so choosing alpha needs a
+// Source path.
+func (s addRunScope) plantDuplicate(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(s.source, "plugins", "alpha", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# alpha, plugin edition\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// plantConflict puts an untracked alpha on the Global skills directory, so
+// adding alpha there must confirm the overwrite.
+func (s addRunScope) plantConflict(t *testing.T) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(s.globalSkills, "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAddRunAsksScopeAndAvailabilityThenAdds(t *testing.T) {
+	t.Run("Project scope", func(t *testing.T) {
+		scope := newAddRunScope(t)
+		prompter := &fakeAddPrompter{interactive: true, skills: []string{"alpha"}, project: true}
+
+		if out, err := scope.run(t, prompter, addRequest{}); err != nil {
+			t.Fatalf("run: %v\n%s", err, out)
+		}
+		if got, want := prompter.asked, []string{"skills", "scope", "availability"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("asked %v; want %v", got, want)
+		}
+		cfg, err := config.LoadConfig(scope.projectConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := cfg.Local["alpha"]; !ok {
+			t.Fatalf("Project Config does not declare alpha: %#v", cfg.Local)
+		}
+		if _, err := os.Stat(scope.globalConfig); !os.IsNotExist(err) {
+			t.Fatalf("Global Config was written: %v", err)
+		}
+	})
+
+	t.Run("customized Agents", func(t *testing.T) {
+		scope := newAddRunScope(t)
+		prompter := &fakeAddPrompter{interactive: true, skills: []string{"alpha"}, customize: true, agents: []string{"claude-code"}}
+
+		if out, err := scope.run(t, prompter, addRequest{}); err != nil {
+			t.Fatalf("run: %v\n%s", err, out)
+		}
+		cfg, err := config.LoadConfig(scope.globalConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := engine.NewAvailability(cfg, scope.globalSkills).ManagedAgents("alpha"); !reflect.DeepEqual(got, []string{"claude-code"}) {
+			t.Fatalf("alpha's Agents = %v; want [claude-code]", got)
+		}
+	})
+
+	t.Run("confirmed overwrite", func(t *testing.T) {
+		scope := newAddRunScope(t)
+		scope.plantConflict(t)
+		prompter := &fakeAddPrompter{interactive: true, skills: []string{"alpha"}}
+
+		if out, err := scope.run(t, prompter, addRequest{}); err != nil {
+			t.Fatalf("run: %v\n%s", err, out)
+		}
+		if !slices.Contains(prompter.asked, "overwrite") {
+			t.Fatalf("asked %v; want the overwrite confirmed", prompter.asked)
+		}
+		if info, err := os.Lstat(filepath.Join(scope.globalSkills, "alpha")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("alpha was not replaced by the linked Skill: %v", err)
+		}
+	})
+}
+
+// Without a terminal, or with --yes, Add asks nothing: it fails where only an
+// answer could decide.
+func TestAddRunWithoutPromptsFailsWhereOnlyAnAnswerDecides(t *testing.T) {
+	tests := []struct {
+		name      string
+		conflict  bool
+		duplicate bool
+		req       addRequest
+		want      string
+	}{
+		{name: "which Skills", req: addRequest{}, want: "multiple skills found without selection"},
+		{name: "which Source path", duplicate: true, req: addRequest{skills: []string{"alpha"}}, want: `duplicate Skill "alpha" requires a Source path`},
+		{name: "overwrite", conflict: true, req: addRequest{skills: []string{"alpha"}}, want: "refusing to overwrite 1 existing skill(s) without a terminal"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scope := newAddRunScope(t)
+			if tt.conflict {
+				scope.plantConflict(t)
+			}
+			if tt.duplicate {
+				scope.plantDuplicate(t)
+			}
+			prompter := &fakeAddPrompter{}
+
+			out, err := scope.run(t, prompter, tt.req)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v; want %q\n%s", err, tt.want, out)
+			}
+			if len(prompter.asked) != 0 {
+				t.Fatalf("asked %v without a terminal", prompter.asked)
+			}
+		})
+	}
+}
+
+// Backing out of any question writes nothing.
+func TestAddRunCancellation(t *testing.T) {
+	cancel := func(string, []string) (string, error) { return "", errAddCancelled }
+	tests := []struct {
+		name      string
+		duplicate bool
+		conflict  bool
+		prompter  fakeAddPrompter
+		wantErr   string
+		wantOut   string
+	}{
+		{name: "Skills", prompter: fakeAddPrompter{skillsErr: errAddCancelled}, wantOut: "Operation cancelled."},
+		{name: "no Skills chosen", prompter: fakeAddPrompter{skills: []string{}}, wantOut: "No skills selected. Aborted."},
+		{name: "Source path", duplicate: true, prompter: fakeAddPrompter{skills: []string{"alpha"}, path: cancel}, wantOut: "Operation cancelled."},
+		{name: "Scope", prompter: fakeAddPrompter{skills: []string{"alpha"}, scopeErr: errAddCancelled}, wantErr: "add cancelled"},
+		{name: "Availability", prompter: fakeAddPrompter{skills: []string{"alpha"}, availErr: errAddCancelled}, wantErr: "add cancelled"},
+		{name: "Agents", prompter: fakeAddPrompter{skills: []string{"alpha"}, customize: true, agentsErr: errAddCancelled}, wantErr: "operation cancelled by user"},
+		{name: "overwrite", conflict: true, prompter: fakeAddPrompter{skills: []string{"alpha"}, overwrite: errAddCancelled}, wantOut: "Operation cancelled."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scope := newAddRunScope(t)
+			if tt.duplicate {
+				scope.plantDuplicate(t)
+			}
+			if tt.conflict {
+				scope.plantConflict(t)
+			}
+			prompter := tt.prompter
+			prompter.interactive = true
+
+			out, err := scope.run(t, &prompter, addRequest{})
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || err.Error() != tt.wantErr) {
+				t.Fatalf("error = %v; want %q\n%s", err, tt.wantErr, out)
+			}
+			if !strings.Contains(out, tt.wantOut) {
+				t.Fatalf("output does not say %q:\n%s", tt.wantOut, out)
+			}
+			for _, path := range []string{scope.globalConfig, scope.projectConfig} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("cancelled Add wrote %s: %v", path, err)
+				}
+			}
+		})
 	}
 }

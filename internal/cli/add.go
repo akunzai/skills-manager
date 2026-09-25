@@ -2,8 +2,8 @@ package cli
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -45,20 +45,14 @@ func markInstalledSkills(options []tui.SelectOption, skillsDirs []string) {
 	}
 }
 
-func prepareAddTarget(cmd *cobra.Command, skip bool, agents []string) (string, string, *config.Config, []string, error) {
+func prepareAddTarget(cmd *cobra.Command, prompter addPrompter, interactive bool, agents []string) (string, string, *config.Config, []string, error) {
 	scope := ResolveScope()
-	if tui.IsTerminal() && !skip && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
-		choice, err := tui.PromptSelect("Choose a scope:", []tui.SelectOption{
-			{Key: "global", Title: "Global"},
-			{Key: "project", Title: "Project"},
-		}, 0)
+	if interactive && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
+		project, err := prompter.SelectScope()
 		if err != nil {
 			return "", "", nil, nil, err
 		}
-		if choice == "" {
-			return "", "", nil, nil, fmt.Errorf("add cancelled")
-		}
-		scope = resolveScopeFor(choice == "project")
+		scope = resolveScopeFor(project)
 	}
 
 	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
@@ -150,25 +144,6 @@ func discoveryResult(discovered engine.DiscoveredSkills, err error, sourceKey st
 		return nil, fmt.Errorf("no SKILL.md found in %s", sourceKey)
 	}
 	return discovered, nil
-}
-
-func promptConfirmConflicts(out io.Writer, conflicts []engine.AddConflict) error {
-	if !tui.IsTerminal() {
-		return fmt.Errorf("refusing to overwrite %d existing skill(s) without a terminal; rerun with --yes", len(conflicts))
-	}
-	fmt.Fprintf(out, "\n%sWarning: The following %d skill(s) already exist and will be overwritten:%s\n", colorYellow, len(conflicts), colorReset)
-	for _, c := range conflicts {
-		fmt.Fprintf(out, "  • %s%s%s: %s -> %s\n", colorBold, c.Skill, colorReset, c.CurrentSrc, c.ProposedSrc)
-	}
-	fmt.Fprintln(out)
-	confirmed, err := tui.PromptConfirm("Do you want to proceed with overwriting these skills?", false)
-	if err != nil {
-		return err
-	}
-	if !confirmed {
-		return fmt.Errorf("operation cancelled by user")
-	}
-	return nil
 }
 
 func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath string) (*addIntake, error) {
@@ -383,24 +358,18 @@ func newAddCmd() *cobra.Command {
 	return cmd
 }
 
-func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsDir string, skip bool, explicitAgents []string) (engine.AddAvailabilityIntent, error) {
+func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsDir string, prompter addPrompter, interactive bool, explicitAgents []string) (engine.AddAvailabilityIntent, error) {
 	if len(explicitAgents) > 0 {
 		return engine.AddAvailabilityIntent{Kind: engine.AddAvailabilityInclude, Agents: explicitAgents}, nil
 	}
-	if skip || !tui.IsTerminal() {
+	if !interactive {
 		return engine.AddAvailabilityIntent{}, nil
 	}
-	choice, err := tui.PromptSelect("Agent availability:", []tui.SelectOption{
-		{Key: "defaults", Title: "Follow defaults (recommended)"},
-		{Key: "custom", Title: "Customize"},
-	}, 0)
+	customize, err := prompter.SelectAvailability()
 	if err != nil {
 		return engine.AddAvailabilityIntent{}, err
 	}
-	if choice == "" {
-		return engine.AddAvailabilityIntent{}, fmt.Errorf("add cancelled")
-	}
-	if choice == "defaults" {
+	if !customize {
 		return engine.AddAvailabilityIntent{Kind: engine.AddAvailabilityFollowDefaults}, nil
 	}
 
@@ -416,12 +385,12 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsD
 		_, selected := baseline[agent]
 		options = append(options, tui.SelectOption{Key: agent, Title: agent, Selected: selected})
 	}
-	selected, err := tui.PromptMultiSelect("Select agents where these skills should be available:", options)
+	selected, err := prompter.SelectAgents(options)
+	if errors.Is(err, errAddCancelled) {
+		return engine.AddAvailabilityIntent{}, fmt.Errorf("operation cancelled by user")
+	}
 	if err != nil {
 		return engine.AddAvailabilityIntent{}, err
-	}
-	if selected == nil {
-		return engine.AddAvailabilityIntent{}, fmt.Errorf("operation cancelled by user")
 	}
 	return engine.AddAvailabilityIntent{Kind: engine.AddAvailabilitySetManaged, Agents: selected}, nil
 }
