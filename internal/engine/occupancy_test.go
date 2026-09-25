@@ -338,7 +338,7 @@ func TestObserveOccupancyLeftoverReportsEmptyUnselectedAgentDirs(t *testing.T) {
 	}
 }
 
-func TestApplyLeftoverRemovesObservedPathsAndSkipsChangedOnes(t *testing.T) {
+func TestRemoveLeftoverSkipsAPathThatChangedSinceTheObservation(t *testing.T) {
 	availability, _, skillsDir := projectAvailability(t, "sample")
 	project := filepath.Dir(filepath.Dir(skillsDir))
 	codexDir := filepath.Join(project, ".codex", "skills")
@@ -348,17 +348,20 @@ func TestApplyLeftoverRemovesObservedPathsAndSkipsChangedOnes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := availability.ApplyLeftover(occupancy)
+	result := availability.RemoveLeftover(occupancy)
 
-	if len(result.SkippedPaths) != 1 || result.SkippedPaths[0].Path != link {
-		t.Fatalf("SkippedPaths = %#v; want the path that was no longer managed", result.SkippedPaths)
+	if skipped, _ := leftoverRepaired(result, RepairSkipped); len(skipped) != 1 || skipped[0].Path != link {
+		t.Fatalf("Paths = %#v; want the path that was no longer managed skipped", result.Paths)
 	}
-	if len(result.RemovedPaths) != 0 {
-		t.Fatalf("RemovedPaths = %#v; a vanished leftover must not count as removed", result.RemovedPaths)
+	if removed, _ := leftoverRepaired(result, RepairSucceeded); len(removed) != 0 {
+		t.Fatalf("removed = %#v; a vanished leftover must not count as removed", removed)
+	}
+	if occupancy.Paths[0].Repair.Status != RepairNotAttempted {
+		t.Fatal("RemoveLeftover wrote its outcome into the observation it was given")
 	}
 }
 
-func TestApplyLeftoverRemovesEmptyDirsAndLeftoverPaths(t *testing.T) {
+func TestRemoveLeftoverRemovesEmptyDirsAndLeftoverPaths(t *testing.T) {
 	availability, _, skillsDir := projectAvailability(t, "sample")
 	project := filepath.Dir(filepath.Dir(skillsDir))
 	codexDir := filepath.Join(project, ".codex", "skills")
@@ -368,26 +371,27 @@ func TestApplyLeftoverRemovesEmptyDirsAndLeftoverPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := availability.ApplyLeftover(availability.ObserveOccupancy().Leftover)
+	result := availability.RemoveLeftover(availability.ObserveOccupancy().Leftover)
 
-	if len(result.RemovedPaths) != 1 || result.RemovedPaths[0].Path != link {
-		t.Fatalf("RemovedPaths = %#v; want gone on Codex", result.RemovedPaths)
+	removedPaths, removedEmpty := leftoverRepaired(result, RepairSucceeded)
+	if len(removedPaths) != 1 || removedPaths[0].Path != link {
+		t.Fatalf("removed = %#v; want gone on Codex", removedPaths)
 	}
 	if _, err := os.Lstat(link); !os.IsNotExist(err) {
 		t.Fatalf("leftover path still exists: %v", err)
 	}
 	foundEmpty := false
-	for _, dir := range result.RemovedEmpty {
+	for _, dir := range removedEmpty {
 		if dir.Name == "continue" {
 			foundEmpty = true
 		}
 	}
 	if !foundEmpty {
-		t.Fatalf("RemovedEmpty = %#v; want continue", result.RemovedEmpty)
+		t.Fatalf("removed = %#v; want continue", removedEmpty)
 	}
 }
 
-func TestApplyLeftoverSkipsEmptyDirThatGainedAnEntry(t *testing.T) {
+func TestRemoveLeftoverSkipsEmptyDirThatGainedAnEntry(t *testing.T) {
 	availability, _, skillsDir := projectAvailability(t, "sample")
 	project := filepath.Dir(filepath.Dir(skillsDir))
 	continueDir := filepath.Join(project, ".continue", "skills")
@@ -399,13 +403,13 @@ func TestApplyLeftoverSkipsEmptyDirThatGainedAnEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := availability.ApplyLeftover(occupancy)
+	result := availability.RemoveLeftover(occupancy)
 
-	if len(result.RemovedEmpty) != 0 {
-		t.Fatalf("RemovedEmpty = %#v; a directory that is no longer empty was not removed", result.RemovedEmpty)
+	if _, removed := leftoverRepaired(result, RepairSucceeded); len(removed) != 0 {
+		t.Fatalf("removed = %#v; a directory that is no longer empty was not removed", removed)
 	}
-	if len(result.SkippedEmpty) != 1 || result.SkippedEmpty[0].Dir != continueDir {
-		t.Fatalf("SkippedEmpty = %#v; want continue", result.SkippedEmpty)
+	if _, skipped := leftoverRepaired(result, RepairSkipped); len(skipped) != 1 || skipped[0].Dir != continueDir {
+		t.Fatalf("skipped = %#v; want continue", skipped)
 	}
 	if _, err := os.Stat(filepath.Join(continueDir, "hand-made")); err != nil {
 		t.Fatalf("hand-made entry: %v", err)
@@ -484,4 +488,22 @@ func TestObserveOccupancyReportsARealDirectoryOnADeclaredPathAsForeignOnly(t *te
 	if len(foreign) != 1 || foreign[0].Path != filepath.Join(claude, "alpha") || foreign[0].Kind != ForeignAvailabilityDirectory {
 		t.Fatalf("Foreign = %#v; want the real directory on alpha's path", foreign)
 	}
+}
+
+// leftoverRepaired is the paths and empty Agent directories whose Repair has
+// status.
+func leftoverRepaired(occupancy LeftoverOccupancy, status RepairStatus) ([]LeftoverPath, []AgentDir) {
+	var paths []LeftoverPath
+	for _, path := range occupancy.Paths {
+		if path.Repair.Status == status {
+			paths = append(paths, path)
+		}
+	}
+	var empty []AgentDir
+	for _, dir := range occupancy.Empty {
+		if dir.Repair.Status == status {
+			empty = append(empty, dir)
+		}
+	}
+	return paths, empty
 }

@@ -839,17 +839,6 @@ func hasUnknownAgent(refs []UnknownAgentReference, skill, field, agent string) b
 	return false
 }
 
-func TestAttachLeftoverRepairsRecordsSkip(t *testing.T) {
-	path := LeftoverPath{Agent: "codex", Skill: "sample", Path: "/tmp/sample"}
-	got := attachLeftoverRepairs(
-		LeftoverOccupancy{Paths: []LeftoverPath{path}},
-		LeftoverApplyResult{SkippedPaths: []LeftoverPath{path}},
-	)
-	if got.Paths[0].Repair.Status != RepairSkipped {
-		t.Fatalf("repair = %#v; want Skipped", got.Paths[0].Repair)
-	}
-}
-
 func leftoverEmptyRepairStatus(report DoctorReport, status RepairStatus) int {
 	n := 0
 	for _, empty := range report.Leftover.Empty {

@@ -300,7 +300,7 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 	}
 	plan.availability = NewAvailability(plan.cfg, plan.skillsDir)
 	occupancy := plan.availability.ObserveOccupancy()
-	plan.availability.ApplyLeftover(occupancy.Leftover.ForSkills([]string{old}).WithoutEmpty())
+	plan.availability.RemoveLeftover(occupancy.Leftover.ForSkills([]string{old}).WithoutEmpty())
 	if err := RemoveAll(skill.ScopePath); err != nil && !os.IsNotExist(err) {
 		return fail(err)
 	}

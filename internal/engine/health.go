@@ -396,11 +396,15 @@ func (d *Doctor) repair(plan *DoctorReport, progress DoctorProgress, replaceFore
 			plan.StaleScopes[i].Repair = ItemRepair{Status: RepairSucceeded}
 		}
 	}
-	plan.Leftover = attachLeftoverRepairs(plan.Leftover, d.availability.ApplyLeftover(plan.Leftover))
+	plan.Leftover = d.availability.RemoveLeftover(plan.Leftover)
 	for i, drift := range plan.Drift {
 		var err error
 		if len(drift.absentUnexpected) > 0 {
-			err = removeManagedAgentPaths(drift.absentUnexpected, d.skillsDir)
+			var errs []error
+			for _, repair := range removeManagedPaths(d.skillsDir, drift.absentUnexpected) {
+				errs = append(errs, repair.Err)
+			}
+			err = errors.Join(errs...)
 		} else if len(drift.Foreign) > 0 && replaceForeign {
 			err = d.availability.ReplaceForeign(drift.Skill, drift.Foreign)
 		} else {
@@ -419,61 +423,11 @@ func agentsOf(paths []ManagedAgentPath) []string {
 	return agents
 }
 
-// removeManagedAgentPaths removes each path that is still a managed path for
-// its Skill, leaving one that changed since it was observed.
-func removeManagedAgentPaths(paths []ManagedAgentPath, skillsDir string) error {
-	var errs []error
-	for _, path := range paths {
-		if _, err := removeManagedSkillPath(path.Path, path.Skill, skillsDir); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
 func itemRepairFromErr(err error) ItemRepair {
 	if err != nil {
 		return ItemRepair{Status: RepairFailed, Err: err}
 	}
 	return ItemRepair{Status: RepairSucceeded}
-}
-
-func leftoverPathKey(path LeftoverPath) string {
-	return path.Agent + "\x00" + path.Skill + "\x00" + path.Path
-}
-
-func attachLeftoverRepairs(occupancy LeftoverOccupancy, result LeftoverApplyResult) LeftoverOccupancy {
-	paths := make(map[string]ItemRepair, len(occupancy.Paths))
-	for _, path := range result.RemovedPaths {
-		paths[leftoverPathKey(path)] = ItemRepair{Status: RepairSucceeded}
-	}
-	for _, path := range result.SkippedPaths {
-		paths[leftoverPathKey(path)] = ItemRepair{Status: RepairSkipped}
-	}
-	for _, failure := range result.FailedPaths {
-		paths[leftoverPathKey(failure.Path)] = itemRepairFromErr(failure.Err)
-	}
-	for i, path := range occupancy.Paths {
-		if repair, ok := paths[leftoverPathKey(path)]; ok {
-			occupancy.Paths[i].Repair = repair
-		}
-	}
-	empty := make(map[string]ItemRepair, len(occupancy.Empty))
-	for _, dir := range result.RemovedEmpty {
-		empty[dir.Dir] = ItemRepair{Status: RepairSucceeded}
-	}
-	for _, dir := range result.SkippedEmpty {
-		empty[dir.Dir] = ItemRepair{Status: RepairSkipped}
-	}
-	for _, failure := range result.FailedEmpty {
-		empty[failure.Dir.Dir] = itemRepairFromErr(failure.Err)
-	}
-	for i, dir := range occupancy.Empty {
-		if repair, ok := empty[dir.Dir]; ok {
-			occupancy.Empty[i].Repair = repair
-		}
-	}
-	return occupancy
 }
 
 // LegacyCacheRoots names the legacy branchless Cache roots doctor found, for

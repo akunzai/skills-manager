@@ -26,7 +26,7 @@ type LeftoverPath struct {
 	Repair   ItemRepair
 }
 
-// LeftoverOccupancy is leftover occupancy observed once. ApplyLeftover takes
+// LeftoverOccupancy is leftover occupancy observed once. RemoveLeftover takes
 // this value; filtering it is a pure transformation, not a second observation.
 type LeftoverOccupancy struct {
 	Paths []LeftoverPath
@@ -49,29 +49,6 @@ func (o LeftoverOccupancy) ForSkills(names []string) LeftoverOccupancy {
 		}
 	}
 	return LeftoverOccupancy{Paths: paths, Empty: slices.Clone(o.Empty)}
-}
-
-// LeftoverFailure is one leftover path ApplyLeftover could not remove.
-type LeftoverFailure struct {
-	Path LeftoverPath
-	Err  error
-}
-
-// LeftoverEmptyFailure is one leftover empty Agent directory ApplyLeftover
-// could not remove.
-type LeftoverEmptyFailure struct {
-	Dir AgentDir
-	Err error
-}
-
-// LeftoverApplyResult is what ApplyLeftover did with one occupancy snapshot.
-type LeftoverApplyResult struct {
-	RemovedPaths []LeftoverPath
-	SkippedPaths []LeftoverPath
-	FailedPaths  []LeftoverFailure
-	RemovedEmpty []AgentDir
-	SkippedEmpty []AgentDir
-	FailedEmpty  []LeftoverEmptyFailure
 }
 
 // Occupancy is a Scope's Agent directory occupancy, observed once (see
@@ -246,38 +223,59 @@ func (a *Availability) agentHealth(agent, dir string, entries []os.DirEntry, dec
 	return health
 }
 
-// ApplyLeftover removes the leftover occupancy in occupancy, revalidating each
-// path immediately before deletion.
-func (a *Availability) ApplyLeftover(occupancy LeftoverOccupancy) LeftoverApplyResult {
-	result := LeftoverApplyResult{}
-	for _, path := range occupancy.Paths {
-		managed, err := removeManagedSkillPath(path.Path, path.Skill, a.skillsDir)
-		if !managed {
-			result.SkippedPaths = append(result.SkippedPaths, path)
-			continue
-		}
-		if err != nil && !os.IsNotExist(err) {
-			result.FailedPaths = append(result.FailedPaths, LeftoverFailure{Path: path, Err: err})
-			continue
-		}
-		result.RemovedPaths = append(result.RemovedPaths, path)
+// RemoveLeftover removes the leftover occupancy in occupancy and returns it
+// with each item's Repair recorded.
+func (a *Availability) RemoveLeftover(occupancy LeftoverOccupancy) LeftoverOccupancy {
+	removed := LeftoverOccupancy{Paths: slices.Clone(occupancy.Paths), Empty: slices.Clone(occupancy.Empty)}
+	paths := make([]ManagedAgentPath, len(removed.Paths))
+	for i, path := range removed.Paths {
+		paths[i] = path.ManagedAgentPath
 	}
-	stopAt := models.ScopeRoot(a.skillsDir)
-	for _, empty := range occupancy.Empty {
-		// removeEmptyAgentDir leaves a directory that is no longer empty and
-		// returns nil, so ask first: whatever changed since the observation
-		// owns the directory now.
-		if isEmpty, err := isDirEffectivelyEmpty(empty.Dir); err != nil || !isEmpty {
-			result.SkippedEmpty = append(result.SkippedEmpty, empty)
-			continue
-		}
-		if err := removeEmptyAgentDir(empty.Dir, stopAt); err != nil {
-			result.FailedEmpty = append(result.FailedEmpty, LeftoverEmptyFailure{Dir: empty, Err: err})
-			continue
-		}
-		result.RemovedEmpty = append(result.RemovedEmpty, empty)
+	for i, repair := range removeManagedPaths(a.skillsDir, paths) {
+		removed.Paths[i].Repair = repair
 	}
-	return result
+	for i, repair := range removeEmptyAgentDirs(a.skillsDir, removed.Empty) {
+		removed.Empty[i].Repair = repair
+	}
+	return removed
+}
+
+// removeManagedPaths is the one step that removes managed paths from Agent
+// directories. Each path is checked again immediately before removal, since
+// it can change while a confirmation prompt is open: one that is no longer a
+// managed path for its Skill is Skipped and left alone. The repairs are in
+// the order of paths.
+func removeManagedPaths(skillsDir string, paths []ManagedAgentPath) []ItemRepair {
+	repairs := make([]ItemRepair, len(paths))
+	for i, path := range paths {
+		managed, err := removeManagedSkillPath(path.Path, path.Skill, skillsDir)
+		switch {
+		case !managed:
+			repairs[i] = ItemRepair{Status: RepairSkipped}
+		case err != nil && !os.IsNotExist(err):
+			repairs[i] = ItemRepair{Status: RepairFailed, Err: err}
+		default:
+			repairs[i] = ItemRepair{Status: RepairSucceeded}
+		}
+	}
+	return repairs
+}
+
+// removeEmptyAgentDirs removes each Agent directory that is still empty, and
+// the empty parents it leaves, without escaping the Scope. One that is gone
+// or has gained an entry is Skipped: whatever changed since the observation
+// owns it now. The repairs are in the order of dirs.
+func removeEmptyAgentDirs(skillsDir string, dirs []AgentDir) []ItemRepair {
+	repairs := make([]ItemRepair, len(dirs))
+	stopAt := models.ScopeRoot(skillsDir)
+	for i, dir := range dirs {
+		if empty, err := isDirEffectivelyEmpty(dir.Dir); err != nil || !empty {
+			repairs[i] = ItemRepair{Status: RepairSkipped}
+			continue
+		}
+		repairs[i] = itemRepairFromErr(removeEmptyAgentDir(dir.Dir, stopAt))
+	}
+	return repairs
 }
 
 // selects reports whether declared Availability puts skill on agent. Such a

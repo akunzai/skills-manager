@@ -233,7 +233,7 @@ func globalSkillsHome(t *testing.T, skillName string) (string, string) {
 // Universal agents read the skills directory directly, but older versions and
 // setup scripts materialized their directories; links there must not dangle
 // after the skill is removed.
-func TestApplyLeftoverClearsAutomaticallyAvailableManagedPaths(t *testing.T) {
+func TestRemoveLeftoverClearsAutomaticallyAvailableManagedPaths(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
 
 	codex := filepath.Join(home, ".codex", "skills")
@@ -248,7 +248,7 @@ func TestApplyLeftoverClearsAutomaticallyAvailableManagedPaths(t *testing.T) {
 	}
 
 	availability := NewAvailability(config.DefaultConfig(), skillsDir)
-	result := availability.ApplyLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"alpha"}).WithoutEmpty())
+	result := availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"alpha"}).WithoutEmpty())
 
 	for _, dir := range []string{codex, cursor} {
 		if _, err := os.Lstat(filepath.Join(dir, "alpha")); !os.IsNotExist(err) {
@@ -256,7 +256,8 @@ func TestApplyLeftoverClearsAutomaticallyAvailableManagedPaths(t *testing.T) {
 		}
 	}
 	var sawCodex, sawCursor bool
-	for _, path := range result.RemovedPaths {
+	removed, _ := leftoverRepaired(result, RepairSucceeded)
+	for _, path := range removed {
 		switch path.Agent {
 		case "codex":
 			sawCodex = true
@@ -265,7 +266,7 @@ func TestApplyLeftoverClearsAutomaticallyAvailableManagedPaths(t *testing.T) {
 		}
 	}
 	if !sawCodex || !sawCursor {
-		t.Fatalf("removed = %#v; want codex and cursor reported", result.RemovedPaths)
+		t.Fatalf("removed = %#v; want codex and cursor reported", removed)
 	}
 }
 
@@ -295,7 +296,7 @@ func TestRemoveAgentSymlinksLeavesUnmanagedEntriesAlone(t *testing.T) {
 	}
 
 	availability := NewAvailability(config.DefaultConfig(), skillsDir)
-	availability.ApplyLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"alpha", "beta"}).WithoutEmpty())
+	availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"alpha", "beta"}).WithoutEmpty())
 
 	if _, err := os.Stat(keep); err != nil {
 		t.Fatalf("a real directory must never be removed: %v", err)

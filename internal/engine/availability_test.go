@@ -106,7 +106,7 @@ func projectAvailability(t *testing.T, skill string) (*Availability, string, str
 // repaired silently, a foreign path needs the user's consent before it is
 // replaced, and an unobservable one cannot be repaired at all. Each was
 // reachable only through the CLI before this.
-func TestObserveAvailabilityDistinguishesDriftBranches(t *testing.T) {
+func TestOccupancyDriftDistinguishesDriftBranches(t *testing.T) {
 	t.Run("missing link", func(t *testing.T) {
 		availability, _, _ := projectAvailability(t, "sample")
 
@@ -258,7 +258,7 @@ func plantManagedLink(t *testing.T, skillsDir, agentDir, skill string) string {
 	return link
 }
 
-func TestObserveAvailabilityReportsBrokenDesiredLink(t *testing.T) {
+func TestOccupancyDriftReportsBrokenDesiredLink(t *testing.T) {
 	availability, linkPath, skillsDir := projectAvailability(t, "sample")
 	plantManagedLink(t, skillsDir, filepath.Dir(linkPath), "sample")
 	if err := os.RemoveAll(filepath.Join(skillsDir, "sample")); err != nil {
@@ -314,7 +314,7 @@ func TestApplyRepairsBrokenDesiredLink(t *testing.T) {
 	}
 }
 
-func TestObserveAvailabilityCopiesDoNotFillEmpty(t *testing.T) {
+func TestOccupancyDriftCopiesDoNotFillEmpty(t *testing.T) {
 	availability, linkPath, skillsDir := projectAvailability(t, "sample")
 	denyLinkCreation(t, ErrLinkPrivilegeNotHeld)
 	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
@@ -374,7 +374,7 @@ func assertClaudeReservedDirIntact(t *testing.T, claudeFile string) {
 // A Skill whose name an Agent reserves is never Availability for that Agent:
 // there is nothing to observe on that path, so it is neither Missing nor
 // Foreign nor anything else.
-func TestObserveAvailabilityIgnoresAgentReservedName(t *testing.T) {
+func TestOccupancyDriftIgnoresAgentReservedName(t *testing.T) {
 	availability, _, _, _ := reservedNameScope(t)
 
 	drift := availability.ObserveOccupancy().Drift("synced")

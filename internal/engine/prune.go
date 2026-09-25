@@ -3,7 +3,6 @@ package engine
 import (
 	"cmp"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 
@@ -114,18 +113,17 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 	}
 	result := PruneResult{}
 	var errs []error
-	for _, link := range plan.Unconfigured {
-		managed, err := removeManagedSkillPath(link.Path, link.Skill, skillsDir)
-		if !managed {
+	for i, repair := range removeManagedPaths(skillsDir, plan.Unconfigured) {
+		link := plan.Unconfigured[i]
+		switch repair.Status {
+		case RepairSkipped:
 			result.SkippedLinks = append(result.SkippedLinks, link)
-			continue
+		case RepairFailed:
+			result.Failures = append(result.Failures, PruneFailure{Path: link.Path, Err: repair.Err})
+			errs = append(errs, repair.Err)
+		default:
+			result.RemovedLinks = append(result.RemovedLinks, link)
 		}
-		if err != nil && !os.IsNotExist(err) {
-			result.Failures = append(result.Failures, PruneFailure{Path: link.Path, Err: err})
-			errs = append(errs, err)
-			continue
-		}
-		result.RemovedLinks = append(result.RemovedLinks, link)
 	}
 	for _, skill := range plan.UntrackedSkills {
 		path := filepath.Join(skillsDir, skill)
@@ -136,21 +134,17 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 		}
 		result.RemovedSkills = append(result.RemovedSkills, skill)
 	}
-	stopAt := models.ScopeRoot(skillsDir)
-	for _, dir := range plan.EmptyAgentDirs {
-		empty, err := isDirEffectivelyEmpty(dir.Dir)
-		if err != nil || !empty {
-			// Gone, or no longer empty: whatever changed since planning owns
-			// the directory now, not prune.
+	for i, repair := range removeEmptyAgentDirs(skillsDir, plan.EmptyAgentDirs) {
+		dir := plan.EmptyAgentDirs[i]
+		switch repair.Status {
+		case RepairSkipped:
 			result.SkippedEmptyDirs = append(result.SkippedEmptyDirs, dir)
-			continue
+		case RepairFailed:
+			result.Failures = append(result.Failures, PruneFailure{Path: dir.Dir, Err: repair.Err})
+			errs = append(errs, repair.Err)
+		default:
+			result.RemovedEmptyDirs = append(result.RemovedEmptyDirs, dir)
 		}
-		if err := removeEmptyAgentDir(dir.Dir, stopAt); err != nil {
-			result.Failures = append(result.Failures, PruneFailure{Path: dir.Dir, Err: err})
-			errs = append(errs, err)
-			continue
-		}
-		result.RemovedEmptyDirs = append(result.RemovedEmptyDirs, dir)
 	}
 	if len(plan.StateSkills) > 0 {
 		baselines := OpenBaselines(skillsDir)

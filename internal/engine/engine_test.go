@@ -457,8 +457,8 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 		t.Fatalf("expected symlink at %s", claudeLink)
 	}
 
-	result := availability.ApplyLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"test-skill"}).WithoutEmpty())
-	if len(result.RemovedPaths) == 0 {
+	result := availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"test-skill"}).WithoutEmpty())
+	if removed, _ := leftoverRepaired(result, RepairSucceeded); len(removed) == 0 {
 		t.Errorf("expected at least 1 leftover path removed")
 	}
 	if _, err := os.Lstat(claudeLink); err == nil {
