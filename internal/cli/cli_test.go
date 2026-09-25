@@ -1479,7 +1479,9 @@ func TestCLIDoctorFixStillReportsUnrepairableIssues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A physical directory with no master skill behind it cannot be converted.
+	// An unmanaged directory with no master skill behind it is left as-is,
+	// not a repair target (D1); the unmanaged broken symlink is the one
+	// issue --fix still cannot repair.
 	orphan := filepath.Join(project, ".claude", "skills", "no-master")
 	if err := os.MkdirAll(orphan, 0755); err != nil {
 		t.Fatal(err)
@@ -1494,10 +1496,13 @@ func TestCLIDoctorFixStillReportsUnrepairableIssues(t *testing.T) {
 
 	out, err := runCLI(t, "doctor", "--fix", "-p")
 	if err == nil {
-		t.Fatalf("doctor --fix should fail while an issue remains unrepaired:\n%s", out)
+		t.Fatalf("doctor --fix should fail while the unmanaged broken symlink remains unrepaired:\n%s", out)
 	}
-	if !strings.Contains(out, "Cannot replace unmanaged directory") {
-		t.Fatalf("expected an explanation of what could not be repaired:\n%s", out)
+	if !strings.Contains(out, "Unmanaged directories left as-is: no-master") {
+		t.Fatalf("expected the unmanaged directory reported as a warning:\n%s", out)
+	}
+	if strings.Contains(out, "Cannot replace unmanaged directory") {
+		t.Fatalf("--fix must not claim it attempted to repair an unmanaged directory:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(orphan, "SKILL.md")); err != nil {
 		t.Fatalf("doctor --fix modified unmanaged data: %v", err)
@@ -1623,8 +1628,13 @@ func TestCLIRuntimeErrorDoesNotPrintUsage(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, ".agents", "skills"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	orphan := filepath.Join(project, ".claude", "skills", "no-master")
-	if err := os.MkdirAll(orphan, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(project, ".claude", "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// An unmanaged broken symlink still counts as an issue (an unmanaged
+	// directory no longer does, D1), so it is what makes this run fail.
+	unmanagedBroken := filepath.Join(project, ".claude", "skills", "custom-broken")
+	if err := os.Symlink(filepath.Join(project, "gone"), unmanagedBroken); err != nil {
 		t.Fatal(err)
 	}
 

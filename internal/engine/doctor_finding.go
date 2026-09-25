@@ -37,11 +37,13 @@ const (
 )
 
 // CountsAsIssue is whether this kind contributes to Remaining. Untracked
-// occupancy on the skills directory is not Drift (ADR-0002). Availability
-// Copies never appear as a kind.
+// occupancy on the skills directory, and an unmanaged directory this tool did
+// not create and Config does not declare on an Agent directory, are not
+// Drift (ADR-0002): the tool leaves both alone and reports them as warnings.
+// Availability Copies never appear as a kind.
 func (k DoctorFindingKind) CountsAsIssue() bool {
 	switch k {
-	case findingUntracked, findingUntrackedLink:
+	case findingUntracked, findingUntrackedLink, findingAgentPhysical:
 		return false
 	default:
 		return k != ""

@@ -55,15 +55,13 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 		}
 		add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("  [%s] Symlinks healthy (%s).", agent.Name, models.ToTildePath(agent.Dir))})
 		if len(agent.UnmanagedBroken) > 0 {
-			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: [%s] Unmanaged broken symlinks were left unchanged: %s", agent.Name, strings.Join(agent.UnmanagedBroken, ", "))})
+			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  [%s] Unmanaged broken symlinks were left unchanged: %s", agent.Name, strings.Join(agent.UnmanagedBroken, ", "))})
 		}
 		if len(agent.Physical) > 0 {
-			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: [%s] Physical directories found instead of symlinks: %s", agent.Name, strings.Join(agent.Physical, ", "))})
-			if attemptedFix {
-				for _, pName := range agent.Physical {
-					add(Finding{Severity: SeverityError, Message: fmt.Sprintf("    Cannot replace unmanaged directory %s in %s.", pName, agent.Name)})
-				}
-			}
+			// Not a repair target: an unmanaged directory this tool did not
+			// create and Config does not declare is left alone, the same as
+			// Untracked occupancy on the skills directory (ADR-0002).
+			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  [%s] Unmanaged directories left as-is: %s", agent.Name, strings.Join(agent.Physical, ", "))})
 		}
 	}
 
@@ -90,7 +88,7 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 	}
 
 	if len(p.Leftover.Empty) > 0 {
-		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: %d leftover empty agent directories (not covered by any configured Agent policy): %s", len(p.Leftover.Empty), strings.Join(leftoverAgentNames(p.Leftover.Empty), ", "))})
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  %d leftover empty agent directories (not covered by any configured Agent policy): %s", len(p.Leftover.Empty), strings.Join(leftoverAgentNames(p.Leftover.Empty), ", "))})
 		for _, empty := range p.Leftover.Empty {
 			findings = append(findings, leftoverEmptyRepairFinding(empty)...)
 		}
@@ -129,7 +127,7 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 	}
 
 	if len(p.Missing) > 0 {
-		add(Finding{Severity: SeverityWarning, Message: "Warning: Configured but missing skills: " + strings.Join(p.Missing, ", "), Blank: true})
+		add(Finding{Severity: SeverityWarning, Message: "Configured but missing skills: " + strings.Join(p.Missing, ", "), Blank: true})
 	}
 	if len(p.Untracked) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Untracked skills in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.Untracked, ", ")), Blank: true})
@@ -207,7 +205,7 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 		if ref.Skill != "" {
 			where = fmt.Sprintf("settings.availability.%s.%s", ref.Skill, ref.Field)
 		}
-		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Warning: unknown agent %q in %s", ref.Agent, where), Blank: true})
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("unknown agent %q in %s", ref.Agent, where), Blank: true})
 	}
 
 	return findings

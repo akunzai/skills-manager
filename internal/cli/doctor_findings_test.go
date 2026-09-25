@@ -77,7 +77,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := doctorFindings(beforeOutcome.Report, beforeOutcome.AttemptedFix)
-	if !containsMessage(before, "Warning:") {
+	if finding, ok := findingWith(before, "leftover empty agent director"); !ok || finding.Severity != SeverityWarning {
 		t.Fatalf("expected a pre-fix warning finding, got %#v", before)
 	}
 
@@ -86,11 +86,81 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := doctorFindings(afterOutcome.Report, afterOutcome.AttemptedFix)
-	if !containsMessage(after, "Warning:") {
+	if finding, ok := findingWith(after, "leftover empty agent director"); !ok || finding.Severity != SeverityWarning {
 		t.Errorf("post-fix findings dropped the leftover diagnosis: %#v", after)
 	}
 	if !containsMessage(after, "Removed leftover empty agent directory continue") {
 		t.Errorf("expected a Removed finding after fixing the leftover dir, got %#v", after)
+	}
+}
+
+// An unmanaged directory on an Agent directory (D1) is a warning, worded
+// without the literal "Warning:" prefix (D4), and --fix does not claim it
+// tried and failed to replace it: it was never a repair target.
+func TestFindingsUnmanagedAgentDirectoryIsWarningWithoutRepairAttempt(t *testing.T) {
+	report := engine.DoctorReport{
+		Agents: []engine.AgentHealth{
+			{Name: "goose", Dir: "/scope/goose", Physical: []string{"physical-dir"}},
+		},
+	}
+
+	finding, ok := findingWith(doctorFindings(report, false), "physical-dir")
+	if !ok {
+		t.Fatalf("expected a finding naming the unmanaged directory, got %#v", doctorFindings(report, false))
+	}
+	if finding.Severity != SeverityWarning {
+		t.Errorf("severity = %v; want SeverityWarning", finding.Severity)
+	}
+	if !strings.Contains(finding.Message, "[goose] Unmanaged directories left as-is: physical-dir") {
+		t.Errorf("message = %q; want the renamed wording", finding.Message)
+	}
+	if strings.Contains(finding.Message, "Warning:") {
+		t.Errorf("message = %q; must not carry the literal Warning: prefix", finding.Message)
+	}
+
+	fixed := doctorFindings(report, true)
+	if containsMessage(fixed, "Cannot replace unmanaged directory") {
+		t.Errorf("--fix must not claim it attempted to replace an unmanaged directory: %#v", fixed)
+	}
+}
+
+// D1 end to end: a Scope whose only standing fact is an unmanaged directory
+// on an Agent directory still matches its Config, so doctor exits 0 with or
+// without --fix.
+func TestCLIDoctorExitsZeroWithOnlyAnUnmanagedAgentDirectory(t *testing.T) {
+	project := projectScope(t)
+
+	if _, err := runCLI(t, "init", "-p"); err != nil {
+		t.Fatalf("init -p: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, ".agents", "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	unmanaged := filepath.Join(project, ".claude", "skills", "unmanaged")
+	if err := os.MkdirAll(unmanaged, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unmanaged, "SKILL.md"), []byte("# Unmanaged"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "-p")
+	if err != nil {
+		t.Fatalf("doctor should exit 0 with only an unmanaged Agent directory present: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Unmanaged directories left as-is: unmanaged") {
+		t.Fatalf("expected the unmanaged-directory warning:\n%s", out)
+	}
+	if strings.Contains(out, "Warning:") {
+		t.Fatalf("doctor line kept the literal Warning: prefix:\n%s", out)
+	}
+
+	fixedOut, err := runCLI(t, "doctor", "--fix", "-p")
+	if err != nil {
+		t.Fatalf("doctor --fix should also exit 0: %v\n%s", err, fixedOut)
+	}
+	if strings.Contains(fixedOut, "Cannot replace unmanaged directory") {
+		t.Fatalf("doctor --fix should not claim to repair an unmanaged directory:\n%s", fixedOut)
 	}
 }
 
