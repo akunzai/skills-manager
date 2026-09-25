@@ -79,21 +79,8 @@ func newDoctorCmd() *cobra.Command {
 				// condition" above a standing warning is what made --fix read
 				// as broken.
 				var notes []string
-				if n := outcome.Untracked; n > 0 {
-					notes = append(notes, untrackedOccupancy(n)+" not in Config")
-				}
-				if n := outcome.UntrackedLinks; n > 0 {
-					notes = append(notes, leftoverSymlinks(n)+" can be pruned")
-				}
-				if n := unmanagedAgentDirs(outcome.Report); n > 0 {
-					noun := "unmanaged Agent directories"
-					if n == 1 {
-						noun = "unmanaged Agent directory"
-					}
-					notes = append(notes, fmt.Sprintf("%d %s left as-is", n, noun))
-				}
-				if n := len(outcome.Report.ReservedNames); n > 0 {
-					notes = append(notes, countOf(n, "Skill")+" cannot be available to an Agent")
+				for _, warning := range outcome.Warnings {
+					notes = append(notes, warningNote(warning))
 				}
 				if len(notes) > 0 {
 					fmt.Fprintf(out, "%s%sNo issues detected. %s.%s\n", colorBold, colorYellow, strings.Join(notes, "; "), colorReset)
@@ -131,12 +118,26 @@ func newDoctorCmd() *cobra.Command {
 	return cmd
 }
 
-func unmanagedAgentDirs(report engine.DoctorReport) int {
-	n := 0
-	for _, agent := range report.Agents {
-		n += len(agent.Physical)
+// warningNote words one warning kind for doctor's summary line. Every kind in
+// engine.DoctorWarningKinds needs a case; TestEveryDoctorWarningKindIsWorded
+// fails otherwise.
+func warningNote(warning engine.DoctorWarning) string {
+	n := warning.Count
+	switch warning.Kind {
+	case engine.DoctorFindingUntracked:
+		return untrackedOccupancy(n) + " not in Config"
+	case engine.DoctorFindingUntrackedLink:
+		return leftoverSymlinks(n) + " can be pruned"
+	case engine.DoctorFindingUnmanagedDirectory:
+		if n == 1 {
+			return "1 unmanaged Agent directory left as-is"
+		}
+		return fmt.Sprintf("%d unmanaged Agent directories left as-is", n)
+	case engine.DoctorFindingReservedName:
+		return countOf(n, "Skill") + " cannot be available to an Agent"
+	default:
+		return ""
 	}
-	return n
 }
 
 func untrackedOccupancy(n int) string {

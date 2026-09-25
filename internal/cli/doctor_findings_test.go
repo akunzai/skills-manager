@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -357,8 +358,8 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		if !containsMessage(doctorFindings(outcome.Report), "Not in Config; left as-is. A TTY prune can remove it; 'skills prune -p --yes' will not.") {
 			t.Fatalf("untracked finding has no Project-scoped next action: %#v", doctorFindings(outcome.Report))
 		}
-		if outcome.Untracked != 1 {
-			t.Errorf("Untracked = %d; want 1", outcome.Untracked)
+		if want := []engine.DoctorWarning{{Kind: engine.DoctorFindingUntracked, Count: 1}}; !reflect.DeepEqual(outcome.Warnings, want) {
+			t.Errorf("Warnings = %#v; want %#v", outcome.Warnings, want)
 		}
 		if outcome.Remaining != 0 {
 			t.Errorf("Remaining = %d; want 0 (untracked must not count)", outcome.Remaining)
@@ -637,5 +638,17 @@ func TestLeftoverEmptyRepairFindingReportsSkip(t *testing.T) {
 	want := []Finding{{Severity: SeverityInfo, Message: "    Skipped leftover agent directory continue: it is no longer empty."}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("finding = %#v; want %#v", got, want)
+	}
+}
+
+// A warning kind the summary line cannot word would vanish from it while
+// doctor still exits 0.
+func TestEveryDoctorWarningKindIsWorded(t *testing.T) {
+	for _, kind := range engine.DoctorWarningKinds() {
+		for _, n := range []int{1, 2} {
+			if note := warningNote(engine.DoctorWarning{Kind: kind, Count: n}); !strings.HasPrefix(note, strconv.Itoa(n)+" ") {
+				t.Errorf("warningNote(%s, %d) = %q; want a sentence starting with the count", kind, n, note)
+			}
+		}
 	}
 }
