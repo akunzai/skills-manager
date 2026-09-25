@@ -28,6 +28,7 @@ const (
 	findingInvalid              DoctorFindingKind = "invalid"
 	findingStub                 DoctorFindingKind = "stub"
 	findingUnknownAgent         DoctorFindingKind = "unknown-agent"
+	findingReservedName         DoctorFindingKind = "reserved-name"
 	findingStateError           DoctorFindingKind = "state-error"
 	findingGitError             DoctorFindingKind = "git-error"
 	findingStaleState           DoctorFindingKind = "stale-state"
@@ -40,10 +41,12 @@ const (
 // occupancy on the skills directory, and an unmanaged directory this tool did
 // not create and Config does not declare on an Agent directory, are not
 // Drift (ADR-0002): the tool leaves both alone and reports them as warnings.
-// Availability Copies never appear as a kind.
+// A Skill whose name an Agent reserves is not Drift either: no repair can make
+// it available there, so it is a warning about the declaration. Availability
+// Copies never appear as a kind.
 func (k DoctorFindingKind) CountsAsIssue() bool {
 	switch k {
-	case findingUntracked, findingUntrackedLink, findingAgentPhysical:
+	case findingUntracked, findingUntrackedLink, findingAgentPhysical, findingReservedName:
 		return false
 	default:
 		return k != ""
@@ -99,6 +102,7 @@ func (p DoctorReport) findings() []DoctorFindingKind {
 	add(findingInvalid, len(p.Invalid))
 	add(findingStub, len(p.Stubs))
 	add(findingUnknownAgent, len(p.UnknownAgents))
+	add(findingReservedName, len(p.ReservedNames))
 	if p.StateError != "" {
 		add(findingStateError, 1)
 	}

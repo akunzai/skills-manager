@@ -515,3 +515,66 @@ func TestObserveAvailabilityCopiesDoNotFillEmpty(t *testing.T) {
 		t.Fatalf("copy path missing: %v", err)
 	}
 }
+
+// reservedNameScope is a Project Scope declaring a Skill named "synced" for
+// Claude Code and Continue, while Claude Code keeps its own claude.ai skills
+// in Synced/ — the name it reserves in any capitalization. It returns the
+// Scope's Availability, its skills directory, and the file inside Claude
+// Code's directory that nothing may touch.
+func reservedNameScope(t *testing.T) (*Availability, *config.Config, string, string) {
+	t.Helper()
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "synced", "SKILL.md"), []byte("# Synced\n"))
+	claudeFile := filepath.Join(project, ".claude", "skills", "Synced", "account", "SKILL.md")
+	mustWriteScopeStateTestFile(t, claudeFile, []byte("# claude.ai skill\n"))
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "synced", "synced", "github", "main")
+	return NewAvailability(cfg, skillsDir), cfg, skillsDir, claudeFile
+}
+
+func assertClaudeReservedDirIntact(t *testing.T, claudeFile string) {
+	t.Helper()
+	got, err := os.ReadFile(claudeFile)
+	if err != nil || string(got) != "# claude.ai skill\n" {
+		t.Fatalf("Claude Code's reserved directory was touched: %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(filepath.Dir(filepath.Dir(claudeFile))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != "Synced" {
+			t.Fatalf("Claude Code's skills directory gained %q beside its reserved entry", entry.Name())
+		}
+	}
+}
+
+// A Skill whose name an Agent reserves is never Availability for that Agent:
+// there is nothing to observe on that path, so it is neither Missing nor
+// Foreign nor anything else.
+func TestObserveAvailabilityIgnoresAgentReservedName(t *testing.T) {
+	availability, _, _, _ := reservedNameScope(t)
+
+	drift := availability.ObserveAvailability("synced")
+
+	want := AvailabilityDrift{Skill: "synced", Missing: []string{"continue"}}
+	if !reflect.DeepEqual(drift, want) {
+		t.Fatalf("drift = %#v; want %#v", drift, want)
+	}
+}
+
+func TestApplyLeavesAgentReservedNameAlone(t *testing.T) {
+	availability, _, skillsDir, claudeFile := reservedNameScope(t)
+	project := filepath.Dir(filepath.Dir(skillsDir))
+
+	if _, err := availability.Apply("synced"); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	assertClaudeReservedDirIntact(t, claudeFile)
+	if !isManagedSkillPath(filepath.Join(project, ".continue", "skills", "synced"), "synced", skillsDir) {
+		t.Fatal("Apply did not make synced available to continue")
+	}
+}

@@ -997,6 +997,7 @@ func classifiedDoctorReport() DoctorReport {
 		Invalid:        []InvalidSkill{{Name: "broken"}},
 		Stubs:          []string{"stub"},
 		UnknownAgents:  []UnknownAgentReference{{Agent: "nope"}},
+		ReservedNames:  []ReservedAvailability{{Skill: "synced", Agent: "claude-code"}},
 		StateError:     "corrupt",
 		StaleState:     []string{"old"},
 		GitError:       "git too old",
@@ -1037,6 +1038,7 @@ func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
 		findingInvalid:                1,
 		findingStub:                   1,
 		findingUnknownAgent:           1,
+		findingReservedName:           1,
 		findingStateError:             1,
 		findingGitError:               1,
 		findingStaleState:             1,
@@ -1113,6 +1115,7 @@ func TestEveryDoctorReportFieldIsClassified(t *testing.T) {
 		"Invalid":        {findingInvalid},
 		"Stubs":          {findingStub},
 		"UnknownAgents":  {findingUnknownAgent},
+		"ReservedNames":  {findingReservedName},
 		"StateError":     {findingStateError},
 		"StaleState":     {findingStaleState},
 		"CacheRecovery":  {findingCacheRecovery},
@@ -1152,5 +1155,34 @@ func TestEveryDoctorReportFieldIsClassified(t *testing.T) {
 				t.Errorf("DoctorReport.%s set alone yields kinds %v; want %s among them", field.Name, got, kind)
 			}
 		}
+	}
+}
+
+// Doctor must never offer Claude Code's own synced/ directory for
+// replacement: approving every foreign-path prompt would otherwise delete the
+// account's claude.ai skills. The pair is reported as a warning instead.
+func TestDoctorFixLeavesAgentReservedNameAlone(t *testing.T) {
+	_, cfg, skillsDir, claudeFile := reservedNameScope(t)
+	var offered []ForeignAvailabilityPath
+	approveAll := func(paths []ForeignAvailabilityPath) (bool, error) {
+		offered = append(offered, paths...)
+		return true, nil
+	}
+
+	outcome, err := NewDoctor(cfg, skillsDir).Run(true, nil, approveAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertClaudeReservedDirIntact(t, claudeFile)
+	if len(offered) != 0 {
+		t.Fatalf("doctor offered to replace %#v", offered)
+	}
+	want := []ReservedAvailability{{Skill: "synced", Agent: "claude-code"}}
+	if !reflect.DeepEqual(outcome.Report.ReservedNames, want) {
+		t.Fatalf("ReservedNames = %#v; want %#v", outcome.Report.ReservedNames, want)
+	}
+	if outcome.Remaining != 0 || outcome.Failed != 0 {
+		t.Fatalf("Remaining = %d, Failed = %d; a reserved name is a warning, not an issue", outcome.Remaining, outcome.Failed)
 	}
 }
