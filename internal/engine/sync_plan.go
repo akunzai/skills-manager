@@ -176,6 +176,7 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 		return nil, err
 	}
 	availability := NewAvailability(cfg, skillsDir)
+	occupancy := availability.ObserveOccupancy()
 	plan := &SyncPlan{
 		StateError:   snapshot.StateError,
 		cfg:          cfg,
@@ -188,7 +189,7 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 		for _, skill := range repository.Skills {
 			item := planRemoteItem(
 				repository.Source, repository.CachePath, repository.LocalSHA,
-				skill, availability.ObserveAvailability(skill.Name),
+				skill, occupancy.Drift(skill.Name),
 			)
 			if skill.Status == SkillRenamed {
 				item = planRename(cfg, skillsDir, item)
@@ -200,13 +201,13 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 		if cfg.Local[name].Type != "symlink" {
 			continue
 		}
-		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, availability.ObserveAvailability(name), name))
+		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, occupancy.Drift(name), name))
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Local)) {
 		if cfg.Local[name].Type != "command" {
 			continue
 		}
-		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, availability.ObserveAvailability(name), name))
+		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, occupancy.Drift(name), name))
 	}
 	return plan, nil
 }

@@ -1210,7 +1210,7 @@ func TestLeftoverManagedLinkOnAReservedNameIsCleanedUp(t *testing.T) {
 		cfg.Settings.DefaultAgents = []string{"claude"}
 		config.AddRemoteSkillEntry(cfg, "owner/repo", "synced", "synced", "github", "main")
 		link := plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "synced")
-		leftover := NewAvailability(cfg, skillsDir).ObserveAgentDirs().Leftover.Paths
+		leftover := NewAvailability(cfg, skillsDir).ObserveOccupancy().Leftover.Paths
 		if len(leftover) != 1 || leftover[0].Path != link || leftover[0].Agent != "claude-code" || leftover[0].Skill != "synced" {
 			t.Fatalf("Leftover = %#v; want the old managed synced link", leftover)
 		}

@@ -3,8 +3,6 @@ package engine
 import (
 	"errors"
 	"os"
-	"path/filepath"
-	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
@@ -303,11 +301,11 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		plan.MasterMissing = true
 	}
 
-	agentDirs := d.availability.ObserveAgentDirs()
-	plan.Agents = agentDirs.Agents
-	plan.Leftover = agentDirs.Leftover
+	occupancy := d.availability.ObserveOccupancy()
+	plan.Agents = occupancy.Agents
+	plan.Leftover = occupancy.Leftover
 	unexpected := make(map[string][]ManagedAgentPath)
-	for _, path := range agentDirs.Unexpected {
+	for _, path := range occupancy.Unexpected {
 		unexpected[path.Skill] = append(unexpected[path.Skill], path)
 	}
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
@@ -323,18 +321,16 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	plan.IllegalLocal = inv.IllegalLocal()
 	plan.Invalid = inv.Invalid()
 	plan.Stubs = inv.Stubs()
-	// Unexpected comes from the Agent directory observation for every
-	// declared Skill, the same answer prune acts on; the per-Skill
-	// observation supplies the rest of a present Skill's Drift.
 	for _, s := range inv.declaredPresent() {
-		drift := d.availability.ObserveAvailability(s.Name)
-		drift.Unexpected = agentsOf(unexpected[s.Name])
+		drift := occupancy.Drift(s.Name)
 		delete(unexpected, s.Name)
 		if drift.Empty() && len(drift.Copies) == 0 {
 			continue
 		}
 		plan.Drift = append(plan.Drift, SkillDrift{AvailabilityDrift: drift})
 	}
+	// A declared Skill that is not present has no desired paths to observe,
+	// only Unexpected ones, which --fix removes rather than Apply.
 	for _, item := range inv.SkillItems() {
 		paths, ok := unexpected[item.Name]
 		if !ok {
@@ -345,25 +341,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			absentUnexpected:  paths,
 		})
 	}
-	plan.Agents = withoutForeignPhysical(plan.Agents, plan.foreignAvailabilityPaths())
 	return plan, nil
-}
-
-// withoutForeignPhysical drops the Physical entries Drift already reports as
-// Foreign. A real directory on a declared Skill's Agent path is one finding,
-// and Foreign is the one --fix can act on.
-func withoutForeignPhysical(agents []AgentHealth, foreign []ForeignAvailabilityPath) []AgentHealth {
-	claimed := make(map[string]struct{}, len(foreign))
-	for _, path := range foreign {
-		claimed[path.Path] = struct{}{}
-	}
-	for i, agent := range agents {
-		agents[i].Physical = slices.DeleteFunc(agent.Physical, func(name string) bool {
-			_, ok := claimed[filepath.Join(agent.Dir, name)]
-			return ok
-		})
-	}
-	return agents
 }
 
 // issueCount is Remaining: how many classified findings still stand in the

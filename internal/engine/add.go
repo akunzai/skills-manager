@@ -364,6 +364,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		return AddResult{}, err
 	}
 
+	occupancy := availability.ObserveOccupancy()
 	result := AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}
 	emit := func(ev SyncEvent) { result.Events = append(result.Events, ev) }
 	baselines := OpenBaselines(plan.SkillsDir)
@@ -394,10 +395,10 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 				Source:    plan.Source.Key,
 				Subpath:   subpath,
 				ScopePath: filepath.Join(plan.SkillsDir, name),
-			}, availability.ObserveAvailability(name))
+			}, occupancy.Drift(name))
 			outcome, _ = applyRemoteItem(availability, plan.SkillsDir, item, SyncDecision{}, baselines, emit)
 		case AddSourceSymlink, AddSourceCommand:
-			item := planLocalItem(cfg, plan.SkillsDir, availability.ObserveAvailability(name), name)
+			item := planLocalItem(cfg, plan.SkillsDir, occupancy.Drift(name), name)
 			outcome, _ = applyLocalItem(availability, plan.SkillsDir, item, emit)
 		}
 		switch outcome {

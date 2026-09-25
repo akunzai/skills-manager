@@ -490,7 +490,7 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(filepath.Dir(skillsDir), "local-src", "alpha"), "")
 
 	availability := engine.NewAvailability(cfg, skillsDir)
-	drift := availability.ObserveAvailability("alpha")
+	drift := availability.ObserveOccupancy().Drift("alpha")
 	if drift.Empty() {
 		t.Fatal("an unreadable availability path must not observe as no drift")
 	}

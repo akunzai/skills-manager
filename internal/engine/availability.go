@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"cmp"
 	"fmt"
 	"maps"
 	"os"
@@ -313,47 +312,43 @@ func (s availabilityState) isManagedPath(path string) bool {
 
 func (s availabilityState) drift() AvailabilityDrift {
 	var observation AvailabilityDrift
-	for agent, agentDir := range s.known {
-		linkPath := filepath.Join(agentDir, s.skillName)
-		_, want := s.desired[agent]
-		if want {
-			// Stat the Agent directory first. Lstat of a child of a file is
-			// ENOTDIR on POSIX but ERROR_PATH_NOT_FOUND on Windows, which Go
-			// maps to os.ErrNotExist — the same answer as a missing link.
-			// https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-
-			if reason := unusableDirectory(agentDir); reason != "" {
-				observation.Unobservable = append(observation.Unobservable, UnobservableAvailabilityPath{
-					Agent: agent, Dir: agentDir, Path: linkPath, Err: reason,
-				})
-				continue
-			}
-			_, err := os.Lstat(linkPath)
-			switch {
-			case os.IsNotExist(err):
-				observation.Missing = append(observation.Missing, agent)
-			case err != nil:
-				// Anything but ENOENT means the answer is unknown, not "no
-				// Drift". Silently dropping it let a Scope whose Agent
-				// directory was a regular file — Lstat returns ENOTDIR —
-				// report as healthy while nothing was linked at all.
-				observation.Unobservable = append(observation.Unobservable, describeUnobservableAvailabilityPath(agent, agentDir, linkPath, err))
-			case !s.isManagedPath(linkPath):
-				observation.Foreign = append(observation.Foreign, describeForeignAvailabilityPath(agent, linkPath))
-			case isManagedSkillCopy(linkPath, s.skillName, s.skillsDir):
-				observation.Copies = append(observation.Copies, agent)
-			default:
-				if _, statErr := os.Stat(linkPath); statErr != nil {
-					observation.Broken = append(observation.Broken, agent)
-				}
-			}
+	for agent := range s.desired {
+		agentDir, ok := s.known[agent]
+		if !ok {
 			continue
 		}
-		if s.isManagedPath(linkPath) {
-			observation.Unexpected = append(observation.Unexpected, agent)
+		linkPath := filepath.Join(agentDir, s.skillName)
+		// Stat the Agent directory first. Lstat of a child of a file is
+		// ENOTDIR on POSIX but ERROR_PATH_NOT_FOUND on Windows, which Go
+		// maps to os.ErrNotExist — the same answer as a missing link.
+		// https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-
+		if reason := unusableDirectory(agentDir); reason != "" {
+			observation.Unobservable = append(observation.Unobservable, UnobservableAvailabilityPath{
+				Agent: agent, Dir: agentDir, Path: linkPath, Err: reason,
+			})
+			continue
+		}
+		_, err := os.Lstat(linkPath)
+		switch {
+		case os.IsNotExist(err):
+			observation.Missing = append(observation.Missing, agent)
+		case err != nil:
+			// Anything but ENOENT means the answer is unknown, not "no
+			// Drift". Silently dropping it let a Scope whose Agent
+			// directory was a regular file — Lstat returns ENOTDIR —
+			// report as healthy while nothing was linked at all.
+			observation.Unobservable = append(observation.Unobservable, describeUnobservableAvailabilityPath(agent, agentDir, linkPath, err))
+		case !s.isManagedPath(linkPath):
+			observation.Foreign = append(observation.Foreign, describeForeignAvailabilityPath(agent, linkPath))
+		case isManagedSkillCopy(linkPath, s.skillName, s.skillsDir):
+			observation.Copies = append(observation.Copies, agent)
+		default:
+			if _, statErr := os.Stat(linkPath); statErr != nil {
+				observation.Broken = append(observation.Broken, agent)
+			}
 		}
 	}
 	slices.Sort(observation.Missing)
-	slices.Sort(observation.Unexpected)
 	slices.Sort(observation.Broken)
 	slices.Sort(observation.Copies)
 	slices.SortFunc(observation.Foreign, func(a, b ForeignAvailabilityPath) int { return strings.Compare(a.Path, b.Path) })
@@ -517,78 +512,6 @@ func (d AvailabilityDrift) Empty() bool {
 	return len(d.Missing) == 0 && len(d.Unexpected) == 0 && len(d.Broken) == 0 && len(d.Foreign) == 0 && len(d.Unobservable) == 0
 }
 
-// ObserveAvailability reports Drift for one Skill without touching the
-// filesystem. It is the single comparison behind every caller that needs to
-// know about Drift before deciding whether to act on it.
-func (a *Availability) ObserveAvailability(skill string) AvailabilityDrift {
-	observation := a.state(skill).drift()
-	observation.Skill = skill
-	return observation
-}
-
-// ManagedAgentPath is one managed Availability path on an Agent directory.
-type ManagedAgentPath struct {
-	Agent string
-	Skill string
-	Path  string
-}
-
-// LeftoverPath is one managed Availability path that declared Availability
-// does not call for.
-type LeftoverPath struct {
-	ManagedAgentPath
-	Dangling bool
-	Repair   ItemRepair
-}
-
-// LeftoverOccupancy is leftover occupancy observed once. ApplyLeftover takes
-// this value; filtering it is a pure transformation, not a second observation.
-type LeftoverOccupancy struct {
-	Paths []LeftoverPath
-	Empty []AgentDir
-}
-
-func (o LeftoverOccupancy) WithoutEmpty() LeftoverOccupancy {
-	return LeftoverOccupancy{Paths: slices.Clone(o.Paths)}
-}
-
-func (o LeftoverOccupancy) ForSkills(names []string) LeftoverOccupancy {
-	want := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		want[name] = struct{}{}
-	}
-	var paths []LeftoverPath
-	for _, path := range o.Paths {
-		if _, ok := want[path.Skill]; ok {
-			paths = append(paths, path)
-		}
-	}
-	return LeftoverOccupancy{Paths: paths, Empty: slices.Clone(o.Empty)}
-}
-
-// LeftoverFailure is one leftover path ApplyLeftover could not remove.
-type LeftoverFailure struct {
-	Path LeftoverPath
-	Err  error
-}
-
-// LeftoverEmptyFailure is one leftover empty Agent directory ApplyLeftover
-// could not remove.
-type LeftoverEmptyFailure struct {
-	Dir AgentDir
-	Err error
-}
-
-// LeftoverApplyResult is what ApplyLeftover did with one occupancy snapshot.
-type LeftoverApplyResult struct {
-	RemovedPaths []LeftoverPath
-	SkippedPaths []LeftoverPath
-	FailedPaths  []LeftoverFailure
-	RemovedEmpty []AgentDir
-	SkippedEmpty []AgentDir
-	FailedEmpty  []LeftoverEmptyFailure
-}
-
 func (a *Availability) declaredSkills() map[string]struct{} {
 	names := make(map[string]struct{})
 	for _, repo := range a.cfg.Remote {
@@ -600,194 +523,6 @@ func (a *Availability) declaredSkills() map[string]struct{} {
 		names[name] = struct{}{}
 	}
 	return names
-}
-
-// AgentDirObservation is every Agent directory of one Scope read once: the
-// health of each configured directory, the leftover occupancy across all of
-// them, and the managed paths of declared Skills on Agents their Availability
-// does not select.
-type AgentDirObservation struct {
-	Agents     []AgentHealth
-	Leftover   LeftoverOccupancy
-	Unexpected []ManagedAgentPath
-}
-
-// ObserveAgentDirs reads each known and leftover-root Agent directory once and
-// classifies its entries under one set of rules. Leftover occupancy is managed
-// paths on Automatically available Agents, managed paths for Skills Config
-// does not declare, managed paths on a name the Agent reserves, and empty
-// Agent directories the current policy does not select. Unexpected is the
-// Drift half of the same scan: managed paths of declared Skills, whatever
-// their master's state, on known Agents their Availability does not select. A
-// path on a leftover root is leftover occupancy, never also Unexpected. Agent
-// health covers configured directories only. A real directory on a declared
-// Skill's path reads here as Physical and in ObserveAvailability as Foreign;
-// the caller holding both resolves it.
-func (a *Availability) ObserveAgentDirs() AgentDirObservation {
-	type listing struct {
-		entries []os.DirEntry
-		err     error
-	}
-	listings := make(map[string]listing)
-	readDir := func(dir string) ([]os.DirEntry, error) {
-		if l, ok := listings[dir]; ok {
-			return l.entries, l.err
-		}
-		entries, err := os.ReadDir(dir)
-		listings[dir] = listing{entries, err}
-		return entries, err
-	}
-
-	var observation AgentDirObservation
-	knownDirs := a.agents.KnownDirs()
-	configured := a.ConfiguredAgentDirs()
-	for _, agent := range slices.Sorted(maps.Keys(configured)) {
-		dir := configured[agent]
-		info, err := os.Stat(dir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err == nil && !info.IsDir() {
-			observation.Agents = append(observation.Agents, AgentHealth{Name: agent, Dir: dir, Unusable: "not a directory"})
-			continue
-		}
-		entries, _ := readDir(dir)
-		observation.Agents = append(observation.Agents, a.agentHealth(agent, dir, entries))
-	}
-
-	declared := a.declaredSkills()
-	seen := make(map[string]struct{})
-	addPaths := func(agent, dir string, leftoverRoot bool) {
-		entries, err := readDir(dir)
-		if err != nil {
-			return
-		}
-		for _, entry := range entries {
-			name := entry.Name()
-			if strings.HasPrefix(name, ".") {
-				continue
-			}
-			// An Agent's reserved entry is its own content, unless this tool
-			// put a managed path there (before v0.15.0 a declared Skill of
-			// that name could be linked). Availability never selects that
-			// path now, so such a path is leftover occupancy; anything else
-			// on the name is skipped below as not managed.
-			reserved := a.agents.IsReserved(agent, name)
-			_, isDeclared := declared[name]
-			if isDeclared && !leftoverRoot && !reserved && slices.Contains(a.ManagedAgents(name), agent) {
-				continue
-			}
-			path := filepath.Join(dir, name)
-			if !isManagedSkillPath(path, name, a.skillsDir) {
-				continue
-			}
-			if _, dup := seen[path]; dup {
-				continue
-			}
-			seen[path] = struct{}{}
-			if isDeclared && !leftoverRoot && !reserved {
-				observation.Unexpected = append(observation.Unexpected, ManagedAgentPath{Agent: agent, Skill: name, Path: path})
-				continue
-			}
-			_, err := os.Stat(path)
-			observation.Leftover.Paths = append(observation.Leftover.Paths, LeftoverPath{
-				Agent: agent, Skill: name, Path: path, Dangling: err != nil,
-			})
-		}
-	}
-	// Leftover roots first, so a path on a directory that is both a root and
-	// a known Agent directory is leftover occupancy.
-	for agent, dir := range a.agents.LeftoverRoots() {
-		addPaths(agent, dir, true)
-	}
-	for agent, dir := range knownDirs {
-		addPaths(agent, dir, false)
-	}
-	slices.SortFunc(observation.Leftover.Paths, func(a, b LeftoverPath) int {
-		return cmp.Or(cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Skill, b.Skill), cmp.Compare(a.Path, b.Path))
-	})
-	slices.SortFunc(observation.Unexpected, func(a, b ManagedAgentPath) int {
-		return cmp.Or(cmp.Compare(a.Skill, b.Skill), cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Path, b.Path))
-	})
-
-	for agent, dir := range knownDirs {
-		if _, ok := configured[agent]; ok {
-			continue
-		}
-		// Dot entries (e.g. .DS_Store) are not Skills. A reserved entry is
-		// the Agent's own content, so it keeps the directory.
-		entries, err := readDir(dir)
-		if err == nil && !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return !strings.HasPrefix(e.Name(), ".") }) {
-			observation.Leftover.Empty = append(observation.Leftover.Empty, AgentDir{Name: agent, Dir: dir})
-		}
-	}
-	slices.SortFunc(observation.Leftover.Empty, func(a, b AgentDir) int { return cmp.Compare(a.Name, b.Name) })
-	return observation
-}
-
-// agentHealth classifies the entries of one configured Agent directory:
-// dangling links this tool never created, and real directories that are
-// neither a copy this tool made nor reserved by the Agent.
-func (a *Availability) agentHealth(agent, dir string, entries []os.DirEntry) AgentHealth {
-	health := AgentHealth{Name: agent, Dir: dir}
-	for _, entry := range entries {
-		name := entry.Name()
-		if a.agents.IsReserved(agent, name) {
-			continue
-		}
-		path := filepath.Join(dir, name)
-		fi, err := os.Lstat(path)
-		if err != nil {
-			continue
-		}
-		switch {
-		case fi.Mode()&os.ModeSymlink != 0:
-			// A dangling managed link is Drift or leftover occupancy,
-			// reported with the Skill it belongs to.
-			if _, err := os.Stat(path); err != nil && !isManagedSkillLink(path, name, a.skillsDir) {
-				health.UnmanagedBroken = append(health.UnmanagedBroken, name)
-			}
-		case fi.IsDir() && !strings.HasPrefix(name, "."):
-			if !isManagedSkillCopy(path, name, a.skillsDir) {
-				health.Physical = append(health.Physical, name)
-			}
-		}
-	}
-	return health
-}
-
-// ApplyLeftover removes the leftover occupancy in occupancy, revalidating each
-// path immediately before deletion.
-func (a *Availability) ApplyLeftover(occupancy LeftoverOccupancy) LeftoverApplyResult {
-	result := LeftoverApplyResult{}
-	for _, path := range occupancy.Paths {
-		managed, err := removeManagedSkillPath(path.Path, path.Skill, a.skillsDir)
-		if !managed {
-			result.SkippedPaths = append(result.SkippedPaths, path)
-			continue
-		}
-		if err != nil && !os.IsNotExist(err) {
-			result.FailedPaths = append(result.FailedPaths, LeftoverFailure{Path: path, Err: err})
-			continue
-		}
-		result.RemovedPaths = append(result.RemovedPaths, path)
-	}
-	stopAt := models.ScopeRoot(a.skillsDir)
-	for _, empty := range occupancy.Empty {
-		// removeEmptyAgentDir leaves a directory that is no longer empty and
-		// returns nil, so ask first: whatever changed since the observation
-		// owns the directory now.
-		if isEmpty, err := isDirEffectivelyEmpty(empty.Dir); err != nil || !isEmpty {
-			result.SkippedEmpty = append(result.SkippedEmpty, empty)
-			continue
-		}
-		if err := removeEmptyAgentDir(empty.Dir, stopAt); err != nil {
-			result.FailedEmpty = append(result.FailedEmpty, LeftoverEmptyFailure{Dir: empty, Err: err})
-			continue
-		}
-		result.RemovedEmpty = append(result.RemovedEmpty, empty)
-	}
-	return result
 }
 
 // ReservedAvailability is a declared Skill whose name its Agent reserves for

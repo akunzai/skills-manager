@@ -299,7 +299,8 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 		return fail(err)
 	}
 	plan.availability = NewAvailability(plan.cfg, plan.skillsDir)
-	plan.availability.ApplyLeftover(plan.availability.ObserveAgentDirs().Leftover.ForSkills([]string{old}).WithoutEmpty())
+	occupancy := plan.availability.ObserveOccupancy()
+	plan.availability.ApplyLeftover(occupancy.Leftover.ForSkills([]string{old}).WithoutEmpty())
 	if err := RemoveAll(skill.ScopePath); err != nil && !os.IsNotExist(err) {
 		return fail(err)
 	}
@@ -316,7 +317,7 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 		Subpath:   skill.RenamedSubpath,
 		ScopePath: filepath.Join(plan.skillsDir, skill.RenamedTo),
 		CachePath: filepath.Join(item.CachePath, filepath.FromSlash(skill.RenamedSubpath)),
-	}, plan.availability.ObserveAvailability(skill.RenamedTo))
+	}, occupancy.Drift(skill.RenamedTo))
 	outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
 	return outcome
 }

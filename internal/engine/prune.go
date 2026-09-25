@@ -84,7 +84,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		// The Agent directory observation is the same answer Doctor reports:
 		// Unexpected paths of declared Skills and leftover occupancy, never
 		// the same path in both.
-		observation := NewAvailability(cfg, skillsDir).ObserveAgentDirs()
+		observation := NewAvailability(cfg, skillsDir).ObserveOccupancy()
 		leftover := observation.Leftover.WithoutEmpty()
 		if includeConfiguredLinks {
 			plan.Unconfigured = append(plan.Unconfigured, observation.Unexpected...)
