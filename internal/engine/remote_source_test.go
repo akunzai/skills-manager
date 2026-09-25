@@ -54,6 +54,7 @@ func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 // Add discovers every Skill from its SKILL.md alone, compares duplicate
 // candidates by committed tree, and leaves the Cache's cone as it was.
 func TestPrepareRemoteSourceDiscoversFromSkillMDOnly(t *testing.T) {
+	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	repoDir, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
 	if err != nil {
@@ -67,6 +68,7 @@ func TestPrepareRemoteSourceDiscoversFromSkillMDOnly(t *testing.T) {
 }
 
 func TestPrepareRemoteSourceKeepsDivergentMirrorsApart(t *testing.T) {
+	t.Parallel()
 	origin, url := writeSparseOrigin(t)
 	if err := os.WriteFile(filepath.Join(origin, "mirror", "alpha", "notes.txt"), []byte("diverged\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -82,6 +84,7 @@ func TestPrepareRemoteSourceKeepsDivergentMirrorsApart(t *testing.T) {
 }
 
 func TestPrepareRemoteSourceScopedToDirectoryWithoutSkills(t *testing.T) {
+	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	_, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "fixtures")
 	if err != nil {

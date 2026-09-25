@@ -261,6 +261,7 @@ func TestSyncMissingCacheFailsWithoutNetworkAndContinues(t *testing.T) {
 // Scope's Skill. Freshness asks for an update, and update adds the path to
 // the sparse checkout rather than leaving Sync blocked (ADR 0004).
 func TestUpdateCompletesCacheMissingADeclaredSkill(t *testing.T) {
+	t.Parallel()
 	origin, url := writeSparseOrigin(t)
 	branch := mustGit(t, origin, "symbolic-ref", "--short", "HEAD")
 	cacheDir := t.TempDir()
@@ -296,6 +297,7 @@ func TestUpdateCompletesCacheMissingADeclaredSkill(t *testing.T) {
 // Sync must not Materialize a Skill the sparse checkout does not cover, even
 // when part of its directory is on disk (ADR 0004).
 func TestInspectFreshnessTreatsUncoveredSkillAsMissingFromCache(t *testing.T) {
+	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
 	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/alpha")

@@ -1008,6 +1008,7 @@ func TestGetRemoteRepoCommitMatchesExactBranch(t *testing.T) {
 }
 
 func TestUpdateDetectsChangedRemoteDefaultBranch(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
@@ -1630,6 +1631,7 @@ func writeLocalGitSkill(t *testing.T, repo, skill string) {
 // not reported as updated, though the Cache still moves to that commit so
 // Freshness stops asking for an update.
 func TestUpdateReportsSourceWhoseDeclaredSkillsDidNotChange(t *testing.T) {
+	t.Parallel()
 	origin, url := writeSparseOrigin(t)
 	branch := strings.TrimSpace(mustGit(t, origin, "symbolic-ref", "--short", "HEAD"))
 	cacheDir := t.TempDir()

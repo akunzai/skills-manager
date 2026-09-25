@@ -166,6 +166,7 @@ func TestBuildAddPlanDetectsUntrackedDiskConflicts(t *testing.T) {
 // added today is classified SkillUnknownBaseline after the next Update, so
 // Sync blocks a routine upstream change instead of applying it.
 func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
+	t.Parallel()
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cacheDir := filepath.Join(project, "cache")
