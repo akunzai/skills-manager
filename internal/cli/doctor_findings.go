@@ -37,7 +37,7 @@ type Finding struct {
 // Repair outcomes travel on the diagnosed items; this file only renders.
 // Every doctor sentence is assembled here and nowhere else — the engine
 // reports facts, this file turns them into English (see engine.DoctorOutcome).
-func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
+func doctorFindings(p engine.DoctorReport) []Finding {
 	var findings []Finding
 	add := func(f Finding) { findings = append(findings, f) }
 
@@ -55,15 +55,13 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 		}
 		add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("  [%s] Symlinks healthy (%s).", agent.Name, models.ToTildePath(agent.Dir))})
 		if len(agent.UnmanagedBroken) > 0 {
-			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: [%s] Unmanaged broken symlinks were left unchanged: %s", agent.Name, strings.Join(agent.UnmanagedBroken, ", "))})
+			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  [%s] Unmanaged broken symlinks were left unchanged: %s", agent.Name, strings.Join(agent.UnmanagedBroken, ", "))})
 		}
 		if len(agent.Physical) > 0 {
-			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: [%s] Physical directories found instead of symlinks: %s", agent.Name, strings.Join(agent.Physical, ", "))})
-			if attemptedFix {
-				for _, pName := range agent.Physical {
-					add(Finding{Severity: SeverityError, Message: fmt.Sprintf("    Cannot replace unmanaged directory %s in %s.", pName, agent.Name)})
-				}
-			}
+			// Not a repair target: an unmanaged directory this tool did not
+			// create and Config does not declare is left alone, the same as
+			// Untracked occupancy on the skills directory (ADR-0002).
+			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  [%s] Unmanaged directories left as-is: %s", agent.Name, strings.Join(agent.Physical, ", "))})
 		}
 	}
 
@@ -90,7 +88,7 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 	}
 
 	if len(p.Leftover.Empty) > 0 {
-		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  Warning: %d leftover empty agent directories (not covered by any configured Agent policy): %s", len(p.Leftover.Empty), strings.Join(leftoverAgentNames(p.Leftover.Empty), ", "))})
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  %d leftover empty agent directories (not covered by any configured Agent policy): %s", len(p.Leftover.Empty), strings.Join(leftoverAgentNames(p.Leftover.Empty), ", "))})
 		for _, empty := range p.Leftover.Empty {
 			findings = append(findings, leftoverEmptyRepairFinding(empty)...)
 		}
@@ -129,7 +127,7 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 	}
 
 	if len(p.Missing) > 0 {
-		add(Finding{Severity: SeverityWarning, Message: "Warning: Configured but missing skills: " + strings.Join(p.Missing, ", "), Blank: true})
+		add(Finding{Severity: SeverityWarning, Message: "Configured but missing skills: " + strings.Join(p.Missing, ", "), Blank: true})
 	}
 	if len(p.Untracked) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Untracked skills in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.Untracked, ", ")), Blank: true})
@@ -207,7 +205,13 @@ func doctorFindings(p engine.DoctorReport, attemptedFix bool) []Finding {
 		if ref.Skill != "" {
 			where = fmt.Sprintf("settings.availability.%s.%s", ref.Skill, ref.Field)
 		}
-		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Warning: unknown agent %q in %s", ref.Agent, where), Blank: true})
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Unknown agent %q in %s", ref.Agent, where), Blank: true})
+	}
+	// Not a repair target: the Agent owns that name, so no Availability can
+	// be applied there; the way out is renaming or excluding the Skill.
+	for _, reserved := range p.ReservedNames {
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("%s cannot be available to %s: %s reserves that directory name.", reserved.Skill, reserved.Agent, agentProductName(reserved.Agent)), Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: rename the Skill, or run 'skills agents%s %s exclude %s'.", scopeFlag(p), reserved.Skill, reserved.Agent)})
 	}
 
 	return findings
@@ -243,6 +247,15 @@ func scopeFlag(p engine.DoctorReport) string {
 		return " -p"
 	}
 	return ""
+}
+
+// agentProductName is how a sentence names an Agent's product, for the Agents
+// whose own behaviour a finding describes. Any other Agent is named by key.
+func agentProductName(agent string) string {
+	if agent == "claude-code" {
+		return "Claude Code"
+	}
+	return agent
 }
 
 func objectPronoun(n int) string {

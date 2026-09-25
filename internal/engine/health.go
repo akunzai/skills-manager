@@ -80,8 +80,11 @@ type DoctorReport struct {
 	// files instead of directories — what a git client that cannot create
 	// symbolic links leaves behind when a committed Project skills directory
 	// is checked out.
-	Stubs           []string
-	UnknownAgents   []UnknownAgentReference
+	Stubs         []string
+	UnknownAgents []UnknownAgentReference
+	// ReservedNames are declared Skills whose name an Agent they are
+	// available to keeps for its own content. Availability skips that pair.
+	ReservedNames   []ReservedAvailability
 	StateError      string
 	StaleState      []string
 	StateRepair     ItemRepair
@@ -304,6 +307,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		unexpected[path.Skill] = append(unexpected[path.Skill], path)
 	}
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
+	plan.ReservedNames = d.availability.ReservedAvailability()
 
 	inv, err := LoadInventory(d.cfg, d.skillsDir)
 	if err != nil {

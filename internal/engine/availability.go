@@ -272,13 +272,39 @@ type availabilityState struct {
 	skillsDir string
 }
 
+// state leaves out every Agent that reserves skillName for its own content:
+// that path is the Agent's, never desired Availability, never Drift, and so
+// never a path Apply links or ReplaceForeign removes. Claude Code's synced/
+// holds the account's claude.ai skills.
 func (a *Availability) state(skillName string) availabilityState {
+	desired := agentSet(a.ManagedAgents(skillName))
+	known := a.agents.KnownDirs()
+	for agent := range known {
+		if a.agents.IsReserved(agent, skillName) {
+			delete(known, agent)
+			delete(desired, agent)
+		}
+	}
 	return availabilityState{
 		skillName: skillName,
-		desired:   agentSet(a.ManagedAgents(skillName)),
-		known:     a.agents.KnownDirs(),
+		desired:   desired,
+		known:     known,
 		skillsDir: a.skillsDir,
 	}
+}
+
+// ReservedAvailability lists the declared Skills whose Availability selects
+// an Agent that reserves the Skill's name. Availability skips each pair.
+func (a *Availability) ReservedAvailability() []ReservedAvailability {
+	var out []ReservedAvailability
+	for _, skill := range slices.Sorted(maps.Keys(a.declaredSkills())) {
+		for _, agent := range a.ManagedAgents(skill) {
+			if a.agents.IsReserved(agent, skill) {
+				out = append(out, ReservedAvailability{Skill: skill, Agent: agent})
+			}
+		}
+	}
+	return out
 }
 
 func (s availabilityState) isManagedPath(path string) bool {
@@ -748,4 +774,12 @@ func (a *Availability) ApplyLeftover(occupancy LeftoverOccupancy) LeftoverApplyR
 		result.RemovedEmpty = append(result.RemovedEmpty, empty)
 	}
 	return result
+}
+
+// ReservedAvailability is a declared Skill whose name its Agent reserves for
+// its own content (models.Agents.IsReserved), so the Skill cannot be available
+// to that Agent.
+type ReservedAvailability struct {
+	Skill string
+	Agent string
 }

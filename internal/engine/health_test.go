@@ -954,6 +954,7 @@ func TestDoctorFindingKindCountsAsIssue(t *testing.T) {
 	}{
 		{findingUntracked, false},
 		{findingUntrackedLink, false},
+		{findingAgentPhysical, false},
 		{findingUnknownAgent, true},
 		{DoctorFindingLeftoverDangling, true},
 		{DoctorFindingLeftoverLive, true},
@@ -996,6 +997,7 @@ func classifiedDoctorReport() DoctorReport {
 		Invalid:        []InvalidSkill{{Name: "broken"}},
 		Stubs:          []string{"stub"},
 		UnknownAgents:  []UnknownAgentReference{{Agent: "nope"}},
+		ReservedNames:  []ReservedAvailability{{Skill: "synced", Agent: "claude-code"}},
 		StateError:     "corrupt",
 		StaleState:     []string{"old"},
 		GitError:       "git too old",
@@ -1036,6 +1038,7 @@ func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
 		findingInvalid:                1,
 		findingStub:                   1,
 		findingUnknownAgent:           1,
+		findingReservedName:           1,
 		findingStateError:             1,
 		findingGitError:               1,
 		findingStaleState:             1,
@@ -1052,11 +1055,47 @@ func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("unexpected finding kinds: %v", got)
 	}
-	if issues != 24 {
-		t.Errorf("CountsAsIssue total = %d; want 24", issues)
+	if issues != 23 {
+		t.Errorf("CountsAsIssue total = %d; want 23", issues)
 	}
-	if report.issueCount() != 24 {
-		t.Errorf("issueCount = %d; want 24", report.issueCount())
+	if report.issueCount() != 23 {
+		t.Errorf("issueCount = %d; want 23", report.issueCount())
+	}
+}
+
+// A real directory on a configured Agent directory that this tool did not
+// create and Config does not declare is reported (Agents[].Physical) but
+// does not stand in the way of a clean doctor run, by the same reasoning as
+// Untracked occupancy on the skills directory (ADR-0002).
+func TestDoctorRunReportsUnmanagedAgentDirectoryButNotAsIssue(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	unmanaged := filepath.Join(project, ".claude", "skills", "unmanaged")
+	if err := os.MkdirAll(unmanaged, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unmanaged, "SKILL.md"), []byte("# Unmanaged\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var physical []string
+	for _, agent := range outcome.Report.Agents {
+		physical = append(physical, agent.Physical...)
+	}
+	if !slices.Contains(physical, "unmanaged") {
+		t.Fatalf("Agents[].Physical = %#v; want the unmanaged directory reported", outcome.Report.Agents)
+	}
+	if outcome.Remaining != 0 {
+		t.Fatalf("Remaining = %d; want 0 (an unmanaged Agent directory must not count as an issue)", outcome.Remaining)
 	}
 }
 
@@ -1076,6 +1115,7 @@ func TestEveryDoctorReportFieldIsClassified(t *testing.T) {
 		"Invalid":        {findingInvalid},
 		"Stubs":          {findingStub},
 		"UnknownAgents":  {findingUnknownAgent},
+		"ReservedNames":  {findingReservedName},
 		"StateError":     {findingStateError},
 		"StaleState":     {findingStaleState},
 		"CacheRecovery":  {findingCacheRecovery},
@@ -1115,5 +1155,34 @@ func TestEveryDoctorReportFieldIsClassified(t *testing.T) {
 				t.Errorf("DoctorReport.%s set alone yields kinds %v; want %s among them", field.Name, got, kind)
 			}
 		}
+	}
+}
+
+// Doctor must never offer Claude Code's own synced/ directory for
+// replacement: approving every foreign-path prompt would otherwise delete the
+// account's claude.ai skills. The pair is reported as a warning instead.
+func TestDoctorFixLeavesAgentReservedNameAlone(t *testing.T) {
+	_, cfg, skillsDir, claudeFile := reservedNameScope(t)
+	var offered []ForeignAvailabilityPath
+	approveAll := func(paths []ForeignAvailabilityPath) (bool, error) {
+		offered = append(offered, paths...)
+		return true, nil
+	}
+
+	outcome, err := NewDoctor(cfg, skillsDir).Run(true, nil, approveAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertClaudeReservedDirIntact(t, claudeFile)
+	if len(offered) != 0 {
+		t.Fatalf("doctor offered to replace %#v", offered)
+	}
+	want := []ReservedAvailability{{Skill: "synced", Agent: "claude-code"}}
+	if !reflect.DeepEqual(outcome.Report.ReservedNames, want) {
+		t.Fatalf("ReservedNames = %#v; want %#v", outcome.Report.ReservedNames, want)
+	}
+	if outcome.Remaining != 0 || outcome.Failed != 0 {
+		t.Fatalf("Remaining = %d, Failed = %d; a reserved name is a warning, not an issue", outcome.Remaining, outcome.Failed)
 	}
 }

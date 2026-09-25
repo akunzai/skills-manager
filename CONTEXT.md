@@ -60,6 +60,10 @@ _Avoid_: stale, orphan, leftover occupancy, mismatch (when you mean Availability
 On an Agent directory, occupancy this tool's Availability mechanism created (or left behind) that declared Availability does not call for: a managed path on an automatically available Agent, a managed path for a Skill Config does not declare, or an empty Agent directory the current policy does not select.
 _Avoid_: Drift (no declaration to compare), Inventory (wrong directory), stale, orphan
 
+**Unmanaged directory**:
+On an Agent directory, a real directory this tool did not create and Config does not declare. The tool leaves it alone and reports it as a warning, not Drift.
+_Avoid_: Physical, stray, orphan
+
 **Sync**:
 Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability. Sync writes Config only to apply a Rename.
 _Avoid_: restore, install (when you mean the whole declared state)

@@ -58,27 +58,38 @@ func newDoctorCmd() *cobra.Command {
 				progress = startDoctorProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Rebuilding %s Cache...", event.Index, event.Total, event.Source))
 			}, approve)
 			progress.Stop()
-			printHealthReport(out, doctorFindings(outcome.Report, outcome.AttemptedFix))
+			printHealthReport(out, doctorFindings(outcome.Report))
 			if runErr != nil {
 				return runErr
 			}
 
 			fmt.Fprintln(out, "\n"+strings.Repeat(tableRule, 60))
 			if outcome.Remaining == 0 {
-				// Untracked occupancy is not an issue (ADR-0002: 1 means the
-				// Scope does not match its Config), so the exit code stays 0
-				// — but saying "top condition" above a standing finding is
-				// what made --fix read as broken.
-				real := outcome.Untracked
-				links := outcome.UntrackedLinks
-				switch {
-				case real > 0 && links > 0:
-					fmt.Fprintf(out, "%s%sNo issues detected. %s not in Config; %s can be pruned.%s\n\n", colorBold, colorYellow, untrackedOccupancy(real), leftoverSymlinks(links), colorReset)
-				case real > 0:
-					fmt.Fprintf(out, "%s%sNo issues detected. %s not in Config.%s\n\n", colorBold, colorYellow, untrackedOccupancy(real), colorReset)
-				case links > 0:
-					fmt.Fprintf(out, "%s%sNo issues detected. %s can be pruned.%s\n\n", colorBold, colorYellow, leftoverSymlinks(links), colorReset)
-				default:
+				// Untracked occupancy, unmanaged Agent directories and reserved
+				// names are not issues (ADR-0002: 1 means the Scope does not
+				// match its Config), so the exit code stays 0 — but saying "top
+				// condition" above a standing warning is what made --fix read
+				// as broken.
+				var notes []string
+				if n := outcome.Untracked; n > 0 {
+					notes = append(notes, untrackedOccupancy(n)+" not in Config")
+				}
+				if n := outcome.UntrackedLinks; n > 0 {
+					notes = append(notes, leftoverSymlinks(n)+" can be pruned")
+				}
+				if n := unmanagedAgentDirs(outcome.Report); n > 0 {
+					noun := "unmanaged Agent directories"
+					if n == 1 {
+						noun = "unmanaged Agent directory"
+					}
+					notes = append(notes, fmt.Sprintf("%d %s left as-is", n, noun))
+				}
+				if n := len(outcome.Report.ReservedNames); n > 0 {
+					notes = append(notes, countOf(n, "Skill")+" cannot be available to an Agent")
+				}
+				if len(notes) > 0 {
+					fmt.Fprintf(out, "%s%sNo issues detected. %s.%s\n\n", colorBold, colorYellow, strings.Join(notes, "; "), colorReset)
+				} else {
 					fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n\n", colorBold, colorGreen, colorReset)
 				}
 				return nil
@@ -110,6 +121,14 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flagFix, "fix", false, "Automatically repair detected issues")
 
 	return cmd
+}
+
+func unmanagedAgentDirs(report engine.DoctorReport) int {
+	n := 0
+	for _, agent := range report.Agents {
+		n += len(agent.Physical)
+	}
+	return n
 }
 
 func untrackedOccupancy(n int) string {
