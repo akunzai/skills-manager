@@ -1632,3 +1632,52 @@ func writeLocalGitSkill(t *testing.T, repo, skill string) {
 		}
 	}
 }
+
+// A Source whose new commit leaves every declared Skill's tree untouched is
+// not reported as updated, though the Cache still moves to that commit so
+// Freshness stops asking for an update.
+func TestUpdateReportsSourceWhoseDeclaredSkillsDidNotChange(t *testing.T) {
+	origin, url := writeSparseOrigin(t)
+	branch := strings.TrimSpace(mustGit(t, origin, "symbolic-ref", "--short", "HEAD"))
+	cacheDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: url, Branch: branch, Skills: map[string]string{"alpha": "skills/alpha"}}
+	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
+		t.Fatal(err)
+	}
+	commitOrigin := func(file, content string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(origin, filepath.FromSlash(file)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mustGit(t, origin, "commit", "-am", "change "+file)
+		return strings.TrimSpace(mustGit(t, origin, "rev-parse", "HEAD"))
+	}
+
+	head := commitOrigin("skills/beta/reference.txt", "beta changed\n")
+	var kinds []string
+	result, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, func(ev UpdateEvent) { kinds = append(kinds, ev.Kind) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SkippedRepoInfo{{Source: "owner/repo", Reason: SkippedSkillsUnchanged, LocalSHA: head}}
+	if len(result.UpdatedRepos) != 0 || !reflect.DeepEqual(result.SkippedRepos, want) {
+		t.Fatalf("update result = %#v; want only skipped %#v", result, want)
+	}
+	if !slices.Contains(kinds, UpdateRepoUnchanged) || slices.Contains(kinds, UpdateRepoDone) {
+		t.Fatalf("event kinds = %v", kinds)
+	}
+	repoDir := NewCache("owner/repo", url, branch, cacheDir).dir()
+	if got := localRepoCommit(repoDir); got != head {
+		t.Fatalf("Cache commit = %q; want %q", got, head)
+	}
+
+	head = commitOrigin("skills/alpha/notes.txt", "alpha changed\n")
+	result, err = UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.UpdatedRepos) != 1 || result.UpdatedRepos[0].NewSHA != head {
+		t.Fatalf("changed Skill was not reported as updated: %#v", result)
+	}
+}
