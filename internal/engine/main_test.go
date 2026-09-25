@@ -3,7 +3,9 @@ package engine
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +19,7 @@ import (
 // fixture that commits or tags without its own identity fails here instead of
 // only in CI.
 func TestMain(m *testing.M) {
+	unsetRepositoryGitEnv()
 	state, err := os.MkdirTemp("", "skills-manager-test-state-")
 	if err != nil {
 		panic(err)
@@ -35,6 +38,21 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(state)
 	os.Exit(code)
+}
+
+// unsetRepositoryGitEnv clears the variables git uses to locate a repository
+// (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE and the rest git itself lists).
+// Run from `git rebase --exec` or a hook, the tests inherit them, and every
+// fixture's git command then writes into the developer's repository instead
+// of its temporary one: its config, commits and tags.
+func unsetRepositoryGitEnv() {
+	names, err := exec.Command("git", "rev-parse", "--local-env-vars").Output()
+	if err != nil {
+		panic(err)
+	}
+	for name := range strings.FieldsSeq(string(names)) {
+		os.Unsetenv(name)
+	}
 }
 
 // setGitConfig adds one git config entry for a test on top of TestMain's.
