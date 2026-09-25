@@ -51,6 +51,11 @@ unmanaged agent path, a baseline that could not be recorded.
 A third command adopting this scheme adopts these codes rather than inventing
 its own.
 
+Occupancy the tool does not manage is not a mismatch with Config either:
+Untracked occupancy on the skills directory, an Unmanaged directory on an Agent
+directory, and a declared Skill whose name its Agent reserves for itself. Doctor
+reports each as a warning and they do not raise the exit code.
+
 A user backing out of an interactive question before the command has changed
 anything is neither: nothing was left unreconciled and nothing broke. The
 command says it was cancelled, writes nothing, and exits `0`. Declining a

@@ -211,6 +211,7 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 	// be applied there; the way out is renaming or excluding the Skill.
 	for _, reserved := range p.ReservedNames {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("%s cannot be available to %s: %s reserves that directory name.", reserved.Skill, reserved.Agent, agentProductName(reserved.Agent)), Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: rename the Skill, or run 'skills agents%s %s exclude %s'.", scopeFlag(p), reserved.Skill, reserved.Agent)})
 	}
 
 	return findings

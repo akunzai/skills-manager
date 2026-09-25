@@ -149,6 +149,9 @@ func TestCLIDoctorExitsZeroWithOnlyAnUnmanagedAgentDirectory(t *testing.T) {
 	if !strings.Contains(out, "Unmanaged directories left as-is: unmanaged") {
 		t.Fatalf("expected the unmanaged-directory warning:\n%s", out)
 	}
+	if !strings.Contains(out, "No issues detected. 1 unmanaged Agent directory left as-is.") || strings.Contains(out, "top condition") {
+		t.Fatalf("summary must not claim top condition above the warning:\n%s", out)
+	}
 	if strings.Contains(out, "Warning:") {
 		t.Fatalf("doctor line kept the literal Warning: prefix:\n%s", out)
 	}
@@ -200,6 +203,11 @@ func TestCLIDoctorWarnsAboutAnAgentReservedSkillName(t *testing.T) {
 		}
 		if !strings.Contains(out, warning) {
 			t.Fatalf("%v did not warn about the reserved name:\n%s", args, out)
+		}
+		for _, want := range []string{"Next: rename the Skill, or run 'skills agents -p synced exclude claude-code'.", "No issues detected. 1 Skill cannot be available to an Agent."} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%v does not say %q:\n%s", args, want, out)
+			}
 		}
 		if got, err := os.ReadFile(claudeFile); err != nil || string(got) != "# claude.ai skill\n" {
 			t.Fatalf("%v touched Claude Code's synced directory: %q, %v", args, got, err)
