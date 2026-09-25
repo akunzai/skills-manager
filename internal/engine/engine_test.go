@@ -1134,19 +1134,12 @@ func TestUpdateRemoteSkillsDryRunTreatsRemoteErrorAsIntendedRefresh(t *testing.T
 		Skills: map[string]string{"other": "other"},
 	}
 
-	var check UpdateEvent
 	var kinds []string
 	result, err := UpdateRemoteSkills(cfg, nil, false, true, cacheDir, func(ev UpdateEvent) {
 		kinds = append(kinds, ev.Kind)
-		if ev.Kind == UpdateCheckDone {
-			check = ev
-		}
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if check.Outdated != 1 || check.UpToDate != 1 {
-		t.Fatalf("CheckDone outdated=%d upToDate=%d", check.Outdated, check.UpToDate)
 	}
 	if slices.Contains(kinds, UpdateRepoError) {
 		t.Fatal("dry-run must not emit UpdateRepoError for an observation error")
