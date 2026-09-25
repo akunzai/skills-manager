@@ -46,7 +46,7 @@ func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 	if err != nil || report.Blocked != 1 {
 		t.Fatalf("a Cache that was never fetched should block: err=%v blocked=%d", err, report.Blocked)
 	}
-	if want := []string{SyncRepoStart, SyncFetchFailed}; !reflect.DeepEqual(kinds, want) {
+	if want := []string{SyncRepoStart, SyncItemStart, SyncFetchFailed, SyncItemDone}; !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
 	}
 }

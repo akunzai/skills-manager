@@ -745,9 +745,14 @@ func TestDoctorRunRebuildsEveryConfiguredBranchForLegacyCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var rebuilt []string
+	var rebuilt, finished []string
 	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, func(event DoctorEvent) {
-		rebuilt = append(rebuilt, event.Source)
+		switch {
+		case !event.Finished:
+			rebuilt = append(rebuilt, event.Source)
+		case !event.Failed:
+			finished = append(finished, event.Source)
+		}
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -757,6 +762,10 @@ func TestDoctorRunRebuildsEveryConfiguredBranchForLegacyCache(t *testing.T) {
 	}
 	if len(rebuilt) != 2 {
 		t.Fatalf("rebuilt Sources = %q; want both configured branches", rebuilt)
+	}
+	// Both Sources share one legacy Cache, so both finish when it does.
+	if !slices.Equal(finished, rebuilt) {
+		t.Fatalf("finished Sources = %q; want %q to finish without failing", finished, rebuilt)
 	}
 	for _, branch := range []string{defaultBranch, "dev"} {
 		if got := localRepoCommit(resolveCacheRepo("owner/repo", origin, branch, cacheDir).Dir); got == "" {

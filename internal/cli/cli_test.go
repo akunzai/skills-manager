@@ -18,7 +18,6 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
-	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/pflag"
 )
@@ -1058,7 +1057,7 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	}
 }
 
-func TestCLIUpdateShowsProgressWhileCheckingAndRefreshing(t *testing.T) {
+func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	resetRootCmdFlags()
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
@@ -1069,20 +1068,27 @@ func TestCLIUpdateShowsProgressWhileCheckingAndRefreshing(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-
-	var messages []string
-	oldStartProgress := startUpdateProgress
-	startUpdateProgress = func(_ io.Writer, message string) *presentation.Progress {
-		messages = append(messages, message)
-		return &presentation.Progress{}
-	}
-	t.Cleanup(func() { startUpdateProgress = oldStartProgress })
-
-	if _, err := runCLI(t, "update", "--config", configFile, "--cache-dir", filepath.Join(root, "cache")); err != nil {
+	sha, _, err := engine.RunCmd("git rev-parse --short=7 HEAD", origin)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"Checking 1 remote Sources in parallel...", "[1/1] Refreshing owner/repo..."}; !reflect.DeepEqual(messages, want) {
-		t.Fatalf("progress messages = %q; want %q", messages, want)
+
+	var stdout, stderr bytes.Buffer
+	RootCmd.SetOut(&stdout)
+	RootCmd.SetErr(&stderr)
+	RootCmd.SetArgs([]string{"update", "--config", configFile, "--cache-dir", filepath.Join(root, "cache")})
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	// The durable per-Source line replaces the progress region's "ok" line.
+	want := "  1 Source Cache update(s) needed, 0 already up to date.\n" +
+		"      Updated owner/repo (" + sha + ").\n" +
+		"Refreshed 1 Source Cache(s).\nRun 'skills sync' to apply cached content to this Scope.\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout = %q\nwant     %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q; want no progress lines without a terminal", got)
 	}
 }
 
@@ -1208,6 +1214,48 @@ func TestCLISyncExitCodes(t *testing.T) {
 	}
 	if !strings.Contains(out, "Failed to apply availability for sample") {
 		t.Fatalf("failure must name the Skill:\n%s", out)
+	}
+}
+
+// Without a terminal, Sync leaves one "ok" line per Skill it applied and
+// words only what stands in the way.
+func TestCLISyncReportsEachSkillOnceWithoutATerminal(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	writeCLIGitSkill(t, origin, "drifted")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "drifted", "drifted", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample", "drifted"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatalf("first Sync: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "drifted", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if ExitCode(err) != 1 {
+		t.Fatalf("drift should exit 1, got err=%v:\n%s", err, out)
+	}
+	body := out
+	// runCLI goes around Execute, which keeps exit 1 from reading as an error.
+	body, _, _ = strings.Cut(body, "Error: ")
+	want := "  Skipped drifted: local_drift\n" +
+		"ok  sample\n" +
+		"Sync did not converge. 1 blocked skill.\n" +
+		"Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n"
+	if body != want {
+		t.Fatalf("output = %q\nwant     %q", body, want)
 	}
 }
 
@@ -1637,7 +1685,7 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	}
 }
 
-func TestCLIDoctorFixShowsProgressWhileRebuildingLegacyCache(t *testing.T) {
+func TestCLIDoctorFixReportsEachRebuiltCacheOnceWithoutATerminal(t *testing.T) {
 	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
@@ -1659,19 +1707,12 @@ func TestCLIDoctorFixShowsProgressWhileRebuildingLegacyCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var messages []string
-	oldStartProgress := startDoctorProgress
-	startDoctorProgress = func(_ io.Writer, message string) *presentation.Progress {
-		messages = append(messages, message)
-		return &presentation.Progress{}
-	}
-	t.Cleanup(func() { startDoctorProgress = oldStartProgress })
-
-	if _, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+	out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"[1/1] Rebuilding owner/repo Cache..."}; !reflect.DeepEqual(messages, want) {
-		t.Fatalf("progress messages = %q; want %q", messages, want)
+	if want := "ok  owner/repo\n"; !strings.HasPrefix(out, want) {
+		t.Fatalf("output = %q; want it to start %q", out, want)
 	}
 }
 
@@ -2962,6 +3003,28 @@ func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
 		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+	}
+}
+
+// Without a terminal, Add leaves one "ok" line for the fetched Source and one
+// per Skill it applied, then its summary.
+func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+
+	out, err := runCLI(t, "add", "owner/repo", "--url", origin, "--skill", "sample", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	want := "ok  owner/repo\n" +
+		"ok  sample\n" +
+		"Added 1 skill(s) [sample] and updated skills.json.\n"
+	if out != want {
+		t.Fatalf("output = %q\nwant     %q", out, want)
 	}
 }
 

@@ -297,9 +297,16 @@ func TestApplyAddPlanContinuesPastAFailedSkill(t *testing.T) {
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource("owner/repo", "git", "", repoDir),
 		map[string]string{"bad": "missing", "good": "good"}, AddAvailabilityIntent{})
-	result, err := ApplyAddPlan(plan, cfg, nil)
+	var progress []string
+	result, err := ApplyAddPlan(plan, cfg, func(ev AddSkillEvent) {
+		progress = append(progress, ev.Name+":"+string(ev.Outcome))
+	})
 	if err != nil {
 		t.Fatalf("ApplyAddPlan error = %v; a failed Skill is an outcome, not an error", err)
+	}
+	// Each Skill is announced before it is applied and again with its outcome.
+	if want := []string{"bad:", "bad:failed", "good:", "good:done"}; !slices.Equal(progress, want) {
+		t.Fatalf("progress = %q, want %q", progress, want)
 	}
 	if result.Failed != 1 || result.Blocked != 0 {
 		t.Fatalf("Failed=%d Blocked=%d; want 1 failed", result.Failed, result.Blocked)

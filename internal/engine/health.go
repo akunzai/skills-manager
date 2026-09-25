@@ -143,9 +143,13 @@ type DoctorOutcome struct {
 	UntrackedLinks int
 }
 
+// DoctorEvent reports a legacy Cache rebuild: once when a Source starts, then
+// with Finished set when the Cache it shares with its siblings is done, and
+// Failed set when that rebuild did not succeed.
 type DoctorEvent struct {
-	Source       string
-	Index, Total int
+	Source           string
+	Index, Total     int
+	Finished, Failed bool
 }
 
 type DoctorProgress func(DoctorEvent)
@@ -387,13 +391,21 @@ func (d *Doctor) repair(plan *DoctorReport, progress DoctorProgress, replaceFore
 		total += len(migration.Sources)
 	}
 	index := 0
+	var staged []string
 	migrations := d.cacheMigration.apply(plan.legacyCache, func(event legacyCacheMigrationEvent) {
-		if event.Phase != legacyCacheMigrationStaging {
+		if progress == nil {
 			return
 		}
-		index++
-		if progress != nil {
+		switch event.Phase {
+		case legacyCacheMigrationStaging:
+			index++
+			staged = append(staged, event.Source)
 			progress(DoctorEvent{Source: event.Source, Index: index, Total: total})
+		case legacyCacheMigrationFinished:
+			for _, source := range staged {
+				progress(DoctorEvent{Source: source, Index: index, Total: total, Finished: true, Failed: event.Status != legacyCacheRebuilt})
+			}
+			staged = nil
 		}
 	})
 	for _, migration := range migrations {

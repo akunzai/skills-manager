@@ -177,7 +177,7 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 			resourceNoun: "Local directory",
 		},
 		progressLine: func(name, subpath string) string {
-			return fmt.Sprintf("Linking local skill: %s%s%s -> %s", colorBold, name, colorReset, models.ToTildePath(resolvedPath(subpath)))
+			return fmt.Sprintf("Linking local skill: %s -> %s", name, models.ToTildePath(resolvedPath(subpath)))
 		},
 	}, nil
 }
@@ -191,7 +191,7 @@ func newCommandIntake(skillName, command, check, description string) *addIntake 
 			resourceNoun: "Command",
 		},
 		progressLine: func(name, _ string) string {
-			return fmt.Sprintf("Configuring command skill: %s%s%s\n   Command: %s\n   Executing installer command...", colorBold, name, colorReset, command)
+			return "Configuring command skill: " + name
 		},
 	}
 }
@@ -218,17 +218,16 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 		selectionPath = parsed.Subpath
 	}
 
-	out := cmd.OutOrStdout()
-	errOut := cmd.ErrOrStderr()
-	if presentation.For(errOut).Plain {
-		fmt.Fprintf(out, "%sFetching Source: %s%s%s...\n", colorCyan, colorBold, parsed.SourceKey, colorReset)
-	}
-	progress := presentation.StartProgress(errOut, "Fetching Source: "+parsed.SourceKey+"...")
+	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
+	region.Start(presentation.Job{Name: parsed.SourceKey, Label: "Fetching " + parsed.SourceKey})
 	repoDir, discovered, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir, selectionPath)
-	progress.Stop()
 	if err != nil {
+		region.Fail(parsed.SourceKey)
+		region.Stop()
 		return nil, err
 	}
+	region.Done(parsed.SourceKey)
+	region.Stop()
 	discovered, err = discoveryResult(discovered, nil, parsed.SourceKey)
 	if err != nil {
 		return nil, err
@@ -248,7 +247,7 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 			resourceNoun: "Repository",
 		},
 		progressLine: func(name, subpath string) string {
-			return fmt.Sprintf("Installing %s%s%s (from %s)...", colorBold, name, colorReset, subpath)
+			return fmt.Sprintf("Installing %s (from %s)", name, subpath)
 		},
 	}, nil
 }

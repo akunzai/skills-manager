@@ -22,15 +22,20 @@ type Style struct {
 }
 
 func For(w io.Writer) Style {
-	style := Style{Plain: !isInteractive(w), Rule: "─", Branch: "├─", LastBranch: "└─"}
+	tty := isTerminal(w)
+	style := Style{Plain: !interactive(tty), Rule: "─", Branch: "├─", LastBranch: "└─"}
 	if style.Plain {
 		style.Rule = "-"
 		style.Branch = "+-"
 		style.LastBranch = "`-"
 	}
-	if !supportsColor(w) {
+	if !colorful(tty) {
 		return style
 	}
+	return withColor(style)
+}
+
+func withColor(style Style) Style {
 	style.Cyan = "\033[96m"
 	style.Green = "\033[92m"
 	style.Yellow = "\033[93m"
@@ -68,18 +73,23 @@ func (s Style) SourceIcon(sourceType string) string {
 	}[kind]
 }
 
-func supportsColor(w io.Writer) bool {
-	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
-		return false
-	}
+func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
-func isInteractive(w io.Writer) bool {
-	if os.Getenv("TERM") == "dumb" {
-		return false
-	}
-	f, ok := w.(*os.File)
-	return ok && term.IsTerminal(int(f.Fd()))
+// interactive is whether a terminal writer takes terminal control: TERM=dumb
+// asks for plain output even on a terminal.
+func interactive(tty bool) bool {
+	return tty && os.Getenv("TERM") != "dumb"
+}
+
+func colorful(tty bool) bool {
+	return interactive(tty) && os.Getenv("NO_COLOR") == ""
+}
+
+// animated is whether progress may redraw itself in place. A CI log that
+// allocates a terminal still keeps every frame, so CI gets plain lines.
+func animated(tty bool) bool {
+	return interactive(tty) && os.Getenv("CI") == ""
 }

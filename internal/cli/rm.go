@@ -92,7 +92,7 @@ func newRmCmd() *cobra.Command {
 				return applyErr
 			}
 
-			fmt.Fprintf(out, "\n%sSkill removal complete.%s\n\n", colorGreen, colorReset)
+			fmt.Fprintf(out, "%sSkill removal complete.%s\n", colorGreen, colorReset)
 			return nil
 		},
 	}
@@ -104,7 +104,7 @@ func newRmCmd() *cobra.Command {
 
 func printRemoveResult(out io.Writer, result engine.RemoveResult) {
 	for _, s := range result.Skills {
-		fmt.Fprintf(out, "\n%sRemoving skill: %s%s%s...\n", colorCyan, colorBold, s.Name, colorReset)
+		fmt.Fprintf(out, "%sRemoving skill: %s%s%s...\n", colorCyan, colorBold, s.Name, colorReset)
 		if s.RemovedFromConfig {
 			fmt.Fprintf(out, "  %sRemoved from configuration.%s\n", colorGreen, colorReset)
 		}

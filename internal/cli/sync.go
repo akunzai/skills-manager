@@ -8,6 +8,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -63,7 +64,6 @@ completed.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "\n%s%sSyncing skills from %s...%s\n\n", colorBold, colorCyan, models.ToTildePath(configPath), colorReset)
 
 			plan, err := engine.PlanSync(cfg, configPath, skillsDir, cacheDir)
 			if err != nil {
@@ -90,8 +90,14 @@ completed.`,
 				}
 			}
 
-			report, err := plan.Apply(decision, nil)
-			printSyncEvents(out, report)
+			// With nothing declared there is no progress to show; a nil region
+			// shows none.
+			var region *presentation.Region
+			if n := len(plan.Items); n > 0 {
+				region = presentation.StartRegion(cmd.ErrOrStderr(), "Syncing "+countOf(n, "Skill"), n)
+			}
+			report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev) })
+			region.Stop()
 			// The flag the user passed, not the shape of --skills-dir (root.go).
 			scopeFlag := ""
 			if scope.IsProject {
@@ -127,21 +133,21 @@ func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, 
 		if blocked > 0 {
 			parts = append(parts, countOf(blocked, "blocked skill"))
 		}
-		fmt.Fprintf(out, "\n%s%sSync did not converge. %s.%s\n", colorBold, colorYellow, strings.Join(parts, ", "), colorReset)
+		fmt.Fprintf(out, "%s%sSync did not converge. %s.%s\n", colorBold, colorYellow, strings.Join(parts, ", "), colorReset)
 		if blocked > 0 && forceable {
-			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n\n")
+			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n")
 		} else if blocked > 0 {
-			fmt.Fprintf(out, "Next: follow the reason given for each skipped skill above.\n\n")
+			fmt.Fprintf(out, "Next: follow the reason given for each skipped skill above.\n")
 		} else {
-			fmt.Fprintf(out, "Next: run 'skills sync'.\n\n")
+			fmt.Fprintf(out, "Next: run 'skills sync'.\n")
 		}
 		return exitError{message: "Scope does not match its Config", code: 1}
 	}
 	if dryRun {
-		fmt.Fprintf(out, "\n%s%sScope already matches its Config. %d skills declared.%s\n\n", colorBold, colorGreen, configured, colorReset)
+		fmt.Fprintf(out, "%s%sScope already matches its Config. %d skills declared.%s\n", colorBold, colorGreen, configured, colorReset)
 		return nil
 	}
-	fmt.Fprintf(out, "\n%s%sSkills sync complete. %d skills configured.%s\n\n", colorBold, colorGreen, configured, colorReset)
+	fmt.Fprintf(out, "%s%sSkills sync complete. %d skills configured.%s\n", colorBold, colorGreen, configured, colorReset)
 	return nil
 }
 
@@ -247,22 +253,65 @@ func printCopiedAvailability(out io.Writer, report *engine.SyncReport, scopeFlag
 	fmt.Fprintln(out, "\n"+copiedAvailabilityNotice(copied, "", scopeFlag))
 }
 
-func printSyncEvents(out io.Writer, report *engine.SyncReport) {
-	if report == nil {
-		return
-	}
-	for _, ev := range report.Events {
-		printSyncEvent(out, ev)
+// showSyncProgress moves one Skill's row through the region. Only what stands
+// in the way, or a rename, stays on screen; a line that just says a step went
+// well would repeat the row it replaces.
+func showSyncProgress(region *presentation.Region, out io.Writer, ev engine.SyncEvent) {
+	switch ev.Kind {
+	case engine.SyncItemStart:
+		region.Start(presentation.Job{Name: ev.Skill, Phase: syncPhase(ev.Action)})
+	case engine.SyncMaterialized:
+		region.SetPhase(ev.Skill, "linking")
+	case engine.SyncCommandStart:
+		region.SetPhase(ev.Skill, "running installer")
+	case engine.SyncItemDone:
+		if ev.Outcome == engine.SyncDone {
+			region.Done(ev.Skill)
+		} else {
+			region.Fail(ev.Skill)
+		}
+	default:
+		if !syncEventIsProgress(ev.Kind) {
+			region.Above(func() { printSyncEvent(out, ev) })
+		}
 	}
 }
 
-// printSyncEvent words one Sync event. Add prints the events that say why a
-// Skill was not applied through it too, so that reason reads the same whichever
-// command applied the Skill.
+func syncPhase(action engine.SyncAction) string {
+	switch action {
+	case engine.SyncActionMaterialize:
+		return "materializing"
+	case engine.SyncActionRename:
+		return "renaming"
+	case engine.SyncActionCommand:
+		return "running installer"
+	case engine.SyncActionSkip:
+		return "checking"
+	default:
+		return "linking"
+	}
+}
+
+// syncEventIsProgress is whether an event only says a step went well, which
+// the progress region shows instead of a line: a Source or Skill starting,
+// Materializing, linking, starting an installer, and the Availability-copied
+// notice, which is summed up once afterwards.
+func syncEventIsProgress(kind string) bool {
+	switch kind {
+	case engine.SyncRepoStart, engine.SyncMaterialized, engine.SyncSymlinked, engine.SyncCommandStart, engine.SyncAvailabilityCopied, engine.SyncItemStart, engine.SyncItemDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// printSyncEvent words one Sync event that stays on screen: what stands in a
+// Skill's way, or a rename. Add prints the events that say why a Skill was not
+// applied through it too, so that reason reads the same whichever command
+// applied the Skill. Events that only say a step went well have no words here;
+// the progress region shows them.
 func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
 	switch ev.Kind {
-	case engine.SyncRepoStart:
-		fmt.Fprintf(out, "Syncing Source: %s%s%s (%d skills)...\n", colorBold, ev.Source, colorReset, len(ev.Skills))
 	case engine.SyncFetchFailed:
 		fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
 	case engine.SyncPathMissing:
@@ -271,18 +320,12 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
 		fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	case engine.SyncCopyFailed:
 		fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
-	case engine.SyncMaterialized:
-		fmt.Fprintf(out, "  %sRestored %s%s%s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, colorReset)
 	case engine.SyncSourceMissing:
 		fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
 	case engine.SyncSymlinkFailed:
 		fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
-	case engine.SyncSymlinked:
-		fmt.Fprintf(out, "  %sLinked local skill %s%s%s -> %s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, models.ToTildePath(ev.Target), colorReset)
 	case engine.SyncCheckFailed:
 		fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
-	case engine.SyncCommandStart:
-		fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
 	case engine.SyncCommandFailed:
 		fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	case engine.SyncRenamed:

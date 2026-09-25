@@ -27,6 +27,11 @@ const (
 	SyncSkipped            = "skipped"
 	SyncRenamed            = "renamed"
 	SyncRenameFailed       = "rename_failed"
+	// SyncItemStart and SyncItemDone bracket each declared Skill, carrying
+	// the Action about to be taken and the Outcome reached. They drive live
+	// progress only and are not recorded in the SyncReport.
+	SyncItemStart = "item_start"
+	SyncItemDone  = "item_done"
 )
 
 // SyncOutcome is what became of one declared Skill. Blocked and Failed ask
@@ -55,6 +60,10 @@ type SyncEvent struct {
 	// SyncAvailabilityCopied, those whose Availability is a copy of the Skill
 	// rather than a link to it.
 	Agents []string
+	// Action is what Apply is about to do with the Skill of a SyncItemStart.
+	Action SyncAction
+	// Outcome is what became of the Skill of a SyncItemDone.
+	Outcome SyncOutcome
 }
 
 // SyncReport is the observable outcome of applying a SyncPlan.
@@ -110,6 +119,16 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 		report.tally(SyncFailed)
 	}
 	report.Configured = plan.Names()
+	// progress tells onProgress alone where each Skill stands.
+	progress := func(ev SyncEvent) {
+		if onProgress != nil {
+			onProgress(ev)
+		}
+	}
+	finish := func(item SyncPlanItem, outcome SyncOutcome) {
+		progress(SyncEvent{Kind: SyncItemDone, Source: item.Source, Skill: item.Name, Outcome: outcome})
+		report.tally(outcome)
+	}
 
 	for _, source := range plan.Sources {
 		items := plan.SourceItems(source)
@@ -118,19 +137,23 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 			if item.Block == SyncBlockUnknownBaseline {
 				report.Unknown = append(report.Unknown, item.Freshness)
 			}
-			if action, _ := item.Resolve(decision); action == SyncActionRename {
-				report.tally(plan.applyRename(item, baselines, emit))
+			action, _ := item.Resolve(decision)
+			progress(SyncEvent{Kind: SyncItemStart, Source: source, Skill: item.Name, Action: action})
+			if action == SyncActionRename {
+				finish(item, plan.applyRename(item, baselines, emit))
 				report.Configured = config.GetConfiguredSkillNames(plan.cfg)
 				continue
 			}
 			outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, item, decision, baselines, emit)
-			report.tally(outcome)
+			finish(item, outcome)
 		}
 	}
 
 	for _, item := range plan.LocalItems() {
+		action, _ := item.Resolve(decision)
+		progress(SyncEvent{Kind: SyncItemStart, Skill: item.Name, Action: action})
 		outcome, _ := applyLocalItem(plan.availability, plan.skillsDir, item, emit)
-		report.tally(outcome)
+		finish(item, outcome)
 	}
 	return report, nil
 }
