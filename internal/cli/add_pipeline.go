@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -24,9 +25,11 @@ type sourceLabels struct {
 // addIntake owns one acquired Source from discovery through selection and
 // confirmation. Source-specific constructors are the only way to create it.
 type addIntake struct {
-	source       engine.AddSource
-	discovered   engine.DiscoveredSkills
-	labels       sourceLabels
+	source     engine.AddSource
+	discovered engine.DiscoveredSkills
+	labels     sourceLabels
+	// progressLine is the row a Skill shows while Add applies it: plain text
+	// on one line, since the progress region styles and truncates it.
 	progressLine func(name, subpath string) string
 }
 
@@ -196,9 +199,19 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 		return err
 	}
 
+	region := presentation.StartRegion(cmd.ErrOrStderr(), "Adding "+countOf(len(plan.Skills), "Skill"), len(plan.Skills))
 	result, err := engine.ApplyAddPlan(plan, cfg, func(ev engine.AddSkillEvent) {
-		fmt.Fprintf(out, "  %s\n", intake.progressLine(ev.Name, ev.Subpath))
+		switch ev.Outcome {
+		case "":
+			region.Start(presentation.Job{Name: ev.Name, Label: intake.progressLine(ev.Name, ev.Subpath)})
+		case engine.SyncDone:
+			region.Done(ev.Name)
+		default:
+			// reportAddOutcome says why, once the region is gone.
+			region.Fail(ev.Name)
+		}
 	})
+	region.Stop()
 	if err != nil {
 		return err
 	}
@@ -211,7 +224,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 // failed one is work that broke (2).
 func reportAddOutcome(out io.Writer, result engine.AddResult, configName string) error {
 	for _, ev := range result.Events {
-		if !addEventRepeatsProgress(ev.Kind) {
+		if !syncEventIsProgress(ev.Kind) {
 			printSyncEvent(out, ev)
 		}
 	}
@@ -241,18 +254,4 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName string)
 		return exitError{message: fmt.Sprintf("Add did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill")), code: 2}
 	}
 	return exitError{message: "Scope does not match its Config", code: 1}
-}
-
-// addEventRepeatsProgress is whether an event only restates what Add's own
-// progress lines already said: Sync's success lines ("Restored", "Linked",
-// "Running installer") and its Availability-copied notice, which Add has never
-// reported. Every other event is printed, so a kind added to Sync later shows
-// up in Add rather than being silently dropped.
-func addEventRepeatsProgress(kind string) bool {
-	switch kind {
-	case engine.SyncRepoStart, engine.SyncMaterialized, engine.SyncSymlinked, engine.SyncCommandStart, engine.SyncAvailabilityCopied:
-		return true
-	default:
-		return false
-	}
 }

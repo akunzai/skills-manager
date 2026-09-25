@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var startDoctorProgress = presentation.StartProgress
 var doctorIsTerminal = tui.IsTerminal
 var doctorConfirm = tui.PromptConfirm
 
@@ -46,7 +45,7 @@ func newDoctorCmd() *cobra.Command {
 			}
 
 			fmt.Fprintf(out, "\n%s%sDiagnosing skills health...%s\n\n", colorBold, colorCyan, colorReset)
-			var progress *presentation.Progress
+			var region *presentation.Region
 			var approve engine.DoctorReplaceForeign
 			if flagFix && doctorIsTerminal() {
 				approve = func(paths []engine.ForeignAvailabilityPath) (bool, error) {
@@ -54,10 +53,20 @@ func newDoctorCmd() *cobra.Command {
 				}
 			}
 			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix, func(event engine.DoctorEvent) {
-				progress.Stop()
-				progress = startDoctorProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Rebuilding %s Cache...", event.Index, event.Total, event.Source))
+				if region == nil {
+					region = presentation.StartRegion(cmd.ErrOrStderr(), "Rebuilding "+countOf(event.Total, "Cache"), event.Total)
+				}
+				switch {
+				case !event.Finished:
+					region.Start(presentation.Job{Name: event.Source, Phase: "rebuilding"})
+				case event.Failed:
+					// The health report below says why.
+					region.Fail(event.Source)
+				default:
+					region.Done(event.Source)
+				}
 			}, approve)
-			progress.Stop()
+			region.Stop()
 			printHealthReport(out, doctorFindings(outcome.Report))
 			if runErr != nil {
 				return runErr

@@ -293,12 +293,10 @@ func syncPhase(action engine.SyncAction) string {
 	}
 }
 
-// syncEventIsProgress is whether an event only says a step went well: Sync's
-// success lines ("Restored", "Linked", "Running installer"), the Source
-// heading, and the Availability-copied notice, which is summed up once
-// afterwards. The progress region stands in for all of them. Every other
-// event is printed, so a kind added to Sync later shows up rather than being
-// silently dropped.
+// syncEventIsProgress is whether an event only says a step went well, which
+// the progress region shows instead of a line: a Source or Skill starting,
+// Materializing, linking, starting an installer, and the Availability-copied
+// notice, which is summed up once afterwards.
 func syncEventIsProgress(kind string) bool {
 	switch kind {
 	case engine.SyncRepoStart, engine.SyncMaterialized, engine.SyncSymlinked, engine.SyncCommandStart, engine.SyncAvailabilityCopied, engine.SyncItemStart, engine.SyncItemDone:
@@ -308,13 +306,13 @@ func syncEventIsProgress(kind string) bool {
 	}
 }
 
-// printSyncEvent words one Sync event. Add prints the events that say why a
-// Skill was not applied through it too, so that reason reads the same whichever
-// command applied the Skill.
+// printSyncEvent words one Sync event that stays on screen: what stands in a
+// Skill's way, or a rename. Add prints the events that say why a Skill was not
+// applied through it too, so that reason reads the same whichever command
+// applied the Skill. Events that only say a step went well have no words here;
+// the progress region shows them.
 func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
 	switch ev.Kind {
-	case engine.SyncRepoStart:
-		fmt.Fprintf(out, "Syncing Source: %s%s%s (%d skills)...\n", colorBold, ev.Source, colorReset, len(ev.Skills))
 	case engine.SyncFetchFailed:
 		fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
 	case engine.SyncPathMissing:
@@ -323,18 +321,12 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
 		fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	case engine.SyncCopyFailed:
 		fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
-	case engine.SyncMaterialized:
-		fmt.Fprintf(out, "  %sRestored %s%s%s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, colorReset)
 	case engine.SyncSourceMissing:
 		fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
 	case engine.SyncSymlinkFailed:
 		fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
-	case engine.SyncSymlinked:
-		fmt.Fprintf(out, "  %sLinked local skill %s%s%s -> %s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, models.ToTildePath(ev.Target), colorReset)
 	case engine.SyncCheckFailed:
 		fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
-	case engine.SyncCommandStart:
-		fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
 	case engine.SyncCommandFailed:
 		fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	case engine.SyncRenamed:

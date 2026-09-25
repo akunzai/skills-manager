@@ -18,7 +18,6 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
-	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/pflag"
 )
@@ -1687,7 +1686,7 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	}
 }
 
-func TestCLIDoctorFixShowsProgressWhileRebuildingLegacyCache(t *testing.T) {
+func TestCLIDoctorFixReportsEachRebuiltCacheOnceWithoutATerminal(t *testing.T) {
 	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
@@ -1709,19 +1708,12 @@ func TestCLIDoctorFixShowsProgressWhileRebuildingLegacyCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var messages []string
-	oldStartProgress := startDoctorProgress
-	startDoctorProgress = func(_ io.Writer, message string) *presentation.Progress {
-		messages = append(messages, message)
-		return &presentation.Progress{}
-	}
-	t.Cleanup(func() { startDoctorProgress = oldStartProgress })
-
-	if _, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+	out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"[1/1] Rebuilding owner/repo Cache..."}; !reflect.DeepEqual(messages, want) {
-		t.Fatalf("progress messages = %q; want %q", messages, want)
+	if want := "\nDiagnosing skills health...\n\nok  owner/repo\n"; !strings.HasPrefix(out, want) {
+		t.Fatalf("output = %q; want it to start %q", out, want)
 	}
 }
 
@@ -3012,6 +3004,28 @@ func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
 		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+	}
+}
+
+// Without a terminal, Add leaves one "ok" line for the fetched Source and one
+// per Skill it applied, then its summary.
+func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+
+	out, err := runCLI(t, "add", "owner/repo", "--url", origin, "--skill", "sample", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	want := "ok  owner/repo\n" +
+		"ok  sample\n" +
+		"\nAdded 1 skill(s) [sample] and updated skills.json.\n\n"
+	if out != want {
+		t.Fatalf("output = %q\nwant     %q", out, want)
 	}
 }
 

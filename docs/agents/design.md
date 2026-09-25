@@ -75,6 +75,8 @@ Emoji are not a fallback. Use only widely supported Unicode marks when their mea
 
 No font probing or icon configuration is performed. Honor `NO_COLOR`. Emit no ANSI styling for non-TTY output or `TERM=dumb`.
 
+Progress redraws in place only on an interactive terminal outside CI (`CI` set to anything counts as CI, since a CI log keeps every frame). Everywhere else it draws nothing and each finished job leaves one plain `ok  <name>` line; a job that fails or is blocked leaves its reason instead.
+
 ## Interaction
 
 Ask only for decisions that flags have not supplied. Keep non-interactive operation and `--yes` as stable shortcuts.

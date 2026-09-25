@@ -267,12 +267,15 @@ func BuildAddPlan(
 	return plan
 }
 
-// AddSkillEvent is emitted during ApplyAddPlan for UI progress reporting.
+// AddSkillEvent is emitted during ApplyAddPlan for UI progress reporting:
+// once before a Skill is applied, with an empty Outcome, and once after, with
+// the Outcome it reached.
 type AddSkillEvent struct {
 	Name    string
 	Subpath string
 	Kind    AddSourceKind
 	Target  string
+	Outcome SyncOutcome
 }
 
 // AddResult records the outcome of applying an AddPlan. Every Skill in
@@ -366,22 +369,20 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	baselines := OpenBaselines(plan.SkillsDir)
 	for _, name := range names {
 		subpath := plan.Skills[name]
+		target := ""
+		if plan.Source.Kind == AddSourceSymlink {
+			target = resolvedLocal(subpath)
+		} else if plan.Source.Kind == AddSourceCommand {
+			target = plan.Source.Command
+		}
+		event := AddSkillEvent{
+			Name:    name,
+			Subpath: subpath,
+			Kind:    plan.Source.Kind,
+			Target:  target,
+		}
 		if onProgress != nil {
-			target := ""
-			if plan.Source.Kind == AddSourceSymlink {
-				target = plan.Source.LocalPath
-				if subpath != "" && subpath != "." {
-					target = filepath.Join(target, filepath.FromSlash(subpath))
-				}
-			} else if plan.Source.Kind == AddSourceCommand {
-				target = plan.Source.Command
-			}
-			onProgress(AddSkillEvent{
-				Name:    name,
-				Subpath: subpath,
-				Kind:    plan.Source.Kind,
-				Target:  target,
-			})
+			onProgress(event)
 		}
 		// The apply functions emit every reason a Skill was not applied, so
 		// their returned error adds nothing to the Events already collected.
@@ -404,6 +405,10 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 			result.Blocked++
 		case SyncFailed:
 			result.Failed++
+		}
+		if onProgress != nil {
+			event.Outcome = outcome
+			onProgress(event)
 		}
 	}
 
