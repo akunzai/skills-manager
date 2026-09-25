@@ -43,6 +43,12 @@ jobs:
     name: Test & Build (Windows)
     runs-on: windows-latest
     steps:
+      # The engine tests spawn git thousands of times and every test binary is
+      # new, so Defender's real-time scan dominates the job. The runner is
+      # disposable and only ever runs this repository's code.
+      - name: Disable Defender real-time scanning
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       # Without this the checkout arrives as CRLF and a byte-exact assertion
       # ends up testing git rather than the code.
       - name: Keep line endings unchanged
