@@ -9,7 +9,7 @@ A control point for skills shared across AI agents (Claude Code, Google Antigrav
 
 ## Core Invariants
 
-- **Two-phase Refresh**: `update` fetches remote sources into local cache; `sync` reconciles Scope skills from cache offline.
+- **Update then Sync**: `update` fetches remote sources into the shared cache, then syncs the Scope; `sync` alone reconciles Scope skills from cache offline.
 - **Availability via Defaults & Symlinks**: Universal agents read the central skills directory directly; non-universal agents receive symlinks per declared policy (`defaultAgents`, `include`, `exclude`).
 - **Exit-Code Contract**:
   | Exit Code | Meaning | Agent Action |
@@ -89,7 +89,7 @@ skills -p add --command "playwright-cli install --skills=agents" playwright-cli 
 
 **Completion criterion**: Run `skills ls` (or `skills -p ls`) and verify the skill appears with status `Installed` and expected availability.
 
-### 2. Inspect and Reconcile (`skills outdated` -> `skills update` -> `skills sync`)
+### 2. Inspect and Reconcile (`skills outdated` -> `skills update`)
 
 Keep installed skills aligned with remote sources and local configuration.
 
@@ -97,18 +97,17 @@ Keep installed skills aligned with remote sources and local configuration.
 # Step 1: Check remote freshness (Exit 0 = current, 1 = outdated/differences found)
 skills outdated
 
-# Step 2: Fetch remote changes into the shared Cache (network operation)
+# Step 2: Preview the refresh and the reconciliation plan without writing (Exit 0 = synced, 1 = pending work)
+skills update --dry-run
+
+# Step 3: Fetch remote changes into the shared Cache, then materialize skills and apply availability
 skills update
 
-# Step 3: Preview reconciliation plan without writing to disk (Exit 0 = synced, 1 = pending work)
-skills sync --dry-run
-
-# Step 4: Materialize skills and apply availability (offline operation)
+# Reconcile from the existing Cache only (offline operation)
 skills sync
 
 # Project Scope (workspace reconciliation):
 skills -p update
-skills -p sync
 ```
 
 **Protected drift**: If local files inside a materialized skill were modified, `skills sync` leaves them untouched and reports them as `Blocked` (exit code `1`). To intentionally discard local modifications and overwrite from cache:
@@ -116,9 +115,9 @@ skills -p sync
 skills sync --force
 ```
 
-**Renamed upstream**: When a Source renames a Skill and the new `SKILL.md` declares `metadata: {replaces: <old name>}`, `skills update` reports the rename and `skills sync` migrates it: Config names the new Skill, the new Skill is synced, and the old copy is removed. An edited old copy blocks the rename exactly like protected drift. A Skill removed upstream with no replacement stays blocked; resolve it with `skills rm <name>`, never `--force`.
+**Renamed upstream**: When a Source renames a Skill and the new `SKILL.md` declares `metadata: {replaces: <old name>}`, `skills update` finds the rename and its Sync migrates it: Config names the new Skill, the new Skill is synced, and the old copy is removed. An edited old copy blocks the rename exactly like protected drift. A Skill removed upstream with no replacement stays blocked; resolve it with `skills rm <name>`, never `--force`.
 
-**Completion criterion**: `skills sync` (or `skills -p sync`) exits `0` (converged).
+**Completion criterion**: `skills update` or `skills sync` (with `-p` for a Project) exits `0` (converged).
 
 ### 3. Diagnose and Repair Health (`skills doctor` & `skills prune`)
 

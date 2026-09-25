@@ -101,7 +101,7 @@ A harness that can load Skills (Claude Code, Copilot, Codex, …).
 _Avoid_: harness (in user-facing copy), tool, IDE
 
 **Update**:
-Refreshing remote Sources into the shared Cache only, including covering the replacement of a Renamed Skill. Does not Materialize Skills or apply Availability. This supersedes the pre-0.8.0 definition recorded in #60.
+Refreshing remote Sources into the shared Cache, including covering the replacement of a Renamed Skill, then Syncing the Scope it runs in. The refresh is the only part that reaches the network. This supersedes the Cache-only definition from #85.
 _Avoid_: upgrade, pull (when you mean this command), Self-update
 
 **Self-update**:

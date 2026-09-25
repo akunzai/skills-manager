@@ -396,7 +396,7 @@
       </div>
       <div>
         <h3>Offline sync and drift diagnosis</h3>
-        <p>Network fetching is isolated to <code>skills update</code>; reconciling disk with <code>skills sync</code> is 100% offline from a shared cache. <code>skills doctor --fix</code> diagnoses broken symlinks, physical collisions, and drift, repairing manageable state safely.</p>
+        <p>Network fetching is isolated to <code>skills update</code>, which then reconciles the Scope; <code>skills sync</code> reconciles disk 100% offline from a shared cache. <code>skills doctor --fix</code> diagnoses broken symlinks, physical collisions, and drift, repairing manageable state safely.</p>
       </div>
       <div>
         <h3>State-expressing exit codes</h3>
@@ -475,7 +475,7 @@
 <span class="prompt">$ </span><span class="cmd">git add .agents/skills.json &amp;&amp; git commit -m "chore: add agent skills"</span>
 
 <span class="comment"># Teammates clone and restore declared state deterministically</span>
-<span class="prompt">$ </span><span class="cmd">skills -p update &amp;&amp; skills -p sync</span></pre>
+<span class="prompt">$ </span><span class="cmd">skills -p update</span></pre>
         </div>
         <p style="margin-top: 10px; font-size: 14px; color: var(--muted);">
           Declare team-wide skills in <code>.agents/skills.json</code>. Materialized skills in <code>.agents/skills/</code> are ordinary files—commit only <code>skills.json</code> for a clean repo, or commit the skills directory directly for zero-install onboarding.
@@ -552,8 +552,8 @@
           </tr>
           <tr>
             <td><code>skills update</code></td>
-            <td>Refresh declared remote Sources into shared Cache</td>
-            <td><code>0</code> updated</td>
+            <td>Refresh declared remote Sources, then sync the Scope</td>
+            <td><code>0</code> synced, <code>1</code> drift</td>
           </tr>
           <tr>
             <td><code>skills self-update</code></td>
