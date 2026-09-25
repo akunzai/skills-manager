@@ -1,6 +1,7 @@
 # Skills Manager
 
 [![CI](https://github.com/akunzai/skills-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/akunzai/skills-manager/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/akunzai/skills-manager/graph/badge.svg)](https://codecov.io/gh/akunzai/skills-manager)
 [![License: MIT](https://img.shields.io/badge/license-MIT-24292f.svg)](LICENSE)
 
 One source of truth for skills across Claude Code, Codex, Google Antigravity CLI, and other AI agents.
