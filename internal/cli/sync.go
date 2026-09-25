@@ -255,7 +255,9 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 	}
 }
 
-// printSyncEvent words one Sync event.
+// printSyncEvent words one Sync event. Add prints the events that say why a
+// Skill was not applied through it too, so that reason reads the same whichever
+// command applied the Skill.
 func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
 	switch ev.Kind {
 	case engine.SyncRepoStart:

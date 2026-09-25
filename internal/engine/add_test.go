@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -221,8 +222,11 @@ func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {
 		NewRemoteAddSource("owner/repo", "git", "", repoDir),
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	result, err := ApplyAddPlan(plan, cfg, nil)
-	if err == nil {
-		t.Fatal("ApplyAddPlan error = nil; want the unrecorded Baseline reported")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failed != 1 {
+		t.Fatalf("Failed = %d; an unrecorded Baseline is a failure", result.Failed)
 	}
 	if result.StateError == "" {
 		t.Fatal("StateError is empty; want why the Baseline was not recorded")
@@ -257,8 +261,12 @@ func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource("owner/repo", "git", "", repoDir),
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
-	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
-		t.Fatal("expected unmanaged Availability path to fail closed")
+	result, err := ApplyAddPlan(plan, cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failed != 1 || !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncAvailabilityFailed }) {
+		t.Fatalf("Failed=%d Events=%#v; want the unmanaged Availability path to fail closed", result.Failed, result.Events)
 	}
 	loaded, err := config.LoadConfig(configPath)
 	if err != nil {
@@ -269,7 +277,9 @@ func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
 	}
 }
 
-func TestApplyAddPlanStopsAfterFirstRemoteFailure(t *testing.T) {
+// Config already declares every selected Skill before any is applied, so a
+// failed Skill does not stop the rest: each gets its own outcome, as in Sync.
+func TestApplyAddPlanContinuesPastAFailedSkill(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	repoDir := filepath.Join(project, "repo")
@@ -287,18 +297,41 @@ func TestApplyAddPlanStopsAfterFirstRemoteFailure(t *testing.T) {
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource("owner/repo", "git", "", repoDir),
 		map[string]string{"bad": "missing", "good": "good"}, AddAvailabilityIntent{})
-	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
-		t.Fatal("expected the missing Skill to fail apply")
-	}
-	loaded, err := config.LoadConfig(configPath)
+	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ApplyAddPlan error = %v; a failed Skill is an outcome, not an error", err)
 	}
-	if _, ok := loaded.Remote["owner/repo"].Skills["good"]; !ok {
-		t.Fatal("Config must already list every selected Skill")
+	if result.Failed != 1 || result.Blocked != 0 {
+		t.Fatalf("Failed=%d Blocked=%d; want 1 failed", result.Failed, result.Blocked)
 	}
-	if _, err := os.Stat(filepath.Join(skillsDir, "good", "SKILL.md")); !os.IsNotExist(err) {
-		t.Fatal("second Skill must not be Materialized after the first fails")
+	if !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncPathMissing && ev.Skill == "bad" }) {
+		t.Fatalf("Events = %#v; want bad's missing path", result.Events)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "good", "SKILL.md")); err != nil {
+		t.Fatalf("good must still be Materialized after bad failed: %v", err)
+	}
+}
+
+// A command check that does not pass leaves the Skill declared but not
+// installed: blocked, as Sync calls it, not failed.
+func TestApplyAddPlanCountsAFailedCheckAsBlocked(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cfg := config.DefaultConfig()
+	plan := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
+		NewCommandAddSource("echo ok", "exit 1", ""),
+		map[string]string{"cmd-skill": "."}, AddAvailabilityIntent{})
+
+	result, err := ApplyAddPlan(plan, cfg, nil)
+	if err != nil {
+		t.Fatalf("ApplyAddPlan error = %v; a blocked Skill is an outcome, not an error", err)
+	}
+	if result.Blocked != 1 || result.Failed != 0 {
+		t.Fatalf("Blocked=%d Failed=%d; want 1 blocked", result.Blocked, result.Failed)
+	}
+	if !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncCheckFailed }) {
+		t.Fatalf("Events = %#v; want the failed check", result.Events)
 	}
 }
 

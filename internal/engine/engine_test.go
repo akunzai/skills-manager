@@ -1432,9 +1432,12 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 	}
 
 	plan := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, AddAvailabilityIntent{})
-	_, err := ApplyAddPlan(plan, cfg, nil)
-	if err == nil {
-		t.Fatal("expected materialize error")
+	result, err := ApplyAddPlan(plan, cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failed != 1 {
+		t.Fatalf("Failed = %d; want the installer failure counted", result.Failed)
 	}
 	loaded, err := config.LoadConfig(configPath)
 	if err != nil {
