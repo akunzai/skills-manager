@@ -16,7 +16,12 @@ type PrunePlan struct {
 	UntrackedSkills []string
 	UntrackedDirs   []string
 	Unconfigured    []ManagedAgentPath
-	StateSkills     []string
+	// EmptyAgentDirs are leftover empty Agent directories the current
+	// Availability policy does not select (see CONTEXT.md's Leftover
+	// occupancy). Populated only when BuildPrunePlan is asked to include
+	// configured links, the same condition Unconfigured uses.
+	EmptyAgentDirs []AgentDir
+	StateSkills    []string
 	// StateError is why the Scope state could not be read. Its stale
 	// Baselines are left alone; everything else is still pruned.
 	StateError string
@@ -34,10 +39,12 @@ type PruneFailure struct {
 
 // PruneResult records what happened while applying a plan.
 type PruneResult struct {
-	RemovedSkills []string
-	RemovedLinks  []ManagedAgentPath
-	SkippedLinks  []ManagedAgentPath
-	Failures      []PruneFailure
+	RemovedSkills    []string
+	RemovedLinks     []ManagedAgentPath
+	SkippedLinks     []ManagedAgentPath
+	RemovedEmptyDirs []AgentDir
+	SkippedEmptyDirs []AgentDir
+	Failures         []PruneFailure
 }
 
 // BuildPrunePlan finds untracked master skills and managed links that are no
@@ -77,6 +84,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		leftover := observation.Leftover.WithoutEmpty()
 		if includeConfiguredLinks {
 			plan.Unconfigured = append(plan.Unconfigured, observation.Unexpected...)
+			plan.EmptyAgentDirs = slices.Clone(observation.Leftover.Empty)
 		} else {
 			leftover = leftover.ForSkills(append(inv.Untracked(), inv.UntrackedLinks()...))
 		}
@@ -89,6 +97,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 	slices.Sort(plan.UntrackedDirs)
 	slices.Sort(plan.StateSkills)
 	slices.SortFunc(plan.Unconfigured, func(a, b ManagedAgentPath) int { return cmp.Compare(a.Path, b.Path) })
+	slices.SortFunc(plan.EmptyAgentDirs, func(a, b AgentDir) int { return cmp.Compare(a.Name, b.Name) })
 	return plan, nil
 }
 
@@ -122,6 +131,22 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 			continue
 		}
 		result.RemovedSkills = append(result.RemovedSkills, skill)
+	}
+	stopAt := models.ScopeRoot(skillsDir)
+	for _, dir := range plan.EmptyAgentDirs {
+		empty, err := isDirEffectivelyEmpty(dir.Dir)
+		if err != nil || !empty {
+			// Gone, or no longer empty: whatever changed since planning owns
+			// the directory now, not prune.
+			result.SkippedEmptyDirs = append(result.SkippedEmptyDirs, dir)
+			continue
+		}
+		if err := removeEmptyAgentDir(dir.Dir, stopAt); err != nil {
+			result.Failures = append(result.Failures, PruneFailure{Path: dir.Dir, Err: err})
+			errs = append(errs, err)
+			continue
+		}
+		result.RemovedEmptyDirs = append(result.RemovedEmptyDirs, dir)
 	}
 	if len(plan.StateSkills) > 0 {
 		baselines := OpenBaselines(skillsDir)

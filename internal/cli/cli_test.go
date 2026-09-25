@@ -461,6 +461,113 @@ func TestCLIPruneSkillsOnlyKeepsConfiguredSkillLinks(t *testing.T) {
 	}
 }
 
+// Doctor already counts and removes this as an issue; prune must too, by
+// default and under --yes.
+func TestCLIPruneYesRemovesLeftoverEmptyAgentDir(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+	jazzDir := filepath.Join(home, ".jazz", "skills")
+	if err := os.MkdirAll(jazzDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "prune", "--yes", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("prune --yes: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "1 empty agent directory") {
+		t.Fatalf("expected the empty agent directory counted in the summary, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Removed empty agent directory:") {
+		t.Fatalf("expected a per-item removal line, got:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".jazz")); !os.IsNotExist(err) {
+		t.Fatal("expected leftover ~/.jazz to be removed")
+	}
+}
+
+// --skills-only plans master skills and their links only; a leftover empty
+// Agent directory is links territory and must survive.
+func TestCLIPruneSkillsOnlyKeepsLeftoverEmptyAgentDir(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+	jazzDir := filepath.Join(home, ".jazz", "skills")
+	if err := os.MkdirAll(jazzDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(home, "elsewhere", "orphan")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(skillsDir, "orphan")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "prune", "--skills-only", "--yes", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("prune --skills-only --yes: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "empty agent directory") {
+		t.Fatalf("--skills-only must not touch leftover empty Agent directories, got:\n%s", out)
+	}
+	if _, err := os.Stat(jazzDir); err != nil {
+		t.Fatal("expected leftover ~/.jazz/skills to survive --skills-only")
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "orphan")); !os.IsNotExist(err) {
+		t.Fatal("expected the untracked master symlink to be removed")
+	}
+}
+
+func TestCLIPruneDryRunListsLeftoverEmptyAgentDir(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+	jazzDir := filepath.Join(home, ".jazz", "skills")
+	if err := os.MkdirAll(jazzDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "prune", "--dry-run", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("prune --dry-run: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "1 leftover empty agent director") {
+		t.Fatalf("expected the empty agent directory counted in the plan, got:\n%s", out)
+	}
+	if !strings.Contains(out, "empty agent directory: ") || !strings.Contains(out, "(jazz)") {
+		t.Fatalf("expected a per-item plan line naming the agent, got:\n%s", out)
+	}
+	if _, err := os.Stat(jazzDir); err != nil {
+		t.Fatal("dry-run must not remove anything")
+	}
+}
+
 func TestCLIPruneRequiresYesWithoutTerminal(t *testing.T) {
 	resetRootCmdFlags()
 	home := isolateHome(t)
@@ -519,6 +626,21 @@ func TestSelectedPrunePlanKeepsStaleBaselines(t *testing.T) {
 
 	if got, want := selected.StateSkills, []string{"gone"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected StateSkills = %v; want %v", got, want)
+	}
+}
+
+func TestSelectedPrunePlanKeepsSelectedEmptyDirsAndDropsUnselected(t *testing.T) {
+	plan := engine.PrunePlan{
+		EmptyAgentDirs: []engine.AgentDir{
+			{Name: "jazz", Dir: "/agents/jazz/skills"},
+			{Name: "crush", Dir: "/agents/crush/skills"},
+		},
+	}
+
+	selected := selectedPrunePlan(plan, []string{pruneEmptyDirKey("/agents/jazz/skills")})
+
+	if got, want := selected.EmptyAgentDirs, []engine.AgentDir{{Name: "jazz", Dir: "/agents/jazz/skills"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected EmptyAgentDirs = %#v; want %#v", got, want)
 	}
 }
 
