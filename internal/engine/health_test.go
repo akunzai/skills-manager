@@ -299,10 +299,10 @@ func TestStaleBaselinesAreEntriesNotDeclaredRemote(t *testing.T) {
 	}
 }
 
-// The summary reads UntrackedLinks off the outcome, beside Untracked. --fix
-// leaves untracked links alone today, so this pins that the count is there
-// with and without --fix; it cannot tell a pre-fix count from a post-fix one.
-func TestDoctorRunCountsUntrackedLinks(t *testing.T) {
+// The summary reads Warnings off the outcome. --fix leaves untracked links
+// alone today, so this pins that the count is there with and without --fix;
+// it cannot tell a pre-fix count from a post-fix one.
+func TestDoctorRunCountsUntrackedLinksAsWarnings(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
@@ -320,8 +320,9 @@ func TestDoctorRunCountsUntrackedLinks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if outcome.UntrackedLinks != 1 {
-			t.Fatalf("fix=%v: UntrackedLinks = %d; want 1", fix, outcome.UntrackedLinks)
+		want := []DoctorWarning{{Kind: DoctorFindingUntrackedLink, Count: 1}}
+		if !reflect.DeepEqual(outcome.Warnings, want) {
+			t.Fatalf("fix=%v: Warnings = %#v; want %#v", fix, outcome.Warnings, want)
 		}
 	}
 }
@@ -950,9 +951,9 @@ func TestDoctorFindingKindCountsAsIssue(t *testing.T) {
 		kind DoctorFindingKind
 		want bool
 	}{
-		{findingUntracked, false},
-		{findingUntrackedLink, false},
-		{findingAgentPhysical, false},
+		{DoctorFindingUntracked, false},
+		{DoctorFindingUntrackedLink, false},
+		{DoctorFindingUnmanagedDirectory, false},
 		{findingUnknownAgent, true},
 		{DoctorFindingLeftoverDangling, true},
 		{DoctorFindingLeftoverLive, true},
@@ -1017,32 +1018,32 @@ func TestDoctorReportFindingsClassifyIssues(t *testing.T) {
 		}
 	}
 	want := map[DoctorFindingKind]int{
-		findingMasterMissing:          1,
-		findingAgentUnusable:          1,
-		findingAgentUnmanagedBroken:   2,
-		findingAgentPhysical:          1,
-		DoctorFindingLeftoverDangling: 1,
-		DoctorFindingLeftoverLive:     1,
-		findingLeftoverEmpty:          1,
-		findingDriftMissing:           1,
-		findingDriftUnexpected:        1,
-		findingDriftBroken:            1,
-		findingDriftForeign:           1,
-		findingDriftUnobservable:      1,
-		findingMissingSkill:           1,
-		findingUntracked:              1,
-		findingUntrackedLink:          1,
-		findingIllegalLocal:           1,
-		findingInvalid:                1,
-		findingStub:                   1,
-		findingUnknownAgent:           1,
-		findingReservedName:           1,
-		findingStateError:             1,
-		findingGitError:               1,
-		findingStaleState:             1,
-		findingLegacyCache:            1,
-		findingCacheRecovery:          1,
-		findingStaleScope:             1,
+		findingMasterMissing:            1,
+		findingAgentUnusable:            1,
+		findingAgentUnmanagedBroken:     2,
+		DoctorFindingUnmanagedDirectory: 1,
+		DoctorFindingLeftoverDangling:   1,
+		DoctorFindingLeftoverLive:       1,
+		findingLeftoverEmpty:            1,
+		findingDriftMissing:             1,
+		findingDriftUnexpected:          1,
+		findingDriftBroken:              1,
+		findingDriftForeign:             1,
+		findingDriftUnobservable:        1,
+		findingMissingSkill:             1,
+		DoctorFindingUntracked:          1,
+		DoctorFindingUntrackedLink:      1,
+		findingIllegalLocal:             1,
+		findingInvalid:                  1,
+		findingStub:                     1,
+		findingUnknownAgent:             1,
+		DoctorFindingReservedName:       1,
+		findingStateError:               1,
+		findingGitError:                 1,
+		findingStaleState:               1,
+		findingLegacyCache:              1,
+		findingCacheRecovery:            1,
+		findingStaleScope:               1,
 	}
 	for kind, n := range want {
 		if got[kind] != n {
@@ -1103,17 +1104,17 @@ func TestDoctorRunReportsUnmanagedAgentDirectoryButNotAsIssue(t *testing.T) {
 func TestEveryDoctorReportFieldIsClassified(t *testing.T) {
 	findingFields := map[string][]DoctorFindingKind{
 		"MasterMissing":  {findingMasterMissing},
-		"Agents":         {findingAgentUnusable, findingAgentUnmanagedBroken, findingAgentPhysical},
+		"Agents":         {findingAgentUnusable, findingAgentUnmanagedBroken, DoctorFindingUnmanagedDirectory},
 		"Leftover":       {DoctorFindingLeftoverDangling, DoctorFindingLeftoverLive, findingLeftoverEmpty},
 		"Drift":          {findingDriftMissing, findingDriftUnexpected, findingDriftBroken, findingDriftForeign, findingDriftUnobservable},
 		"Missing":        {findingMissingSkill},
-		"Untracked":      {findingUntracked},
-		"UntrackedLinks": {findingUntrackedLink},
+		"Untracked":      {DoctorFindingUntracked},
+		"UntrackedLinks": {DoctorFindingUntrackedLink},
 		"IllegalLocal":   {findingIllegalLocal},
 		"Invalid":        {findingInvalid},
 		"Stubs":          {findingStub},
 		"UnknownAgents":  {findingUnknownAgent},
-		"ReservedNames":  {findingReservedName},
+		"ReservedNames":  {DoctorFindingReservedName},
 		"StateError":     {findingStateError},
 		"StaleState":     {findingStaleState},
 		"CacheRecovery":  {findingCacheRecovery},
@@ -1236,4 +1237,32 @@ func TestLeftoverManagedLinkOnAReservedNameIsCleanedUp(t *testing.T) {
 		}
 		assertRemoved(t, skillsDir, link)
 	})
+}
+
+// A warning is exactly a kind that does not count as an issue, and Warnings
+// counts every one of them in DoctorWarningKinds order.
+func TestDoctorWarningsCountEveryNonIssueKindInOrder(t *testing.T) {
+	report := classifiedDoctorReport()
+	var want []DoctorWarning
+	counts := make(map[DoctorFindingKind]int)
+	for _, kind := range report.findings() {
+		if !kind.CountsAsIssue() {
+			counts[kind]++
+		}
+	}
+	for _, kind := range DoctorWarningKinds() {
+		if kind.CountsAsIssue() {
+			t.Errorf("warning kind %s counts as an issue", kind)
+		}
+		if counts[kind] > 0 {
+			want = append(want, DoctorWarning{Kind: kind, Count: counts[kind]})
+		}
+		delete(counts, kind)
+	}
+	if len(counts) > 0 {
+		t.Errorf("non-issue kinds missing from DoctorWarningKinds: %v", counts)
+	}
+	if got := report.warnings(); !reflect.DeepEqual(got, want) || len(got) != len(DoctorWarningKinds()) {
+		t.Fatalf("warnings = %#v; want one per warning kind, %#v", got, want)
+	}
 }

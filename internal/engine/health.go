@@ -132,13 +132,11 @@ type DoctorOutcome struct {
 	// two apart: a finding is a state to act on, a failed repair is work
 	// that broke.
 	Failed int
-	// Untracked is how many Untracked real directories sit on the skills
-	// directory. They are not counted in Remaining (see issueCount): they are
-	// occupancy the tool does not manage, not Drift to reconcile.
-	Untracked int
-	// UntrackedLinks is how many leftover symlinks sit on the skills
-	// directory, counted from the same diagnosis as Untracked.
-	UntrackedLinks int
+	// Warnings counts the findings that are not issues (DoctorWarningKinds),
+	// from the same diagnosis as Remaining: occupancy or declarations the tool
+	// leaves alone rather than Drift to reconcile, so they are not in
+	// Remaining (ADR-0002).
+	Warnings []DoctorWarning
 }
 
 // DoctorEvent reports a legacy Cache rebuild: once when a Source starts, then
@@ -189,14 +187,14 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 		return DoctorOutcome{}, err
 	}
 	if !fix {
-		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Untracked: len(plan.Untracked), UntrackedLinks: len(plan.UntrackedLinks)}, nil
+		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Warnings: plan.warnings()}, nil
 	}
 
 	replaceForeign := false
 	if foreign := plan.foreignAvailabilityPaths(); len(foreign) > 0 && approve != nil {
 		replaceForeign, err = approve(foreign)
 		if err != nil {
-			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Untracked: len(plan.Untracked), UntrackedLinks: len(plan.UntrackedLinks)}, err
+			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Warnings: plan.warnings()}, err
 		}
 	}
 	d.repair(&plan, progress, replaceForeign)
@@ -206,8 +204,7 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 		return outcome, err
 	}
 	outcome.Remaining = after.issueCount()
-	outcome.Untracked = len(after.Untracked)
-	outcome.UntrackedLinks = len(after.UntrackedLinks)
+	outcome.Warnings = after.warnings()
 	outcome.RecoveryNeeded = outcome.RecoveryNeeded || len(after.CacheRecovery) > 0
 	return outcome, nil
 }

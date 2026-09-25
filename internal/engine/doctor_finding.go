@@ -1,5 +1,7 @@
 package engine
 
+import "slices"
+
 // DoctorFindingKind is how Doctor classifies one diagnosed fact. Remaining
 // counts kinds whose CountsAsIssue is true. CLI leftover grouping asks the
 // leftover-dangling and leftover-live kinds rather than inspecting Dangling;
@@ -11,10 +13,16 @@ const (
 	DoctorFindingLeftoverDangling DoctorFindingKind = "leftover-dangling"
 	DoctorFindingLeftoverLive     DoctorFindingKind = "leftover-live"
 
+	// The warning kinds (DoctorWarningKinds). The CLI words each one in
+	// doctor's summary line, so they are exported.
+	DoctorFindingUntracked          DoctorFindingKind = "untracked"
+	DoctorFindingUntrackedLink      DoctorFindingKind = "untracked-link"
+	DoctorFindingUnmanagedDirectory DoctorFindingKind = "unmanaged-directory"
+	DoctorFindingReservedName       DoctorFindingKind = "reserved-name"
+
 	findingMasterMissing        DoctorFindingKind = "master-missing"
 	findingAgentUnusable        DoctorFindingKind = "agent-unusable"
 	findingAgentUnmanagedBroken DoctorFindingKind = "agent-unmanaged-broken"
-	findingAgentPhysical        DoctorFindingKind = "agent-physical"
 	findingLeftoverEmpty        DoctorFindingKind = "leftover-empty"
 	findingDriftMissing         DoctorFindingKind = "drift-missing"
 	findingDriftUnexpected      DoctorFindingKind = "drift-unexpected"
@@ -22,13 +30,10 @@ const (
 	findingDriftForeign         DoctorFindingKind = "drift-foreign"
 	findingDriftUnobservable    DoctorFindingKind = "drift-unobservable"
 	findingMissingSkill         DoctorFindingKind = "missing-skill"
-	findingUntracked            DoctorFindingKind = "untracked"
-	findingUntrackedLink        DoctorFindingKind = "untracked-link"
 	findingIllegalLocal         DoctorFindingKind = "illegal-local"
 	findingInvalid              DoctorFindingKind = "invalid"
 	findingStub                 DoctorFindingKind = "stub"
 	findingUnknownAgent         DoctorFindingKind = "unknown-agent"
-	findingReservedName         DoctorFindingKind = "reserved-name"
 	findingStateError           DoctorFindingKind = "state-error"
 	findingGitError             DoctorFindingKind = "git-error"
 	findingStaleState           DoctorFindingKind = "stale-state"
@@ -45,12 +50,41 @@ const (
 // it available there, so it is a warning about the declaration. Availability
 // Copies never appear as a kind.
 func (k DoctorFindingKind) CountsAsIssue() bool {
-	switch k {
-	case findingUntracked, findingUntrackedLink, findingAgentPhysical, findingReservedName:
-		return false
-	default:
-		return k != ""
+	return k != "" && !slices.Contains(DoctorWarningKinds(), k)
+}
+
+// DoctorWarningKinds is every kind that does not count as an issue, in the
+// order doctor's summary line names them. It is the one definition of a
+// warning: DoctorOutcome.Warnings counts these, and the CLI must word each.
+func DoctorWarningKinds() []DoctorFindingKind {
+	return []DoctorFindingKind{
+		DoctorFindingUntracked,
+		DoctorFindingUntrackedLink,
+		DoctorFindingUnmanagedDirectory,
+		DoctorFindingReservedName,
 	}
+}
+
+// DoctorWarning is how many findings of one warning kind a diagnosis holds.
+type DoctorWarning struct {
+	Kind  DoctorFindingKind
+	Count int
+}
+
+// warnings counts findings() by warning kind, in DoctorWarningKinds order,
+// leaving out kinds with none.
+func (p DoctorReport) warnings() []DoctorWarning {
+	counts := make(map[DoctorFindingKind]int)
+	for _, kind := range p.findings() {
+		counts[kind]++
+	}
+	var out []DoctorWarning
+	for _, kind := range DoctorWarningKinds() {
+		if n := counts[kind]; n > 0 {
+			out = append(out, DoctorWarning{Kind: kind, Count: n})
+		}
+	}
+	return out
 }
 
 // FindingKind is leftover dangling vs live occupancy. CLI chooses Error vs
@@ -80,7 +114,7 @@ func (p DoctorReport) findings() []DoctorFindingKind {
 			add(findingAgentUnusable, 1)
 		}
 		add(findingAgentUnmanagedBroken, len(agent.UnmanagedBroken))
-		add(findingAgentPhysical, len(agent.Physical))
+		add(DoctorFindingUnmanagedDirectory, len(agent.Physical))
 	}
 	for _, path := range p.Leftover.Paths {
 		add(path.FindingKind(), 1)
@@ -96,13 +130,13 @@ func (p DoctorReport) findings() []DoctorFindingKind {
 		// Scope by another mechanism, not Drift to reconcile (ADR-0002).
 	}
 	add(findingMissingSkill, len(p.Missing))
-	add(findingUntracked, len(p.Untracked))
-	add(findingUntrackedLink, len(p.UntrackedLinks))
+	add(DoctorFindingUntracked, len(p.Untracked))
+	add(DoctorFindingUntrackedLink, len(p.UntrackedLinks))
 	add(findingIllegalLocal, len(p.IllegalLocal))
 	add(findingInvalid, len(p.Invalid))
 	add(findingStub, len(p.Stubs))
 	add(findingUnknownAgent, len(p.UnknownAgents))
-	add(findingReservedName, len(p.ReservedNames))
+	add(DoctorFindingReservedName, len(p.ReservedNames))
 	if p.StateError != "" {
 		add(findingStateError, 1)
 	}
