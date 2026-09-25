@@ -1219,6 +1219,48 @@ func TestCLISyncExitCodes(t *testing.T) {
 	}
 }
 
+// Without a terminal, Sync leaves one "ok" line per Skill it applied and
+// words only what stands in the way.
+func TestCLISyncReportsEachSkillOnceWithoutATerminal(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	writeCLIGitSkill(t, origin, "drifted")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "drifted", "drifted", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample", "drifted"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+		t.Fatalf("first Sync: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "drifted", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if ExitCode(err) != 1 {
+		t.Fatalf("drift should exit 1, got err=%v:\n%s", err, out)
+	}
+	_, body, _ := strings.Cut(out, "...\n\n")
+	// runCLI goes around Execute, which keeps exit 1 from reading as an error.
+	body, _, _ = strings.Cut(body, "Error: ")
+	want := "  Skipped drifted: local_drift\n" +
+		"ok  sample\n" +
+		"\nSync did not converge. 1 blocked skill.\n" +
+		"Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n\n"
+	if body != want {
+		t.Fatalf("output = %q\nwant     %q", body, want)
+	}
+}
+
 func TestCLISyncDryRunNeverEntersApply(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()

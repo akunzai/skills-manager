@@ -8,6 +8,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
+	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -90,8 +91,14 @@ completed.`,
 				}
 			}
 
-			report, err := plan.Apply(decision, nil)
-			printSyncEvents(out, report)
+			// With nothing declared there is no progress to show; a nil region
+			// shows none.
+			var region *presentation.Region
+			if n := len(plan.Items); n > 0 {
+				region = presentation.StartRegion(cmd.ErrOrStderr(), "Syncing "+countOf(n, "Skill"), n)
+			}
+			report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev) })
+			region.Stop()
 			// The flag the user passed, not the shape of --skills-dir (root.go).
 			scopeFlag := ""
 			if scope.IsProject {
@@ -247,12 +254,57 @@ func printCopiedAvailability(out io.Writer, report *engine.SyncReport, scopeFlag
 	fmt.Fprintln(out, "\n"+copiedAvailabilityNotice(copied, "", scopeFlag))
 }
 
-func printSyncEvents(out io.Writer, report *engine.SyncReport) {
-	if report == nil {
-		return
+// showSyncProgress moves one Skill's row through the region. Only what stands
+// in the way, or a rename, stays on screen; a line that just says a step went
+// well would repeat the row it replaces.
+func showSyncProgress(region *presentation.Region, out io.Writer, ev engine.SyncEvent) {
+	switch ev.Kind {
+	case engine.SyncItemStart:
+		region.Start(presentation.Job{Name: ev.Skill, Phase: syncPhase(ev.Action)})
+	case engine.SyncMaterialized:
+		region.SetPhase(ev.Skill, "linking")
+	case engine.SyncCommandStart:
+		region.SetPhase(ev.Skill, "running installer")
+	case engine.SyncItemDone:
+		if ev.Outcome == engine.SyncDone {
+			region.Done(ev.Skill)
+		} else {
+			region.Fail(ev.Skill)
+		}
+	default:
+		if !syncEventIsProgress(ev.Kind) {
+			region.Above(func() { printSyncEvent(out, ev) })
+		}
 	}
-	for _, ev := range report.Events {
-		printSyncEvent(out, ev)
+}
+
+func syncPhase(action engine.SyncAction) string {
+	switch action {
+	case engine.SyncActionMaterialize:
+		return "materializing"
+	case engine.SyncActionRename:
+		return "renaming"
+	case engine.SyncActionCommand:
+		return "running installer"
+	case engine.SyncActionSkip:
+		return "checking"
+	default:
+		return "linking"
+	}
+}
+
+// syncEventIsProgress is whether an event only says a step went well: Sync's
+// success lines ("Restored", "Linked", "Running installer"), the Source
+// heading, and the Availability-copied notice, which is summed up once
+// afterwards. The progress region stands in for all of them. Every other
+// event is printed, so a kind added to Sync later shows up rather than being
+// silently dropped.
+func syncEventIsProgress(kind string) bool {
+	switch kind {
+	case engine.SyncRepoStart, engine.SyncMaterialized, engine.SyncSymlinked, engine.SyncCommandStart, engine.SyncAvailabilityCopied, engine.SyncItemStart, engine.SyncItemDone:
+		return true
+	default:
+		return false
 	}
 }
 

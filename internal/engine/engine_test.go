@@ -1387,17 +1387,26 @@ func TestSyncPlanApplyReportsLiveRemoteSourceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(live, report.Events) {
-		t.Fatalf("live events = %#v, report = %#v", live, report.Events)
-	}
-
-	var kinds []string
+	// Each Skill's start and outcome are progress only; the report keeps what
+	// is worth printing afterwards.
+	var kinds, reported []string
 	for _, ev := range live {
 		kinds = append(kinds, ev.Kind)
 	}
-	want := []string{SyncRepoStart, SyncMaterialized}
-	if !reflect.DeepEqual(kinds, want) {
-		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
+	for _, ev := range report.Events {
+		reported = append(reported, ev.Kind)
+	}
+	if want := []string{SyncRepoStart, SyncItemStart, SyncMaterialized, SyncItemDone}; !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("live event kinds = %#v, want %#v", kinds, want)
+	}
+	if want := []string{SyncRepoStart, SyncMaterialized}; !reflect.DeepEqual(reported, want) {
+		t.Fatalf("reported event kinds = %#v, want %#v", reported, want)
+	}
+	if start := live[1]; start.Skill != "sample" || start.Action != SyncActionMaterialize {
+		t.Fatalf("start event = %#v; want sample to be materialized", start)
+	}
+	if done := live[3]; done.Skill != "sample" || done.Outcome != SyncDone {
+		t.Fatalf("done event = %#v; want sample done", done)
 	}
 }
 
@@ -1442,12 +1451,20 @@ func TestSyncPlanApplyCommandCheckSkipsMaterialize(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddLocalCommandEntry(cfg, "sample", "echo install", "exit 1", "")
 
-	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, nil)
+	var outcome SyncOutcome
+	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, func(ev SyncEvent) {
+		if ev.Kind == SyncItemDone {
+			outcome = ev.Outcome
+		}
+	})
 	if err != nil || report.Blocked != 1 {
 		t.Fatalf("a check that does not pass blocks the Skill: err=%v blocked=%d", err, report.Blocked)
 	}
 	if len(report.Events) != 1 || report.Events[0].Kind != SyncCheckFailed {
 		t.Fatalf("events = %#v", report.Events)
+	}
+	if outcome != SyncBlocked {
+		t.Fatalf("live outcome = %q; want the Skill blocked", outcome)
 	}
 	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "sample")); !os.IsNotExist(err) {
 		t.Fatal("failed check must not apply Availability")
