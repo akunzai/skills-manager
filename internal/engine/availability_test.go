@@ -320,7 +320,10 @@ func TestObserveAgentDirsReportsUnexpectedPathsOfDeclaredSkills(t *testing.T) {
 	continueDir := filepath.Join(project, ".continue", "skills")
 	unexpected := plantManagedLink(t, skillsDir, claude, "sample")
 	missing := plantManagedLink(t, skillsDir, claude, "missing")
-	plantManagedLink(t, skillsDir, claude, "synced")
+	// Claude Code's own synced/ is a real directory, never a managed path.
+	if err := os.MkdirAll(filepath.Join(claude, "synced", "account"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	plantManagedLink(t, skillsDir, claude, ".hidden")
 	plantManagedLink(t, skillsDir, continueDir, "sample")
 	undeclared := plantManagedLink(t, skillsDir, claude, "undeclared")

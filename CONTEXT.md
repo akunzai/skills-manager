@@ -57,7 +57,7 @@ A difference between declared Availability and filesystem state.
 _Avoid_: stale, orphan, leftover occupancy, mismatch (when you mean Availability vs disk)
 
 **Leftover occupancy**:
-On an Agent directory, occupancy this tool's Availability mechanism created (or left behind) that declared Availability does not call for: a managed path on an automatically available Agent, a managed path for a Skill Config does not declare, or an empty Agent directory the current policy does not select.
+On an Agent directory, occupancy this tool's Availability mechanism created (or left behind) that declared Availability does not call for: a managed path on an automatically available Agent, a managed path for a Skill Config does not declare, a managed path on a name the Agent reserves for its own content, or an empty Agent directory the current policy does not select.
 _Avoid_: Drift (no declaration to compare), Inventory (wrong directory), stale, orphan
 
 **Unmanaged directory**:

@@ -614,14 +614,14 @@ type AgentDirObservation struct {
 // ObserveAgentDirs reads each known and leftover-root Agent directory once and
 // classifies its entries under one set of rules. Leftover occupancy is managed
 // paths on Automatically available Agents, managed paths for Skills Config
-// does not declare, and empty Agent directories the current policy does not
-// select. Unexpected is the Drift half of the same scan: managed paths of
-// declared Skills, whatever their master's state, on known Agents their
-// Availability does not select. A path on a leftover root is leftover
-// occupancy, never also Unexpected. Agent health covers configured
-// directories only. A real directory on a declared Skill's path reads here as
-// Physical and in ObserveAvailability as Foreign; the caller holding both
-// resolves it.
+// does not declare, managed paths on a name the Agent reserves, and empty
+// Agent directories the current policy does not select. Unexpected is the
+// Drift half of the same scan: managed paths of declared Skills, whatever
+// their master's state, on known Agents their Availability does not select. A
+// path on a leftover root is leftover occupancy, never also Unexpected. Agent
+// health covers configured directories only. A real directory on a declared
+// Skill's path reads here as Physical and in ObserveAvailability as Foreign;
+// the caller holding both resolves it.
 func (a *Availability) ObserveAgentDirs() AgentDirObservation {
 	type listing struct {
 		entries []os.DirEntry
@@ -663,11 +663,17 @@ func (a *Availability) ObserveAgentDirs() AgentDirObservation {
 		}
 		for _, entry := range entries {
 			name := entry.Name()
-			if strings.HasPrefix(name, ".") || a.agents.IsReserved(agent, name) {
+			if strings.HasPrefix(name, ".") {
 				continue
 			}
+			// An Agent's reserved entry is its own content, unless this tool
+			// put a managed path there (before v0.15.0 a declared Skill of
+			// that name could be linked). Availability never selects that
+			// path now, so such a path is leftover occupancy; anything else
+			// on the name is skipped below as not managed.
+			reserved := a.agents.IsReserved(agent, name)
 			_, isDeclared := declared[name]
-			if isDeclared && !leftoverRoot && slices.Contains(a.ManagedAgents(name), agent) {
+			if isDeclared && !leftoverRoot && !reserved && slices.Contains(a.ManagedAgents(name), agent) {
 				continue
 			}
 			path := filepath.Join(dir, name)
@@ -678,7 +684,7 @@ func (a *Availability) ObserveAgentDirs() AgentDirObservation {
 				continue
 			}
 			seen[path] = struct{}{}
-			if isDeclared && !leftoverRoot {
+			if isDeclared && !leftoverRoot && !reserved {
 				observation.Unexpected = append(observation.Unexpected, ManagedAgentPath{Agent: agent, Skill: name, Path: path})
 				continue
 			}

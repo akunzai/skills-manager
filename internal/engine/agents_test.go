@@ -398,13 +398,39 @@ func TestObserveAgentDirsLeavesAgentReservedEntriesAlone(t *testing.T) {
 
 	t.Run("not leftover occupancy", func(t *testing.T) {
 		home, skillsDir := globalSkillsHome(t, "synced")
-		plantManagedLink(t, skillsDir, filepath.Join(home, ".claude", "skills"), "synced")
+		// Claude Code's own synced/ is a real directory it fills itself. A
+		// managed link on that name is this tool's leftover (#178).
+		if err := os.MkdirAll(filepath.Join(home, ".claude", "skills", "synced", "account"), 0755); err != nil {
+			t.Fatal(err)
+		}
 		gooseLink := plantManagedLink(t, skillsDir, filepath.Join(home, ".config", "goose", "skills"), "synced")
 
 		observation := globalAgentDirs(t, skillsDir, "claude", "goose").ObserveAgentDirs()
 
 		if len(observation.Leftover.Paths) != 1 || observation.Leftover.Paths[0].Path != gooseLink {
 			t.Fatalf("Leftover = %#v; want only the goose link", observation.Leftover.Paths)
+		}
+	})
+
+	t.Run("not a link this tool did not make", func(t *testing.T) {
+		home, skillsDir := globalSkillsHome(t, "synced")
+		claudeDir := filepath.Join(home, ".claude", "skills")
+		if err := os.MkdirAll(claudeDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// A Synced link pointing outside the skills directory is the
+		// Agent's own, whatever its case.
+		if err := os.Symlink(filepath.Join(home, "elsewhere"), filepath.Join(claudeDir, "Synced")); err != nil {
+			t.Fatal(err)
+		}
+
+		observation := globalAgentDirs(t, skillsDir, "claude").ObserveAgentDirs()
+
+		if len(observation.Leftover.Paths) != 0 || len(observation.Unexpected) != 0 {
+			t.Fatalf("Leftover = %#v, Unexpected = %#v; want neither", observation.Leftover.Paths, observation.Unexpected)
+		}
+		if got := agentHealthFor(t, observation, "claude-code"); len(got.UnmanagedBroken) != 0 {
+			t.Fatalf("claude-code UnmanagedBroken = %#v; the reserved entry is the Agent's own", got.UnmanagedBroken)
 		}
 	})
 
