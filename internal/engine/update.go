@@ -61,11 +61,11 @@ const (
 )
 
 type UpdateEvent struct {
-	Kind, Source, NewSHA, Err        string
-	From, To                         string
-	Skills                           []string
-	Index, Total, Outdated, UpToDate int
-	DryRun                           bool
+	Kind, Source, NewSHA, Err string
+	From, To                  string
+	Skills                    []string
+	Index, Total              int
+	DryRun                    bool
 }
 type UpdateProgress func(UpdateEvent)
 
@@ -141,7 +141,7 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		}
 		refresh = append(refresh, source)
 	}
-	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckDone, Total: len(snapshot.Repositories), UpToDate: len(result.SkippedRepos), Outdated: len(refresh)})
+	emitUpdate(progress, UpdateEvent{Kind: UpdateCheckDone, Total: len(snapshot.Repositories)})
 	if !dryRun && len(refresh) > 0 {
 		emitUpdate(progress, UpdateEvent{Kind: UpdateRefreshStart, Total: len(refresh)})
 	}
