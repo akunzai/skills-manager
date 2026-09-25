@@ -573,6 +573,24 @@ func localRepoCommit(repoDest string) string {
 	return strings.TrimSpace(stdout)
 }
 
+// skillTrees reads the tree ID of each subpath at a Cache's HEAD. A subpath
+// the commit lacks, or a directory that is not a Cache, maps to "".
+func skillTrees(repoDir string, paths []string) map[string]string {
+	trees := make(map[string]string)
+	if localRepoCommit(repoDir) == "" {
+		return trees
+	}
+	for _, p := range cleanSparsePaths(paths) {
+		rev := "HEAD:" + p
+		if p == "." {
+			rev = "HEAD^{tree}"
+		}
+		stdout, _, _ := runGit(repoDir, "rev-parse", "--verify", "--quiet", rev)
+		trees[p] = strings.TrimSpace(stdout)
+	}
+	return trees
+}
+
 func remoteRepoCommit(source, url, branch string) (string, error) {
 	repo := resolveCacheRepo(source, url, branch, "")
 	if repo.Branch == "" {

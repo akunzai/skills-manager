@@ -176,6 +176,9 @@ func refreshSources(cmd *cobra.Command, out io.Writer, cfg *config.Config, targe
 			region.DoneWith(ev.Source, func() {
 				fmt.Fprintf(out, "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
 			})
+		case engine.UpdateRepoUnchanged:
+			// Counted with the Sources already up to date, not listed.
+			region.Done(ev.Source)
 		case engine.UpdateRepoError:
 			region.Fail(ev.Source)
 			region.Above(func() {

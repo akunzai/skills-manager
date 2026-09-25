@@ -18,6 +18,11 @@ type UpdatedRepoInfo struct {
 	NewSHA string `json:"new_sha,omitempty"`
 	DryRun bool   `json:"dry_run,omitempty"`
 }
+
+// SkippedSkillsUnchanged is a Source whose Cache moved to a new commit that
+// left every declared Skill's tree as it was.
+const SkippedSkillsUnchanged = "skills_unchanged"
+
 type SkippedRepoInfo struct {
 	Source   string `json:"source"`
 	Reason   string `json:"reason"`
@@ -44,14 +49,15 @@ type UpdateResult struct {
 }
 
 const (
-	UpdateCheckStart   = "check_start"
-	UpdateCheckDone    = "check_done"
-	UpdateRefreshStart = "refresh_start"
-	UpdateRefreshDone  = "refresh_done"
-	UpdateStart        = "update_start"
-	UpdateRepoDone     = "repo_done"
-	UpdateRepoError    = "repo_error"
-	UpdateRenamed      = "renamed"
+	UpdateCheckStart    = "check_start"
+	UpdateCheckDone     = "check_done"
+	UpdateRefreshStart  = "refresh_start"
+	UpdateRefreshDone   = "refresh_done"
+	UpdateStart         = "update_start"
+	UpdateRepoDone      = "repo_done"
+	UpdateRepoUnchanged = "repo_unchanged"
+	UpdateRepoError     = "repo_error"
+	UpdateRenamed       = "renamed"
 )
 
 type UpdateEvent struct {
@@ -148,7 +154,12 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		// A Cache that only lacks a declared Skill is already at the remote
 		// commit; adding the path is enough.
 		fetch := force || !incomplete[source]
-		dir, refreshErr := NewCache(source, repositories[source].URL, repositories[source].Branch, cacheDir).Refresh(fetch, declaredSubpaths(repositories[source])...)
+		cache := NewCache(source, repositories[source].URL, repositories[source].Branch, cacheDir)
+		paths := declaredSubpaths(repositories[source])
+		beforeDir := cache.dir()
+		beforeSHA := localRepoCommit(beforeDir)
+		beforeTrees := skillTrees(beforeDir, paths)
+		dir, refreshErr := cache.Refresh(fetch, paths...)
 		if refreshErr != nil {
 			message := refreshErr.Error()
 			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})
@@ -156,6 +167,13 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 			continue
 		}
 		sha := localRepoCommit(dir)
+		// Comparing tree IDs needs no file contents, so a commit elsewhere in
+		// the Source is told apart from one that changed a declared Skill.
+		if beforeSHA != "" && dir == beforeDir && sha != beforeSHA && maps.Equal(beforeTrees, skillTrees(dir, paths)) {
+			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: SkippedSkillsUnchanged, LocalSHA: sha})
+			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoUnchanged, Source: source, NewSHA: sha})
+			continue
+		}
 		result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, NewSHA: sha})
 		emitUpdate(progress, UpdateEvent{Kind: UpdateRepoDone, Source: source, NewSHA: sha})
 	}

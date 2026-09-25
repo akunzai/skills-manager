@@ -1119,6 +1119,69 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	}
 }
 
+// A commit outside every declared Skill moves the Cache but is not reported
+// as an update, so a daily run stays one line.
+func TestCLIUpdateDoesNotReportASourceWhoseSkillsDidNotChange(t *testing.T) {
+	resetRootCmdFlags()
+	isolateHome(t)
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	configFile := filepath.Join(root, "skills.json")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"update", "--config", configFile, "--skills-dir", filepath.Join(root, "skills"), "--cache-dir", filepath.Join(root, "cache")}
+	if out, err := runCLI(t, args...); err != nil {
+		t.Fatalf("first update = %v:\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(origin, "README.md"), []byte("# Origin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliRunGit(t, origin, "add", ".")
+	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "readme")
+
+	resetSubcommandFlags()
+	var stdout, stderr bytes.Buffer
+	RootCmd.SetOut(&stdout)
+	RootCmd.SetErr(&stderr)
+	RootCmd.SetArgs(args)
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	want := "  1 Source Cache update(s) needed, 0 already up to date.\n" +
+		"Everything is already up to date.\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout = %q\nwant     %q", got, want)
+	}
+	if got := stderr.String(); got != "ok  owner/repo\n" {
+		t.Fatalf("stderr = %q; want the refresh's plain line", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(origin, "README.md"), []byte("# Origin again\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-am", "readme again")
+	resetSubcommandFlags()
+	stdout.Reset()
+	RootCmd.SetArgs(append(args, "--json"))
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		UpdatedRepos []engine.UpdatedRepoInfo `json:"updated_repos"`
+		SkippedRepos []engine.SkippedRepoInfo `json:"skipped_repos"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("JSON: %v\n%s", err, stdout.String())
+	}
+	if len(doc.UpdatedRepos) != 0 || len(doc.SkippedRepos) != 1 || doc.SkippedRepos[0].Reason != engine.SkippedSkillsUnchanged {
+		t.Fatalf("JSON = %+v", doc)
+	}
+}
+
 // Update is the one daily command whatever the Config declares: without a
 // remote Source it still syncs the Scope.
 func TestCLIUpdateSyncsAScopeWithoutRemoteSources(t *testing.T) {
