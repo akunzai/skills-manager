@@ -11,8 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var startUpdateProgress = presentation.StartProgress
-
 func newUpdateCmd() *cobra.Command {
 	var (
 		flagForce  bool
@@ -55,50 +53,59 @@ func newUpdateCmd() *cobra.Command {
 				}
 			}
 
-			var progress *presentation.Progress
+			// Progress is transient and goes to stderr. Each refreshed Source,
+			// error and rename is permanent and goes to stdout, above the
+			// progress region.
+			var region *presentation.Region
+			errOut := cmd.ErrOrStderr()
 			onProgress := func(ev engine.UpdateEvent) {
 				if flagJSON {
 					return
 				}
 				switch ev.Kind {
 				case engine.UpdateCheckStart:
-					progress = startUpdateProgress(cmd.ErrOrStderr(), fmt.Sprintf("Checking %d remote Sources in parallel...", ev.Total))
+					region = presentation.StartRegion(errOut, "Checking "+countOf(ev.Total, "Source"), 0)
 				case engine.UpdateCheckDone:
-					progress.Stop()
-					progress = nil
+					region.Stop()
+					region = nil
 					if ev.Outdated == 0 {
 						fmt.Fprintf(cmd.OutOrStdout(), "  %sAll %d Source Caches are already up to date.%s\n\n", colorGreen, ev.UpToDate, colorReset)
 					} else {
 						fmt.Fprintf(cmd.OutOrStdout(), "  %s%d Source Cache update(s) needed, %d already up to date.%s\n\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
 					}
+				case engine.UpdateRefreshStart:
+					region = presentation.StartRegion(errOut, "Refreshing "+countOf(ev.Total, "Source"), ev.Total)
 				case engine.UpdateRefreshDone:
-					progress.Stop()
-					progress = nil
+					region.Stop()
+					region = nil
 				case engine.UpdateStart:
 					if ev.DryRun {
 						fmt.Fprintf(cmd.OutOrStdout(), "  [%d/%d] %s[Dry-run]%s Would refresh %s%s%s\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset)
 					} else {
-						progress = startUpdateProgress(cmd.ErrOrStderr(), fmt.Sprintf("[%d/%d] Refreshing %s...", ev.Index, ev.Total, ev.Source))
+						region.Start(presentation.Job{Name: ev.Source, Phase: "fetching"})
 					}
 				case engine.UpdateRepoDone:
-					progress.Stop()
-					progress = nil
 					shaStr := ""
 					if len(ev.NewSHA) >= 7 {
 						shaStr = fmt.Sprintf(" (%s)", ev.NewSHA[:7])
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
+					region.DoneWith(ev.Source, func() {
+						fmt.Fprintf(cmd.OutOrStdout(), "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
+					})
 				case engine.UpdateRenamed:
-					fmt.Fprintf(cmd.OutOrStdout(), "      %s%s was renamed to %s%s%s in %s.%s\n", colorCyan, ev.From, colorBold, ev.To, colorReset+colorCyan, ev.Source, colorReset)
+					region.Above(func() {
+						fmt.Fprintf(cmd.OutOrStdout(), "      %s%s was renamed to %s%s%s in %s.%s\n", colorCyan, ev.From, colorBold, ev.To, colorReset+colorCyan, ev.Source, colorReset)
+					})
 				case engine.UpdateRepoError:
-					progress.Stop()
-					progress = nil
-					fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
+					region.Fail(ev.Source)
+					region.Above(func() {
+						fmt.Fprintf(cmd.OutOrStdout(), "      %sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
+					})
 				}
 			}
 
 			result, err := engine.UpdateRemoteSkills(cfg, targets, flagForce, flagDryRun, cacheDir, onProgress)
-			progress.Stop()
+			region.Stop()
 			if err != nil {
 				return err
 			}

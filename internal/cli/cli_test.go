@@ -1058,7 +1058,7 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	}
 }
 
-func TestCLIUpdateShowsProgressWhileCheckingAndRefreshing(t *testing.T) {
+func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	resetRootCmdFlags()
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
@@ -1069,20 +1069,28 @@ func TestCLIUpdateShowsProgressWhileCheckingAndRefreshing(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-
-	var messages []string
-	oldStartProgress := startUpdateProgress
-	startUpdateProgress = func(_ io.Writer, message string) *presentation.Progress {
-		messages = append(messages, message)
-		return &presentation.Progress{}
-	}
-	t.Cleanup(func() { startUpdateProgress = oldStartProgress })
-
-	if _, err := runCLI(t, "update", "--config", configFile, "--cache-dir", filepath.Join(root, "cache")); err != nil {
+	sha, _, err := engine.RunCmd("git rev-parse --short=7 HEAD", origin)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"Checking 1 remote Sources in parallel...", "[1/1] Refreshing owner/repo..."}; !reflect.DeepEqual(messages, want) {
-		t.Fatalf("progress messages = %q; want %q", messages, want)
+
+	var stdout, stderr bytes.Buffer
+	RootCmd.SetOut(&stdout)
+	RootCmd.SetErr(&stderr)
+	RootCmd.SetArgs([]string{"update", "--config", configFile, "--cache-dir", filepath.Join(root, "cache")})
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	// The durable per-Source line replaces the progress region's "ok" line.
+	want := "\nRefreshing remote Sources in the shared Cache...\n\n" +
+		"  1 Source Cache update(s) needed, 0 already up to date.\n\n" +
+		"      Updated owner/repo (" + sha + ").\n" +
+		"\nRefreshed 1 Source Cache(s).\nRun 'skills sync' to apply cached content to this Scope.\n\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout = %q\nwant     %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q; want no progress lines without a terminal", got)
 	}
 }
 
