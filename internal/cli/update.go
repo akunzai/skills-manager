@@ -153,10 +153,10 @@ func refreshSources(cmd *cobra.Command, out io.Writer, cfg *config.Config, targe
 			region = presentation.StartRegion(errOut, "Checking "+countOf(ev.Total, "Source"), 0)
 		case engine.UpdateCheckDone:
 			region.Stop()
+			// No count here: a Source whose new commit leaves its Skills
+			// unchanged is only known after the refresh, and the summary
+			// line counts it then.
 			region = nil
-			if ev.Outdated > 0 {
-				fmt.Fprintf(out, "  %s%d Source Cache update(s) needed, %d already up to date.%s\n", colorCyan, ev.Outdated, ev.UpToDate, colorReset)
-			}
 		case engine.UpdateRefreshStart:
 			region = presentation.StartRegion(errOut, "Refreshing "+countOf(ev.Total, "Source"), ev.Total)
 		case engine.UpdateRefreshDone:

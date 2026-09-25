@@ -1093,8 +1093,7 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	}
 	// The durable per-Source line replaces the progress region's "ok" line,
 	// and the Sync that follows applies what was refreshed.
-	want := "  1 Source Cache update(s) needed, 0 already up to date.\n" +
-		"      Updated owner/repo (" + sha + ").\n" +
+	want := "      Updated owner/repo (" + sha + ").\n" +
 		"Refreshed 1 Source Cache(s).\n" +
 		"Skills sync complete. 1 skills configured.\n"
 	if got := stdout.String(); got != want {
@@ -1151,8 +1150,7 @@ func TestCLIUpdateDoesNotReportASourceWhoseSkillsDidNotChange(t *testing.T) {
 	if err := RootCmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	want := "  1 Source Cache update(s) needed, 0 already up to date.\n" +
-		"Everything is already up to date.\n"
+	want := "Everything is already up to date.\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout = %q\nwant     %q", got, want)
 	}
