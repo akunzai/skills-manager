@@ -275,17 +275,24 @@ type AddSkillEvent struct {
 	Target  string
 }
 
-// AddResult records the outcome of applying an AddPlan.
+// AddResult records the outcome of applying an AddPlan. Every Skill in
+// AddedSkills is declared in Config; Blocked and Failed count those that could
+// not be applied, as Sync counts them, and Events says why.
 type AddResult struct {
 	AddedSkills []string
 	ConfigPath  string
+	Events      []SyncEvent
+	Blocked     int
+	Failed      int
 	// StateError is why the Scope state could not be read. The Skills are
-	// applied but their Baselines are not recorded.
+	// applied but their Baselines are not recorded, which counts as failed.
 	StateError string
 }
 
 // ApplyAddPlan records all selected Skills in Config, saves Config,
-// Materializes each Skill, and applies Availability.
+// Materializes each Skill, and applies Availability. It returns an error only
+// when it fails before any Skill is applied; after that, each Skill's outcome
+// is in the result and one that fails does not stop the rest.
 func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEvent)) (AddResult, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -354,6 +361,8 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		return AddResult{}, err
 	}
 
+	result := AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}
+	emit := func(ev SyncEvent) { result.Events = append(result.Events, ev) }
 	baselines := OpenBaselines(plan.SkillsDir)
 	for _, name := range names {
 		subpath := plan.Skills[name]
@@ -374,10 +383,9 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 				Target:  target,
 			})
 		}
-		var (
-			outcome  SyncOutcome
-			applyErr error
-		)
+		// The apply functions emit every reason a Skill was not applied, so
+		// their returned error adds nothing to the Events already collected.
+		var outcome SyncOutcome
 		switch plan.Source.Kind {
 		case AddSourceRemote:
 			item := planRemoteItem(plan.Source.Key, plan.Source.RepoDir, localRepoCommit(plan.Source.RepoDir), SkillFreshness{
@@ -386,24 +394,22 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 				Subpath:   subpath,
 				ScopePath: filepath.Join(plan.SkillsDir, name),
 			}, availability.ObserveAvailability(name))
-			outcome, applyErr = applyRemoteItem(availability, plan.SkillsDir, item, SyncDecision{}, baselines, nil)
+			outcome, _ = applyRemoteItem(availability, plan.SkillsDir, item, SyncDecision{}, baselines, emit)
 		case AddSourceSymlink, AddSourceCommand:
 			item := planLocalItem(cfg, plan.SkillsDir, availability.ObserveAvailability(name), name)
-			outcome, applyErr = applyLocalItem(availability, plan.SkillsDir, item, nil)
+			outcome, _ = applyLocalItem(availability, plan.SkillsDir, item, emit)
 		}
-		if outcome != SyncDone {
-			result := AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}
-			if applyErr != nil {
-				return result, fmt.Errorf("saved config but failed to apply %s: %w", name, applyErr)
-			}
-			return result, fmt.Errorf("saved config but failed to apply %s", name)
+		switch outcome {
+		case SyncBlocked:
+			result.Blocked++
+		case SyncFailed:
+			result.Failed++
 		}
 	}
 
-	result := AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}
 	if stateErr := baselines.Err(); stateErr != nil && plan.Source.Kind == AddSourceRemote {
 		result.StateError = stateErr.Error()
-		return result, fmt.Errorf("added Skills but did not record their Baselines: %w", stateErr)
+		result.Failed++
 	}
 	return result, nil
 }

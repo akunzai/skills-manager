@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -198,14 +199,60 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	result, err := engine.ApplyAddPlan(plan, cfg, func(ev engine.AddSkillEvent) {
 		fmt.Fprintf(out, "  %s\n", intake.progressLine(ev.Name, ev.Subpath))
 	})
-	if err != nil && result.StateError == "" {
+	if err != nil {
 		return err
 	}
+	return reportAddOutcome(out, result, filepath.Base(configPath))
+}
 
-	fmt.Fprintf(out, "\n%sAdded %d skill(s) [%s] and updated %s.%s\n\n", colorGreen, len(result.AddedSkills), strings.Join(result.AddedSkills, ", "), filepath.Base(configPath), colorReset)
+// reportAddOutcome says why any Skill could not be applied, in Sync's words,
+// then sums up. Add has already declared every Skill, so it adopts ADR-0002's
+// codes: a blocked Skill leaves the Scope not matching its Config (1), a
+// failed one is work that broke (2).
+func reportAddOutcome(out io.Writer, result engine.AddResult, configName string) error {
+	for _, ev := range result.Events {
+		if !addEventRepeatsProgress(ev.Kind) {
+			printSyncEvent(out, ev)
+		}
+	}
 	if result.StateError != "" {
 		printScopeStateUnreadable(out, result.StateError)
-		return exitError{message: "Baselines were not recorded", code: 2}
 	}
-	return nil
+	added := fmt.Sprintf("Added %d skill(s) [%s]", len(result.AddedSkills), strings.Join(result.AddedSkills, ", "))
+	if result.Blocked == 0 && result.Failed == 0 {
+		fmt.Fprintf(out, "\n%s%s and updated %s.%s\n\n", colorGreen, added, configName, colorReset)
+		return nil
+	}
+	var parts []string
+	if result.Blocked > 0 {
+		parts = append(parts, fmt.Sprintf("%d blocked", result.Blocked))
+	}
+	if result.Failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", result.Failed))
+	}
+	fmt.Fprintf(out, "\n%s%s to %s; %s.%s\n", colorYellow, added, configName, strings.Join(parts, ", "), colorReset)
+	// Sync cannot get past an unreadable Scope state either, so it is only
+	// the next step for a Skill that was blocked or failed on its own.
+	if result.StateError == "" || result.Blocked+result.Failed > 1 {
+		fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync'.\n")
+	}
+	fmt.Fprintln(out)
+	if result.Failed > 0 {
+		return exitError{message: fmt.Sprintf("Add did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill")), code: 2}
+	}
+	return exitError{message: "Scope does not match its Config", code: 1}
+}
+
+// addEventRepeatsProgress is whether an event only restates what Add's own
+// progress lines already said: Sync's success lines ("Restored", "Linked",
+// "Running installer") and its Availability-copied notice, which Add has never
+// reported. Every other event is printed, so a kind added to Sync later shows
+// up in Add rather than being silently dropped.
+func addEventRepeatsProgress(kind string) bool {
+	switch kind {
+	case engine.SyncRepoStart, engine.SyncMaterialized, engine.SyncSymlinked, engine.SyncCommandStart, engine.SyncAvailabilityCopied:
+		return true
+	default:
+		return false
+	}
 }

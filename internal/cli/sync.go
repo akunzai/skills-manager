@@ -251,44 +251,51 @@ func printSyncEvents(out io.Writer, report *engine.SyncReport) {
 		return
 	}
 	for _, ev := range report.Events {
-		switch ev.Kind {
-		case engine.SyncRepoStart:
-			fmt.Fprintf(out, "Syncing Source: %s%s%s (%d skills)...\n", colorBold, ev.Source, colorReset, len(ev.Skills))
-		case engine.SyncFetchFailed:
-			fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
-		case engine.SyncPathMissing:
-			fmt.Fprintf(out, "  %sSkill path missing in Source: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
-		case engine.SyncAvailabilityFailed:
-			fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
-		case engine.SyncCopyFailed:
-			fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
-		case engine.SyncMaterialized:
-			fmt.Fprintf(out, "  %sRestored %s%s%s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, colorReset)
-		case engine.SyncSourceMissing:
-			fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
-		case engine.SyncSymlinkFailed:
-			fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
-		case engine.SyncSymlinked:
-			fmt.Fprintf(out, "  %sLinked local skill %s%s%s -> %s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, models.ToTildePath(ev.Target), colorReset)
-		case engine.SyncCheckFailed:
-			fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
-		case engine.SyncCommandStart:
-			fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
-		case engine.SyncCommandFailed:
-			fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
-		case engine.SyncRenamed:
-			fmt.Fprintf(out, "  %sRenamed %s%s%s to %s%s%s, as its Source declares.%s\n", colorGreen, colorBold, ev.Skill, colorReset+colorGreen, colorBold, ev.Target, colorReset+colorGreen, colorReset)
-		case engine.SyncRenameFailed:
-			fmt.Fprintf(out, "  %sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
-		case engine.SyncSkipped:
-			fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
-		case engine.SyncStateFailed:
-			if ev.Skill == "" {
-				printScopeStateUnreadable(out, ev.Err)
-				break
-			}
-			fmt.Fprintf(out, "  %sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		printSyncEvent(out, ev)
+	}
+}
+
+// printSyncEvent words one Sync event. Add prints the events that say why a
+// Skill was not applied through it too, so that reason reads the same whichever
+// command applied the Skill.
+func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
+	switch ev.Kind {
+	case engine.SyncRepoStart:
+		fmt.Fprintf(out, "Syncing Source: %s%s%s (%d skills)...\n", colorBold, ev.Source, colorReset, len(ev.Skills))
+	case engine.SyncFetchFailed:
+		fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
+	case engine.SyncPathMissing:
+		fmt.Fprintf(out, "  %sSkill path missing in Source: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
+	case engine.SyncAvailabilityFailed:
+		fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+	case engine.SyncCopyFailed:
+		fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+	case engine.SyncMaterialized:
+		fmt.Fprintf(out, "  %sRestored %s%s%s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, colorReset)
+	case engine.SyncSourceMissing:
+		fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
+	case engine.SyncSymlinkFailed:
+		fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+	case engine.SyncSymlinked:
+		fmt.Fprintf(out, "  %sLinked local skill %s%s%s -> %s.%s\n", colorGreen, colorBold, ev.Skill, colorReset, models.ToTildePath(ev.Target), colorReset)
+	case engine.SyncCheckFailed:
+		fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
+	case engine.SyncCommandStart:
+		fmt.Fprintf(out, "  Running installer for %s%s%s...\n", colorBold, ev.Skill, colorReset)
+	case engine.SyncCommandFailed:
+		fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+	case engine.SyncRenamed:
+		fmt.Fprintf(out, "  %sRenamed %s%s%s to %s%s%s, as its Source declares.%s\n", colorGreen, colorBold, ev.Skill, colorReset+colorGreen, colorBold, ev.Target, colorReset+colorGreen, colorReset)
+	case engine.SyncRenameFailed:
+		fmt.Fprintf(out, "  %sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
+	case engine.SyncSkipped:
+		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
+	case engine.SyncStateFailed:
+		if ev.Skill == "" {
+			printScopeStateUnreadable(out, ev.Err)
+			break
 		}
+		fmt.Fprintf(out, "  %sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	}
 }
 

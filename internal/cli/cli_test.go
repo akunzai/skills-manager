@@ -1990,11 +1990,21 @@ func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
 	out, err := runCLI(t, "add", "--command", "exit 1", "--skill", "cmd-skill", "-y", "--config", configFile, "--skills-dir", skillsDir)
-	if err == nil {
-		t.Fatalf("expected installer failure, got:\n%s", out)
+	if err == nil || ExitCode(err) != 2 || err.Error() != "Add did not complete: 1 failure, 0 blocked skills" {
+		t.Fatalf("error = %v (exit %d); want the failed installer, exit 2\n%s", err, ExitCode(err), out)
 	}
-	if !strings.Contains(err.Error(), "saved config but failed to apply cmd-skill") {
-		t.Fatalf("got %v\n%s", err, out)
+	for _, want := range []string{
+		"Failed to run installer for cmd-skill",
+		"Added 1 skill(s) [cmd-skill] to skills.json; 1 failed.",
+		"Next: follow the reason given for each skill above, then run 'skills sync'.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output does not say %q:\n%s", want, out)
+		}
+	}
+	// Add words its own progress; Sync's success line would only repeat it.
+	if strings.Contains(out, "Running installer for") {
+		t.Fatalf("output repeats Sync's progress line:\n%s", out)
 	}
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
@@ -2011,11 +2021,17 @@ func TestCLICommandAddCheckFailureStillSaves(t *testing.T) {
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
 	out, err := runCLI(t, "add", "--command", "echo ok", "--check", "exit 1", "--skill", "cmd-skill", "-y", "--config", configFile, "--skills-dir", skillsDir)
-	if err == nil {
-		t.Fatalf("expected check failure, got:\n%s", out)
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("error = %v (exit %d); a check that does not pass blocks the Skill, exit 1\n%s", err, ExitCode(err), out)
 	}
-	if !strings.Contains(err.Error(), "command check") {
-		t.Fatalf("got %v\n%s", err, out)
+	for _, want := range []string{
+		"Command check 'exit 1' failed, skipping cmd-skill",
+		"Added 1 skill(s) [cmd-skill] to skills.json; 1 blocked.",
+		"Next: follow the reason given for each skill above, then run 'skills sync'.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output does not say %q:\n%s", want, out)
+		}
 	}
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
@@ -2720,6 +2736,9 @@ func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 	}
 	if !strings.Contains(out, "Added 1 skill(s) [sample]") {
 		t.Fatalf("output does not report the applied Skill:\n%s", out)
+	}
+	if strings.Contains(out, "run 'skills sync'") {
+		t.Fatalf("Sync cannot get past an unreadable Scope state either; do not send the user there:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
 		t.Fatalf("the Skill must still be Materialized: %v", err)
