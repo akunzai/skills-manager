@@ -68,5 +68,24 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      # Temporary measurement, not for merge.
+      - name: Measure git spawn cost
+        shell: bash
+        run: |
+          time (for i in $(seq 100); do git --version >/dev/null; done)
+          mkdir -p "$RUNNER_TEMP/r" && cd "$RUNNER_TEMP/r" && git init -q
+          time (for i in $(seq 100); do git rev-parse --git-dir >/dev/null; done)
+
+      - name: Time engine tests
+        shell: bash
+        run: |
+          go test -count=1 -v ./internal/engine/ > engine.log
+          grep -E '^ok|^FAIL' engine.log
+          perl -ne 'print "$2 $1\n" if /^--- \w+: (\S+) \(([0-9.]+)s\)/' engine.log | sort -rn > times.txt
+          awk '{s+=$1} END {print "tests", NR, "sum", s "s"}' times.txt
+          head -25 times.txt
+          echo "--- by file prefix"
+          awk '{split($2,a,"/"); print $1, a[1]}' times.txt | awk '$1>=1' | wc -l | xargs echo "tests >= 1s:"
+
       - name: Build binary
         run: go build -v ./cmd/skills
