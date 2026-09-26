@@ -1,7 +1,11 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
+	"os/exec"
+	"slices"
+	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -95,6 +99,92 @@ func (c Cache) observe(paths ...string) cacheFacts {
 	}
 	facts.missing = missing
 	return facts
+}
+
+// diffOptions pin git's patch format against the user's git config, so the
+// patch parses the same way everywhere: plain text, a/ and b/ prefixes, no
+// rename pairing and no external or text-converting drivers.
+var diffOptions = []string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"}
+
+// diffCommits is the patch of subpath from one commit of this Cache to
+// another, with paths relative to subpath. A blob the partial clone never
+// fetched is fetched on demand, which is the only way this reaches the network.
+func (c Cache) diffCommits(from, to, subpath string) (string, error) {
+	args := append(slices.Clone(diffOptions), "--src-prefix=a/", "--dst-prefix=b/")
+	subpath = cleanSparsePaths([]string{subpath})[0]
+	if subpath != "." {
+		args = append(args, "--relative="+subpath)
+	}
+	args = append(args, from, to, "--")
+	if subpath != "." {
+		args = append(args, subpath)
+	}
+	stdout, stderr, err := runGitRaw(c.dir(), args...)
+	if err != nil {
+		return "", gitOpErr("diff", c.dir(), string(stdout), stderr, err)
+	}
+	return string(stdout), nil
+}
+
+// readBlob reads the file at path, relative to the repository root, as
+// commit has it. A symlink reads as its target, as DigestSkillContent hashes it.
+func (c Cache) readBlob(commit, path string) ([]byte, error) {
+	stdout, stderr, err := runGitRaw(c.dir(), "cat-file", "blob", commit+":"+path)
+	if err != nil {
+		return nil, gitOpErr("read "+path+" at "+commit+" in", c.dir(), "", stderr, err)
+	}
+	return stdout, nil
+}
+
+// diffDirs is the patch from dir/a to dir/b, two trees of files outside any
+// repository, with paths relative to each tree as a/<path> and b/<path>.
+func diffDirs(dir string) (string, error) {
+	args := append(slices.Clone(diffOptions), "--no-index", "--no-prefix", "a", "b")
+	stdout, stderr, err := runGitRaw(dir, args...)
+	// --no-index exits 1 when the trees differ.
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
+		err = nil
+	}
+	if err != nil {
+		return "", gitOpErr("diff", dir, string(stdout), stderr, err)
+	}
+	// Without prefixes, the "diff --git" line of an added or removed file
+	// names the one tree it is in on both sides: "b/new b/new". The ---
+	// and +++ lines already read a/<path> and b/<path>.
+	lines := strings.SplitAfter(string(stdout), "\n")
+	for i, line := range lines {
+		if rest, ok := strings.CutPrefix(line, "diff --git "); ok {
+			if src, ok := diffGitPath(rest); ok {
+				lines[i] = "diff --git " + setTreeName(src, 'a') + " " + setTreeName(src, 'b') + "\n"
+			}
+		}
+	}
+	return strings.Join(lines, ""), nil
+}
+
+// diffGitPath returns one side of a "diff --git" header's paths. Without
+// renames both sides name the same path, differing only in their a/ or b/,
+// so the header is two equal halves around one space.
+func diffGitPath(rest string) (string, bool) {
+	rest = strings.TrimSuffix(rest, "\n")
+	if len(rest)%2 == 0 {
+		return "", false
+	}
+	half := len(rest) / 2
+	return rest[:half], rest[half] == ' '
+}
+
+// setTreeName replaces the a or b that starts a patch path, quoted or not.
+func setTreeName(path string, tree byte) string {
+	b := []byte(path)
+	i := 0
+	if len(b) > 0 && b[0] == '"' {
+		i = 1
+	}
+	if len(b) > i+1 && (b[i] == 'a' || b[i] == 'b') && b[i+1] == '/' {
+		b[i] = tree
+	}
+	return string(b)
 }
 
 func (c Cache) withSkillFiles(fn func(repoDir string) error) error {
