@@ -14,7 +14,22 @@ Skills Manager installs skills once, records the result in `skills.json`, and ke
 
 ## Install
 
-macOS and Linux:
+macOS and Linux, with [Homebrew](https://brew.sh):
+
+```sh
+brew install akunzai/tap/skills-manager
+```
+
+Windows, with [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add akunzai https://github.com/akunzai/scoop-bucket
+scoop install akunzai/skills-manager
+```
+
+Either package manager also handles upgrades: `brew upgrade akunzai/tap/skills-manager` or `scoop update skills-manager`.
+
+Without a package manager, macOS and Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/akunzai/skills-manager/main/install.sh | bash

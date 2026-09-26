@@ -9,8 +9,21 @@ The release pipeline is automated via GitHub Actions (`.github/workflows/release
 2. Generating checksums and GitHub release assets (`.tar.gz` and `.zip`).
 3. Generating categorized release notes.
 4. Signing a build provenance attestation for every archive listed in `checksums.txt`.
+5. Pushing `Formula/skills-manager.rb` to `akunzai/homebrew-tap` and a `skills-manager` manifest to `akunzai/scoop-bucket`, so `brew install akunzai/tap/skills-manager` and `scoop install akunzai/skills-manager` pick up the new release.
 
 The tests run again first, and GoReleaser then waits until a required reviewer approves the `release` environment. Release assets are uploaded before the release is published, so the repository's immutable-releases setting holds: a published tag and its assets cannot change. A bad release is fixed by a new patch version, never by re-tagging.
+
+The tap and bucket pushes are the `goreleaser` job's last two steps
+(`scripts/release/update-homebrew-formula.sh` and
+`scripts/release/update-scoop-manifest.sh`), run after the GitHub release and
+its attestation so the archives they point at already exist. Each reads
+`HOMEBREW_BUMP_TOKEN` from the `release` environment and the SHA-256s for its
+platforms out of `dist/checksums.txt`; either step exits `0` with a notice,
+not a failure, when the secret is unset. `update-homebrew-formula.sh`
+regenerates `Formula/skills-manager.rb` from a template on every run;
+`update-scoop-manifest.sh` patches only `version` and the two `architecture`
+entries in the existing `bucket/skills-manager.json`, leaving `checkver` and
+`autoupdate` as maintained by hand in that repo.
 
 ## Release Notes Categorization
 
@@ -115,6 +128,14 @@ git push origin vX.Y.Z
    ```bash
    skills self-update --check
    ```
+4. Confirm the tap and bucket pushes landed, once the `goreleaser` job finishes:
+   ```bash
+   gh api repos/akunzai/homebrew-tap/commits/main --jq '.commit.message'
+   gh api repos/akunzai/scoop-bucket/commits/main --jq '.commit.message'
+   ```
+   Each should read `chore: bump skills-manager to vX.Y.Z`. If either step
+   was skipped (`HOMEBREW_BUMP_TOKEN` unset — check the job log for its
+   notice), bump the formula or manifest by hand instead.
 
 ### 7. Milestone Management
 1. **Summarize the released milestone** with one concise sentence describing its main user-facing outcomes:
