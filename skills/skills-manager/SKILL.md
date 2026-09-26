@@ -1,6 +1,6 @@
 ---
 name: skills-manager
-description: Manage skills across AI agents via the skills CLI. Triggers when adding skills (Git, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated), diagnosing health issues (doctor, prune), or configuring availability policies.
+description: Manage skills across AI agents via the skills CLI. Triggers when adding skills (Git, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated, diff), diagnosing health issues (doctor, prune), or configuring availability policies.
 ---
 
 # Skills Manager
@@ -110,7 +110,14 @@ skills sync
 skills -p update
 ```
 
-**Protected drift**: If local files inside a materialized skill were modified, `skills sync` leaves them untouched and reports them as `Blocked` (exit code `1`). To intentionally discard local modifications and overwrite from cache:
+**Review before updating**: `skills diff <skill>` prints two unified diffs for a remote skill: Upstream (the commit its copy was applied from -> the Cache) and Local (that applied content -> the Scope copy). It is read-only and offline; `--fetch` refreshes the skill's Source into the Cache first without syncing, and `--stat` lists changed files only. Exit `0` = no differences, `1` = differences, `2` = unknown, local, command, or uncached skill. Without a recorded baseline it shows only Upstream, comparing the Scope copy with the Cache.
+
+```sh
+skills diff <skill>
+skills diff --fetch --stat <skill>
+```
+
+**Protected drift**: If local files inside a materialized skill were modified, `skills sync` leaves them untouched and reports them as `Blocked` (exit code `1`). Inspect them with `skills diff <skill>`. To intentionally discard local modifications and overwrite from cache:
 ```sh
 skills sync --force
 ```
