@@ -169,14 +169,30 @@ func normalizeAgents(agents []string) []string {
 	return slices.Sorted(maps.Keys(seen))
 }
 
-func FindSkillSource(cfg *Config, skillName string) (category string, sourceKey string, found bool) {
+// SkillKind is how Config declares a Skill: from a remote Source, as a local
+// symlink, or as a command whose installer provides it.
+type SkillKind string
+
+const (
+	SkillRemote  SkillKind = "remote"
+	SkillSymlink SkillKind = "symlink"
+	SkillCommand SkillKind = "command"
+)
+
+// FindSkillSource is how skillName is declared: its kind, and the Source key
+// of a remote Skill or the name of a local one. A remote declaration wins
+// over a local one.
+func FindSkillSource(cfg *Config, skillName string) (kind SkillKind, sourceKey string, found bool) {
 	for srcKey, repo := range cfg.Remote {
 		if _, ok := repo.Skills[skillName]; ok {
-			return "remote", srcKey, true
+			return SkillRemote, srcKey, true
 		}
 	}
-	if _, ok := cfg.Local[skillName]; ok {
-		return "local", skillName, true
+	if entry, ok := cfg.Local[skillName]; ok {
+		if entry.Type == "command" {
+			return SkillCommand, skillName, true
+		}
+		return SkillSymlink, skillName, true
 	}
 	return "", "", false
 }

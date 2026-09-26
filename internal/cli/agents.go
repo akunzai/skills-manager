@@ -80,11 +80,11 @@ func newAgentsCmd() *cobra.Command {
 }
 
 func configuredSkillSource(cfg *config.Config, skill string) (string, error) {
-	category, source, found := config.FindSkillSource(cfg, skill)
+	kind, source, found := config.FindSkillSource(cfg, skill)
 	if !found {
 		return "", fmt.Errorf("skill %q is not configured", skill)
 	}
-	if category == "local" {
+	if kind != config.SkillRemote {
 		source = "local"
 	}
 	return source, nil

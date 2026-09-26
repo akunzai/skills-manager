@@ -212,9 +212,11 @@ func BuildAddPlan(
 	for _, name := range sortedSkillKeys(skills) {
 		subpath := skills[name]
 		newSrcDisplay := source.proposedDisplay(subpath, skillsDir)
-		cat, srcKey, found := config.FindSkillSource(cfg, name)
+		kind, srcKey, found := config.FindSkillSource(cfg, name)
 		if found {
-			if cat == "remote" {
+			entry := cfg.Local[name]
+			switch kind {
+			case config.SkillRemote:
 				if source.Kind != AddSourceRemote || srcKey != source.Key {
 					plan.Conflicts = append(plan.Conflicts, AddConflict{
 						Skill:       name,
@@ -222,30 +224,26 @@ func BuildAddPlan(
 						ProposedSrc: newSrcDisplay,
 					})
 				}
-			} else if cat == "local" {
-				if entry, ok := cfg.Local[name]; ok {
-					if entry.Type == "command" {
-						if source.Kind != AddSourceCommand || entry.Command != source.Command {
-							plan.Conflicts = append(plan.Conflicts, AddConflict{
-								Skill:       name,
-								CurrentSrc:  fmt.Sprintf("[command] %s", entry.Command),
-								ProposedSrc: newSrcDisplay,
-							})
-						}
-					} else {
-						localSkillSource := source.LocalPath
-						if subpath != "" && subpath != "." {
-							localSkillSource = filepath.Join(source.LocalPath, filepath.FromSlash(subpath))
-						}
-						stored := models.StoreLocalSourcePath(localSkillSource, skillsDir)
-						if source.Kind != AddSourceSymlink || (entry.Source != stored && models.ToTildePath(entry.Source) != models.ToTildePath(localSkillSource)) {
-							plan.Conflicts = append(plan.Conflicts, AddConflict{
-								Skill:       name,
-								CurrentSrc:  fmt.Sprintf("[symlink] %s", models.ToTildePath(entry.Source)),
-								ProposedSrc: newSrcDisplay,
-							})
-						}
-					}
+			case config.SkillCommand:
+				if source.Kind != AddSourceCommand || entry.Command != source.Command {
+					plan.Conflicts = append(plan.Conflicts, AddConflict{
+						Skill:       name,
+						CurrentSrc:  fmt.Sprintf("[command] %s", entry.Command),
+						ProposedSrc: newSrcDisplay,
+					})
+				}
+			case config.SkillSymlink:
+				localSkillSource := source.LocalPath
+				if subpath != "" && subpath != "." {
+					localSkillSource = filepath.Join(source.LocalPath, filepath.FromSlash(subpath))
+				}
+				stored := models.StoreLocalSourcePath(localSkillSource, skillsDir)
+				if source.Kind != AddSourceSymlink || (entry.Source != stored && models.ToTildePath(entry.Source) != models.ToTildePath(localSkillSource)) {
+					plan.Conflicts = append(plan.Conflicts, AddConflict{
+						Skill:       name,
+						CurrentSrc:  fmt.Sprintf("[symlink] %s", models.ToTildePath(entry.Source)),
+						ProposedSrc: newSrcDisplay,
+					})
 				}
 			}
 		} else {

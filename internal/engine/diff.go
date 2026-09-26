@@ -62,14 +62,13 @@ func (d *SkillDiff) Empty() bool {
 // reads the Cache as it is and writes nothing to the Scope, its Config, its
 // state, or the Cache.
 func DiffSkill(cfg *config.Config, name, skillsDir, cacheDir string) (*SkillDiff, error) {
-	category, source, found := config.FindSkillSource(cfg, name)
-	if !found {
+	kind, source, found := config.FindSkillSource(cfg, name)
+	switch {
+	case !found:
 		return nil, fmt.Errorf("%s is not declared in this Scope's Config", name)
-	}
-	if category != "remote" {
-		if cfg.Local[name].Type == "command" {
-			return nil, fmt.Errorf("%s is a command Skill: its installer provides it, so there is no Source to diff against", name)
-		}
+	case kind == config.SkillCommand:
+		return nil, fmt.Errorf("%s is a command Skill: its installer provides it, so there is no Source to diff against", name)
+	case kind == config.SkillSymlink:
 		return nil, fmt.Errorf("%s is a local Skill: the Scope links to its Source directly, so there is nothing to diff", name)
 	}
 	repo := cfg.Remote[source]

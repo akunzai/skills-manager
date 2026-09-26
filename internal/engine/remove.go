@@ -69,12 +69,12 @@ func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) Remov
 		if name == "" {
 			continue
 		}
-		category, _, inConfig := config.FindSkillSource(cfg, name)
+		kind, _, inConfig := config.FindSkillSource(cfg, name)
 		_, err := os.Lstat(filepath.Join(skillsDir, name))
 		plan.Skills = append(plan.Skills, RemoveItem{
 			Name:         name,
 			InConfig:     inConfig,
-			Remote:       category == "remote",
+			Remote:       kind == config.SkillRemote,
 			MasterExists: err == nil,
 		})
 	}

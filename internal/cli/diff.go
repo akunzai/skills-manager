@@ -67,8 +67,8 @@ could not be completed.`,
 // update's refresh does, and stops there. A Skill that is not remote is left
 // for DiffSkill to reject.
 func fetchSkillSource(cmd *cobra.Command, cfg *config.Config, name, cacheDir string) error {
-	category, source, found := config.FindSkillSource(cfg, name)
-	if !found || category != "remote" {
+	kind, source, found := config.FindSkillSource(cfg, name)
+	if !found || kind != config.SkillRemote {
 		return nil
 	}
 	// Progress goes to stderr; stdout carries only the diff.

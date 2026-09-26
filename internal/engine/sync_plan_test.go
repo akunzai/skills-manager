@@ -224,12 +224,12 @@ func TestSyncApplyContinuesAfterMaterializeFailure(t *testing.T) {
 		Sources: []string{"owner/repo"},
 		Items: []SyncPlanItem{
 			{
-				Name: "bad", Kind: SyncItemRemote, Source: "owner/repo",
+				Name: "bad", Kind: config.SkillRemote, Source: "owner/repo",
 				CachePath: repoDir, NeedsWrite: true,
 				Freshness: SkillFreshness{Name: "bad", Source: "owner/repo", Subpath: "missing", ScopePath: filepath.Join(skillsDir, "bad")},
 			},
 			{
-				Name: "good", Kind: SyncItemRemote, Source: "owner/repo",
+				Name: "good", Kind: config.SkillRemote, Source: "owner/repo",
 				CachePath: repoDir, NeedsWrite: true,
 				Freshness: SkillFreshness{Name: "good", Source: "owner/repo", Subpath: "good", ScopePath: filepath.Join(skillsDir, "good")},
 			},
@@ -268,7 +268,7 @@ func TestSyncApplyReportsScopeStateUnreadableSincePlanning(t *testing.T) {
 	plan := &SyncPlan{
 		Sources: []string{"owner/repo"},
 		Items: []SyncPlanItem{{
-			Name: "good", Kind: SyncItemRemote, Source: "owner/repo",
+			Name: "good", Kind: config.SkillRemote, Source: "owner/repo",
 			CachePath: repoDir, NeedsWrite: true,
 			Freshness: SkillFreshness{Name: "good", Source: "owner/repo", Subpath: "good", ScopePath: filepath.Join(skillsDir, "good")},
 		}},
@@ -378,7 +378,7 @@ func TestPlanRemoteItem(t *testing.T) {
 			freshness.Status = tc.status
 			freshness.Error = tc.err
 			item := planRemoteItem("owner/repo", cache, freshness, drift)
-			if item.Kind != SyncItemRemote || item.Name != "sample" || item.Source != "owner/repo" {
+			if item.Kind != config.SkillRemote || item.Name != "sample" || item.Source != "owner/repo" {
 				t.Fatalf("identity = %+v", item)
 			}
 			if item.CachePath != cache.dir() || item.LocalSHA != head {
@@ -419,7 +419,7 @@ func TestPlanDeclaredRemoteItemIsAlwaysWritten(t *testing.T) {
 	item := planDeclaredRemoteItem("owner/repo", cache, skill, drift)
 
 	want := SyncPlanItem{
-		Name: "sample", Kind: SyncItemRemote, Source: "owner/repo",
+		Name: "sample", Kind: config.SkillRemote, Source: "owner/repo",
 		Drift: drift, Freshness: skill, CachePath: cache.dir(), LocalSHA: head, cache: cache,
 		NeedsWrite: true,
 	}
