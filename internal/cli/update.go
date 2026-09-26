@@ -49,7 +49,9 @@ completed.`,
 			}
 
 			result := &engine.UpdateResult{UpdatedRepos: []engine.UpdatedRepoInfo{}, SkippedRepos: []engine.SkippedRepoInfo{}, Renamed: []engine.RenamedSkillInfo{}, Errors: []engine.UpdateErrorInfo{}}
-			if len(cfg.Remote) > 0 {
+			// A named target is checked even with no remote Source, so a
+			// typo is an error rather than a silent Sync of everything.
+			if len(cfg.Remote) > 0 || len(args) > 0 {
 				result, err = refreshSources(cmd, out, cfg, args, flagForce, flagDryRun, flagJSON, cacheDir)
 				if err != nil {
 					return err
