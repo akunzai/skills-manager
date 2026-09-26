@@ -14,10 +14,11 @@ import (
 	"github.com/akunzai/skills-manager/internal/tui"
 )
 
-func TestMarkInstalledSkillsAcrossUndecidedScopes(t *testing.T) {
-	globalDir := filepath.Join(t.TempDir(), "global")
-	projectDir := filepath.Join(t.TempDir(), "project")
-	if err := os.MkdirAll(filepath.Join(projectDir, "installed"), 0o755); err != nil {
+// Add knows its Scope before it offers Skills, so only a Skill on that
+// Scope reads as installed.
+func TestMarkInstalledSkillsOnTheChosenScope(t *testing.T) {
+	skillsDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(skillsDir, "installed"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	options := []tui.SelectOption{
@@ -25,7 +26,7 @@ func TestMarkInstalledSkillsAcrossUndecidedScopes(t *testing.T) {
 		{Key: "new", Title: "new"},
 	}
 
-	markInstalledSkills(options, []string{globalDir, projectDir})
+	markInstalledSkills(options, skillsDir)
 
 	if !options[0].Installed || options[0].Selected {
 		t.Fatalf("installed option = %#v; want installed but unselected", options[0])

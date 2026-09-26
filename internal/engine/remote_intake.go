@@ -45,12 +45,18 @@ func PrepareRemoteIntake(cfg *config.Config, spec models.ParsedRepoSource, cache
 // Declare records skills (name to subpath) from this Source in cfg, with the
 // branch that was fetched, after covering them in the Cache together with the
 // Skills cfg already declares from the Source. A Source cfg declares on
-// another branch is refused before anything changes. Declare changes cfg in
-// memory only; the caller saves it.
+// another branch is refused before anything changes, as is one cfg declares
+// on a branch this intake did not read: the Cache Skills are Materialized
+// from must be the one cfg names. Declare changes cfg in memory only; the
+// caller saves it.
 func (in *RemoteIntake) Declare(cfg *config.Config, skills map[string]string) error {
 	key := in.spec.SourceKey
-	if _, err := AddBranch(cfg, key, in.spec.Branch); err != nil {
+	branch, err := AddBranch(cfg, key, in.spec.Branch)
+	if err != nil {
 		return err
+	}
+	if branch != in.spec.Branch {
+		return fmt.Errorf("Source %s is declared on branch %q, but its default branch was read; add it again with --branch %s", key, branch, branch)
 	}
 	names := sortedSkillKeys(skills)
 	subpaths := declaredSubpaths(cfg.Remote[key])

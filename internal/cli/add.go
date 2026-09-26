@@ -19,52 +19,45 @@ import (
 
 const repositoryRootGroup = "Repository root"
 
-func selectionSkillsDirs(cmd *cobra.Command) []string {
-	if cmd.Flags().Changed("global") || cmd.Flags().Changed("project") || cmd.Flags().Changed("skills-dir") {
-		return []string{ResolveScope().SkillsDir}
-	}
-
-	dirs := []string{models.DefaultSkillsDir()}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return dirs
-	}
-	_, projectDir := models.GetProjectPaths(cwd)
-	return append(dirs, projectDir)
-}
-
-func markInstalledSkills(options []tui.SelectOption, skillsDirs []string) {
+// markInstalledSkills marks the options already present on the Scope Add
+// declares into.
+func markInstalledSkills(options []tui.SelectOption, skillsDir string) {
 	for i := range options {
-		for _, skillsDir := range skillsDirs {
-			if _, err := os.Stat(filepath.Join(skillsDir, options[i].Key)); err == nil {
-				options[i].Installed = true
-				break
-			}
+		if _, err := os.Stat(filepath.Join(skillsDir, options[i].Key)); err == nil {
+			options[i].Installed = true
 		}
 	}
 }
 
-func prepareAddTarget(cmd *cobra.Command, prompter addPrompter, interactive bool, agents []string) (Scope, *config.Config, []string, error) {
+// resolveAddScope is the Scope Add declares into: the one --global or
+// --project names, or, when a person can answer and neither flag was given,
+// the one they choose. Add settles it before reading the Source, because the
+// Scope's Config decides which branch a declared Source is read from.
+func resolveAddScope(cmd *cobra.Command, yes bool) (Scope, error) {
 	scope := ResolveScope()
-	if interactive && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
+	prompter := newAddPrompter(cmd)
+	if prompter.Interactive() && !yes && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
 		project, err := prompter.SelectScope()
 		if err != nil {
-			return Scope{}, nil, nil, err
+			return Scope{}, err
 		}
 		scope = resolveScopeFor(project)
 	}
+	return scope, nil
+}
 
+func prepareAddTarget(scope Scope, agents []string) (*config.Config, []string, error) {
 	cfg, err := config.LoadConfig(scope.ConfigPath)
 	if err != nil {
-		return Scope{}, nil, nil, err
+		return nil, nil, err
 	}
 	if len(agents) > 0 {
 		agents, err = engine.NewAvailability(cfg, scope.SkillsDir).ValidateManagedAgents(agents)
 		if err != nil {
-			return Scope{}, nil, nil, err
+			return nil, nil, err
 		}
 	}
-	return scope, cfg, agents, nil
+	return cfg, agents, nil
 }
 
 func groupDiscoveredSkills(discovered map[string]string) (tui.GroupedItems, bool) {
@@ -198,12 +191,12 @@ func newCommandIntake(skillName, command, check, description string) *addIntake 
 // fetchRemoteIntake parses a remote Source argument and its flags, then
 // prepares it through Remote intake under a progress region. It returns the
 // Source key for display.
-func fetchRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*engine.RemoteIntake, string, error) {
+func fetchRemoteIntake(cmd *cobra.Command, configPath, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*engine.RemoteIntake, string, error) {
 	spec := models.ParseRepoSource(rawSource)
 	spec.URL = cmp.Or(flagURL, spec.URL)
 	spec.Branch = cmp.Or(flagBranch, spec.Branch)
 	spec.Subpath = cmp.Or(flagPath, spec.Subpath)
-	cfg, err := config.LoadConfig(ResolveScope().ConfigPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -221,8 +214,8 @@ func fetchRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagP
 	return intake, spec.SourceKey, nil
 }
 
-func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
-	intake, key, err := fetchRemoteIntake(cmd, rawSource, flagURL, flagBranch, flagPath, cacheDir)
+func newRemoteIntake(cmd *cobra.Command, configPath, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
+	intake, key, err := fetchRemoteIntake(cmd, configPath, rawSource, flagURL, flagBranch, flagPath, cacheDir)
 	if err != nil {
 		return nil, err
 	}
@@ -311,13 +304,18 @@ func newAddCmd() *cobra.Command {
 				return runAddList(cmd, kind, source, flagPath, flagBranch, flagURL, cacheDir, flagJSON)
 			}
 
+			scope, err := resolveAddScope(cmd, flagYes)
+			if err != nil {
+				return endAdd(cmd.OutOrStdout(), err)
+			}
+
 			switch kind {
 			case engine.AddSourceSymlink:
 				intake, err := newLocalIntake(cmd, source, flagDescription, flagPath)
 				if err != nil {
 					return err
 				}
-				return intake.run(cmd, addRequest{all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
+				return intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
 			case engine.AddSourceCommand:
 				if len(flagSkills) == 0 && len(args) == 0 {
 					cmd.SilenceUsage = false
@@ -330,13 +328,13 @@ func newAddCmd() *cobra.Command {
 					skillName = args[0]
 				}
 				intake := newCommandIntake(skillName, source, flagCheck, flagDescription)
-				return intake.run(cmd, addRequest{skills: []string{skillName}, yes: flagYes, agents: flagAgents})
+				return intake.run(cmd, addRequest{scope: scope, skills: []string{skillName}, yes: flagYes, agents: flagAgents})
 			case engine.AddSourceRemote:
-				intake, err := newRemoteIntake(cmd, source, flagURL, flagBranch, flagPath, cacheDir)
+				intake, err := newRemoteIntake(cmd, scope.ConfigPath, source, flagURL, flagBranch, flagPath, cacheDir)
 				if err != nil {
 					return err
 				}
-				return intake.run(cmd, addRequest{all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
+				return intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
 			default:
 				return fmt.Errorf("unsupported Add Source kind %q", kind)
 			}
