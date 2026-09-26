@@ -156,9 +156,18 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		fetch := force || !incomplete[source]
 		cache := NewCache(source, repositories[source].URL, repositories[source].Branch, cacheDir)
 		paths := declaredSubpaths(repositories[source])
+		// Comparing tree IDs needs no file contents, so a commit elsewhere in
+		// the Source is told apart from one that changed a declared Skill.
+		declaredTrees := func() map[string]string {
+			trees := make(map[string]string, len(paths))
+			for _, p := range paths {
+				trees[p] = cache.atHead(p).id
+			}
+			return trees
+		}
 		beforeDir := cache.dir()
-		beforeSHA := localRepoCommit(beforeDir)
-		beforeTrees := skillTrees(beforeDir, paths)
+		beforeSHA := cache.head()
+		beforeTrees := declaredTrees()
 		dir, refreshErr := cache.Refresh(fetch, paths...)
 		if refreshErr != nil {
 			message := refreshErr.Error()
@@ -166,10 +175,8 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: message})
 			continue
 		}
-		sha := localRepoCommit(dir)
-		// Comparing tree IDs needs no file contents, so a commit elsewhere in
-		// the Source is told apart from one that changed a declared Skill.
-		if beforeSHA != "" && dir == beforeDir && sha != beforeSHA && maps.Equal(beforeTrees, skillTrees(dir, paths)) {
+		sha := cache.head()
+		if beforeSHA != "" && dir == beforeDir && sha != beforeSHA && maps.Equal(beforeTrees, declaredTrees()) {
 			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: SkippedSkillsUnchanged, LocalSHA: sha})
 			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoUnchanged, Source: source, NewSHA: sha})
 			continue
@@ -197,7 +204,7 @@ func followRenames(repositories map[string]config.RemoteRepo, cacheDir string, r
 	for _, source := range slices.Sorted(maps.Keys(repositories)) {
 		repo := repositories[source]
 		cache := NewCache(source, repo.URL, repo.Branch, cacheDir)
-		if failed[source] || localRepoCommit(cache.dir()) == "" {
+		if failed[source] || cache.head() == "" {
 			continue
 		}
 		found, err := coverReplacements(cache, repo.Skills)

@@ -354,6 +354,7 @@ func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 }
 
 func TestPlanRemoteItem(t *testing.T) {
+	cache, head := refreshedCache(t)
 	drift := AvailabilityDrift{Skill: "sample", Missing: []string{"codex"}}
 	skill := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: "sample", ScopePath: "/scope/sample"}
 	for _, tc := range []struct {
@@ -376,11 +377,11 @@ func TestPlanRemoteItem(t *testing.T) {
 			freshness := skill
 			freshness.Status = tc.status
 			freshness.Error = tc.err
-			item := planRemoteItem("owner/repo", "/cache/repo", "abc123", freshness, drift)
+			item := planRemoteItem("owner/repo", cache, freshness, drift)
 			if item.Kind != SyncItemRemote || item.Name != "sample" || item.Source != "owner/repo" {
 				t.Fatalf("identity = %+v", item)
 			}
-			if item.CachePath != "/cache/repo" || item.LocalSHA != "abc123" {
+			if item.CachePath != cache.dir() || item.LocalSHA != head {
 				t.Fatalf("CachePath=%q LocalSHA=%q", item.CachePath, item.LocalSHA)
 			}
 			if !reflect.DeepEqual(item.Freshness, freshness) {
@@ -413,11 +414,13 @@ func TestPlanDeclaredRemoteItemIsAlwaysWritten(t *testing.T) {
 	drift := AvailabilityDrift{Skill: "sample", Missing: []string{"codex"}}
 	skill := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: "sample", ScopePath: "/scope/sample"}
 
-	item := planDeclaredRemoteItem("owner/repo", "/cache/repo", "abc123", skill, drift)
+	cache, head := refreshedCache(t)
+
+	item := planDeclaredRemoteItem("owner/repo", cache, skill, drift)
 
 	want := SyncPlanItem{
 		Name: "sample", Kind: SyncItemRemote, Source: "owner/repo",
-		Drift: drift, Freshness: skill, CachePath: "/cache/repo", LocalSHA: "abc123",
+		Drift: drift, Freshness: skill, CachePath: cache.dir(), LocalSHA: head, cache: cache,
 		NeedsWrite: true,
 	}
 	if !reflect.DeepEqual(item, want) {

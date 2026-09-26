@@ -94,12 +94,10 @@ func discoverRemoteSkills(cache Cache, scope string) (DiscoveredSkills, Discover
 	var descriptions DiscoveredSkillDescriptions
 	err := cache.withSkillFiles(func(repoDir string) error {
 		var err error
-		found, descriptions, err = discoverSkills(repoDir, scope, gitTreeIdentity(repoDir))
+		found, descriptions, err = discoverSkills(repoDir, scope, cacheTreeIdentity(cache))
 		// A committed directory holding no SKILL.md is not on disk at all.
-		if errors.Is(err, os.ErrNotExist) {
-			if kind, _, gitErr := runGit(repoDir, "cat-file", "-t", "HEAD:"+filepath.ToSlash(filepath.Clean(scope))); gitErr == nil && kind == "tree" {
-				found, descriptions, err = DiscoveredSkills{}, DiscoveredSkillDescriptions{}, nil
-			}
+		if errors.Is(err, os.ErrNotExist) && cache.atHead(scope).dir {
+			found, descriptions, err = DiscoveredSkills{}, DiscoveredSkillDescriptions{}, nil
 		}
 		return err
 	})
@@ -218,18 +216,15 @@ func fileBundleIdentity(repoDir string) bundleIdentity {
 	}
 }
 
-// gitTreeIdentity is the committed tree ID, which already covers content,
+// cacheTreeIdentity is the committed tree ID, which already covers content,
 // executable bits, and symlink targets.
-func gitTreeIdentity(repoDir string) bundleIdentity {
+func cacheTreeIdentity(cache Cache) bundleIdentity {
 	return func(relPath string) (string, error) {
-		if relPath == "." {
-			relPath = ""
+		entry := cache.atHead(relPath)
+		if !entry.exists() {
+			return "", fmt.Errorf("%s is not in the Cache's head commit", relPath)
 		}
-		stdout, stderr, err := runGit(repoDir, "rev-parse", "HEAD:"+relPath)
-		if err != nil {
-			return "", gitOpErr("resolve tree", relPath, stdout, stderr, err)
-		}
-		return stdout, nil
+		return entry.id, nil
 	}
 }
 

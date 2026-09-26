@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -120,6 +121,19 @@ func writeSparseOrigin(t *testing.T) (string, string) {
 	return origin, localFileURL(origin)
 }
 
+// refreshedCache is a Cache of a one-Skill local origin, with the commit it
+// has checked out.
+func refreshedCache(t *testing.T) (Cache, string) {
+	t.Helper()
+	origin := filepath.Join(t.TempDir(), "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	cache := NewCache("owner/repo", origin, "", t.TempDir())
+	if _, err := cache.Refresh(false, "sample"); err != nil {
+		t.Fatal(err)
+	}
+	return cache, mustGit(t, origin, "rev-parse", "HEAD")
+}
+
 func mustGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	stdout, stderr, err := runGit(dir, args...)
@@ -191,8 +205,8 @@ func TestEnsureGitRepoChecksOutWholeTreeForRootSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCachePaths(t, repoDir, []string{"SKILL.md"}, nil)
-	if missing, err := missingSparsePaths(repoDir, []string{"."}); err != nil || len(missing) != 0 {
-		t.Fatalf("missingSparsePaths = %v, %v", missing, err)
+	if coverage, err := NewCache("owner/repo", origin, "", cacheDir).coverage(); err != nil || len(coverage.missing([]string{"."})) != 0 {
+		t.Fatalf("coverage = %+v, %v; want the root covered", coverage, err)
 	}
 }
 
@@ -298,7 +312,72 @@ func TestEnsureGitRepoKeepsRootSkillCheckoutForOtherScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCachePaths(t, repoDir, []string{"skills/beta/reference.txt", "fixtures/large/fixture.txt"}, nil)
-	if missing, err := missingSparsePaths(repoDir, []string{"."}); err != nil || len(missing) != 0 {
-		t.Fatalf("missingSparsePaths = %v, %v", missing, err)
+	if coverage, err := NewCache("owner/repo", url, "", cacheDir).coverage(); err != nil || len(coverage.missing([]string{"."})) != 0 {
+		t.Fatalf("coverage = %+v, %v; want the root covered", coverage, err)
+	}
+}
+
+// The Cache answers what its head commit holds from the trees a blobless
+// clone always has, so paths outside the sparse checkout are answered too,
+// and no blob is downloaded to answer.
+func TestCacheAnswersHeadAndSubpathsOffline(t *testing.T) {
+	t.Parallel()
+	origin, url := writeSparseOrigin(t)
+	cache := NewCache("owner/repo", url, "", t.TempDir())
+	if head := cache.head(); head != "" {
+		t.Fatalf("head of an absent Cache = %q; want none", head)
+	}
+	if entry := cache.atHead("skills/alpha"); entry != (headEntry{}) {
+		t.Fatalf("atHead in an absent Cache = %+v; want none", entry)
+	}
+	if _, err := cache.Refresh(false, "skills/alpha"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := cache.head(), mustGit(t, origin, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("head = %q; want %q", got, want)
+	}
+	for _, tc := range []struct {
+		subpath, rev string
+		dir          bool
+	}{
+		{subpath: "skills/alpha", rev: "HEAD:skills/alpha", dir: true},
+		{subpath: "skills/beta/", rev: "HEAD:skills/beta", dir: true},
+		{subpath: "skills/beta/reference.txt", rev: "HEAD:skills/beta/reference.txt"},
+		{subpath: ".", rev: "HEAD^{tree}", dir: true},
+	} {
+		want := headEntry{id: mustGit(t, origin, "rev-parse", tc.rev), dir: tc.dir}
+		if got := cache.atHead(tc.subpath); got != want {
+			t.Errorf("atHead(%q) = %+v; want %+v", tc.subpath, got, want)
+		}
+	}
+	for _, subpath := range []string{"skills/gamma", "skills/alpha/nested", "skills/al*"} {
+		if got := cache.atHead(subpath); got.exists() {
+			t.Errorf("atHead(%q) = %+v; want none", subpath, got)
+		}
+	}
+	reference := mustGit(t, origin, "rev-parse", "HEAD:skills/beta/reference.txt")
+	if missing := mustGit(t, cache.dir(), "rev-list", "--objects", "--missing=print", "HEAD"); !strings.Contains(missing, "?"+reference) {
+		t.Fatalf("answering downloaded blob %s:\n%s", reference, missing)
+	}
+}
+
+func TestCacheCoverageNamesMissingSubpaths(t *testing.T) {
+	t.Parallel()
+	_, url := writeSparseOrigin(t)
+	cache := NewCache("owner/repo", url, "", t.TempDir())
+	if _, err := cache.Refresh(false, "skills/alpha"); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := cache.coverage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := coverage.missing([]string{"skills/alpha", "skills/alpha/notes.txt", "skills/beta/", "."})
+	if want := []string{".", "skills/beta"}; !slices.Equal(got, want) {
+		t.Fatalf("missing = %v; want %v", got, want)
+	}
+	if !coverage.covers("skills/alpha") || coverage.covers("skills/beta") {
+		t.Fatalf("covers alpha = %v, beta = %v; want true, false", coverage.covers("skills/alpha"), coverage.covers("skills/beta"))
 	}
 }

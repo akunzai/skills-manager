@@ -575,7 +575,7 @@ type remoteAdoption struct {
 }
 
 func (r *remoteAdoption) cachePath() string {
-	return filepath.Join(r.intake.dir, filepath.FromSlash(r.subpath))
+	return filepath.Join(r.intake.cache.dir(), filepath.FromSlash(r.subpath))
 }
 
 func (a *adoption) run() AdoptOutcome {
@@ -809,8 +809,7 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 		return a.outcome
 	default:
 		a.neededBaseline = true
-		repoDir := remote.intake.dir
-		item := baseRemoteItem(remote.intake.spec.SourceKey, repoDir, localRepoCommit(repoDir), SkillFreshness{
+		item := baseRemoteItem(remote.intake.spec.SourceKey, remote.intake.cache, SkillFreshness{
 			Name:      name,
 			Source:    remote.intake.spec.SourceKey,
 			Subpath:   remote.subpath,

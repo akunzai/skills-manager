@@ -381,8 +381,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		var item SyncPlanItem
 		switch plan.Source.Kind {
 		case AddSourceRemote:
-			repoDir := plan.Source.Remote.dir
-			item = planDeclaredRemoteItem(plan.Source.Key, repoDir, localRepoCommit(repoDir), SkillFreshness{
+			item = planDeclaredRemoteItem(plan.Source.Key, plan.Source.Remote.cache, SkillFreshness{
 				Name:      name,
 				Source:    plan.Source.Key,
 				Subpath:   subpath,

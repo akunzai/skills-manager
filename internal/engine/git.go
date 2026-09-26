@@ -448,16 +448,6 @@ func (s sparseState) missing(paths []string) []string {
 	return missing
 }
 
-// missingSparsePaths lists the subpaths a Cache's sparse checkout does not
-// cover. It reads local git state only, so offline Freshness can use it.
-func missingSparsePaths(repoDir string, paths []string) ([]string, error) {
-	state, err := readSparseState(repoDir)
-	if err != nil {
-		return nil, err
-	}
-	return state.missing(paths), nil
-}
-
 // normalizeSparseCheckout puts a Cache in cone mode before a refresh. A Cache
 // cloned in full by an older release is narrowed to its root files, unless a
 // Scope declares the repository root; a Cache left in discovery mode by an
@@ -578,24 +568,6 @@ func localRepoCommit(repoDest string) string {
 		return ""
 	}
 	return strings.TrimSpace(stdout)
-}
-
-// skillTrees reads the tree ID of each subpath at a Cache's HEAD. A subpath
-// the commit lacks, or a directory that is not a Cache, maps to "".
-func skillTrees(repoDir string, paths []string) map[string]string {
-	trees := make(map[string]string)
-	if localRepoCommit(repoDir) == "" {
-		return trees
-	}
-	for _, p := range cleanSparsePaths(paths) {
-		rev := "HEAD:" + p
-		if p == "." {
-			rev = "HEAD^{tree}"
-		}
-		stdout, _, _ := runGit(repoDir, "rev-parse", "--verify", "--quiet", rev)
-		trees[p] = strings.TrimSpace(stdout)
-	}
-	return trees
 }
 
 func remoteRepoCommit(source, url, branch string) (string, error) {
