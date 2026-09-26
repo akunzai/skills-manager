@@ -217,6 +217,28 @@ func TestRemoteIntakeDeclareRecordsTheSourceAndBranch(t *testing.T) {
 	}
 }
 
+// An intake read from one Config can be declared into another. When that
+// Config names a branch the intake did not read, declaring would record Skills
+// Materialized from the wrong Cache, so it is refused.
+func TestRemoteIntakeDeclareRefusesABranchItDidNotRead(t *testing.T) {
+	t.Parallel()
+	origin, _ := writeBranchedOrigin(t)
+	intake := mustPrepareRemoteIntake(t, config.DefaultConfig(), remoteSpec(origin, "", ""), t.TempDir())
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "dev-only", "dev-only", "github", origin)
+	repo := cfg.Remote["owner/repo"]
+	repo.Branch = "dev"
+	cfg.Remote["owner/repo"] = repo
+
+	err := intake.Declare(cfg, map[string]string{"sample": "sample"})
+	if err == nil || !strings.Contains(err.Error(), "--branch dev") {
+		t.Fatalf("Declare = %v; want a refusal naming --branch dev", err)
+	}
+	if _, declared := cfg.Remote["owner/repo"].Skills["sample"]; declared {
+		t.Fatal("a refused Declare changed Config")
+	}
+}
+
 // A URL the key already implies is not stored, however it is spelled: a
 // trailing .git or / and the host's case do not make it another URL. Add and
 // adopt both declare through here, and installer lock files record URLs
