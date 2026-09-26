@@ -354,6 +354,12 @@ func (d *Doctor) repair(plan *DoctorReport, replaceForeign bool) {
 	plan.Leftover = d.availability.RemoveLeftover(plan.Leftover)
 	for i, drift := range plan.Drift {
 		var err error
+		// A Skill that only has Copies is here for Doctor's notice, not for
+		// repair: a copy is working Availability (ADR-0003), and 'skills sync'
+		// switches it to a link once the machine allows one.
+		if drift.Empty() && len(drift.absentUnexpected) == 0 {
+			continue
+		}
 		if len(drift.absentUnexpected) > 0 {
 			var errs []error
 			for _, repair := range removeManagedPaths(d.skillsDir, drift.absentUnexpected) {

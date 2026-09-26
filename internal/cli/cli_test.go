@@ -3254,6 +3254,18 @@ func TestCLIDoctorCountsAvailabilityPathsAppliedByCopying(t *testing.T) {
 	if !strings.Contains(out, "Developer Mode") {
 		t.Fatalf("doctor did not say how to switch to links:\n%s", out)
 	}
+
+	// A copy is not Drift, so --fix has nothing to repair or claim.
+	out, err = runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("doctor --fix: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Fixed availability drift") {
+		t.Fatalf("doctor --fix claimed to repair copies:\n%s", out)
+	}
+	if !strings.Contains(out, "Availability applied by copying: 2 paths") {
+		t.Fatalf("doctor --fix dropped the copy notice:\n%s", out)
+	}
 }
 
 // A teammate's Windows clone turns a committed symlinked Skill into a text
