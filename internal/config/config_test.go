@@ -45,15 +45,19 @@ func TestConfigLoadAndSave(t *testing.T) {
 	if len(loaded.Local) != 2 {
 		t.Fatalf("expected 2 local skills, got %d", len(loaded.Local))
 	}
-	// 4. Test FindSkillSource
-	cat, src, found := FindSkillSource(loaded, "skill-a")
-	if !found || cat != "remote" || src != "owner/repo" {
-		t.Errorf("FindSkillSource(skill-a) = (%v, %v, %v); want (remote, owner/repo, true)", cat, src, found)
-	}
-
-	cat, src, found = FindSkillSource(loaded, "local-skill")
-	if !found || cat != "local" || src != "local-skill" {
-		t.Errorf("FindSkillSource(local-skill) = (%v, %v, %v); want (local, local-skill, true)", cat, src, found)
+	// 4. Test FindSkillSource: the kind tells a command Skill from a symlink
+	for _, tc := range []struct {
+		name, src string
+		kind      SkillKind
+	}{
+		{"skill-a", "owner/repo", SkillRemote},
+		{"local-skill", "local-skill", SkillSymlink},
+		{"cmd-skill", "cmd-skill", SkillCommand},
+	} {
+		kind, src, found := FindSkillSource(loaded, tc.name)
+		if !found || kind != tc.kind || src != tc.src {
+			t.Errorf("FindSkillSource(%s) = (%v, %v, %v); want (%v, %v, true)", tc.name, kind, src, found, tc.kind, tc.src)
+		}
 	}
 
 	// 5. Test RemoveSkillEntry
