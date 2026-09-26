@@ -308,11 +308,13 @@ func itemNames(items []SyncPlanItem) []string {
 	return names
 }
 
-// applyRename migrates one renamed Skill (ADR 0007). Config is saved first, so
-// an interruption leaves the new name declared and the next Sync Materializes
-// it; the old copy then shows up as Untracked rather than being lost. The old
-// copy's Availability and baseline go with it, then the new Skill is applied
-// exactly as Sync applies any Skill.
+// applyRename migrates one renamed Skill (ADR 0007). Retire saves Config
+// first, so an interruption leaves the new name declared and the next Sync
+// Materializes it; the old copy then shows up as Untracked rather than being
+// lost. Retire takes the old copy's Availability and Baseline with it, and
+// anything it could not remove fails the item; otherwise the new Skill is
+// applied exactly as Sync applies any Skill. An unreadable Scope state is not
+// this item's failure: Apply already reported it once.
 func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit func(SyncEvent)) SyncOutcome {
 	old, skill := item.Name, item.Freshness
 	fail := func(err error) SyncOutcome {
@@ -334,16 +336,12 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 		}
 		delete(plan.cfg.Settings.Availability, old)
 	}
-	if err := config.SaveConfig(plan.cfg, plan.configPath); err != nil {
+	retired, err := Retire(plan.cfg, plan.configPath, plan.skillsDir, []string{old}, baselines)
+	if err != nil {
 		return fail(err)
 	}
 	plan.availability = NewAvailability(plan.cfg, plan.skillsDir)
-	occupancy := plan.availability.ObserveOccupancy()
-	plan.availability.RemoveLeftover(occupancy.Leftover.ForSkills([]string{old}).WithoutEmpty())
-	if err := RemoveAll(skill.ScopePath); err != nil && !os.IsNotExist(err) {
-		return fail(err)
-	}
-	if err := baselines.Forget(old); err != nil && !errors.Is(err, ErrNotRecorded) {
+	if err := retired[0].Err(); err != nil {
 		return fail(err)
 	}
 	emitSync(emit, SyncEvent{Kind: SyncRenamed, Source: item.Source, Skill: old, Target: skill.RenamedTo})
@@ -356,6 +354,6 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 		Subpath:   skill.RenamedSubpath,
 		ScopePath: filepath.Join(plan.skillsDir, skill.RenamedTo),
 		CachePath: filepath.Join(item.CachePath, filepath.FromSlash(skill.RenamedSubpath)),
-	}, occupancy.Drift(skill.RenamedTo))
+	}, plan.availability.ObserveOccupancy().Drift(skill.RenamedTo))
 	return applyItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
 }

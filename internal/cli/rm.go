@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -79,20 +81,22 @@ func newRmCmd() *cobra.Command {
 			}
 
 			plan := engine.BuildRemovePlan(cfg, skillsDir, skillsToRemove)
-			result, applyErr := engine.ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+			result, err := engine.ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+			if err != nil {
+				return err
+			}
 			printRemoveResult(out, result)
 			if result.StateWarning != "" {
 				printScopeStateWarning(out, result.StateWarning, scopeFlagOf(scope))
 			}
 			if result.StateError != "" {
 				printScopeStateUnreadable(out, result.StateError)
-				if err := result.Err(); err != nil {
-					return err
-				}
-				return exitError{message: "Baselines were not forgotten", code: 2}
 			}
-			if applyErr != nil {
-				return applyErr
+			if names := result.NotFullyRemoved(); len(names) > 0 {
+				return exitError{message: "Skill removal did not complete: " + strings.Join(names, ", ") + " not fully removed", code: 2}
+			}
+			if result.StateError != "" {
+				return exitError{message: "Baselines were not forgotten", code: 2}
 			}
 
 			fmt.Fprintf(out, "%sSkill removal complete.%s\n", colorGreen, colorReset)
@@ -112,13 +116,32 @@ func printRemoveResult(out io.Writer, result engine.RemoveResult) {
 			fmt.Fprintf(out, "  %sRemoved from configuration.%s\n", colorGreen, colorReset)
 		}
 		if len(s.Unlinked) > 0 {
-			fmt.Fprintf(out, "  %sUnlinked from: %s.%s\n", colorGreen, strings.Join(s.Unlinked, ", "), colorReset)
+			agents := make([]string, len(s.Unlinked))
+			for i, link := range s.Unlinked {
+				agents[i] = link.Agent
+			}
+			fmt.Fprintf(out, "  %sUnlinked from: %s.%s\n", colorGreen, strings.Join(agents, ", "), colorReset)
 		}
-		if s.RemovedMaster {
-			fmt.Fprintf(out, "  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(s.MasterPath), colorReset)
+		for _, link := range s.FailedLinks {
+			fmt.Fprintf(out, "  %sFailed to unlink from %s: %s: %s%s\n", colorRed, link.Agent, models.ToTildePath(link.Path), pathCause(link.Err), colorReset)
 		}
-		if s.MasterErr != nil {
-			fmt.Fprintf(out, "  %sFailed to remove master directory: %s: %s%s\n", colorRed, models.ToTildePath(s.MasterPath), s.MasterErr, colorReset)
+		if s.CopyRemoved && s.MasterExisted {
+			fmt.Fprintf(out, "  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(s.CopyPath), colorReset)
+		}
+		if s.CopyErr != nil {
+			fmt.Fprintf(out, "  %sFailed to remove master directory: %s: %s%s\n", colorRed, models.ToTildePath(s.CopyPath), pathCause(s.CopyErr), colorReset)
+		}
+		if s.BaselineErr != nil && !errors.Is(s.BaselineErr, engine.ErrNotRecorded) {
+			fmt.Fprintf(out, "  %sFailed to forget the Baseline: %s%s\n", colorRed, s.BaselineErr, colorReset)
 		}
 	}
+}
+
+// pathCause is err without the path a *fs.PathError repeats, for a line that
+// already names it.
+func pathCause(err error) error {
+	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
+		return pathErr.Err
+	}
+	return err
 }

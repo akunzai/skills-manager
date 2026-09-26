@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 func TestParseSkillReplacesFromMD(t *testing.T) {
@@ -297,6 +299,52 @@ func TestSyncRenameProtectsAnEditedOldCopy(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.declared(t), map[string]string{"new": "skills/new"}) || exists(filepath.Join(f.skillsDir, "old")) {
 		t.Fatalf("forced rename incomplete: %#v", f.declared(t))
+	}
+}
+
+// An Availability link of the old Skill that cannot be removed fails the
+// rename rather than being left for doctor to find. Config already names the
+// new Skill, so the next Sync completes it.
+func TestSyncRenameFailsOnAnOldLinkItCannotRemove(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("a read-only directory does not stop this user removing its entries")
+	}
+	t.Parallel()
+	f := newRenameFixture(t)
+	agentDir := models.ForSkillsDir(f.skillsDir).KnownDirs()["continue"]
+	link := plantManagedLink(t, f.skillsDir, agentDir, "old")
+	if err := os.Chmod(agentDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(agentDir, 0o755) })
+	f.renameUpstream(t, "new", "old")
+	f.update(t)
+
+	var failed []SyncEvent
+	report, err := f.plan(t).Apply(SyncDecision{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range report.Events {
+		if ev.Kind == SyncRenameFailed {
+			failed = append(failed, ev)
+		}
+	}
+	if report.Failed != 1 || len(failed) != 1 || failed[0].Skill != "old" || !strings.Contains(failed[0].Err, link) {
+		t.Fatalf("failed = %d, events = %#v; want the rename of old failed naming %s", report.Failed, failed, link)
+	}
+	if !exists(link) {
+		t.Fatal("the link was removed from a read-only directory")
+	}
+	if !reflect.DeepEqual(f.declared(t), map[string]string{"new": "skills/new"}) {
+		t.Fatalf("Config = %#v; the rename is saved before the old Skill is retired", f.declared(t))
+	}
+
+	if err := os.Chmod(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if report := f.sync(t, SyncDecision{}); !report.Summary().Converged() {
+		t.Fatalf("the next Sync did not complete the rename: %#v", report)
 	}
 }
 
