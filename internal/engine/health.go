@@ -361,12 +361,10 @@ func (d *Doctor) repair(plan *DoctorReport, replaceForeign bool) {
 			continue
 		}
 		if len(drift.absentUnexpected) > 0 {
-			var errs []error
-			for _, repair := range removeManagedPaths(d.skillsDir, drift.absentUnexpected) {
-				errs = append(errs, repair.Err)
-			}
-			err = errors.Join(errs...)
-		} else if len(drift.Foreign) > 0 && replaceForeign {
+			plan.Drift[i].Repair = combineRepairs(removeManagedPaths(d.skillsDir, drift.absentUnexpected))
+			continue
+		}
+		if len(drift.Foreign) > 0 && replaceForeign {
 			err = d.availability.ReplaceForeign(drift.Skill, drift.Foreign)
 		} else {
 			_, err = d.availability.Apply(drift.Skill)
@@ -382,6 +380,25 @@ func agentsOf(paths []ManagedAgentPath) []string {
 		agents = append(agents, path.Agent)
 	}
 	return agents
+}
+
+// combineRepairs is one Skill's repair from its paths' repairs: failed if any
+// failed, skipped if any was no longer the path diagnosed, which a user can
+// change while Doctor waits for an answer, and succeeded only otherwise.
+func combineRepairs(repairs []ItemRepair) ItemRepair {
+	var errs []error
+	skipped := false
+	for _, repair := range repairs {
+		errs = append(errs, repair.Err)
+		skipped = skipped || repair.Status == RepairSkipped
+	}
+	if err := errors.Join(errs...); err != nil {
+		return ItemRepair{Status: RepairFailed, Err: err}
+	}
+	if skipped {
+		return ItemRepair{Status: RepairSkipped}
+	}
+	return ItemRepair{Status: RepairSucceeded}
 }
 
 func itemRepairFromErr(err error) ItemRepair {
