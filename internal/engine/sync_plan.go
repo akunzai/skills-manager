@@ -391,10 +391,34 @@ func (plan *SyncPlan) Failed() []SyncPlanItem {
 	return failed
 }
 
-// Fresh reports whether the Scope already matches its Config under decision:
-// nothing to change, nothing refused, nothing broken.
-func (plan *SyncPlan) Fresh(decision SyncDecision) bool {
-	return plan.FailedCount() == 0 && len(plan.Pending(decision)) == 0 && len(plan.Blocked(decision)) == 0
+// SyncSummary is where a Scope stands against its Config: how many Skills it
+// declares, how many a Sync would still change, refuses, or cannot act on,
+// and whether --force would lift a refusal. A plan summarizes it before
+// Apply, a SyncReport after. The CLI words it and picks the exit code
+// (ADR-0002).
+type SyncSummary struct {
+	Configured int
+	Pending    int
+	Blocked    int
+	Failed     int
+	Forceable  bool
+}
+
+// Converged reports whether the Scope matches its Config: nothing to change,
+// nothing refused, nothing broken.
+func (s SyncSummary) Converged() bool {
+	return s.Pending == 0 && s.Blocked == 0 && s.Failed == 0
+}
+
+// Summary is where the Scope stands if Apply ran under decision.
+func (plan *SyncPlan) Summary(decision SyncDecision) SyncSummary {
+	return SyncSummary{
+		Configured: len(plan.Names()),
+		Pending:    len(plan.Pending(decision)),
+		Blocked:    len(plan.Blocked(decision)),
+		Failed:     plan.FailedCount(),
+		Forceable:  plan.Forceable(decision),
+	}
 }
 
 // FailedCount counts the failures observable before anything is applied.

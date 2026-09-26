@@ -74,7 +74,7 @@ func newRenameFixture(t *testing.T) *renameFixture {
 	if _, err := UpdateRemoteSkills(f.cfg, nil, false, false, f.cacheDir, nil); err != nil {
 		t.Fatal(err)
 	}
-	if report := f.sync(t, SyncDecision{}); !report.Converged() {
+	if report := f.sync(t, SyncDecision{}); !report.Summary().Converged() {
 		t.Fatalf("initial sync did not converge: %#v", report)
 	}
 	return f
@@ -196,7 +196,7 @@ func TestSyncFollowsASkillRenamedUpstream(t *testing.T) {
 		t.Fatalf("action = %q; want rename", action)
 	}
 	report, err := plan.Apply(SyncDecision{}, nil)
-	if err != nil || !report.Converged() {
+	if err != nil || !report.Summary().Converged() {
 		t.Fatalf("rename did not converge: err=%v report=%#v", err, report)
 	}
 	if !reflect.DeepEqual(report.Configured, []string{"new"}) {
@@ -238,8 +238,8 @@ func TestSyncFollowsASkillRenamedUpstream(t *testing.T) {
 	if _, ok := state.Skills["new"]; !ok {
 		t.Fatal("no baseline recorded for the new Skill")
 	}
-	if plan := f.plan(t); !plan.Fresh(SyncDecision{}) {
-		t.Fatalf("Scope not fresh after the rename: pending=%#v blocked=%#v", plan.Pending(SyncDecision{}), plan.Blocked(SyncDecision{}))
+	if plan := f.plan(t); !plan.Summary(SyncDecision{}).Converged() {
+		t.Fatalf("Scope not converged after the rename: pending=%#v blocked=%#v", plan.Pending(SyncDecision{}), plan.Blocked(SyncDecision{}))
 	}
 }
 
@@ -292,7 +292,7 @@ func TestSyncRenameProtectsAnEditedOldCopy(t *testing.T) {
 		t.Fatal("a blocked rename Materialized the new Skill")
 	}
 
-	if report := f.sync(t, SyncDecision{Force: true}); !report.Converged() {
+	if report := f.sync(t, SyncDecision{Force: true}); !report.Summary().Converged() {
 		t.Fatalf("--force did not lift the block: %#v", report)
 	}
 	if !reflect.DeepEqual(f.declared(t), map[string]string{"new": "skills/new"}) || exists(filepath.Join(f.skillsDir, "old")) {
@@ -317,7 +317,7 @@ func TestSyncRenameToADeclaredSkillOnlyDropsTheOld(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if report := f.sync(t, SyncDecision{}); !report.Converged() {
+	if report := f.sync(t, SyncDecision{}); !report.Summary().Converged() {
 		t.Fatalf("sync did not converge: %#v", report)
 	}
 	cfg, err = config.LoadConfig(f.configPath)
@@ -397,7 +397,7 @@ func TestUpdateMatchesOneOfSeveralReplacedNames(t *testing.T) {
 	if result := f.update(t); len(result.Renamed) != 1 || result.Renamed[0].To != "new" {
 		t.Fatalf("renamed = %#v", result.Renamed)
 	}
-	if report := f.sync(t, SyncDecision{}); !report.Converged() {
+	if report := f.sync(t, SyncDecision{}); !report.Summary().Converged() {
 		t.Fatalf("sync did not converge: %#v", report)
 	}
 	if !reflect.DeepEqual(f.declared(t), map[string]string{"new": "skills/new"}) {
