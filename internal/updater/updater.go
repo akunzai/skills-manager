@@ -5,12 +5,15 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -44,6 +47,7 @@ type SelfUpdateInfo struct {
 	AssetURL        string `json:"asset_url,omitempty"`
 	AssetName       string `json:"asset_name,omitempty"`
 	AssetSize       int64  `json:"asset_size,omitempty"`
+	ChecksumsURL    string `json:"checksums_url,omitempty"`
 	ReleaseNotes    string `json:"release_notes,omitempty"`
 	HTMLURL         string `json:"html_url,omitempty"`
 }
@@ -193,31 +197,32 @@ func FetchReleaseInfo(versionTag string, timeoutSec int) (*ReleaseInfo, error) {
 	return &rel, nil
 }
 
+// ChecksumsAssetName is the checksum manifest GoReleaser publishes with
+// every release (.goreleaser.yaml).
+const ChecksumsAssetName = "checksums.txt"
+
+// FindMatchingAsset returns the archive GoReleaser publishes for this
+// platform. Only the exact archive name is accepted, so a look-alike asset
+// added to a release is never picked up.
 func FindMatchingAsset(assets []ReleaseAsset) *ReleaseAsset {
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
+	return findAsset(assets, ArchiveName(runtime.GOOS, runtime.GOARCH))
+}
 
-	// 1. Precise OS & Arch match (e.g. skills_darwin_arm64.tar.gz or skills-linux-amd64)
-	for _, asset := range assets {
-		name := strings.ToLower(asset.Name)
-		if (strings.Contains(name, goos) || (goos == "darwin" && strings.Contains(name, "macos"))) &&
-			(strings.Contains(name, goarch) || (goarch == "amd64" && strings.Contains(name, "x86_64"))) {
-			return &asset
+// ArchiveName mirrors the archive name_template in .goreleaser.yaml.
+func ArchiveName(goos, goarch string) string {
+	ext := "tar.gz"
+	if goos == "windows" {
+		ext = "zip"
+	}
+	return fmt.Sprintf("skills_%s_%s.%s", goos, goarch, ext)
+}
+
+func findAsset(assets []ReleaseAsset, name string) *ReleaseAsset {
+	for i := range assets {
+		if assets[i].Name == name {
+			return &assets[i]
 		}
 	}
-
-	// 2. Generic name match ("skills" or "skills.exe")
-	for _, asset := range assets {
-		if asset.Name == "skills" || (goos == "windows" && asset.Name == "skills.exe") {
-			return &asset
-		}
-	}
-
-	// 3. Fallback to any standalone binary
-	if len(assets) == 1 {
-		return &assets[0]
-	}
-
 	return nil
 }
 
@@ -258,8 +263,48 @@ func CheckSelfUpdateWithTimeout(targetVersion string, timeoutSec int) (*SelfUpda
 		info.AssetName = matchedAsset.Name
 		info.AssetSize = matchedAsset.Size
 	}
+	if checksums := findAsset(rel.Assets, ChecksumsAssetName); checksums != nil {
+		info.ChecksumsURL = checksums.BrowserDownloadURL
+	}
 
 	return info, nil
+}
+
+func download(client *http.Client, url string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "skills-manager/"+Version)
+	req.Header.Set("Accept", "application/octet-stream")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// VerifyChecksum checks data against the SHA-256 that a sha256sum-format
+// manifest lists for name.
+func VerifyChecksum(manifest []byte, name string, data []byte) error {
+	for line := range strings.Lines(string(manifest)) {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || strings.TrimPrefix(fields[1], "*") != name {
+			continue
+		}
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); !strings.EqualFold(got, fields[0]) {
+			return fmt.Errorf("checksum mismatch for %s: got %s, want %s", name, got, fields[0])
+		}
+		return nil
+	}
+	return fmt.Errorf("%s lists no checksum for %s", ChecksumsAssetName, name)
 }
 
 func extractBinaryFromTarGz(data []byte, targetName string) ([]byte, error) {
@@ -318,10 +363,17 @@ func extractBinaryFromZip(data []byte, targetName string) ([]byte, error) {
 	return nil, fmt.Errorf("executable not found in zip archive")
 }
 
-func DownloadAndInstallBinary(assetURL string, targetPath string, timeoutSec int) (string, error) {
+// DownloadAndInstallBinary replaces targetPath with the binary in the
+// archive at assetURL, after checking the archive against the SHA-256 the
+// release's checksum manifest lists for it. A missing or mismatched checksum
+// installs nothing.
+func DownloadAndInstallBinary(assetURL, checksumsURL, targetPath string, timeoutSec int) (string, error) {
 	dest := targetPath
 	if dest == "" {
 		dest = GetCurrentExecutablePath()
+	}
+	if checksumsURL == "" {
+		return "", fmt.Errorf("release publishes no %s; refusing to install an unverified binary", ChecksumsAssetName)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
@@ -329,26 +381,16 @@ func DownloadAndInstallBinary(assetURL string, targetPath string, timeoutSec int
 	}
 
 	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
-	req, err := http.NewRequest("GET", assetURL, nil)
+	checksums, err := download(client, checksumsURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to download %s: %w", ChecksumsAssetName, err)
 	}
-	req.Header.Set("User-Agent", "skills-manager/"+Version)
-	req.Header.Set("Accept", "application/octet-stream")
-
-	resp, err := client.Do(req)
+	downloadBytes, err := download(client, assetURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to download update: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("download failed with HTTP %d", resp.StatusCode)
-	}
-
-	downloadBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+	if err := VerifyChecksum(checksums, path.Base(assetURL), downloadBytes); err != nil {
+		return "", err
 	}
 
 	var binaryBytes []byte

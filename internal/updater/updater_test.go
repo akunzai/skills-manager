@@ -5,6 +5,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -44,15 +51,111 @@ func TestParseSemver(t *testing.T) {
 
 func TestFindMatchingAsset(t *testing.T) {
 	assets := []ReleaseAsset{
-		{Name: "skills_checksums.txt", BrowserDownloadURL: "http://example.com/sums"},
+		{Name: "checksums.txt", BrowserDownloadURL: "http://example.com/sums"},
+		{Name: "skills_linux_amd64.tar.gz.evil", BrowserDownloadURL: "http://example.com/evil"},
 		{Name: "skills_linux_amd64.tar.gz", BrowserDownloadURL: "http://example.com/linux"},
 		{Name: "skills_darwin_arm64.tar.gz", BrowserDownloadURL: "http://example.com/darwin-arm"},
 		{Name: "skills_windows_amd64.zip", BrowserDownloadURL: "http://example.com/win"},
 	}
 
-	matched := FindMatchingAsset(assets)
-	if matched == nil {
-		t.Fatalf("expected matched asset")
+	tests := []struct {
+		goos, goarch, want string
+	}{
+		{"linux", "amd64", "http://example.com/linux"},
+		{"darwin", "arm64", "http://example.com/darwin-arm"},
+		{"windows", "amd64", "http://example.com/win"},
+		{"linux", "arm64", ""},
+	}
+	for _, tt := range tests {
+		got := findAsset(assets, ArchiveName(tt.goos, tt.goarch))
+		switch {
+		case tt.want == "" && got != nil:
+			t.Errorf("%s/%s: matched %q; want none", tt.goos, tt.goarch, got.Name)
+		case tt.want != "" && (got == nil || got.BrowserDownloadURL != tt.want):
+			t.Errorf("%s/%s: matched %v; want %s", tt.goos, tt.goarch, got, tt.want)
+		}
+	}
+
+	if FindMatchingAsset([]ReleaseAsset{{Name: "skills", BrowserDownloadURL: "http://example.com/bare"}}) != nil {
+		t.Errorf("a lone asset with another name must not match")
+	}
+}
+
+func TestVerifyChecksum(t *testing.T) {
+	data := []byte("archive")
+	sum := sha256.Sum256(data)
+	good := hex.EncodeToString(sum[:])
+	manifest := []byte("deadbeef  skills_linux_arm64.tar.gz\n" + good + "  skills_linux_amd64.tar.gz\n")
+
+	if err := VerifyChecksum(manifest, "skills_linux_amd64.tar.gz", data); err != nil {
+		t.Errorf("matching checksum rejected: %v", err)
+	}
+	if err := VerifyChecksum(manifest, "skills_linux_arm64.tar.gz", data); err == nil || !strings.Contains(err.Error(), "mismatch") {
+		t.Errorf("mismatched checksum error = %v; want mismatch", err)
+	}
+	if err := VerifyChecksum(manifest, "skills_darwin_arm64.tar.gz", data); err == nil || !strings.Contains(err.Error(), "no checksum") {
+		t.Errorf("unlisted archive error = %v; want no checksum", err)
+	}
+}
+
+func TestDownloadAndInstallBinaryVerifiesChecksum(t *testing.T) {
+	binary := bytes.Repeat([]byte("x"), 200)
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	_ = tw.WriteHeader(&tar.Header{Name: "skills", Mode: 0755, Size: int64(len(binary))})
+	_, _ = tw.Write(binary)
+	_ = tw.Close()
+	_ = gw.Close()
+	archive := buf.Bytes()
+	sum := sha256.Sum256(archive)
+
+	tests := []struct {
+		name     string
+		manifest string
+		noSums   bool
+		wantErr  string
+	}{
+		{name: "match", manifest: hex.EncodeToString(sum[:]) + "  skills_linux_amd64.tar.gz\n"},
+		{name: "mismatch", manifest: strings.Repeat("0", 64) + "  skills_linux_amd64.tar.gz\n", wantErr: "mismatch"},
+		{name: "unlisted", manifest: hex.EncodeToString(sum[:]) + "  other.tar.gz\n", wantErr: "no checksum"},
+		{name: "no manifest", noSums: true, wantErr: "unverified"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "checksums.txt") {
+					_, _ = w.Write([]byte(tt.manifest))
+					return
+				}
+				_, _ = w.Write(archive)
+			}))
+			defer srv.Close()
+
+			dest := filepath.Join(t.TempDir(), "skills")
+			if err := os.WriteFile(dest, []byte("old"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			sumsURL := srv.URL + "/checksums.txt"
+			if tt.noSums {
+				sumsURL = ""
+			}
+
+			_, err := DownloadAndInstallBinary(srv.URL+"/skills_linux_amd64.tar.gz", sumsURL, dest, 5)
+			got, _ := os.ReadFile(dest)
+			if tt.wantErr == "" {
+				if err != nil || !bytes.Equal(got, binary) {
+					t.Fatalf("err = %v, installed %d bytes; want the new binary", err, len(got))
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v; want %q", err, tt.wantErr)
+			}
+			if string(got) != "old" {
+				t.Fatalf("binary replaced despite %s", tt.name)
+			}
+		})
 	}
 }
 
