@@ -72,3 +72,18 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: dist/checksums.txt
+
+      # Skips with a notice, not a failure, when HOMEBREW_BUMP_TOKEN is unset.
+      # Runs only after the GitHub release above exists, since the archives
+      # it links to must already be downloadable.
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_BUMP_TOKEN: ${{ secrets.HOMEBREW_BUMP_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: scripts/release/update-homebrew-formula.sh
+
+      - name: Update Scoop bucket
+        env:
+          HOMEBREW_BUMP_TOKEN: ${{ secrets.HOMEBREW_BUMP_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: scripts/release/update-scoop-manifest.sh
