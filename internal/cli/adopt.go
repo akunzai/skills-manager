@@ -298,6 +298,9 @@ func reportAdoptOutcome(out io.Writer, result engine.AdoptResult, scope Scope) e
 	if result.StateError != "" {
 		printScopeStateUnreadable(out, result.StateError)
 	}
+	if result.StateWarning != "" {
+		printScopeStateWarning(out, result.StateWarning, scopeFlagOf(scope))
+	}
 	printInstallerWarning(out, recorded, scope.SkillsDir)
 
 	adopted := len(result.Adopted())

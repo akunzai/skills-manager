@@ -768,8 +768,8 @@ func TestBuildPrunePlanProceedsPastUnreadableScopeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPrunePlan error = %v; an unreadable Scope state must not stop prune", err)
 	}
-	if plan.StateError == "" {
-		t.Fatal("StateError is empty; want why stale Baselines were not cleared")
+	if plan.StateWarning == "" {
+		t.Fatal("StateWarning is empty; want why stale Baselines were not cleared")
 	}
 	if len(plan.Unconfigured) != 1 || plan.Unconfigured[0].Path != link {
 		t.Fatalf("Unconfigured = %#v; want the leftover link", plan.Unconfigured)

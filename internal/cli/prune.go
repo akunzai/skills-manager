@@ -61,26 +61,25 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		return fmt.Errorf("build prune plan: %w", err)
 	}
 	// An unreadable Scope state leaves its Baselines alone; prune still does
-	// everything else, then reports it once.
-	stateError := plan.StateError
-	finish := func() error {
-		if stateError == "" {
-			return nil
+	// everything else, then warns once (ADR-0002).
+	stateWarning := plan.StateWarning
+	finish := func(err error) error {
+		if stateWarning != "" {
+			printScopeStateWarning(cmd.OutOrStdout(), stateWarning, scopeFlagOf(scope))
 		}
-		printScopeStateUnreadable(cmd.OutOrStdout(), stateError)
-		return exitError{message: "stale Baselines were not pruned", code: 2}
+		return err
 	}
 	// Empty is what apply would remove; untracked real directories are still
 	// worth offering in the prompt, or reporting as skipped with --yes.
 	if plan.Empty() && len(plan.UntrackedDirs) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "Nothing to prune.")
-		return finish()
+		return finish(nil)
 	}
 
 	if options.dryRun {
 		printPrunePlan(cmd, plan)
 		fmt.Fprintln(cmd.OutOrStdout(), "Dry run complete.")
-		return finish()
+		return finish(nil)
 	}
 	var skippedReal []string
 	if !options.yes {
@@ -109,7 +108,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 
 	if plan.Empty() {
 		printPruneSkippedReal(cmd, skippedReal)
-		return finish()
+		return finish(nil)
 	}
 
 	result, applyErr := engine.ApplyPrunePlan(plan, skillsDir)
@@ -119,12 +118,9 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		for _, failure := range result.Failures {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to prune %s: %v\n", models.ToTildePath(failure.Path), failure.Err)
 		}
-		if stateError != "" {
-			printScopeStateUnreadable(cmd.OutOrStdout(), stateError)
-		}
-		return fmt.Errorf("prune completed with failures: %w", applyErr)
+		return finish(fmt.Errorf("prune completed with failures: %w", applyErr))
 	}
-	return finish()
+	return finish(nil)
 }
 
 func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {

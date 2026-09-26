@@ -2801,7 +2801,7 @@ func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
 }
 
 // An unreadable Scope state leaves Baselines alone but must not stop prune:
-// everything else is removed, then prune says why and exits 2.
+// everything else is removed, then prune warns and exits 0 (ADR-0002).
 func TestCLIPruneProceedsPastUnreadableScopeState(t *testing.T) {
 	resetRootCmdFlags()
 	home := isolateHome(t)
@@ -2823,15 +2823,13 @@ func TestCLIPruneProceedsPastUnreadableScopeState(t *testing.T) {
 	statePath, bad := makeScopeStateUnreadable(t, skillsDir)
 
 	out, err := runCLI(t, "prune", "--yes", "--config", configFile, "--skills-dir", skillsDir)
-	if err == nil || ExitCode(err) != 2 {
-		t.Fatalf("prune --yes error = %v (exit %d); want exit 2\n%s", err, ExitCode(err), out)
+	if err != nil {
+		t.Fatalf("prune --yes error = %v (exit %d); want exit 0\n%s", err, ExitCode(err), out)
 	}
 	if !strings.Contains(out, "Removed master skill: orphan") {
 		t.Fatalf("prune must still remove the untracked link:\n%s", out)
 	}
-	if !strings.Contains(out, "Failed to read the Scope baseline: ") {
-		t.Fatalf("output does not report the unreadable Scope state:\n%s", out)
-	}
+	assertScopeStateWarning(t, out, true)
 	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
 		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
 	}

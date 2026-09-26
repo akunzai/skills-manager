@@ -278,3 +278,40 @@ func TestCLIAdoptFromAgentDirectoriesExitCodes(t *testing.T) {
 		t.Fatalf("nothing left should exit 0, got err=%v:\n%s", err, out)
 	}
 }
+
+// Adopting only local Skills records no Baseline, so an unreadable Scope
+// state is a warning; declaring a remote Skill whose Baseline cannot be
+// recorded is a failure (ADR-0002).
+func TestCLIAdoptOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		remote   bool
+		wantExit int
+	}{
+		{name: "local", wantExit: 0},
+		{name: "remote", remote: true, wantExit: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, scope := adoptCLIScope(t)
+			writeUntrackedCLISkill(t, root, "sample", "# Sample\n")
+			if tc.remote {
+				origin := filepath.Join(root, "origin")
+				writeCLIGitSkill(t, origin, "sample")
+				writeCLIInstallerLock(t, root, map[string]map[string]string{
+					"sample": {"source": "owner/repo", "sourceType": "github", "sourceUrl": origin, "skillPath": "sample"},
+				})
+			}
+			statePath, bad := makeScopeStateUnreadable(t, filepath.Join(root, "skills"))
+
+			out, err := runAdoptCLI(t, scope, "adopt", "sample", "-y")
+
+			if exit := exitCodeOf(err); exit != tc.wantExit {
+				t.Fatalf("adopt error = %v (exit %d); want exit %d\n%s", err, exit, tc.wantExit, out)
+			}
+			assertScopeStateWarning(t, out, tc.wantExit == 0)
+			if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+				t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+			}
+		})
+	}
+}
