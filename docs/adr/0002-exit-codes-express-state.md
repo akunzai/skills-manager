@@ -60,6 +60,15 @@ Untracked occupancy on the skills directory, an Unmanaged directory on an Agent
 directory, and a declared Skill whose name its Agent reserves for itself. Doctor
 reports each as a warning and they do not raise the exit code.
 
+An unreadable Scope state is a failure only where the command must record,
+compare, or forget a Baseline, which only a remote Skill has. Sync, the Sync
+that ends Update, Add, and rm therefore fail on it when they touch a remote
+Skill, or, for rm, a Skill Config does not declare, whose stale Baseline it
+cannot rule out. Otherwise the Scope can still match its Config: the command
+warns that the state is unreadable, names `skills doctor --fix`, and keeps
+the code its other work earns. Doctor still counts the unreadable state as an
+issue, because repairing the tool's own files is what it is for.
+
 A user backing out of an interactive question before the command has changed
 anything is neither: nothing was left unreconciled and nothing broke. The
 command says it was cancelled, writes nothing, and exits `0`. Declining a

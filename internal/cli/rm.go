@@ -81,6 +81,9 @@ func newRmCmd() *cobra.Command {
 			plan := engine.BuildRemovePlan(cfg, skillsDir, skillsToRemove)
 			result, applyErr := engine.ApplyRemovePlan(plan, cfg, configPath, skillsDir)
 			printRemoveResult(out, result)
+			if result.StateWarning != "" {
+				printScopeStateWarning(out, result.StateWarning, scopeFlagOf(scope))
+			}
 			if result.StateError != "" {
 				printScopeStateUnreadable(out, result.StateError)
 				if err := result.Err(); err != nil {

@@ -17,16 +17,19 @@ const (
 	SyncAvailabilityFailed = "availability_failed"
 	SyncAvailabilityCopied = "availability_copied"
 	SyncStateFailed        = "state_failed"
-	SyncMaterialized       = "materialized"
-	SyncSourceMissing      = "source_missing"
-	SyncSymlinkFailed      = "symlink_failed"
-	SyncSymlinked          = "symlinked"
-	SyncCheckFailed        = "check_failed"
-	SyncCommandStart       = "command_start"
-	SyncCommandFailed      = "command_failed"
-	SyncSkipped            = "skipped"
-	SyncRenamed            = "renamed"
-	SyncRenameFailed       = "rename_failed"
+	// SyncStateUnreadable is an unreadable Scope state in a Scope that needs
+	// no Baseline: a warning, not a failure (ADR-0002).
+	SyncStateUnreadable = "state_unreadable"
+	SyncMaterialized    = "materialized"
+	SyncSourceMissing   = "source_missing"
+	SyncSymlinkFailed   = "symlink_failed"
+	SyncSymlinked       = "symlinked"
+	SyncCheckFailed     = "check_failed"
+	SyncCommandStart    = "command_start"
+	SyncCommandFailed   = "command_failed"
+	SyncSkipped         = "skipped"
+	SyncRenamed         = "renamed"
+	SyncRenameFailed    = "rename_failed"
 	// SyncItemStart and SyncItemDone bracket each declared Skill, carrying
 	// the Action about to be taken and the Outcome reached. They drive live
 	// progress only and are not recorded in the SyncReport.
@@ -125,9 +128,11 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 		}
 	}
 	baselines := plan.openBaselines()
-	if err := baselines.Err(); err != nil {
+	if err := baselines.Err(); err != nil && plan.NeedsBaselines() {
 		emit(SyncEvent{Kind: SyncStateFailed, Err: err.Error()})
 		report.tally(SyncFailed)
+	} else if err != nil {
+		emit(SyncEvent{Kind: SyncStateUnreadable, Err: err.Error()})
 	}
 	report.Configured = plan.Names()
 	// progress tells onProgress alone where each Skill stands.

@@ -154,8 +154,10 @@ func (item SyncPlanItem) changes(action SyncAction) bool {
 // value from preview through confirmation to Apply: the decision the user makes
 // in between is applied to the plan, not re-derived from the filesystem.
 type SyncPlan struct {
-	Sources    []string
-	Items      []SyncPlanItem
+	Sources []string
+	Items   []SyncPlanItem
+	// StateError is why the Scope state could not be read. It is a failure
+	// only when NeedsBaselines (ADR-0002).
 	StateError string
 
 	cfg          *config.Config
@@ -424,10 +426,17 @@ func (plan *SyncPlan) Summary(decision SyncDecision) SyncSummary {
 // FailedCount counts the failures observable before anything is applied.
 func (plan *SyncPlan) FailedCount() int {
 	count := len(plan.Failed())
-	if plan.StateError != "" {
+	if plan.StateError != "" && plan.NeedsBaselines() {
 		count++
 	}
 	return count
+}
+
+// NeedsBaselines reports whether applying the plan records or compares a
+// Baseline: whether it declares a remote Skill. Without one, an unreadable
+// Scope state loses nothing and is a warning, not a failure (ADR-0002).
+func (plan *SyncPlan) NeedsBaselines() bool {
+	return slices.ContainsFunc(plan.Items, func(item SyncPlanItem) bool { return item.Kind == SyncItemRemote })
 }
 
 // Names is every declared Skill in the plan, sorted.

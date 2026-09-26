@@ -5,16 +5,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
 
 // RemoveItem is one Skill selected for removal.
 type RemoveItem struct {
-	Name         string
-	InConfig     bool
+	Name     string
+	InConfig bool
+	// Remote is whether Config declares the Skill from a remote Source, the
+	// only kind with a Baseline to forget.
+	Remote       bool
 	MasterExists bool
 	MasterPath   string
+}
+
+// needsBaselines reports whether removing these Skills forgets a Baseline. A
+// Skill Config does not declare may still have a stale one, so it counts.
+func (p RemovePlan) needsBaselines() bool {
+	return slices.ContainsFunc(p.Skills, func(item RemoveItem) bool { return item.Remote || !item.InConfig })
 }
 
 // RemovePlan is the Skills rm will drop from Config then from disk.
@@ -38,6 +48,9 @@ type RemoveResult struct {
 	// StateError is why the Scope state could not be read. The Skills are
 	// removed but their Baselines are not forgotten.
 	StateError string
+	// StateWarning is why the Scope state could not be read when no removed
+	// Skill had a Baseline to forget: a warning, not a failure (ADR-0002).
+	StateWarning string
 }
 
 func (r RemoveResult) Err() error {
@@ -58,12 +71,13 @@ func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) Remov
 		if name == "" {
 			continue
 		}
-		_, _, inConfig := config.FindSkillSource(cfg, name)
+		category, _, inConfig := config.FindSkillSource(cfg, name)
 		path := filepath.Join(skillsDir, name)
 		_, err := os.Lstat(path)
 		plan.Skills = append(plan.Skills, RemoveItem{
 			Name:         name,
 			InConfig:     inConfig,
+			Remote:       category == "remote",
 			MasterExists: err == nil,
 			MasterPath:   path,
 		})
@@ -114,7 +128,10 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 		result.Skills[i].RemovedMaster = true
 	}
 	baselines := OpenBaselines(skillsDir)
-	if stateErr := baselines.Err(); stateErr != nil {
+	if stateErr := baselines.Err(); stateErr != nil && !plan.needsBaselines() {
+		result.StateWarning = stateErr.Error()
+		return result, result.Err()
+	} else if stateErr != nil {
 		result.StateError = stateErr.Error()
 		return result, errors.Join(result.Err(), fmt.Errorf("removed Skills but did not forget their Baselines: %w", stateErr))
 	}
