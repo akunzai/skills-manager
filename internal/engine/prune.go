@@ -22,9 +22,10 @@ type PrunePlan struct {
 	// configured links, the same condition Unconfigured uses.
 	EmptyAgentDirs []AgentDir
 	StateSkills    []string
-	// StateError is why the Scope state could not be read. Its stale
-	// Baselines are left alone; everything else is still pruned.
-	StateError string
+	// StateWarning is why the Scope state could not be read. Its stale
+	// Baselines are left alone and everything else is still pruned: a
+	// warning, not a failure (ADR-0002).
+	StateWarning string
 	// approvedDirs are the UntrackedDirs the user selected. An untracked real
 	// directory is the user's own content, so only Select sets this and
 	// ApplyPrunePlan removes no other real directory.
@@ -139,9 +140,10 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 	if includeSkills {
 		// A stale Baseline is a record about a Skill, so it goes with the
 		// skills directory, not with Agent directory links.
+		// Stale Baselines are never compared again, so prune needs none.
 		baselines := OpenBaselines(skillsDir)
-		if err := baselines.Err(); err != nil {
-			plan.StateError = err.Error()
+		if baselines.Verdict(false) == StateWarn {
+			plan.StateWarning = baselines.Err().Error()
 		} else {
 			plan.StateSkills = baselines.Stale(cfg)
 		}
@@ -229,8 +231,7 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 		}
 	}
 	if len(plan.StateSkills) > 0 {
-		baselines := OpenBaselines(skillsDir)
-		if err := cmp.Or(baselines.Err(), baselines.Forget(plan.StateSkills...)); err != nil {
+		if err := OpenBaselines(skillsDir).Forget(plan.StateSkills...); err != nil {
 			errs = append(errs, err)
 		} else {
 			result.ForgottenBaselines = slices.Clone(plan.StateSkills)

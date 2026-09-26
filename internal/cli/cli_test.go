@@ -195,16 +195,19 @@ func TestCLIRmPrintsRemovalSummaryThroughCapturedOutput(t *testing.T) {
 // removing the Skill: it says why and exits 2.
 // A local Skill has no Baseline to forget, so an unreadable Scope state is a
 // warning for rm, not a failure (ADR-0002). A remote Skill's Baseline cannot
-// be forgotten, which is.
+// be forgotten, which is; nor can a stale one of a Skill Config does not
+// declare be ruled out.
 func TestCLIRmOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		remote   bool
-		wantExit int
-		wantLine string
+		name       string
+		remote     bool
+		undeclared bool
+		wantExit   int
+		wantLine   string
 	}{
-		{name: "local", wantExit: 0, wantLine: "Scope state is unreadable: "},
+		{name: "local", wantExit: 0, wantLine: scopeStateWarning},
 		{name: "remote", remote: true, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
+		{name: "undeclared", undeclared: true, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetSubcommandFlags()
@@ -218,7 +221,10 @@ func TestCLIRmOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
 				writeCLIGitSkill(t, origin, "sample")
 				addArgs = []string{"add", "owner/repo", "--url", origin, "--skill", "sample", "-y"}
 			}
-			if out, err := runCLI(t, append(addArgs, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)...); err != nil {
+			if tc.undeclared {
+				// An Untracked Skill: on the skills directory, not in Config.
+				writeCLILocalSkill(t, skillsDir, "sample")
+			} else if out, err := runCLI(t, append(addArgs, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)...); err != nil {
 				t.Fatalf("add: %v\n%s", err, out)
 			}
 			statePath, bad := makeScopeStateUnreadable(t, skillsDir)
@@ -231,6 +237,7 @@ func TestCLIRmOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
 			if !strings.Contains(out, tc.wantLine) {
 				t.Fatalf("output does not contain %q:\n%s", tc.wantLine, out)
 			}
+			assertScopeStateWarning(t, out, tc.wantExit == 0)
 			if _, err := os.Lstat(filepath.Join(skillsDir, "sample")); !os.IsNotExist(err) {
 				t.Fatal("the Skill must still be removed")
 			}
@@ -252,9 +259,9 @@ func TestCLISyncOnUnreadableScopeStateFailsOnlyWithARemoteSkill(t *testing.T) {
 		wantExit int
 		wantLine string
 	}{
-		{name: "local", command: []string{"sync"}, wantExit: 0, wantLine: "Scope state is unreadable: "},
-		{name: "local dry run", command: []string{"sync", "--dry-run"}, wantExit: 0, wantLine: "Scope state is unreadable: "},
-		{name: "local update", command: []string{"update"}, wantExit: 0, wantLine: "Scope state is unreadable: "},
+		{name: "local", command: []string{"sync"}, wantExit: 0, wantLine: scopeStateWarning},
+		{name: "local dry run", command: []string{"sync", "--dry-run"}, wantExit: 0, wantLine: scopeStateWarning},
+		{name: "local update", command: []string{"update"}, wantExit: 0, wantLine: scopeStateWarning},
 		{name: "remote", remote: true, command: []string{"sync"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
 		{name: "remote update", remote: true, command: []string{"update"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
 	} {
@@ -283,6 +290,7 @@ func TestCLISyncOnUnreadableScopeStateFailsOnlyWithARemoteSkill(t *testing.T) {
 			if !strings.Contains(out, tc.wantLine) {
 				t.Fatalf("output does not contain %q:\n%s", tc.wantLine, out)
 			}
+			assertScopeStateWarning(t, out, tc.wantExit == 0)
 			if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
 				t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
 			}
@@ -305,8 +313,21 @@ func TestCLIAddOfALocalSkillWarnsOnUnreadableScopeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add error = %v (exit %d); want exit 0\n%s", err, ExitCode(err), out)
 	}
-	if !strings.Contains(out, "Scope state is unreadable: ") || !strings.Contains(out, "--fix' to reset it.") {
-		t.Fatalf("output does not warn about the unreadable Scope state:\n%s", out)
+	assertScopeStateWarning(t, out, true)
+}
+
+// scopeStateWarning opens the warning a command prints for an unreadable
+// Scope state it needed no Baseline from (ADR-0002).
+const scopeStateWarning = "Scope state is unreadable: "
+
+// assertScopeStateWarning checks that out warns about an unreadable Scope
+// state, naming doctor --fix, exactly when want: a command that fails on it
+// says so instead.
+func assertScopeStateWarning(t *testing.T, out string, want bool) {
+	t.Helper()
+	got := strings.Contains(out, scopeStateWarning) && strings.Contains(out, "--fix' to reset it.")
+	if got != want {
+		t.Fatalf("warns about the unreadable Scope state = %v; want %v\n%s", got, want, out)
 	}
 }
 
@@ -2780,7 +2801,7 @@ func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
 }
 
 // An unreadable Scope state leaves Baselines alone but must not stop prune:
-// everything else is removed, then prune says why and exits 2.
+// everything else is removed, then prune warns and exits 0 (ADR-0002).
 func TestCLIPruneProceedsPastUnreadableScopeState(t *testing.T) {
 	resetRootCmdFlags()
 	home := isolateHome(t)
@@ -2802,15 +2823,13 @@ func TestCLIPruneProceedsPastUnreadableScopeState(t *testing.T) {
 	statePath, bad := makeScopeStateUnreadable(t, skillsDir)
 
 	out, err := runCLI(t, "prune", "--yes", "--config", configFile, "--skills-dir", skillsDir)
-	if err == nil || ExitCode(err) != 2 {
-		t.Fatalf("prune --yes error = %v (exit %d); want exit 2\n%s", err, ExitCode(err), out)
+	if err != nil {
+		t.Fatalf("prune --yes error = %v (exit %d); want exit 0\n%s", err, ExitCode(err), out)
 	}
 	if !strings.Contains(out, "Removed master skill: orphan") {
 		t.Fatalf("prune must still remove the untracked link:\n%s", out)
 	}
-	if !strings.Contains(out, "Failed to read the Scope baseline: ") {
-		t.Fatalf("output does not report the unreadable Scope state:\n%s", out)
-	}
+	assertScopeStateWarning(t, out, true)
 	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
 		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
 	}
@@ -3272,6 +3291,7 @@ func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 	if !strings.Contains(out, "Failed to read the Scope baseline: ") {
 		t.Fatalf("output does not report the unreadable Scope state:\n%s", out)
 	}
+	assertScopeStateWarning(t, out, false)
 	if !strings.Contains(out, "Added 1 skill(s) [sample]") {
 		t.Fatalf("output does not report the applied Skill:\n%s", out)
 	}

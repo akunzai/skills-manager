@@ -71,9 +71,9 @@ completed.`,
 			// A Scope that already matches its Config is left alone, so a
 			// shell startup that runs update prints one line and changes nothing.
 			if planned.Converged() {
-				// Converged with an unreadable Scope state means no Baseline
-				// was needed: a warning, not a failure (ADR-0002).
-				if plan.StateError != "" {
+				// A converged plan needed no Baseline, so an unreadable Scope
+				// state is at most a warning (ADR-0002).
+				if plan.StateVerdict() == engine.StateWarn {
 					printScopeStateWarning(out, plan.StateError, scopeFlagOf(scope))
 				}
 				summary := newUpdateSyncJSON(planned)

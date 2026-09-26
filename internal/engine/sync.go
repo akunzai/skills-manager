@@ -128,11 +128,12 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 		}
 	}
 	baselines := plan.openBaselines()
-	if err := baselines.Err(); err != nil && plan.NeedsBaselines() {
-		emit(SyncEvent{Kind: SyncStateFailed, Err: err.Error()})
+	switch baselines.Verdict(plan.needsBaselines()) {
+	case StateFail:
+		emit(SyncEvent{Kind: SyncStateFailed, Err: baselines.Err().Error()})
 		report.tally(SyncFailed)
-	} else if err != nil {
-		emit(SyncEvent{Kind: SyncStateUnreadable, Err: err.Error()})
+	case StateWarn:
+		emit(SyncEvent{Kind: SyncStateUnreadable, Err: baselines.Err().Error()})
 	}
 	report.Configured = plan.Names()
 	// progress tells onProgress alone where each Skill stands.
@@ -230,7 +231,9 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 	if len(copied) > 0 {
 		emitSync(emit, SyncEvent{Kind: SyncAvailabilityCopied, Source: item.Source, Skill: item.Name, Agents: copied})
 	}
-	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA); err != nil {
+	// An unreadable Scope state is the Scope's verdict, counted once by the
+	// caller, not a failure of each Skill.
+	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA); err != nil && !errors.Is(err, ErrNotRecorded) {
 		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
 		return SyncFailed, err
 	}
@@ -242,9 +245,18 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 // become readable, so Sync records against the state it planned from.
 func (plan *SyncPlan) openBaselines() *Baselines {
 	if plan.StateError != "" {
-		return &Baselines{err: errors.New(plan.StateError)}
+		return plan.plannedBaselines()
 	}
 	return OpenBaselines(plan.skillsDir)
+}
+
+// plannedBaselines is the Scope state as far as the plan observed it: only
+// whether it could be read.
+func (plan *SyncPlan) plannedBaselines() *Baselines {
+	if plan.StateError == "" {
+		return &Baselines{}
+	}
+	return &Baselines{err: errors.New(plan.StateError)}
 }
 
 // applyLocalItem Materializes one local Skill and applies its Availability. A
@@ -331,7 +343,7 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 	if err := RemoveAll(skill.ScopePath); err != nil && !os.IsNotExist(err) {
 		return fail(err)
 	}
-	if err := baselines.Forget(old); err != nil {
+	if err := baselines.Forget(old); err != nil && !errors.Is(err, ErrNotRecorded) {
 		return fail(err)
 	}
 	emitSync(emit, SyncEvent{Kind: SyncRenamed, Source: item.Source, Skill: old, Target: skill.RenamedTo})

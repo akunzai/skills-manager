@@ -391,11 +391,13 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		}
 	}
 
-	if stateErr := baselines.Err(); stateErr != nil && plan.Source.Kind == AddSourceRemote {
-		result.StateError = stateErr.Error()
+	// Only a remote Skill has a Baseline to record.
+	switch baselines.Verdict(plan.Source.Kind == AddSourceRemote) {
+	case StateFail:
+		result.StateError = baselines.Err().Error()
 		result.tally(SyncFailed)
-	} else if stateErr != nil {
-		result.StateWarning = stateErr.Error()
+	case StateWarn:
+		result.StateWarning = baselines.Err().Error()
 	}
 	return result, nil
 }

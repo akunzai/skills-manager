@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -110,8 +111,8 @@ func TestBaselinesForgetDoesNotCreateMissingState(t *testing.T) {
 }
 
 // A Scope state that cannot be read is never rewritten: Err says why,
-// recording and forgetting do nothing, and nothing compares clean against it.
-// Only Reset replaces it.
+// recording and forgetting report that nothing was recorded, and nothing
+// compares clean against it. Only Reset replaces it.
 func TestBaselinesLeaveUnreadableStateAlone(t *testing.T) {
 	skillsDir, skill := baselinesScope(t)
 	statePath, bad := writeUnreadableScopeState(t, skillsDir)
@@ -126,8 +127,8 @@ func TestBaselinesLeaveUnreadableStateAlone(t *testing.T) {
 		"Forget":      baselines.Forget("sample"),
 		"ForgetStale": baselines.ForgetStale(cfg),
 	} {
-		if err != nil {
-			t.Fatalf("%s error = %v; want a no-op", name, err)
+		if !errors.Is(err, ErrNotRecorded) || !errors.Is(err, baselines.Err()) {
+			t.Fatalf("%s error = %v; want ErrNotRecorded, saying why", name, err)
 		}
 	}
 	if got := baselines.CompareScopeCopy("sample", skill.ScopePath); got != ScopeCopyUnknown {
@@ -145,5 +146,34 @@ func TestBaselinesLeaveUnreadableStateAlone(t *testing.T) {
 	}
 	if err := OpenBaselines(skillsDir).Err(); err != nil {
 		t.Fatalf("Err after Reset = %v; want a readable, empty state", err)
+	}
+}
+
+// ADR-0002: an unreadable Scope state fails a command only when it touched a
+// Skill that needed a Baseline; any other command warns. A readable one is
+// fine either way.
+func TestBaselinesVerdict(t *testing.T) {
+	tests := []struct {
+		name       string
+		unreadable bool
+		needed     bool
+		want       StateVerdict
+	}{
+		{name: "needed and unreadable", unreadable: true, needed: true, want: StateFail},
+		{name: "not needed and unreadable", unreadable: true, want: StateWarn},
+		{name: "needed and readable", needed: true, want: StateOK},
+		{name: "not needed and readable", want: StateOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skillsDir, _ := baselinesScope(t)
+			if tt.unreadable {
+				writeUnreadableScopeState(t, skillsDir)
+			}
+
+			if got := OpenBaselines(skillsDir).Verdict(tt.needed); got != tt.want {
+				t.Fatalf("Verdict(%v) = %v; want %v", tt.needed, got, tt.want)
+			}
+		})
 	}
 }
