@@ -96,7 +96,7 @@ func TestCLIAdoptExitCodes(t *testing.T) {
 
 	// 1: --yes without names or --all selects nothing; every Skill is left.
 	out, err = runAdoptCLI(t, scope, "adopt", "-y")
-	if exitCodeOf(err) != 1 || !strings.Contains(out, "Skipped 2 untracked skills") || !strings.Contains(out, "--all") {
+	if exitCodeOf(err) != 1 || !strings.Contains(out, "Skipped 2 skills") || !strings.Contains(out, "--all") {
 		t.Fatalf("--yes alone should skip every Skill and exit 1, got err=%v:\n%s", err, out)
 	}
 	if !isRealDirPath(mine) {
@@ -199,4 +199,82 @@ func TestCLIAdoptRejectsAllWithNames(t *testing.T) {
 func isRealDirPath(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.IsDir()
+}
+
+func writeAgentCLISkill(t *testing.T, root, agentDir, name, content string) string {
+	t.Helper()
+	dir := filepath.Join(root, agentDir, "skills", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestCLIAdoptFromAgentDirectoriesExitCodes(t *testing.T) {
+	root, scope := adoptCLIScope(t)
+	claudeCopy := writeAgentCLISkill(t, root, ".claude", "split", "# One\n")
+	continueCopy := writeAgentCLISkill(t, root, ".continue", "split", "# Two\n")
+	target := filepath.Join(root, "src", "linked")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Linked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, ".continue", "skills", "linked")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	// 0: a dry run groups the Agent directories' Skills, each with its Agent.
+	out, err := runAdoptCLI(t, scope, "adopt", "--dry-run")
+	if err != nil {
+		t.Fatalf("dry run should exit 0: %v\n%s", err, out)
+	}
+	for _, want := range []string{"Agent directories:", "linked (continue): declare its target", "split (claude-code, continue): left in place: its copies differ", "--from"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dry run must show %q:\n%s", want, out)
+		}
+	}
+
+	// 2: --from must name an Agent of this Scope.
+	out, err = runAdoptCLI(t, scope, "adopt", "split", "--from", "nope", "-y")
+	if exitCodeOf(err) != 2 || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("an unknown --from should exit 2, got err=%v:\n%s", err, out)
+	}
+
+	// 1: differing copies are refused by default, naming every path.
+	out, err = runAdoptCLI(t, scope, "adopt", "split", "-y")
+	if exitCodeOf(err) != 1 || !strings.Contains(out, claudeCopy) || !strings.Contains(out, continueCopy) {
+		t.Fatalf("differing copies should exit 1 listing both, got err=%v:\n%s", err, out)
+	}
+
+	// 0: --from picks one; the other Agent keeps its copy and is excluded.
+	out, err = runAdoptCLI(t, scope, "adopt", "--all", "--from", "continue", "-y")
+	if err != nil {
+		t.Fatalf("adopting with --from should exit 0: %v\n%s", err, out)
+	}
+	for _, want := range []string{"Adopted linked from", "Available in claude-code, continue.", "Excluded from claude-code", "Adopted 2 skills"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("adopt must say %q:\n%s", want, out)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(claudeCopy, "SKILL.md")); err != nil || string(data) != "# One\n" {
+		t.Fatalf("the excluded copy must stay: %q, %v", data, err)
+	}
+	if !isSymlink(continueCopy) {
+		t.Fatal("the adopted copy's place must now be an Availability link")
+	}
+	if out, err := runAdoptCLI(t, scope, "sync", "--dry-run"); err != nil {
+		t.Fatalf("sync --dry-run after adopting should exit 0: %v\n%s", err, out)
+	}
+	if out, err := runAdoptCLI(t, scope, "doctor"); err != nil {
+		t.Fatalf("doctor after adopting should exit 0: %v\n%s", err, out)
+	}
+	out, err = runAdoptCLI(t, scope, "adopt", "--all", "-y")
+	if err != nil || !strings.Contains(out, "Nothing to adopt.") {
+		t.Fatalf("nothing left should exit 0, got err=%v:\n%s", err, out)
+	}
 }
