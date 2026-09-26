@@ -1,6 +1,6 @@
 ---
 name: skills-manager
-description: Manage skills across AI agents via the skills CLI. Triggers when adding skills (Git, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated, diff), diagnosing health issues (doctor, prune), or configuring availability policies.
+description: Manage skills across AI agents via the skills CLI. Triggers when adding skills (Git, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated, diff), diagnosing health issues (doctor, adopt, prune), or configuring availability policies.
 ---
 
 # Skills Manager
@@ -129,7 +129,7 @@ skills sync --force
 
 **Completion criterion**: `skills update` or `skills sync` (with `-p` for a Project) exits `0` (converged).
 
-### 3. Diagnose and Repair Health (`skills doctor` & `skills prune`)
+### 3. Diagnose and Repair Health (`skills doctor`, `skills adopt` & `skills prune`)
 
 Identify and repair broken symlinks, orphaned files, or untracked skills.
 
@@ -139,6 +139,10 @@ skills doctor
 
 # Automatically repair diagnosed issues and rebuild corrupted cache
 skills doctor --fix
+
+# Declare untracked skills instead of removing them (preview first)
+skills adopt --dry-run
+skills adopt --all --yes
 
 # Preview untracked skills and orphaned agent links
 skills prune --dry-run
@@ -150,6 +154,8 @@ skills prune --yes
 skills -p doctor
 skills -p doctor --fix
 ```
+
+**Adopt**: A skill an installer lock file records keeps its place and is declared from that remote Source, with a Baseline only when its copy matches the Source; an edited copy is declared without one, so the next Sync asks before overwriting it. Any other skill, or one that is its own git checkout, moves to `skills-local/<name>` beside the skills directory (or `--to <dir>`) and is declared as a local Source. A skill found directly on an agent directory (a real directory, or a symlink the user placed there) is offered too, labelled with its agent: a directory moves onto the skills directory and is adopted the same way, a symlink has its target declared as a local Source, and the agent keeps it through an Availability link. Copies that differ between agents are refused unless `--from <agent>` picks one; the other agents are excluded and keep their copies. Exit `0` all adopted, `1` something left for the user, `2` a failure.
 
 **Completion criterion**: `skills doctor` (or `skills -p doctor`) reports all checks passing and exits `0`.
 

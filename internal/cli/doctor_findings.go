@@ -132,8 +132,8 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 	if len(p.Untracked) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Untracked skills in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.Untracked, ", ")), Blank: true})
 		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
-			"  Not in Config; left as-is. A TTY prune can remove %s; 'skills prune%s --yes' will not.",
-			objectPronoun(len(p.Untracked)), scopeFlag(p))})
+			"  Not in Config; left as-is. Declare %s with 'skills adopt%s', or remove %s with a TTY prune; 'skills prune%s --yes' will not.",
+			objectPronoun(len(p.Untracked)), scopeFlag(p), objectPronoun(len(p.Untracked)), scopeFlag(p))})
 	}
 	if len(p.UntrackedLinks) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Untracked leftover symlink in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.UntrackedLinks, ", ")), Blank: true})
