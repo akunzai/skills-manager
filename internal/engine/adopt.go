@@ -292,7 +292,7 @@ func adoptRemote(cfg *config.Config, scope models.Scope, outcome AdoptOutcome, b
 	}
 	subpath := record.Subpath
 	if subpath == "" {
-		found, err := discoverRemoteSkills(cache, "")
+		found, _, err := discoverRemoteSkills(cache, "")
 		if err != nil {
 			return adoptFailed(outcome, fmt.Errorf("discover Skills in %s: %w", record.Source, err))
 		}
