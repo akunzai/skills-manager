@@ -1043,3 +1043,42 @@ func TestDoctorWarningsCountEveryNonIssueKindInOrder(t *testing.T) {
 		t.Fatalf("warnings = %#v; want one per warning kind, %#v", got, want)
 	}
 }
+
+// Doctor asks before replacing a foreign path, and a person may change the
+// filesystem while it waits. An unexpected link that is no longer the one
+// diagnosed is skipped, and the repair says so rather than claiming a fix.
+func TestDoctorRepairSaysSkippedForAPathChangedSinceDiagnosis(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", ".", "github", "")
+	link := plantManagedLink(t, skillsDir, filepath.Join(project, ".continue", "skills"), "sample")
+	// Another declared Skill with a foreign path, so Doctor asks.
+	other := filepath.Join(skillsDir, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config.AddLocalSymlinkEntry(cfg, "other", filepath.Join(project, "other-source"), "")
+	if err := os.MkdirAll(filepath.Join(project, ".claude", "skills", "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outcome, err := NewDoctor(cfg, skillsDir).Run(true, func([]ForeignAvailabilityPath) (bool, error) {
+		if err := os.Remove(link); err != nil {
+			return false, err
+		}
+		return false, os.MkdirAll(link, 0o755)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(outcome.Report.Drift, func(drift SkillDrift) bool { return drift.Skill == "sample" })
+	if i < 0 || outcome.Report.Drift[i].Repair.Status != RepairSkipped {
+		t.Fatalf("Drift = %#v; want sample's repair skipped", outcome.Report.Drift)
+	}
+	if _, err := os.Stat(link); err != nil {
+		t.Fatalf("the user's directory is gone: %v", err)
+	}
+}

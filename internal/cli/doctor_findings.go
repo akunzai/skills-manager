@@ -116,6 +116,8 @@ func doctorFindings(p engine.DoctorReport, scopeFlags string) []Finding {
 		switch d.Repair.Status {
 		case engine.RepairSucceeded:
 			add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("Fixed availability drift for %s.", d.Skill)})
+		case engine.RepairSkipped:
+			add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("Skipped availability drift for %s: a path changed since doctor looked at it.", d.Skill)})
 		case engine.RepairFailed:
 			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to reconcile availability for %s: %s", d.Skill, d.Repair.Err)})
 			for _, foreign := range d.Foreign {
