@@ -19,6 +19,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
@@ -698,36 +699,46 @@ func TestCLIPruneRequiresYesWithoutTerminal(t *testing.T) {
 	}
 }
 
-func TestSelectedPrunePlanExpandsMasterSkillsAndKeepsIndividualLinks(t *testing.T) {
-	plan := engine.PrunePlan{
-		UntrackedSkills: []string{"orphan"},
-		Unconfigured: []engine.ManagedAgentPath{
-			{Agent: "augment", Skill: "orphan", Path: "/agents/augment/orphan"},
-			{Agent: "continue", Skill: "configured", Path: "/agents/continue/configured"},
-		},
-	}
+// An untracked entry that is no longer a link was left alone by apply; the
+// summary says so apart from the real directories --yes never offered.
+func TestPrunePrintsSkippedSkillsThatAreNoLongerLinks(t *testing.T) {
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
 
-	selected := selectedPrunePlan(plan, []string{pruneMasterKey("orphan"), pruneLinkKey("/agents/continue/configured")})
-	if got, want := selected.UntrackedSkills, []string{"orphan"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("selected master skills = %v; want %v", got, want)
-	}
-	if got, want := selected.Unconfigured, []engine.ManagedAgentPath{
-		{Agent: "augment", Skill: "orphan", Path: "/agents/augment/orphan"},
-		{Agent: "continue", Skill: "configured", Path: "/agents/continue/configured"},
-	}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("selected links = %v; want %v", got, want)
+	printPruneSummary(cmd, engine.PruneResult{SkippedSkills: []string{"mine"}})
+
+	for _, want := range []string{"Skipped 1 untracked master skill that is no longer a link.", "  Skipped master skill (not a link): mine"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("summary does not contain %q:\n%s", want, out.String())
+		}
 	}
 }
 
-// Stale Baselines are prune items like any other: the user keeps the ones
-// selected and drops the rest (#179).
-func TestSelectedPrunePlanKeepsSelectedStaleBaselines(t *testing.T) {
-	plan := engine.PrunePlan{StateSkills: []string{"gone", "kept"}}
+// The prompt's keys name items; pruneSelection only maps them back.
+// engine.PrunePlan.Select owns what a selection implies.
+func TestPruneSelectionMapsEachKeyToTheItemItNames(t *testing.T) {
+	plan := engine.PrunePlan{
+		UntrackedSkills: []string{"orphan"},
+		UntrackedDirs:   []string{"mine"},
+		Unconfigured:    []engine.ManagedAgentPath{{Agent: "continue", Skill: "configured", Path: "/agents/continue/configured"}},
+		EmptyAgentDirs:  []engine.AgentDir{{Name: "jazz", Dir: "/agents/jazz/skills"}},
+		StateSkills:     []string{"gone"},
+	}
 
-	selected := selectedPrunePlan(plan, []string{pruneBaselineKey("gone")})
+	got := pruneSelection(plan, []string{
+		pruneMasterKey("orphan"), pruneMasterKey("mine"), pruneLinkKey("/agents/continue/configured"),
+		pruneEmptyDirKey("/agents/jazz/skills"), pruneBaselineKey("gone"),
+	})
 
-	if got, want := selected.StateSkills, []string{"gone"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("selected StateSkills = %v; want %v", got, want)
+	want := engine.PruneSelection{
+		Masters:   []string{"orphan", "mine"},
+		Links:     []string{"/agents/continue/configured"},
+		EmptyDirs: []string{"/agents/jazz/skills"},
+		Baselines: []string{"gone"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selection = %#v; want %#v", got, want)
 	}
 }
 
@@ -808,21 +819,6 @@ func TestCLIPruneClearsStaleBaselinesOnTheirOwn(t *testing.T) {
 			t.Fatal("--links-only cleared a Baseline")
 		}
 	})
-}
-
-func TestSelectedPrunePlanKeepsSelectedEmptyDirsAndDropsUnselected(t *testing.T) {
-	plan := engine.PrunePlan{
-		EmptyAgentDirs: []engine.AgentDir{
-			{Name: "jazz", Dir: "/agents/jazz/skills"},
-			{Name: "crush", Dir: "/agents/crush/skills"},
-		},
-	}
-
-	selected := selectedPrunePlan(plan, []string{pruneEmptyDirKey("/agents/jazz/skills")})
-
-	if got, want := selected.EmptyAgentDirs, []engine.AgentDir{{Name: "jazz", Dir: "/agents/jazz/skills"}}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("selected EmptyAgentDirs = %#v; want %#v", got, want)
-	}
 }
 
 func TestCLILsJSONAgentsAreDeclaredAvailability(t *testing.T) {

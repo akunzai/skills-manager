@@ -70,7 +70,9 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		printScopeStateUnreadable(cmd.OutOrStdout(), stateError)
 		return exitError{message: "stale Baselines were not pruned", code: 2}
 	}
-	if nothingToPrune(plan) {
+	// Empty is what apply would remove; untracked real directories are still
+	// worth offering in the prompt, or reporting as skipped with --yes.
+	if plan.Empty() && len(plan.UntrackedDirs) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "Nothing to prune.")
 		return finish()
 	}
@@ -94,18 +96,18 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 			fmt.Fprintln(cmd.OutOrStdout(), "Operation cancelled.")
 			return nil
 		}
-		plan = selectedPrunePlan(plan, selected)
-		if nothingToPrune(plan) {
+		plan = plan.Select(pruneSelection(plan, selected))
+		if plan.Empty() {
 			fmt.Fprintln(cmd.OutOrStdout(), "No items selected. Aborted.")
 			return nil
 		}
 	} else {
 		printPrunePlan(cmd, plan)
-		skippedReal = slices.Clone(plan.UntrackedDirs)
-		plan.UntrackedDirs = nil
+		// Nothing approves them without a prompt, so apply leaves them.
+		skippedReal = plan.UntrackedDirs
 	}
 
-	if nothingToPrune(plan) {
+	if plan.Empty() {
 		printPruneSkippedReal(cmd, skippedReal)
 		return finish()
 	}
@@ -123,12 +125,6 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		return fmt.Errorf("prune completed with failures: %w", applyErr)
 	}
 	return finish()
-}
-
-// nothingToPrune is whether a plan, as planned or as selected, removes
-// nothing at all.
-func nothingToPrune(plan engine.PrunePlan) bool {
-	return len(plan.AllUntracked()) == 0 && len(plan.Unconfigured) == 0 && len(plan.EmptyAgentDirs) == 0 && len(plan.StateSkills) == 0
 }
 
 func printPrunePlan(cmd *cobra.Command, plan engine.PrunePlan) {
@@ -199,6 +195,13 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 	if len(parts) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Pruned %s.\n", strings.Join(parts, " and "))
 	}
+	if n := len(result.SkippedSkills); n > 0 {
+		what := "that are no longer links"
+		if n == 1 {
+			what = "that is no longer a link"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Skipped %s %s.\n", countOf(n, "untracked master skill"), what)
+	}
 	if n := len(result.SkippedLinks); n > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d changed or missing managed links.\n", n)
 	}
@@ -210,6 +213,9 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 	}
 	for _, skill := range result.RemovedSkills {
 		fmt.Fprintf(cmd.OutOrStdout(), "  Removed master skill: %s\n", skill)
+	}
+	for _, skill := range result.SkippedSkills {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Skipped master skill (not a link): %s\n", skill)
 	}
 	for _, link := range result.RemovedLinks {
 		fmt.Fprintf(cmd.OutOrStdout(), "  Removed managed link: %s\n", models.ToTildePath(link.Path))
@@ -278,35 +284,36 @@ func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
 	return tui.PromptOrderedGroupedMultiSelect("Select items to prune:", groups, []string{pruneMasterGroup})
 }
 
-func selectedPrunePlan(plan engine.PrunePlan, selected []string) engine.PrunePlan {
-	selectedSet := make(map[string]bool, len(selected))
+// pruneSelection turns the prompt's selected keys back into the items they
+// name. What a selection implies — a master's links, consent for a real
+// directory — is engine.PrunePlan.Select's to decide.
+func pruneSelection(plan engine.PrunePlan, selected []string) engine.PruneSelection {
+	keys := make(map[string]bool, len(selected))
 	for _, key := range selected {
-		selectedSet[key] = true
+		keys[key] = true
 	}
-	result := engine.PrunePlan{}
-	selectedMasters := make(map[string]bool)
+	var selection engine.PruneSelection
 	for _, skill := range plan.AllUntracked() {
-		if selectedSet[pruneMasterKey(skill)] {
-			result.UntrackedSkills = append(result.UntrackedSkills, skill)
-			selectedMasters[skill] = true
+		if keys[pruneMasterKey(skill)] {
+			selection.Masters = append(selection.Masters, skill)
 		}
 	}
 	for _, link := range plan.Unconfigured {
-		if selectedSet[pruneLinkKey(link.Path)] || selectedMasters[link.Skill] {
-			result.Unconfigured = append(result.Unconfigured, link)
+		if keys[pruneLinkKey(link.Path)] {
+			selection.Links = append(selection.Links, link.Path)
 		}
 	}
 	for _, dir := range plan.EmptyAgentDirs {
-		if selectedSet[pruneEmptyDirKey(dir.Dir)] {
-			result.EmptyAgentDirs = append(result.EmptyAgentDirs, dir)
+		if keys[pruneEmptyDirKey(dir.Dir)] {
+			selection.EmptyDirs = append(selection.EmptyDirs, dir.Dir)
 		}
 	}
 	for _, name := range plan.StateSkills {
-		if selectedSet[pruneBaselineKey(name)] {
-			result.StateSkills = append(result.StateSkills, name)
+		if keys[pruneBaselineKey(name)] {
+			selection.Baselines = append(selection.Baselines, name)
 		}
 	}
-	return result
+	return selection
 }
 
 func pruneMasterKey(skill string) string {
