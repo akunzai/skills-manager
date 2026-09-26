@@ -50,13 +50,15 @@ const (
 
 // SyncEvent is one step of applying a SyncPlan for the CLI to print.
 type SyncEvent struct {
-	Kind       string
-	Source     string
-	Skill      string
-	Skills     []string
-	Path       string
-	Target     string
-	Err        string
+	Kind   string
+	Source string
+	Skill  string
+	Skills []string
+	Path   string
+	Target string
+	Err    string
+	// Next is the skills command that clears what Err reports, if one does.
+	Next       string
 	Missing    []string
 	Unexpected []string
 	// Agents carries the Agents named by an Availability event — for
@@ -224,7 +226,7 @@ func applyItem(availability *Availability, skillsDir string, item SyncPlanItem, 
 // records the baseline it was applied from.
 func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlanItem, decision SyncDecision, baselines *Baselines, emit func(SyncEvent)) (SyncOutcome, error) {
 	if item.Block == SyncBlockCacheMissing {
-		emitSync(emit, SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.BlockReason})
+		emitSync(emit, SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.BlockReason, Next: item.BlockNext})
 		return SyncBlocked, fmt.Errorf("%s", item.BlockReason)
 	}
 	if item.Err != "" {
@@ -237,7 +239,7 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 		if item.BlockReason != "" {
 			reason += ": " + item.BlockReason
 		}
-		emitSync(emit, SyncEvent{Kind: SyncSkipped, Source: item.Source, Skill: item.Name, Err: reason})
+		emitSync(emit, SyncEvent{Kind: SyncSkipped, Source: item.Source, Skill: item.Name, Err: reason, Next: item.BlockNext})
 		return SyncBlocked, fmt.Errorf("%s", block)
 	}
 	if action == SyncActionMaterialize {

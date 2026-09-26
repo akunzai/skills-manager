@@ -50,7 +50,7 @@ func newDoctorCmd() *cobra.Command {
 				}
 			}
 			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix, approve)
-			printHealthReport(out, doctorFindings(outcome.Report))
+			printHealthReport(out, doctorFindings(outcome.Report, scopeFlagsOf(scope)))
 			if runErr != nil {
 				return runErr
 			}

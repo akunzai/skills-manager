@@ -1709,7 +1709,7 @@ func TestCLISyncReportsEachSkillOnceWithoutATerminal(t *testing.T) {
 	want := "  Skipped drifted: local_drift\n" +
 		"ok  sample\n" +
 		"Sync did not converge. 1 blocked skill.\n" +
-		"Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n"
+		"Next: inspect the changes, then re-run with 'skills sync" + pathOverrideFlags(configFile, skillsDir, cacheDir) + " --force' to overwrite them.\n"
 	if body != want {
 		t.Fatalf("output = %q\nwant     %q", body, want)
 	}
@@ -2153,6 +2153,73 @@ func TestCLIProjectSyncResolvesRelativeSourceInNewCheckout(t *testing.T) {
 	}
 	if resolved != want {
 		t.Fatalf("synced skill resolves to %q; want this project's %q", resolved, want)
+	}
+}
+
+// Every command a Project Scope suggests must reach that Project: without -p
+// it would act on Global. The engine names some of these commands, so this
+// covers both the CLI's own sentences and the engine's.
+func TestCLIProjectNextActionsCarryTheScopeFlag(t *testing.T) {
+	project := projectScope(t)
+	origin := filepath.Join(t.TempDir(), "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The engine's reason for a Cache never fetched.
+	out, _ := runCLI(t, "sync", "-p")
+	if !strings.Contains(out, "Cache missing for Source owner/repo; run 'skills update -p'") {
+		t.Fatalf("sync -p did not point at update -p:\n%s", out)
+	}
+	resetSubcommandFlags()
+	if out, err := runCLI(t, "update", "-p"); err != nil {
+		t.Fatalf("update -p: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".agents", "skills", "sample", "SKILL.md"), []byte("# edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The CLI's own sentences for protected drift.
+	resetSubcommandFlags()
+	out, _ = runCLI(t, "sync", "-p")
+	if !strings.Contains(out, "re-run with 'skills sync -p --force'") {
+		t.Fatalf("sync -p did not suggest sync -p --force:\n%s", out)
+	}
+	resetSubcommandFlags()
+	out, _ = runCLI(t, "outdated", "-p")
+	if !strings.Contains(out, "'skills sync -p --force' if intended") {
+		t.Fatalf("outdated -p did not suggest sync -p --force:\n%s", out)
+	}
+}
+
+// Doctor suggests what the user passed, like every other command: a Global
+// Scope whose --skills-dir looks like a Project's is still Global, so its
+// commands carry that --skills-dir and no -p.
+func TestCLIDoctorNextActionsFollowTheFlagsNotThePath(t *testing.T) {
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	home := isolateHome(t)
+	skillsDir := filepath.Join(home, "work", "demo", ".agents", "skills")
+	configFile := filepath.Join(home, "work", "demo", ".agents", "skills.json")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "remoted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "remoted", "remoted", "git", "https://example.test/repo.git")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _ := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
+	want := "then run 'skills sync" + pathOverrideFlags(configFile, skillsDir, "") + "' to re-materialize it."
+	if !strings.Contains(out, want) {
+		t.Fatalf("doctor output lacks %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "sync -p") {
+		t.Fatalf("doctor suggested the Project Scope for a Global run:\n%s", out)
 	}
 }
 
@@ -2777,7 +2844,7 @@ func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
 	for _, want := range []string{
 		"Failed to run installer for cmd-skill",
 		"Added 1 skill(s) [cmd-skill] to skills.json; 1 failed.",
-		"Next: follow the reason given for each skill above, then run 'skills sync'.",
+		"Next: follow the reason given for each skill above, then run 'skills sync" + pathOverrideFlags(configFile, skillsDir, "") + "'.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output does not say %q:\n%s", want, out)
@@ -2808,7 +2875,7 @@ func TestCLICommandAddCheckFailureStillSaves(t *testing.T) {
 	for _, want := range []string{
 		"Command check 'exit 1' failed, skipping cmd-skill",
 		"Added 1 skill(s) [cmd-skill] to skills.json; 1 blocked.",
-		"Next: follow the reason given for each skill above, then run 'skills sync'.",
+		"Next: follow the reason given for each skill above, then run 'skills sync" + pathOverrideFlags(configFile, skillsDir, "") + "'.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output does not say %q:\n%s", want, out)
@@ -3355,8 +3422,8 @@ func TestCLISyncSaysOnceThatAvailabilityWasAppliedByCopying(t *testing.T) {
 	}
 	// The suggested command has to name the Scope the user chose, not the one
 	// this --skills-dir happens to look like (root.go, and the same invariant
-	// ls and config already assert).
-	if !strings.Contains(out, "run 'skills sync' to switch") {
+	// ls and config already assert): the paths they passed, and no -p.
+	if !strings.Contains(out, "run 'skills sync"+pathOverrideFlags(configFile, skillsDir, cacheDir)+"' to switch") {
 		t.Fatalf("a custom --skills-dir without --project must not suggest the Project Scope:\n%s", out)
 	}
 }
@@ -3459,7 +3526,7 @@ func TestCLIOutdatedReportsIncompleteCache(t *testing.T) {
 	if got := ExitCode(err); err == nil || got != 1 {
 		t.Fatalf("outdated exit code = %d (err=%v); want 1:\n%s", got, err, out)
 	}
-	for _, want := range []string{"Cache: Cache incomplete", "beta: Unverified", "run 'skills update'"} {
+	for _, want := range []string{"Cache: Cache incomplete", "beta: Unverified", "run 'skills update" + pathOverrideFlags(configFile, skillsDir, cacheDir) + "'"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("outdated output lacks %q:\n%s", want, out)
 		}
@@ -3524,14 +3591,14 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	}
 	resetSubcommandFlags()
 	out, err := runCLI(t, "update", "--config", otherConfig, "--skills-dir", otherSkills, "--cache-dir", cacheDir)
-	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed old") || !strings.Contains(out, "run 'skills rm gone'") {
+	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed old") || !strings.Contains(out, "run 'skills rm"+pathOverrideFlags(otherConfig, otherSkills, cacheDir)+" gone'") {
 		t.Fatalf("update should follow the rename and leave gone blocked: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(otherSkills, "new", "SKILL.md")); err != nil {
 		t.Fatalf("update did not sync the renamed Skill: %v", err)
 	}
 	out, err = run("outdated")
-	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed") || !strings.Contains(out, "→ ") || !strings.Contains(out, "run 'skills rm gone'") {
+	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed") || !strings.Contains(out, "→ ") || !strings.Contains(out, "run 'skills rm"+pathOverrideFlags(configFile, skillsDir, cacheDir)+" gone'") {
 		t.Fatalf("outdated should show the rename and the removal: %v\n%s", err, out)
 	}
 	out, err = run("sync", "--dry-run")
@@ -3546,7 +3613,7 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	if ExitCode(err) != 1 {
 		t.Fatalf("the removed Skill still blocks, so sync exits 1: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Renamed old") || !strings.Contains(out, "no longer in Source owner/repo; run 'skills rm gone'") {
+	if !strings.Contains(out, "Renamed old") || !strings.Contains(out, "no longer in Source owner/repo; run 'skills rm"+pathOverrideFlags(configFile, skillsDir, cacheDir)+" gone'") {
 		t.Fatalf("sync should rename old and name rm for gone:\n%s", out)
 	}
 	if strings.Contains(out, "--force") || strings.Contains(out, "run 'skills update' first") {
@@ -3735,4 +3802,16 @@ func TestCLIAddBranchIsDeclaredAndKept(t *testing.T) {
 	if got := scopeContent(); got != "main" {
 		t.Fatalf("tag content = %q; want main", got)
 	}
+}
+
+// pathOverrideFlags is what a suggested command carries for the path
+// overrides a test passed, as scopeFlagsOf renders them.
+func pathOverrideFlags(configFile, skillsDir, cacheDir string) string {
+	var flags string
+	for _, override := range []struct{ flag, value string }{{"--config", configFile}, {"--skills-dir", skillsDir}, {"--cache-dir", cacheDir}} {
+		if override.value != "" {
+			flags += " " + override.flag + " " + shellWord(override.value)
+		}
+	}
+	return flags
 }

@@ -332,9 +332,9 @@ func newAddCmd() *cobra.Command {
 			case engine.AddSourceRemote:
 				intake, err := newRemoteIntake(cmd, scope.ConfigPath, source, flagURL, flagBranch, flagPath, cacheDir)
 				if err != nil {
-					return err
+					return withScopeFlags(err, scopeFlagsOf(scope))
 				}
-				return intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
+				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents}), scopeFlagsOf(scope))
 			default:
 				return fmt.Errorf("unsupported Add Source kind %q", kind)
 			}

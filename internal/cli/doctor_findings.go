@@ -37,7 +37,7 @@ type Finding struct {
 // Repair outcomes travel on the diagnosed items; this file only renders.
 // Every doctor sentence is assembled here and nowhere else — the engine
 // reports facts, this file turns them into English (see engine.DoctorOutcome).
-func doctorFindings(p engine.DoctorReport) []Finding {
+func doctorFindings(p engine.DoctorReport, scopeFlags string) []Finding {
 	var findings []Finding
 	add := func(f Finding) { findings = append(findings, f) }
 
@@ -69,7 +69,7 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 	// question this answers — why are these real files instead of links — is
 	// asked once.
 	if copied, breakdown := describeCopiedAvailability(p.Drift); copied > 0 {
-		add(Finding{Severity: SeverityInfo, Message: "  " + copiedAvailabilityNotice(copied, breakdown, scopeFlag(p))})
+		add(Finding{Severity: SeverityInfo, Message: "  " + copiedAvailabilityNotice(copied, breakdown, scopeFlags)})
 	}
 
 	dangling, live := leftoverPathsByAgent(p.Leftover.Paths)
@@ -106,7 +106,7 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 		}
 		for _, unobservable := range d.Unobservable {
 			add(Finding{Severity: SeverityError, Message: unobservableAvailabilityFinding(d.Skill, unobservable), Blank: true})
-			add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: inspect %s, then re-run 'skills doctor%s'.", models.ToTildePath(unobservable.Dir), scopeFlag(p))})
+			add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: inspect %s, then re-run 'skills doctor%s'.", models.ToTildePath(unobservable.Dir), scopeFlags)})
 		}
 		if len(d.Unexpected) > 0 {
 			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Availability drift for %s; unexpected links: %s", d.Skill, strings.Join(d.Unexpected, ", ")), Blank: true})
@@ -133,13 +133,13 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Untracked skills in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.Untracked, ", ")), Blank: true})
 		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
 			"  Not in Config; left as-is. Declare %s with 'skills adopt%s', or remove %s with a TTY prune; 'skills prune%s --yes' will not.",
-			objectPronoun(len(p.Untracked)), scopeFlag(p), objectPronoun(len(p.Untracked)), scopeFlag(p))})
+			objectPronoun(len(p.Untracked)), scopeFlags, objectPronoun(len(p.Untracked)), scopeFlags)})
 	}
 	if len(p.UntrackedLinks) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Untracked leftover symlink in %s: %s", models.ToTildePath(p.SkillsDir), strings.Join(p.UntrackedLinks, ", ")), Blank: true})
 		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
 			"  Remove %s with 'skills prune%s'.",
-			objectPronoun(len(p.UntrackedLinks)), scopeFlag(p))})
+			objectPronoun(len(p.UntrackedLinks)), scopeFlags)})
 	}
 	for _, illegal := range p.IllegalLocal {
 		add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Local source for %s is inside the skills directory.", illegal.Name), Blank: true})
@@ -151,18 +151,18 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 		add(Finding{Severity: SeverityWarning, Message: "Skill arrived as a text stub instead of a directory: " + stub, Blank: true})
 		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf(
 			"  Next: set 'git config core.symlinks true' and check the file out again, or remove %s and run 'skills sync%s'.",
-			models.ToTildePath(filepath.Join(p.SkillsDir, stub)), scopeFlag(p))})
+			models.ToTildePath(filepath.Join(p.SkillsDir, stub)), scopeFlags)})
 	}
 	for _, invalid := range p.Invalid {
 		add(Finding{Severity: SeverityError, Message: "Installed folder missing SKILL.md: " + invalid.Name, Blank: true})
-		add(Finding{Severity: SeverityInfo, Message: "  " + invalidNextAction(p, invalid)})
+		add(Finding{Severity: SeverityInfo, Message: "  " + invalidNextAction(p, invalid, scopeFlags)})
 	}
 	if p.StateError != "" {
 		add(Finding{Severity: SeverityError, Message: "Corrupted Scope state: " + p.StateError, Blank: true})
 	}
 	if p.GitError != "" {
 		add(Finding{Severity: SeverityError, Message: "Remote Sources cannot be fetched: " + p.GitError, Blank: true})
-		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: install or upgrade git, then run 'skills update%s'.", scopeFlag(p))})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: install or upgrade git, then run 'skills update%s'.", scopeFlags)})
 	}
 	if len(p.StaleState) > 0 {
 		add(Finding{Severity: SeverityWarning, Message: "Obsolete Scope state entries: " + strings.Join(p.StaleState, ", "), Blank: true})
@@ -172,7 +172,7 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 	}
 	for _, artifact := range p.CacheRecovery {
 		add(Finding{Severity: SeverityWarning, Message: "Leftover Cache recovery artifact from an earlier release: " + artifact, Blank: true})
-		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: run 'skills doctor --fix%s' to remove it.", scopeFlag(p))})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: run 'skills doctor --fix%s' to remove it.", scopeFlags)})
 	}
 	for _, artifact := range p.StaleScopes {
 		add(Finding{Severity: SeverityWarning, Message: "Scope state references missing path: " + artifact.ScopePath, Blank: true})
@@ -208,7 +208,7 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 	// be applied there; the way out is renaming or excluding the Skill.
 	for _, reserved := range p.ReservedNames {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("%s cannot be available to %s: %s reserves that directory name.", reserved.Skill, reserved.Agent, agentProductName(reserved.Agent)), Blank: true})
-		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: rename the Skill, or run 'skills agents%s %s exclude %s'.", scopeFlag(p), reserved.Skill, reserved.Agent)})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: rename the Skill, or run 'skills agents%s %s exclude %s'.", scopeFlags, reserved.Skill, reserved.Agent)})
 	}
 
 	return findings
@@ -220,8 +220,7 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 // symlinked Skill only rebuilds the same link at the same broken Source, and
 // a command installer is never re-run by Sync when its check does not pass.
 // One shared sentence would therefore be wrong for someone.
-func invalidNextAction(p engine.DoctorReport, invalid engine.InvalidSkill) string {
-	flag := scopeFlag(p)
+func invalidNextAction(p engine.DoctorReport, invalid engine.InvalidSkill, flag string) string {
 	switch invalid.SourceType {
 	case "local_symlink":
 		source := models.ToTildePath(models.ResolveLocalSourcePath(invalid.Source, p.SkillsDir))
@@ -232,18 +231,6 @@ func invalidNextAction(p engine.DoctorReport, invalid engine.InvalidSkill) strin
 		path := models.ToTildePath(filepath.Join(p.SkillsDir, invalid.Name))
 		return fmt.Sprintf("Next: remove %s, then run 'skills sync%s' to re-materialize it.", path, flag)
 	}
-}
-
-// scopeFlag is the flag a suggested command needs to act on the Scope doctor
-// just diagnosed. Printing a Global command while diagnosing a Project would
-// send the user at the wrong skills directory. It derives from the diagnosed
-// skills directory rather than from a Scope, because doctorFindings is handed
-// a report, and every finding it words is about that directory.
-func scopeFlag(p engine.DoctorReport) string {
-	if models.IsProjectScope(p.SkillsDir) {
-		return " -p"
-	}
-	return ""
 }
 
 // agentProductName is how a sentence names an Agent's product, for the Agents

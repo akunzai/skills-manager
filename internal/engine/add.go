@@ -85,19 +85,31 @@ func AddBranch(cfg *config.Config, key, requested string) (string, error) {
 	if requested == "" {
 		return repo.Branch, nil
 	}
-	return "", branchConflictError{key: key, declared: repo.Branch, requested: requested}
+	return "", branchConflictError{key: key, declared: repo.Branch, requested: requested, skills: sortedSkillKeys(repo.Skills)}
 }
 
 // branchConflictError is AddBranch refusing a branch other than the one a
 // Source is declared on: a state for the user to resolve, not a failure.
-type branchConflictError struct{ key, declared, requested string }
+type branchConflictError struct {
+	key, declared, requested string
+	skills                   []string
+}
 
-func (e branchConflictError) Error() string {
+func (e branchConflictError) Error() string { return e.next().Error() }
+
+// Unwrap is the command that resolves the conflict, for the CLI to render
+// with its Scope flags.
+func (e branchConflictError) Unwrap() error { return e.next() }
+
+func (e branchConflictError) next() NextCommand {
 	current := "its default branch"
 	if e.declared != "" {
 		current = fmt.Sprintf("branch %q", e.declared)
 	}
-	return fmt.Sprintf("Source %s is already declared on %s; remove its Skills with 'skills rm' before adding it on %q", e.key, current, e.requested)
+	return NextCommand{
+		Reason:  fmt.Sprintf("Source %s is already declared on %s; to add it on %q, first remove its Skills", e.key, current, e.requested),
+		Command: "rm " + strings.Join(e.skills, " "),
+	}
 }
 
 func NewRemoteAddSource(intake *RemoteIntake) AddSource {

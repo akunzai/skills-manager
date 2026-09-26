@@ -225,7 +225,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	if err != nil {
 		return err
 	}
-	return reportAddOutcome(out, result, filepath.Base(configPath), scopeFlagOf(scope))
+	return reportAddOutcome(out, result, filepath.Base(configPath), scopeFlagsOf(scope))
 }
 
 // reportAddOutcome says why any Skill could not be applied, in Sync's words,
@@ -235,7 +235,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeFlag string) error {
 	for _, ev := range result.Events {
 		if !syncEventIsProgress(ev.Kind) {
-			printSyncEvent(out, ev)
+			printSyncEvent(out, ev, scopeFlag)
 		}
 	}
 	if result.StateError != "" {
@@ -260,7 +260,7 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeF
 	// Sync cannot get past an unreadable Scope state either, so it is only
 	// the next step for a Skill that was blocked or failed on its own.
 	if result.StateError == "" || result.Blocked+result.Failed > 1 {
-		fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync'.\n")
+		fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync%s'.\n", scopeFlag)
 	}
 	if result.Failed > 0 {
 		return exitError{message: fmt.Sprintf("Add did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill")), code: 2}

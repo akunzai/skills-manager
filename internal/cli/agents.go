@@ -74,7 +74,7 @@ func newAgentsCmd() *cobra.Command {
 			if err := printSkillAvailability(cmd, cfg, skill, source, skillsDir); err != nil {
 				return err
 			}
-			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagOf(scope))
+			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagsOf(scope))
 		},
 	}
 }

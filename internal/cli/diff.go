@@ -48,9 +48,9 @@ could not be completed.`,
 			}
 			d, err := engine.DiffSkill(cfg, name, scope.SkillsDir, scope.CacheDir)
 			if err != nil {
-				return err
+				return withScopeFlags(err, scopeFlagsOf(scope))
 			}
-			printSkillDiff(cmd.OutOrStdout(), d, flagStat, scopeFlagOf(scope))
+			printSkillDiff(cmd.OutOrStdout(), d, flagStat, scopeFlagsOf(scope))
 			if !d.Empty() {
 				return exitError{message: fmt.Sprintf("%s differs from its Baseline or Cache", name), code: 1}
 			}
