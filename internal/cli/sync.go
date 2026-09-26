@@ -122,8 +122,26 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 			printScopeStateWarning(out, ev.Err, scopeFlagOf(scope))
 		}
 	}
+	printMaterialized(out, report)
 	printCopiedAvailability(out, report, scopeFlagOf(scope))
 	return report, err
+}
+
+// printMaterialized names the Skills whose content Sync wrote, once the
+// progress region is gone: the region's rows vanish, and without this a
+// person cannot tell which Skills now read differently.
+func printMaterialized(out io.Writer, report *engine.SyncReport) {
+	if report == nil {
+		return
+	}
+	for _, group := range []struct {
+		verb   string
+		skills []string
+	}{{"Updated", report.Updated}, {"Restored", report.Restored}} {
+		if len(group.skills) > 0 {
+			fmt.Fprintf(out, "%s%s %s: %s.%s\n", colorGreen, group.verb, countOf(len(group.skills), "skill"), strings.Join(group.skills, ", "), colorReset)
+		}
+	}
 }
 
 // reportSyncOutcome states where the Scope stands and picks the exit code.

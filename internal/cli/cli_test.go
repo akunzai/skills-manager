@@ -1266,9 +1266,10 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The durable per-Source line replaces the progress region's "ok" line,
-	// and the Sync that follows applies what was refreshed.
+	// and the Sync that follows applies what was refreshed and names it.
 	want := "      Updated owner/repo (" + sha + ").\n" +
 		"Refreshed 1 Source Cache(s).\n" +
+		"Restored 1 skill: sample.\n" +
 		"Skills sync complete. 1 skills configured.\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout = %q\nwant     %q", got, want)
@@ -1351,6 +1352,66 @@ func TestCLIUpdateDoesNotReportASourceWhoseSkillsDidNotChange(t *testing.T) {
 	}
 	if len(doc.UpdatedRepos) != 0 || len(doc.SkippedRepos) != 1 || doc.SkippedRepos[0].Reason != engine.SkippedSkillsUnchanged {
 		t.Fatalf("JSON = %+v", doc)
+	}
+}
+
+// A Skill whose content changed upstream is named once Sync has written it,
+// in text and in JSON, apart from one the Scope was only missing.
+func TestCLIUpdateNamesTheSkillsItWrote(t *testing.T) {
+	resetRootCmdFlags()
+	isolateHome(t)
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "changed")
+	writeCLIGitSkill(t, origin, "deleted")
+	writeCLIGitSkill(t, origin, "steady")
+	configFile, skillsDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills")
+	cfg := config.DefaultConfig()
+	for _, name := range []string{"changed", "deleted", "steady"} {
+		config.AddRemoteSkillEntry(cfg, "owner/repo", name, name, "git", origin)
+	}
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"update", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache")}
+	if out, err := runCLI(t, args...); err != nil {
+		t.Fatalf("first update = %v:\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(origin, "changed", "SKILL.md"), []byte("---\nname: changed\ndescription: new\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-am", "change")
+	if err := os.RemoveAll(filepath.Join(skillsDir, "deleted")); err != nil {
+		t.Fatal(err)
+	}
+
+	resetSubcommandFlags()
+	out, err := runCLI(t, args...)
+	if err != nil {
+		t.Fatalf("update = %v:\n%s", err, out)
+	}
+	if !strings.Contains(out, "Updated 1 skill: changed.\nRestored 1 skill: deleted.\n") || strings.Contains(out, "steady.") {
+		t.Fatalf("output = %q; want changed updated, deleted restored, steady unnamed", out)
+	}
+
+	if err := os.RemoveAll(filepath.Join(skillsDir, "deleted")); err != nil {
+		t.Fatal(err)
+	}
+	resetSubcommandFlags()
+	var stdout bytes.Buffer
+	RootCmd.SetOut(&stdout)
+	RootCmd.SetArgs(append(args, "--json"))
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Sync updateSyncJSON `json:"sync"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("JSON: %v\n%s", err, stdout.String())
+	}
+	if len(doc.Sync.Updated) != 0 || !reflect.DeepEqual(doc.Sync.Restored, []string{"deleted"}) {
+		t.Fatalf("sync = %+v; want only deleted restored", doc.Sync)
 	}
 }
 
