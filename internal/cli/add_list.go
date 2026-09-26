@@ -49,7 +49,7 @@ func listLocalSkills(cmd *cobra.Command, localPath, selectionPath string, jsonOu
 		return fmt.Errorf("local source path does not exist or is not a directory: %s", models.ToTildePath(sourcePath))
 	}
 
-	discovered, descriptions, err := engine.DiscoverSkillsInRepoWithDescriptions(absSourcePath, selectionPath)
+	discovered, descriptions, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
 	if err != nil {
 		return fmt.Errorf("discover skills in %s: %w", models.ToTildePath(sourcePath), err)
 	}
@@ -80,7 +80,7 @@ func listRemoteSkills(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPa
 
 	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
 	region.Start(presentation.Job{Name: parsed.SourceKey, Label: "Fetching " + parsed.SourceKey})
-	_, discovered, descriptions, err := engine.PrepareRemoteSourceWithDescriptions(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir, selectionPath)
+	_, discovered, descriptions, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir, selectionPath)
 	if err != nil {
 		region.Fail(parsed.SourceKey)
 		region.Stop()

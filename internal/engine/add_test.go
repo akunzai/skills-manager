@@ -450,7 +450,7 @@ func TestApplyAddPlanChecksOutSelectedSkillsInSparseCache(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	_, url := writeSparseOrigin(t)
 	project := t.TempDir()
-	repoDir, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, filepath.Join(project, "cache"), "")
+	repoDir, _, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, filepath.Join(project, "cache"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +486,7 @@ func TestApplyAddPlanKeepsDeclaredSkillsInConvertedCache(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "alpha", "alpha", "git", origin)
-	repoDir, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin, Branch: branch}, cacheDir, "")
+	repoDir, _, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin, Branch: branch}, cacheDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
