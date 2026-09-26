@@ -156,7 +156,7 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%sScanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
-	discovered, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
+	discovered, _, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
 	discovered, err = discoveryResult(discovered, err, models.ToTildePath(sourcePath))
 	if err != nil {
 		return nil, err
@@ -219,7 +219,7 @@ func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPat
 
 	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
 	region.Start(presentation.Job{Name: parsed.SourceKey, Label: "Fetching " + parsed.SourceKey})
-	repoDir, discovered, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir, selectionPath)
+	repoDir, discovered, _, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir, selectionPath)
 	if err != nil {
 		region.Fail(parsed.SourceKey)
 		region.Stop()

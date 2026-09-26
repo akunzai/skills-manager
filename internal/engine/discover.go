@@ -80,14 +80,9 @@ type DiscoveredSkills map[string][]string
 // (Add's --list) without a second scan.
 type DiscoveredSkillDescriptions map[string]string
 
-func DiscoverSkillsInRepo(repoDir, scope string) (DiscoveredSkills, error) {
-	discovered, _, err := discoverSkills(repoDir, scope, fileBundleIdentity(repoDir))
-	return discovered, err
-}
-
-// DiscoverSkillsInRepoWithDescriptions is DiscoverSkillsInRepo plus each
+// DiscoverSkillsInRepo discovers the Skills in a local directory, with each
 // candidate's description.
-func DiscoverSkillsInRepoWithDescriptions(repoDir, scope string) (DiscoveredSkills, DiscoveredSkillDescriptions, error) {
+func DiscoverSkillsInRepo(repoDir, scope string) (DiscoveredSkills, DiscoveredSkillDescriptions, error) {
 	return discoverSkills(repoDir, scope, fileBundleIdentity(repoDir))
 }
 

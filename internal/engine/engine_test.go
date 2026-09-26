@@ -56,9 +56,9 @@ description: Does awesome stuff
 	}
 }
 
-// DiscoverSkillsInRepoWithDescriptions is what Add's --list shows: the same
-// candidates DiscoverSkillsInRepo returns, plus each one's description.
-func TestDiscoverSkillsInRepoWithDescriptionsReadsFrontmatter(t *testing.T) {
+// DiscoverSkillsInRepo returns each candidate's description, which Add's
+// --list shows.
+func TestDiscoverSkillsInRepoReadsDescriptions(t *testing.T) {
 	tmpRepo := t.TempDir()
 	skillDir := filepath.Join(tmpRepo, "sample")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
@@ -69,9 +69,9 @@ func TestDiscoverSkillsInRepoWithDescriptionsReadsFrontmatter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	discovered, descriptions, err := DiscoverSkillsInRepoWithDescriptions(tmpRepo, "")
+	discovered, descriptions, err := DiscoverSkillsInRepo(tmpRepo, "")
 	if err != nil {
-		t.Fatalf("DiscoverSkillsInRepoWithDescriptions failed: %v", err)
+		t.Fatalf("DiscoverSkillsInRepo failed: %v", err)
 	}
 	paths := discovered["sample"]
 	if !reflect.DeepEqual(paths, []string{"sample"}) {
@@ -105,7 +105,7 @@ func TestDiscoverSkillsInRepo(t *testing.T) {
 	_ = os.MkdirAll(deepDir, 0755)
 	_ = os.WriteFile(filepath.Join(deepDir, "SKILL.md"), []byte("---\nname: deep-skill\n---\n"), 0644)
 
-	discovered, err := DiscoverSkillsInRepo(tmpRepo, "")
+	discovered, _, err := DiscoverSkillsInRepo(tmpRepo, "")
 	if err != nil {
 		t.Fatalf("DiscoverSkillsInRepo failed: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestDiscoverSkillsInRepoCanonicalizesEquivalentMirrors(t *testing.T) {
 		}
 	}
 
-	discovered, err := DiscoverSkillsInRepo(tmpRepo, "")
+	discovered, _, err := DiscoverSkillsInRepo(tmpRepo, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestDiscoverSkillsInRepoPreservesDivergentDuplicateCandidates(t *testing.T)
 		}
 	}
 
-	discovered, err := DiscoverSkillsInRepo(tmpRepo, "")
+	discovered, _, err := DiscoverSkillsInRepo(tmpRepo, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestDiscoverSkillsInRepoCanonicalizesEquivalentGroupsIndependently(t *testi
 		}
 	}
 
-	discovered, err := DiscoverSkillsInRepo(repo, "")
+	discovered, _, err := DiscoverSkillsInRepo(repo, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestDiscoverSkillsInRepoAcceptsDirectSkillScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	discovered, err := DiscoverSkillsInRepo(repo, "skills/sample")
+	discovered, _, err := DiscoverSkillsInRepo(repo, "skills/sample")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestDiscoverSkillsInRepoScopesTraversalAndKeepsRepositoryPaths(t *testing.T
 		}
 	}
 
-	discovered, err := DiscoverSkillsInRepo(tmpRepo, "skills")
+	discovered, _, err := DiscoverSkillsInRepo(tmpRepo, "skills")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestDiscoverSkillsInRepoMeasuresDepthFromScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	discovered, err := DiscoverSkillsInRepo(tmpRepo, filepath.ToSlash(scope))
+	discovered, _, err := DiscoverSkillsInRepo(tmpRepo, filepath.ToSlash(scope))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestDiscoverSkillsInRepoMeasuresDepthFromScope(t *testing.T) {
 }
 
 func TestDiscoverSkillsInRepoRejectsEscapingScope(t *testing.T) {
-	_, err := DiscoverSkillsInRepo(t.TempDir(), "../outside")
+	_, _, err := DiscoverSkillsInRepo(t.TempDir(), "../outside")
 	if err == nil || !strings.Contains(err.Error(), "escapes repository") {
 		t.Fatalf("error = %v; want repository escape rejection", err)
 	}
@@ -292,7 +292,7 @@ func TestDiscoverSkillsInRepoPreservesExecutableAndSymlinkDifferences(t *testing
 			}
 		}
 
-		discovered, err := DiscoverSkillsInRepo(repo, "")
+		discovered, _, err := DiscoverSkillsInRepo(repo, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -320,7 +320,7 @@ func TestDiscoverSkillsInRepoPreservesExecutableAndSymlinkDifferences(t *testing
 			}
 		}
 
-		discovered, err := DiscoverSkillsInRepo(repo, "")
+		discovered, _, err := DiscoverSkillsInRepo(repo, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -353,7 +353,7 @@ func TestDiscoverSkillsInRepoFailsClosedForUnsupportedBundleEntries(t *testing.T
 		}
 	})
 
-	discovered, err := DiscoverSkillsInRepo(repo, "")
+	discovered, _, err := DiscoverSkillsInRepo(repo, "")
 	if err != nil {
 		t.Fatal(err)
 	}

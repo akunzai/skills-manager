@@ -13,7 +13,7 @@ func TestPrepareRemoteSourceRefreshesCacheAndDiscoversSkills(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, "sample")
 
-	repoDir, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir(), "")
+	repoDir, discovered, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,11 +22,10 @@ func TestPrepareRemoteSourceRefreshesCacheAndDiscoversSkills(t *testing.T) {
 	}
 }
 
-// PrepareRemoteSourceWithDescriptions is what Add's --list uses for a remote
-// Source: the same fetch and discovery as PrepareRemoteSource, plus each
-// candidate's description, captured while the Cache's transient SKILL.md-only
-// checkout (ADR-0004) still holds the file.
-func TestPrepareRemoteSourceWithDescriptionsCapturesEachCandidatesDescription(t *testing.T) {
+// PrepareRemoteSource returns each candidate's description, which Add's
+// --list shows for a remote Source, captured while the Cache's transient
+// SKILL.md-only checkout (ADR-0004) still holds the file.
+func TestPrepareRemoteSourceCapturesEachCandidatesDescription(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	dir := filepath.Join(origin, "sample")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -48,7 +47,7 @@ func TestPrepareRemoteSourceWithDescriptionsCapturesEachCandidatesDescription(t 
 		}
 	}
 
-	repoDir, discovered, descriptions, err := PrepareRemoteSourceWithDescriptions("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir(), "")
+	repoDir, discovered, descriptions, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +97,7 @@ func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 func TestPrepareRemoteSourceDiscoversFromSkillMDOnly(t *testing.T) {
 	t.Parallel()
 	_, url := writeSparseOrigin(t)
-	repoDir, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
+	repoDir, discovered, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +115,7 @@ func TestPrepareRemoteSourceKeepsDivergentMirrorsApart(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustGit(t, origin, "commit", "-am", "diverge")
-	_, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
+	_, discovered, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,14 +127,14 @@ func TestPrepareRemoteSourceKeepsDivergentMirrorsApart(t *testing.T) {
 func TestPrepareRemoteSourceScopedToDirectoryWithoutSkills(t *testing.T) {
 	t.Parallel()
 	_, url := writeSparseOrigin(t)
-	_, discovered, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "fixtures")
+	_, discovered, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "fixtures")
 	if err != nil {
 		t.Fatalf("a committed directory without Skills is not an error: %v", err)
 	}
 	if len(discovered) != 0 {
 		t.Fatalf("discovered = %#v", discovered)
 	}
-	if _, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "absent"); err == nil {
+	if _, _, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "absent"); err == nil {
 		t.Fatal("a directory the commit does not have must still fail")
 	}
 }

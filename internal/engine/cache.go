@@ -194,21 +194,10 @@ func (c Cache) withSkillFiles(fn func(repoDir string) error) error {
 	})
 }
 
-// PrepareRemoteSource refreshes one Source's Cache and discovers its Skills.
-// Add uses this before it knows which Skills the user will declare.
-func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir, scope string) (string, DiscoveredSkills, error) {
-	repoDir, discovered, _, err := prepareRemoteSource(key, repo, cacheDir, scope)
-	return repoDir, discovered, err
-}
-
-// PrepareRemoteSourceWithDescriptions is PrepareRemoteSource plus each
-// candidate's description, for Add's --list, which shows what Add would
-// offer without a second fetch.
-func PrepareRemoteSourceWithDescriptions(key string, repo config.RemoteRepo, cacheDir, scope string) (string, DiscoveredSkills, DiscoveredSkillDescriptions, error) {
-	return prepareRemoteSource(key, repo, cacheDir, scope)
-}
-
-func prepareRemoteSource(key string, repo config.RemoteRepo, cacheDir, scope string) (string, DiscoveredSkills, DiscoveredSkillDescriptions, error) {
+// PrepareRemoteSource refreshes one Source's Cache and discovers its Skills,
+// with each candidate's description. Add uses this before it knows which
+// Skills the user will declare; Add's --list shows the descriptions.
+func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir, scope string) (string, DiscoveredSkills, DiscoveredSkillDescriptions, error) {
 	cache := NewCache(key, repo.URL, repo.Branch, cacheDir)
 	repoDir, err := cache.Refresh(true, declaredSubpaths(repo)...)
 	if err != nil {
