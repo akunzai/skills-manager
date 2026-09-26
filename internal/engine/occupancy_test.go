@@ -507,3 +507,51 @@ func leftoverRepaired(occupancy LeftoverOccupancy, status RepairStatus) ([]Lefto
 	}
 	return paths, empty
 }
+
+// Unmanaged is every entry on a linkable Agent directory that this tool did
+// not create and declared Availability does not select, configured or not:
+// real directories and symlinks the user placed there, dangling or not. What
+// the Agent reserves, what this tool manages, a plain file, and a path Drift
+// reports as Foreign are not in it.
+func TestObserveOccupancyListsUnmanagedPathsOnEveryLinkableAgentDirectory(t *testing.T) {
+	home, skillsDir := globalSkillsHome(t, "alpha")
+	availability := globalAgentDirs(t, skillsDir, "claude")
+	config.AddLocalSymlinkEntry(availability.cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
+	claude := filepath.Join(home, ".claude", "skills")
+	goose := filepath.Join(home, ".config", "goose", "skills")
+	elsewhere := filepath.Join(home, "src", "linked")
+	for _, dir := range []string{
+		filepath.Join(claude, "alpha"),   // Foreign Drift of a declared Skill
+		filepath.Join(claude, "mine"),    // Unmanaged directory
+		filepath.Join(claude, "synced"),  // reserved by the Agent
+		filepath.Join(claude, ".hidden"), // not a Skill
+		filepath.Join(goose, "alpha"),    // declared, but not selected on goose
+		filepath.Join(goose, "theirs"),   // on an Agent directory no policy configures
+		elsewhere,
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWriteScopeStateTestFile(t, filepath.Join(claude, "notes.txt"), []byte("a file\n"))
+	if err := os.Symlink(elsewhere, filepath.Join(claude, "linked")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(home, "gone"), filepath.Join(claude, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	plantManagedLink(t, skillsDir, goose, "removed")
+
+	got := availability.ObserveOccupancy().Unmanaged
+
+	want := []UnmanagedAgentPath{
+		{Agent: "claude-code", Name: "dangling", Path: filepath.Join(claude, "dangling"), Symlink: true},
+		{Agent: "claude-code", Name: "linked", Path: filepath.Join(claude, "linked"), Symlink: true},
+		{Agent: "claude-code", Name: "mine", Path: filepath.Join(claude, "mine")},
+		{Agent: "goose", Name: "alpha", Path: filepath.Join(goose, "alpha")},
+		{Agent: "goose", Name: "theirs", Path: filepath.Join(goose, "theirs")},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unmanaged = %#v\nwant %#v", got, want)
+	}
+}

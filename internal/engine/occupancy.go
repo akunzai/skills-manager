@@ -51,16 +51,31 @@ func (o LeftoverOccupancy) ForSkills(names []string) LeftoverOccupancy {
 	return LeftoverOccupancy{Paths: paths, Empty: slices.Clone(o.Empty)}
 }
 
+// UnmanagedAgentPath is an entry on a linkable Agent directory that this tool
+// did not create and declared Availability does not select: a real directory
+// (an Unmanaged directory) or a symlink the user placed there, which may
+// dangle.
+type UnmanagedAgentPath struct {
+	Agent   string
+	Name    string
+	Path    string
+	Symlink bool
+}
+
 // Occupancy is a Scope's Agent directory occupancy, observed once (see
 // CONTEXT.md): the health of each configured Agent directory, the Leftover
-// occupancy across every Agent directory, and the Unexpected managed paths of
-// declared Skills. Each path lands in at most one of them, and Drift reads a
-// Skill's Unexpected paths from here rather than scanning again, so Sync,
-// Doctor, prune and rm classify a path under the same rule.
+// occupancy across every Agent directory, the Unexpected managed paths of
+// declared Skills, and the Unmanaged paths on every linkable Agent directory.
+// Each path lands in at most one of Leftover, Unexpected and Unmanaged, and
+// Drift reads a Skill's Unexpected paths from here rather than scanning again,
+// so Sync, Doctor, prune, rm and adopt classify a path under the same rule.
+// Agent health is a per-directory view: its Physical entries are Unmanaged
+// directories on configured Agent directories.
 type Occupancy struct {
 	Agents     []AgentHealth
 	Leftover   LeftoverOccupancy
 	Unexpected []ManagedAgentPath
+	Unmanaged  []UnmanagedAgentPath
 
 	availability *Availability
 }
@@ -176,6 +191,27 @@ func (a *Availability) ObserveOccupancy() Occupancy {
 		return cmp.Or(cmp.Compare(a.Skill, b.Skill), cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Path, b.Path))
 	})
 
+	seenUnmanaged := make(map[string]struct{})
+	for agent, dir := range knownDirs {
+		entries, err := readDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			path := filepath.Join(dir, entry.Name())
+			if _, dup := seenUnmanaged[path]; dup {
+				continue
+			}
+			if symlink, ok := a.unmanaged(agent, path, declared); ok {
+				seenUnmanaged[path] = struct{}{}
+				observation.Unmanaged = append(observation.Unmanaged, UnmanagedAgentPath{Agent: agent, Name: entry.Name(), Path: path, Symlink: symlink})
+			}
+		}
+	}
+	slices.SortFunc(observation.Unmanaged, func(a, b UnmanagedAgentPath) int {
+		return cmp.Or(cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Name, b.Name))
+	})
+
 	for agent, dir := range knownDirs {
 		if _, ok := configured[agent]; ok {
 			continue
@@ -214,13 +250,36 @@ func (a *Availability) agentHealth(agent, dir string, entries []os.DirEntry, dec
 			if _, err := os.Stat(path); err != nil && !isManagedSkillLink(path, name, a.skillsDir) {
 				health.UnmanagedBroken = append(health.UnmanagedBroken, name)
 			}
-		case fi.IsDir() && !strings.HasPrefix(name, "."):
-			if !isManagedSkillCopy(path, name, a.skillsDir) && !a.selects(declared, agent, name) {
+		case fi.IsDir():
+			if _, ok := a.unmanaged(agent, path, declared); ok {
 				health.Physical = append(health.Physical, name)
 			}
 		}
 	}
 	return health
+}
+
+// unmanaged is the one rule for an Unmanaged path on agent's directory: a
+// real directory or a symlink, not a dot entry, not a name the Agent reserves,
+// not Availability this tool made, and not on a path declared Availability
+// selects (Drift reports that one as Foreign). It reports whether the path is
+// a symlink.
+func (a *Availability) unmanaged(agent, path string, declared map[string]struct{}) (symlink, ok bool) {
+	name := filepath.Base(path)
+	if strings.HasPrefix(name, ".") || a.agents.IsReserved(agent, name) || a.selects(declared, agent, name) {
+		return false, false
+	}
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return false, false
+	}
+	switch {
+	case fi.Mode()&os.ModeSymlink != 0:
+		return true, !isManagedSkillLink(path, name, a.skillsDir)
+	case fi.IsDir():
+		return false, !isManagedSkillCopy(path, name, a.skillsDir)
+	}
+	return false, false
 }
 
 // RemoveLeftover removes the leftover occupancy in occupancy and returns it
