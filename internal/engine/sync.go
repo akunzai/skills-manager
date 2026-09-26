@@ -92,6 +92,12 @@ type SyncReport struct {
 	Configured []string
 	Events     []SyncEvent
 	Unknown    []SkillFreshness
+	// Updated is the Skills whose Scope copy was replaced with changed
+	// content, and Restored those written where the Scope had none. A Skill
+	// rewritten unchanged under --force is neither, and a rename is its own
+	// event.
+	Updated  []string
+	Restored []string
 	// forceable is whether --force would lift a block left under the
 	// decision Apply applied.
 	forceable bool
@@ -99,6 +105,17 @@ type SyncReport struct {
 
 func (r *SyncReport) add(ev SyncEvent) {
 	r.Events = append(r.Events, ev)
+}
+
+// noteMaterialized files a Materialized Skill under what its Scope copy was
+// before.
+func (r *SyncReport) noteMaterialized(skill string, before SkillFreshnessStatus) {
+	switch before {
+	case SkillMissing:
+		r.Restored = append(r.Restored, skill)
+	case SkillCacheUpdateAvailable, SkillUnknownBaseline, SkillLocalDrift:
+		r.Updated = append(r.Updated, skill)
+	}
 }
 
 // Summary is where the Scope stands after Apply. Nothing is pending once
@@ -114,8 +131,19 @@ func (r *SyncReport) Summary() SyncSummary {
 // Availability is still applied.
 func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (*SyncReport, error) {
 	report := &SyncReport{forceable: plan.Forceable(decision)}
+	// A renamed Skill's new name is not planned, so it reads as neither
+	// Updated nor Restored.
+	before := make(map[string]SkillFreshnessStatus)
+	for _, item := range plan.Items {
+		if item.Kind == SyncItemRemote {
+			before[item.Name] = item.Freshness.Status
+		}
+	}
 	emit := func(ev SyncEvent) {
 		report.add(ev)
+		if ev.Kind == SyncMaterialized {
+			report.noteMaterialized(ev.Skill, before[ev.Skill])
+		}
 		if onProgress != nil {
 			onProgress(ev)
 		}

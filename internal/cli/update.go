@@ -76,7 +76,7 @@ completed.`,
 				if plan.StateVerdict() == engine.StateWarn {
 					printScopeStateWarning(out, plan.StateError, scopeFlagOf(scope))
 				}
-				summary := newUpdateSyncJSON(planned)
+				summary := newUpdateSyncJSON(planned, nil)
 				switch {
 				case flagJSON:
 					printUpdateJSON(cmd.OutOrStdout(), result, summary)
@@ -100,10 +100,10 @@ completed.`,
 				printRefreshed(out, refreshed, len(result.SkippedRepos), flagDryRun)
 			}
 			outcome := planned
+			var report *engine.SyncReport
 			if flagDryRun {
 				printSyncPlan(out, plan, decision, scopeFlagOf(scope))
 			} else {
-				var report *engine.SyncReport
 				var applyErr error
 				if flagJSON {
 					// Without a terminal to ask, unknown baselines stay blocked,
@@ -119,7 +119,7 @@ completed.`,
 			}
 			syncErr := reportSyncOutcome(out, outcome, flagDryRun, "skills update")
 			if flagJSON {
-				printUpdateJSON(cmd.OutOrStdout(), result, newUpdateSyncJSON(outcome))
+				printUpdateJSON(cmd.OutOrStdout(), result, newUpdateSyncJSON(outcome, report))
 			}
 			if updateErr != nil {
 				fmt.Fprintf(out, "%s%sUpdate completed with errors.%s\n", colorBold, colorYellow, colorReset)
@@ -204,23 +204,34 @@ func printRefreshed(out io.Writer, refreshed, skipped int, dryRun bool) {
 }
 
 // updateSyncJSON is where the Scope stands after update's Sync. Pending is
-// only ever non-zero under --dry-run.
+// only ever non-zero under --dry-run; Updated and Restored are only ever
+// non-empty without it.
 type updateSyncJSON struct {
-	Converged  bool `json:"converged"`
-	Configured int  `json:"configured"`
-	Pending    int  `json:"pending"`
-	Blocked    int  `json:"blocked"`
-	Failed     int  `json:"failed"`
+	Converged  bool     `json:"converged"`
+	Configured int      `json:"configured"`
+	Pending    int      `json:"pending"`
+	Blocked    int      `json:"blocked"`
+	Failed     int      `json:"failed"`
+	Updated    []string `json:"updated"`
+	Restored   []string `json:"restored"`
 }
 
-func newUpdateSyncJSON(summary engine.SyncSummary) updateSyncJSON {
-	return updateSyncJSON{
+// newUpdateSyncJSON words summary, and the Skills report wrote when Sync ran.
+func newUpdateSyncJSON(summary engine.SyncSummary, report *engine.SyncReport) updateSyncJSON {
+	doc := updateSyncJSON{
 		Converged:  summary.Converged(),
 		Configured: summary.Configured,
 		Pending:    summary.Pending,
 		Blocked:    summary.Blocked,
 		Failed:     summary.Failed,
+		Updated:    []string{},
+		Restored:   []string{},
 	}
+	if report != nil {
+		doc.Updated = append(doc.Updated, report.Updated...)
+		doc.Restored = append(doc.Restored, report.Restored...)
+	}
+	return doc
 }
 
 // printUpdateJSON keeps the Update document's shape and adds the Sync that

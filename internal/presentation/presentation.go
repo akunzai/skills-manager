@@ -73,6 +73,17 @@ func (s Style) SourceIcon(sourceType string) string {
 	}[kind]
 }
 
+// LineWidth is how many columns one line on w may take without wrapping, or
+// 0 when w is no interactive terminal and a line has no width to fit.
+func LineWidth(w io.Writer) int {
+	if !interactive(isTerminal(w)) {
+		return 0
+	}
+	// The last column is left free: a line that fills it wraps on some
+	// terminals.
+	return terminalWidth(w) - 1
+}
+
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))

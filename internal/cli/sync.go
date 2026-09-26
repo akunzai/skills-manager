@@ -10,6 +10,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
 
@@ -122,8 +123,50 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 			printScopeStateWarning(out, ev.Err, scopeFlagOf(scope))
 		}
 	}
+	printMaterialized(out, report)
 	printCopiedAvailability(out, report, scopeFlagOf(scope))
 	return report, err
+}
+
+// printMaterialized names the Skills whose content Sync wrote, once the
+// progress region is gone: the region's rows vanish, and without this a
+// person cannot tell which Skills now read differently.
+func printMaterialized(out io.Writer, report *engine.SyncReport) {
+	if report == nil {
+		return
+	}
+	width := presentation.LineWidth(out)
+	for _, group := range []struct {
+		verb   string
+		skills []string
+	}{{"Updated", report.Updated}, {"Restored", report.Restored}} {
+		if len(group.skills) > 0 {
+			fmt.Fprintf(out, "%s%s%s\n", colorGreen, materializedLine(group.verb, group.skills, width), colorReset)
+		}
+	}
+}
+
+// materializedLineFull is how many names a line always lists in full.
+const materializedLineFull = 10
+
+// materializedLine lists skills after verb. Past materializedLineFull names on
+// a terminal it keeps to one line of width columns, naming as many as fit and
+// counting the rest; everywhere else, as in a log, it names them all.
+func materializedLine(verb string, skills []string, width int) string {
+	head := verb + " " + countOf(len(skills), "skill")
+	full := head + ": " + strings.Join(skills, ", ") + "."
+	if len(skills) <= materializedLineFull || width <= 0 || runewidth.StringWidth(full) <= width {
+		return full
+	}
+	line := head + "."
+	for shown := 1; shown < len(skills); shown++ {
+		candidate := fmt.Sprintf("%s: %s, and %d more.", head, strings.Join(skills[:shown], ", "), len(skills)-shown)
+		if runewidth.StringWidth(candidate) > width {
+			break
+		}
+		line = candidate
+	}
+	return line
 }
 
 // reportSyncOutcome states where the Scope stands and picks the exit code.
