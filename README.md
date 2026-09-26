@@ -80,6 +80,14 @@ GitHub tree URLs also set the branch and discovery scope. If same-name Skills
 have different contents, interactive Add asks which Source path to use;
 non-interactive Add requires an explicit scope.
 
+To see what a Source offers before declaring anything, add `--list` (`--json`
+for scripts). It honors `--path` and `--branch` the same way and changes
+nothing: no Config, Scope skills directory, or Agent directory is written.
+
+```sh
+skills add microsoft/azure-skills --path skills --list
+```
+
 ## Global or project-local
 
 Global is the default. Project mode keeps the declaration beside the code so a team can reproduce it after cloning.
@@ -126,6 +134,7 @@ Universal agents that read the central skills directory directly do not need lin
 | Intent | Command |
 | --- | --- |
 | See installed and configured skills | `skills ls` |
+| Browse a Source's Skills before adding any | `skills add <source> --list` |
 | Reconcile the selected Scope from its existing Cache | `skills sync` |
 | Preview reconciliation | `skills sync --dry-run` |
 | Inspect remote → Cache → Scope freshness | `skills outdated` |

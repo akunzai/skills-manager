@@ -264,6 +264,8 @@ func newAddCmd() *cobra.Command {
 		flagCheck       string
 		flagDescription string
 		flagYes         bool
+		flagList        bool
+		flagJSON        bool
 	)
 
 	cmd := &cobra.Command{
@@ -294,6 +296,11 @@ func newAddCmd() *cobra.Command {
 				return fmt.Errorf("--all cannot be combined with named Skills")
 			}
 
+			if flagList && (flagCommand != "" || flagAll || len(flagSkills) > 0 || len(flagAgents) > 0) {
+				cmd.SilenceUsage = false
+				return fmt.Errorf("--list cannot be combined with --command, --skill, --all, or --agent")
+			}
+
 			positional := ""
 			if len(args) > 0 {
 				positional = args[0]
@@ -306,6 +313,10 @@ func newAddCmd() *cobra.Command {
 			if err != nil {
 				cmd.SilenceUsage = false
 				return err
+			}
+
+			if flagList {
+				return runAddList(cmd, kind, source, flagPath, flagBranch, flagURL, cacheDir, flagJSON)
 			}
 
 			switch kind {
@@ -351,6 +362,8 @@ func newAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagCheck, "check", "", "Command to check before running the command Source")
 	cmd.Flags().StringVar(&flagDescription, "description", "", "Description of the skill")
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompts")
+	cmd.Flags().BoolVar(&flagList, "list", false, "List a Source's Skills without adding them")
+	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON (with --list)")
 
 	return cmd
 }

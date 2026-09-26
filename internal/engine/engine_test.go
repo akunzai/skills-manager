@@ -36,6 +36,52 @@ description: Does awesome stuff
 	}
 }
 
+func TestParseSkillDescriptionFromMD(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillMd := filepath.Join(tmpDir, "SKILL.md")
+
+	content := `---
+name: my-awesome-skill
+description: Does awesome stuff
+---
+
+# My Awesome Skill
+`
+	if err := os.WriteFile(skillMd, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test SKILL.md: %v", err)
+	}
+
+	if got := ParseSkillDescriptionFromMD(skillMd); got != "Does awesome stuff" {
+		t.Errorf("expected %q, got %q", "Does awesome stuff", got)
+	}
+}
+
+// DiscoverSkillsInRepoWithDescriptions is what Add's --list shows: the same
+// candidates DiscoverSkillsInRepo returns, plus each one's description.
+func TestDiscoverSkillsInRepoWithDescriptionsReadsFrontmatter(t *testing.T) {
+	tmpRepo := t.TempDir()
+	skillDir := filepath.Join(tmpRepo, "sample")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: sample\ndescription: Does the sample thing.\n---\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	discovered, descriptions, err := DiscoverSkillsInRepoWithDescriptions(tmpRepo, "")
+	if err != nil {
+		t.Fatalf("DiscoverSkillsInRepoWithDescriptions failed: %v", err)
+	}
+	paths := discovered["sample"]
+	if !reflect.DeepEqual(paths, []string{"sample"}) {
+		t.Fatalf("discovered[sample] = %#v", paths)
+	}
+	if got := descriptions["sample"]; got != "Does the sample thing." {
+		t.Fatalf("description = %q; want %q", got, "Does the sample thing.")
+	}
+}
+
 func TestDiscoverSkillsInRepo(t *testing.T) {
 	tmpRepo := t.TempDir()
 
