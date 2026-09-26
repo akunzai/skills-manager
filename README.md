@@ -28,6 +28,8 @@ irm https://raw.githubusercontent.com/akunzai/skills-manager/main/install.ps1 | 
 
 To replace this CLI with a newer release later: `skills self-update`. On a terminal, skills mentions a newer release at most once a day.
 
+The installers and `skills self-update` check each download against the release's `checksums.txt`. Every release archive also carries a build provenance attestation: `gh attestation verify skills_<os>_<arch>.tar.gz --repo akunzai/skills-manager`.
+
 ## Start with one skill
 
 ```sh

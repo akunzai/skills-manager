@@ -65,9 +65,9 @@ esac
 
 echo -e "Platform: ${BOLD}${GOOS}_${GOARCH}${RESET}"
 
-# Fetch latest release info from GitHub API
-RELEASE_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
-echo -e "Fetching latest release information..."
+# Archive and checksum names mirror .goreleaser.yaml.
+ASSET_NAME="skills_${GOOS}_${GOARCH}.tar.gz"
+DOWNLOAD_BASE="https://github.com/${GITHUB_REPO}/releases/latest/download"
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
@@ -75,38 +75,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-RELEASE_JSON="${TMP_DIR}/release.json"
-curl -fsSL -H "Accept: application/vnd.github.v3+json" "$RELEASE_API" -o "$RELEASE_JSON" || {
-  echo -e "${RED}Error: Failed to fetch release metadata from GitHub.${RESET}" >&2
+echo -e "Downloading: ${DIM}${DOWNLOAD_BASE}/${ASSET_NAME}${RESET}"
+curl -fsSL "${DOWNLOAD_BASE}/${ASSET_NAME}" -o "${TMP_DIR}/${ASSET_NAME}" || {
+  echo -e "${RED}Error: No prebuilt binary found for ${GOOS}_${GOARCH}.${RESET}" >&2
+  exit 1
+}
+curl -fsSL "${DOWNLOAD_BASE}/checksums.txt" -o "${TMP_DIR}/checksums.txt" || {
+  echo -e "${RED}Error: Failed to download checksums.txt; refusing to install an unverified binary.${RESET}" >&2
   exit 1
 }
 
-# Find download URL for the platform archive
-ASSET_URL="$(grep "browser_download_url" "$RELEASE_JSON" | grep -i "${GOOS}" | grep -i "${GOARCH}" | cut -d '"' -f 4 | head -n 1)"
-
-if [[ -z "$ASSET_URL" ]]; then
-  # Fallback to direct 'skills' binary asset if available
-  ASSET_URL="$(grep "browser_download_url" "$RELEASE_JSON" | grep -E '"[^"]*/skills"' | cut -d '"' -f 4 | head -n 1)"
+EXPECTED="$(awk -v name="$ASSET_NAME" '$2 == name { print $1 }' "${TMP_DIR}/checksums.txt")"
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL="$(sha256sum "${TMP_DIR}/${ASSET_NAME}" | awk '{ print $1 }')"
+else
+  ACTUAL="$(shasum -a 256 "${TMP_DIR}/${ASSET_NAME}" | awk '{ print $1 }')"
 fi
-
-if [[ -z "$ASSET_URL" ]]; then
-  echo -e "${RED}Error: No prebuilt binary found for ${GOOS}_${GOARCH}.${RESET}" >&2
+if [[ -z "$EXPECTED" || "$EXPECTED" != "$ACTUAL" ]]; then
+  echo -e "${RED}Error: Checksum verification failed for ${ASSET_NAME}.${RESET}" >&2
   exit 1
 fi
+echo -e "Checksum verified."
 
-echo -e "Downloading: ${DIM}${ASSET_URL}${RESET}"
-ARCHIVE_FILE="${TMP_DIR}/downloaded"
-curl -fsSL "$ASSET_URL" -o "$ARCHIVE_FILE"
-
-if [[ "$ASSET_URL" == *.tar.gz || "$ASSET_URL" == *.tgz ]]; then
-  tar -xzf "$ARCHIVE_FILE" -C "$TMP_DIR"
-  mv "${TMP_DIR}/skills" "$TARGET_BIN"
-elif [[ "$ASSET_URL" == *.zip ]]; then
-  unzip -q -o "$ARCHIVE_FILE" -d "$TMP_DIR"
-  mv "${TMP_DIR}/skills" "$TARGET_BIN"
-else
-  mv "$ARCHIVE_FILE" "$TARGET_BIN"
-fi
+tar -xzf "${TMP_DIR}/${ASSET_NAME}" -C "$TMP_DIR" skills
+mv "${TMP_DIR}/skills" "$TARGET_BIN"
 
 chmod +x "$TARGET_BIN"
 
