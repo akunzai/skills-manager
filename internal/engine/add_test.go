@@ -208,6 +208,48 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 	}
 }
 
+// Re-adding a Skill whose Scope copy was edited overwrites it: the user
+// already confirmed the overwrite, so the local Drift Sync would block on
+// does not block Add.
+func TestApplyAddPlanOverwritesALocallyEditedCopy(t *testing.T) {
+	t.Parallel()
+	project := t.TempDir()
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	origin := filepath.Join(project, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	repoDir, err := NewCache("owner/repo", origin, "", filepath.Join(project, "cache")).Refresh(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	add := func() AddResult {
+		t.Helper()
+		plan := BuildAddPlan(cfg, configPath, skillsDir,
+			NewRemoteAddSource("owner/repo", "git", origin, repoDir),
+			map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+		result, err := ApplyAddPlan(plan, cfg, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	add()
+	edited := filepath.Join(skillsDir, "sample", "SKILL.md")
+	if err := os.WriteFile(edited, []byte("# Edited here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := add()
+
+	if result.Blocked != 0 || result.Failed != 0 {
+		t.Fatalf("Blocked=%d Failed=%d; want the edited copy overwritten", result.Blocked, result.Failed)
+	}
+	if got, err := os.ReadFile(edited); err != nil || string(got) == "# Edited here\n" {
+		t.Fatalf("SKILL.md = %q, %v; want the Source's copy back", got, err)
+	}
+}
+
 // An unreadable Scope state must not stop Add from applying the Skill, nor
 // pass silently: the next Sync would find no Baseline and block the Skill.
 func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {

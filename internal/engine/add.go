@@ -282,11 +282,10 @@ type AddSkillEvent struct {
 // AddedSkills is declared in Config; Blocked and Failed count those that could
 // not be applied, as Sync counts them, and Events says why.
 type AddResult struct {
+	SyncTally
 	AddedSkills []string
 	ConfigPath  string
 	Events      []SyncEvent
-	Blocked     int
-	Failed      int
 	// StateError is why the Scope state could not be read. The Skills are
 	// applied but their Baselines are not recorded, which counts as failed.
 	StateError string
@@ -385,28 +384,20 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		if onProgress != nil {
 			onProgress(event)
 		}
-		// The apply functions emit every reason a Skill was not applied, so
-		// their returned error adds nothing to the Events already collected.
-		var outcome SyncOutcome
+		var item SyncPlanItem
 		switch plan.Source.Kind {
 		case AddSourceRemote:
-			item := planRemoteItem(plan.Source.Key, plan.Source.RepoDir, localRepoCommit(plan.Source.RepoDir), SkillFreshness{
+			item = planDeclaredRemoteItem(plan.Source.Key, plan.Source.RepoDir, localRepoCommit(plan.Source.RepoDir), SkillFreshness{
 				Name:      name,
 				Source:    plan.Source.Key,
 				Subpath:   subpath,
 				ScopePath: filepath.Join(plan.SkillsDir, name),
 			}, occupancy.Drift(name))
-			outcome, _ = applyRemoteItem(availability, plan.SkillsDir, item, SyncDecision{}, baselines, emit)
 		case AddSourceSymlink, AddSourceCommand:
-			item := planLocalItem(cfg, plan.SkillsDir, occupancy.Drift(name), name)
-			outcome, _ = applyLocalItem(availability, plan.SkillsDir, item, emit)
+			item = planLocalItem(cfg, plan.SkillsDir, occupancy.Drift(name), name)
 		}
-		switch outcome {
-		case SyncBlocked:
-			result.Blocked++
-		case SyncFailed:
-			result.Failed++
-		}
+		outcome := applyItem(availability, plan.SkillsDir, item, SyncDecision{}, baselines, emit)
+		result.tally(outcome)
 		if onProgress != nil {
 			event.Outcome = outcome
 			onProgress(event)
@@ -415,7 +406,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 
 	if stateErr := baselines.Err(); stateErr != nil && plan.Source.Kind == AddSourceRemote {
 		result.StateError = stateErr.Error()
-		result.Failed++
+		result.tally(SyncFailed)
 	}
 	return result, nil
 }

@@ -326,7 +326,6 @@ func TestPlanRemoteItem(t *testing.T) {
 		wantBlock SyncBlock
 		wantErr   bool
 	}{
-		{name: "just declared", wantWrite: true},
 		{name: "in sync", status: SkillInSync},
 		{name: "missing", status: SkillMissing, wantWrite: true},
 		{name: "cache update", status: SkillCacheUpdateAvailable, wantWrite: true},
@@ -365,12 +364,28 @@ func TestPlanRemoteItem(t *testing.T) {
 			} else if item.Err != "" {
 				t.Fatalf("Err = %q; want empty", item.Err)
 			}
-			if tc.status == "" {
-				action, block := item.Resolve(SyncDecision{})
-				if action != SyncActionMaterialize || block != SyncBlockNone {
-					t.Fatalf("just-declared Resolve = %q, %q; want materialize", action, block)
-				}
-			}
 		})
+	}
+}
+
+// A just-declared Skill, from Add or the new name of a Rename, is written
+// whatever the Scope holds: Add has already asked before overwriting, and a
+// Rename has already protected the old copy.
+func TestPlanDeclaredRemoteItemIsAlwaysWritten(t *testing.T) {
+	drift := AvailabilityDrift{Skill: "sample", Missing: []string{"codex"}}
+	skill := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: "sample", ScopePath: "/scope/sample"}
+
+	item := planDeclaredRemoteItem("owner/repo", "/cache/repo", "abc123", skill, drift)
+
+	want := SyncPlanItem{
+		Name: "sample", Kind: SyncItemRemote, Source: "owner/repo",
+		Drift: drift, Freshness: skill, CachePath: "/cache/repo", LocalSHA: "abc123",
+		NeedsWrite: true,
+	}
+	if !reflect.DeepEqual(item, want) {
+		t.Fatalf("item = %+v; want %+v", item, want)
+	}
+	if action, block := item.Resolve(SyncDecision{}); action != SyncActionMaterialize || block != SyncBlockNone {
+		t.Fatalf("Resolve = %q, %q; want materialize", action, block)
 	}
 }
