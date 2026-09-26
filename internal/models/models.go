@@ -703,4 +703,21 @@ type SkillItem struct {
 	Agents        []string `json:"agents"`
 	Description   string   `json:"description,omitempty"`
 	Scope         string   `json:"scope,omitempty"`
+	// Status is how the Skill's entry on the Scope skills directory was
+	// classified, one of the SkillStatus values.
+	Status SkillStatus `json:"status"`
 }
+
+// SkillStatus is how Inventory classifies one Skill against the Scope skills
+// directory, so every reader, Doctor and ls alike, agrees on it.
+type SkillStatus string
+
+const (
+	SkillStatusMissing       SkillStatus = "missing"
+	SkillStatusPresent       SkillStatus = "present"
+	SkillStatusInvalid       SkillStatus = "invalid"
+	SkillStatusStub          SkillStatus = "stub"
+	SkillStatusIllegalLocal  SkillStatus = "illegal-local"
+	SkillStatusUntracked     SkillStatus = "untracked"
+	SkillStatusUntrackedLink SkillStatus = "untracked-link"
+)

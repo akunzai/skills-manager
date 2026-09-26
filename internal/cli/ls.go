@@ -149,6 +149,7 @@ func newLsCmd() *cobra.Command {
 						"subpath":    s.Subpath,
 						"installed":  s.IsInstalled,
 						"valid":      s.IsValidSkill,
+						"status":     s.Status,
 					})
 				}
 				data, _ := json.MarshalIndent(outList, "", "  ")
@@ -215,16 +216,8 @@ func newLsCmd() *cobra.Command {
 			fmt.Fprintln(out, strings.Repeat(style.Rule, totalLineWidth))
 
 			for _, s := range skills {
-				var statusDisplay string
-				if s.IsInstalled {
-					if s.IsValidSkill {
-						statusDisplay = fmt.Sprintf("%s%s%s", style.Green, padRight("Installed", statusWidth), style.Reset)
-					} else {
-						statusDisplay = fmt.Sprintf("%s%s%s", style.Red, padRight("Invalid (No SKILL.md)", statusWidth), style.Reset)
-					}
-				} else {
-					statusDisplay = fmt.Sprintf("%s%s%s", style.Yellow, padRight("Missing", statusWidth), style.Reset)
-				}
+				label, color := lsStatus(s)
+				statusDisplay := fmt.Sprintf("%s%s%s", color(style), padRight(label, statusWidth), style.Reset)
 
 				icon := style.SourceIcon(s.SourceType)
 				var rawSource string
@@ -285,4 +278,27 @@ func newLsCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&flagSource, "source", "s", "", "Filter skills by source repository or type")
 
 	return cmd
+}
+
+// lsStatus words the status Inventory classified, so ls and Doctor name one
+// entry the same way. An Untracked entry keeps the old wording, since its
+// Source column already says it is Untracked.
+func lsStatus(s models.SkillItem) (string, func(presentation.Style) string) {
+	green := func(st presentation.Style) string { return st.Green }
+	yellow := func(st presentation.Style) string { return st.Yellow }
+	red := func(st presentation.Style) string { return st.Red }
+	switch {
+	case s.Status == models.SkillStatusMissing:
+		return "Missing", yellow
+	case s.Status == models.SkillStatusStub:
+		return "Stub (text file)", red
+	case s.Status == models.SkillStatusIllegalLocal:
+		return "Source inside skills dir", red
+	case s.Status == models.SkillStatusUntrackedLink && !s.IsValidSkill:
+		return "Broken link", red
+	case !s.IsValidSkill:
+		return "Invalid (No SKILL.md)", red
+	default:
+		return "Installed", green
+	}
 }
