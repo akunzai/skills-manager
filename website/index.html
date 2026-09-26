@@ -346,7 +346,14 @@
 
     <div class="term">
       <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>bash</span></div>
-<pre><span class="comment"># macOS and Linux (standalone Go binary)</span>
+<pre><span class="comment"># Homebrew (macOS and Linux)</span>
+<span class="prompt">$ </span><span class="cmd">brew install akunzai/tap/skills-manager</span>
+
+<span class="comment"># Scoop (Windows)</span>
+<span class="prompt">PS&gt; </span><span class="cmd">scoop bucket add akunzai https://github.com/akunzai/scoop-bucket</span>
+<span class="prompt">PS&gt; </span><span class="cmd">scoop install akunzai/skills-manager</span>
+
+<span class="comment"># Or the install scripts: macOS and Linux</span>
 <span class="prompt">$ </span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/akunzai/skills-manager/main/install.sh | bash</span>
 
 <span class="comment"># Windows PowerShell</span>
@@ -541,6 +548,11 @@
             <td><code>0</code> added</td>
           </tr>
           <tr>
+            <td><code>skills add &lt;source&gt; --list</code></td>
+            <td>Browse a Source&rsquo;s Skills without declaring any</td>
+            <td><code>0</code> listed, <code>1</code> none found</td>
+          </tr>
+          <tr>
             <td><code>skills sync</code></td>
             <td>Reconcile Scope from existing Cache without network access</td>
             <td><code>0</code> synced, <code>1</code> drift</td>
@@ -557,13 +569,18 @@
           </tr>
           <tr>
             <td><code>skills self-update</code></td>
-            <td>Replace this CLI with a newer release</td>
+            <td>Replace this CLI with a newer release (Homebrew and Scoop installs name their upgrade command instead)</td>
             <td><code>0</code> replaced</td>
           </tr>
           <tr>
             <td><code>skills outdated</code></td>
             <td>Inspect Remote &rarr; Cache &rarr; Scope freshness</td>
             <td><code>0</code> fresh, <code>1</code> outdated</td>
+          </tr>
+          <tr>
+            <td><code>skills diff &lt;skill&gt;</code></td>
+            <td>Show a remote Skill&rsquo;s upstream and local changes before updating</td>
+            <td><code>0</code> no changes, <code>1</code> changes</td>
           </tr>
           <tr>
             <td><code>skills doctor</code></td>
@@ -574,6 +591,11 @@
             <td><code>skills doctor --fix</code></td>
             <td>Safely repair diagnosed health issues</td>
             <td><code>0</code> repaired</td>
+          </tr>
+          <tr>
+            <td><code>skills adopt</code></td>
+            <td>Declare untracked or agent-directory skills, keeping their content</td>
+            <td><code>0</code> adopted, <code>1</code> left for you</td>
           </tr>
           <tr>
             <td><code>skills prune</code></td>
