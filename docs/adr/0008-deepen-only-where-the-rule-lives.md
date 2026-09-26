@@ -9,6 +9,10 @@ Rejected, with where the narrower form landed:
 - **One exit-code adapter for every command** (#200). ADR-0002's mapping is three lines; what differs between sync, update, add, doctor, prune, rm, and outdated is their sentences, by design. Kept instead: one `SyncSummary` for the two commands that shared the counts, sync and update.
 - **The engine owns prune's whole item list, keys and groups included** (#203). Keys, grouping, and which items start selected are the prompt's presentation. Kept instead: `PrunePlan.Select`, which owns the one safety rule, that removing a real directory needs the user's selection.
 
+A later review the same month proposed one more, rejected on the same test:
+
+- **Freshness classification takes every observed fact, so no status is rewritten after it.** `classifyRemoteSkill` compares Cache, Scope, and Baseline content; `attachScopeObservations` then overrides its answer for a Source never fetched, a subpath the sparse checkout does not cover, an unreadable Scope state, and a Skill gone at the Cache head. Those four need the Cache and Baselines, which the classifier does not hold, and they already sit together in one function that `InspectFreshness`'s tests exercise. Moving them in would add four parameters and move the ordering, not remove it. Kept instead: the overrides where they are.
+
 Revisit when a second frontend, such as a `--json` for doctor or prune, needs the same grouping or wording the CLI now owns. Presentation would then have two adapters, and a shared seam for it would be real.
 
 This does not reopen ADR-0001 (Add's Source kind switch) or ADR-0002 (exit codes express state).
