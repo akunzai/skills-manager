@@ -134,6 +134,7 @@ func init() {
 	RootCmd.AddCommand(newRmCmd())
 	RootCmd.AddCommand(newSyncCmd())
 	RootCmd.AddCommand(newPruneCmd())
+	RootCmd.AddCommand(newAdoptCmd())
 	RootCmd.AddCommand(newOutdatedCmd())
 	RootCmd.AddCommand(newUpdateCmd())
 	RootCmd.AddCommand(newDiffCmd())
