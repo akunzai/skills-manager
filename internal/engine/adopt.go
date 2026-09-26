@@ -808,7 +808,6 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 			Source:    remote.intake.spec.SourceKey,
 			Subpath:   remote.subpath,
 			ScopePath: content,
-			CachePath: remote.cachePath(),
 		}, drift)
 		applied, err = applyRemoteItem(availability, skillsDir, item, SyncDecision{}, a.baselines, nil)
 	}

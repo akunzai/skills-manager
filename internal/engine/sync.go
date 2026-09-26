@@ -381,7 +381,6 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 		Source:    item.Source,
 		Subpath:   skill.RenamedSubpath,
 		ScopePath: filepath.Join(plan.skillsDir, skill.RenamedTo),
-		CachePath: filepath.Join(item.CachePath, filepath.FromSlash(skill.RenamedSubpath)),
 	}, plan.availability.ObserveOccupancy().Drift(skill.RenamedTo))
 	return applyItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
 }
