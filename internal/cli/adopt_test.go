@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/akunzai/skills-manager/internal/engine"
 )
 
 // adoptCLIScope is a scratch Scope: a custom --skills-dir is Project-scoped,
@@ -311,6 +314,81 @@ func TestCLIAdoptOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
 			assertScopeStateWarning(t, out, tc.wantExit == 0)
 			if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
 				t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+			}
+		})
+	}
+}
+
+// Each state the engine reports is worded and summed up in ADR-0002's codes
+// here, and nowhere decoded from anything else.
+func TestCLIAdoptWordsEachEndState(t *testing.T) {
+	moveTo := filepath.FromSlash("/scratch/skills-local/mine")
+	claudeCopy, continueCopy := filepath.FromSlash("/scratch/.claude/skills/mine"), filepath.FromSlash("/scratch/.continue/skills/mine")
+	remote := engine.AdoptItem{Name: "sample", Action: engine.AdoptDeclareRemote, Record: engine.InstallerLockRecord{Source: "owner/repo"}}
+	local := engine.AdoptItem{Name: "mine", Action: engine.AdoptMoveLocal, MoveTo: moveTo}
+	for _, tc := range []struct {
+		name     string
+		outcome  engine.AdoptOutcome
+		wantExit int
+		want     []string
+		dontWant []string
+	}{
+		{
+			name:    "adopted",
+			outcome: engine.AdoptOutcome{AdoptItem: local, State: engine.AdoptAdopted, Declared: true},
+			want:    []string{"Adopted mine: moved to " + moveTo + ".", "Adopted 1 skill and updated skills.json."},
+		},
+		{
+			name:     "declared without a Baseline",
+			outcome:  engine.AdoptOutcome{AdoptItem: remote, State: engine.AdoptDeclaredWithoutBaseline, Declared: true, Subpath: "sample"},
+			wantExit: 1,
+			want:     []string{"Declared sample from owner/repo (sample) without a Baseline", "next Sync asks before overwriting it", "1 declared without a Baseline", "run 'skills sync -p'"},
+		},
+		{
+			name:     "declared with copies left",
+			outcome:  engine.AdoptOutcome{AdoptItem: local, State: engine.AdoptDeclaredWithCopiesLeft, Declared: true, CopiesLeft: []string{claudeCopy, continueCopy}},
+			wantExit: 1,
+			want:     []string{"Declared mine, but left " + claudeCopy + ", " + continueCopy + " in place", "Remove them, then run 'skills sync -p'.", "1 declared with copies left"},
+			dontWant: []string{"Failed"},
+		},
+		{
+			name:     "skipped",
+			outcome:  engine.AdoptOutcome{AdoptItem: local, State: engine.AdoptSkipped, Reason: moveTo + " already exists"},
+			wantExit: 1,
+			want:     []string{"Skipped mine: " + moveTo + " already exists", "1 skipped"},
+		},
+		{
+			name:     "failed before the declaration",
+			outcome:  engine.AdoptOutcome{AdoptItem: remote, State: engine.AdoptFailed, Reason: "refresh Source owner/repo: no such repository"},
+			wantExit: 2,
+			want:     []string{"Failed to adopt sample: refresh Source owner/repo: no such repository; it was not declared.", "1 failed"},
+			dontWant: []string{"skills sync"},
+		},
+		{
+			name:     "failed after the declaration",
+			outcome:  engine.AdoptOutcome{AdoptItem: local, State: engine.AdoptFailed, Declared: true, Reason: "failed to create agent dir"},
+			wantExit: 2,
+			want:     []string{"Failed to finish adopting mine: failed to create agent dir. It is declared; fix the cause, then run 'skills sync -p'.", "1 failed"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			scope := Scope{ConfigPath: "/scratch/skills.json", SkillsDir: "/scratch/skills", IsProject: true}
+
+			err := reportAdoptOutcome(&out, engine.AdoptResult{Skills: []engine.AdoptOutcome{tc.outcome}}, scope)
+
+			if exit := exitCodeOf(err); exit != tc.wantExit {
+				t.Fatalf("exit = %d (%v); want %d\n%s", exit, err, tc.wantExit, out.String())
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("output lacks %q:\n%s", want, out.String())
+				}
+			}
+			for _, dontWant := range tc.dontWant {
+				if strings.Contains(out.String(), dontWant) {
+					t.Errorf("output has %q:\n%s", dontWant, out.String())
+				}
 			}
 		})
 	}

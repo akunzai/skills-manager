@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -124,9 +123,7 @@ func TestAdoptMovesARealDirectoryFromAnAgentDirectoryAndLinksItBack(t *testing.T
 	}
 	result := ApplyAdoptPlan(plan, cfg, f.scope())
 
-	if result.Blocked != 0 || result.Failed != 0 || len(result.Adopted()) != 1 {
-		t.Fatalf("result = %#v; want one Skill adopted", result)
-	}
+	assertAdoptStates(t, result, AdoptAdopted)
 	moved := filepath.Join(f.root, ".agents", "skills-local", "mine")
 	if data, err := os.ReadFile(filepath.Join(moved, "SKILL.md")); err != nil || string(data) != "# Mine\n" {
 		t.Fatalf("moved content = %q, %v", data, err)
@@ -149,11 +146,12 @@ func TestAdoptDeclaresALockRecordedRealDirectoryFromAnAgentDirectory(t *testing.
 
 	result := f.adopt(t, cfg)
 
-	if result.Blocked != 0 || result.Failed != 0 || len(result.Skills) != 1 {
-		t.Fatalf("result = %#v; want one Skill adopted", result)
+	assertAdoptStates(t, result, AdoptAdopted)
+	if got := result.Skills[0]; got.Action != AdoptDeclareRemote {
+		t.Fatalf("adopted = %#v; want a remote declaration", got)
 	}
-	if got := result.Skills[0]; got.Action != AdoptDeclareRemote || !got.Baseline {
-		t.Fatalf("adopted = %#v; want a remote declaration with its Baseline", got)
+	if _, ok := OpenBaselines(f.skillsDir).Applied("sample"); !ok {
+		t.Fatal("no Baseline recorded for an identical copy")
 	}
 	if !isRealDir(filepath.Join(f.skillsDir, "sample")) {
 		t.Fatal("the copy must now be a real directory on the skills directory")
@@ -178,9 +176,7 @@ func TestAdoptDeclaresAUserSymlinkTargetWithoutMovingIt(t *testing.T) {
 	}
 	result := ApplyAdoptPlan(plan, cfg, f.scope())
 
-	if result.Blocked != 0 || result.Failed != 0 || len(result.Adopted()) != 1 {
-		t.Fatalf("result = %#v; want one Skill adopted", result)
-	}
+	assertAdoptStates(t, result, AdoptAdopted)
 	saved := f.saved(t)
 	if entry := saved.Local["linked"]; entry.Type != "symlink" || entry.Source != "src/linked" {
 		t.Fatalf("declared = %#v; want the symlink's target as a local Source", entry)
@@ -210,9 +206,7 @@ func TestAdoptRefusesAUserSymlinkIntoTheSkillsDirectoryOrDangling(t *testing.T) 
 	}
 	result := ApplyAdoptPlan(plan.Select([]string{"alias", "gone"}), cfg, f.scope())
 
-	if result.Blocked != 2 || len(result.Adopted()) != 0 {
-		t.Fatalf("result = %#v; want both refused", result)
-	}
+	assertAdoptStates(t, result, AdoptSkipped, AdoptSkipped)
 	for _, link := range []string{intoScope, dangling} {
 		if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
 			t.Fatalf("a refused symlink must stay: %v", err)
@@ -231,9 +225,7 @@ func TestAdoptTakesIdenticalCopiesOnceAndLinksTheOthers(t *testing.T) {
 
 	result := f.adopt(t, cfg)
 
-	if result.Blocked != 0 || result.Failed != 0 || len(result.Adopted()) != 1 {
-		t.Fatalf("result = %#v; want the Skill adopted once", result)
-	}
+	assertAdoptStates(t, result, AdoptAdopted)
 	if got := f.saved(t).Settings.Availability["dup"].Include; !reflect.DeepEqual(got, []string{adoptOtherAgent}) {
 		t.Fatalf("Include = %v; want the Agent defaults do not cover", got)
 	}
@@ -257,9 +249,7 @@ func TestAdoptRefusesDifferingCopiesListingEveryPath(t *testing.T) {
 	}
 	result := ApplyAdoptPlan(plan, cfg, f.scope())
 
-	if result.Blocked != 1 || len(result.Adopted()) != 0 {
-		t.Fatalf("result = %#v; want the Skill refused", result)
-	}
+	assertAdoptStates(t, result, AdoptSkipped)
 	for _, dir := range []string{first, second} {
 		if !isRealDir(dir) {
 			t.Fatalf("%s must stay where it is", dir)
@@ -276,9 +266,7 @@ func TestAdoptFromPicksOneCopyAndExcludesTheOthers(t *testing.T) {
 	plan := f.plan(t, cfg, "continue")
 	result := ApplyAdoptPlan(plan, cfg, f.scope())
 
-	if result.Blocked != 0 || result.Failed != 0 || len(result.Adopted()) != 1 {
-		t.Fatalf("result = %#v; want the chosen copy adopted", result)
-	}
+	assertAdoptStates(t, result, AdoptAdopted)
 	moved := filepath.Join(f.root, ".agents", "skills-local", "split")
 	if data, err := os.ReadFile(filepath.Join(moved, "SKILL.md")); err != nil || string(data) != "# Two\n" {
 		t.Fatalf("adopted content = %q, %v; want the continue copy", data, err)
@@ -306,9 +294,7 @@ func TestAdoptIncludesTheAgentsDefaultsDoNotCover(t *testing.T) {
 
 	result := f.adopt(t, cfg)
 
-	if len(result.Adopted()) != 1 || result.Blocked != 0 || result.Failed != 0 {
-		t.Fatalf("result = %#v; want one Skill adopted", result)
-	}
+	assertAdoptStates(t, result, AdoptAdopted)
 	if got := f.saved(t).Settings.Availability["elsewhere"]; !reflect.DeepEqual(got.Include, []string{adoptOtherAgent}) || len(got.Exclude) != 0 {
 		t.Fatalf("override = %#v; want continue included", got)
 	}
@@ -348,9 +334,7 @@ func TestAdoptRefusesANameThatCollidesInTheScope(t *testing.T) {
 	}
 	result := ApplyAdoptPlan(agentOnly, cfg, f.scope())
 
-	if result.Blocked != 2 || len(result.Adopted()) != 0 {
-		t.Fatalf("result = %#v; want both refused", result)
-	}
+	assertAdoptStates(t, result, AdoptSkipped, AdoptSkipped)
 	for _, dir := range []string{onAgent, declaredCopy} {
 		if !isRealDir(dir) {
 			t.Fatalf("%s must stay where it is", dir)
@@ -358,10 +342,13 @@ func TestAdoptRefusesANameThatCollidesInTheScope(t *testing.T) {
 	}
 }
 
-func TestAdoptLeavesAnUntrackedSkillWhenInterruptedAfterTheMoveAndReRunCompletes(t *testing.T) {
+// A failure before the Skill is declared undoes both moves and the
+// Availability overrides saved before the first, so a re-run finds the copy
+// where it was and adopts it with the same Availability.
+func TestAdoptRestoresTheMovesAndConfigWhenItFailsBeforeDeclaring(t *testing.T) {
 	f := newAdoptFixture(t)
-	f.onAgent(t, adoptOtherAgent, "mine", "# Mine\n")
-	// The move directory cannot be created: the run stops after the Skill
+	copyPath := f.onAgent(t, adoptOtherAgent, "mine", "# Mine\n")
+	// The move directory cannot be created: the run fails after the Skill
 	// has left the Agent directory for the skills directory.
 	blocker := filepath.Join(f.root, "blocker")
 	mustWriteScopeStateTestFile(t, blocker, []byte("a file\n"))
@@ -373,22 +360,109 @@ func TestAdoptLeavesAnUntrackedSkillWhenInterruptedAfterTheMoveAndReRunCompletes
 
 	first := ApplyAdoptPlan(plan, cfg, f.scope())
 
-	if first.Failed != 1 || len(first.Adopted()) != 0 {
-		t.Fatalf("first run = %#v; want it to fail after the move", first)
+	assertAdoptStates(t, first, AdoptFailed)
+	if got := first.Skills[0]; got.Declared || got.Reason == "" {
+		t.Fatalf("failed = %#v; want it undeclared, with a reason", got)
 	}
-	if untracked := f.untrackedNow(t); !slices.Contains(untracked, "mine") {
-		t.Fatalf("Untracked after the interrupted run = %v; want mine", untracked)
+	if data, err := os.ReadFile(filepath.Join(copyPath, "SKILL.md")); err != nil || string(data) != "# Mine\n" {
+		t.Fatalf("the copy must be back on the Agent directory: %q, %v", data, err)
+	}
+	if _, err := os.Lstat(filepath.Join(f.skillsDir, "mine")); !os.IsNotExist(err) {
+		t.Fatalf("nothing may stay on the skills directory: %v", err)
+	}
+	if _, ok := cfg.Settings.Availability["mine"]; ok {
+		t.Fatal("the Availability override must be rolled back in memory")
+	}
+	if _, err := os.Stat(f.configPath); !os.IsNotExist(err) {
+		t.Fatalf("Config did not exist before, so it must not now: %v", err)
 	}
 
-	again := f.plan(t, f.saved(t), "")
-	if names := again.Names(); !reflect.DeepEqual(names, []string{"mine"}) || again.Items[0].OnAgentDirectories() {
-		t.Fatalf("re-run plan = %#v; want mine offered from the skills directory", again.Items)
-	}
-	second := ApplyAdoptPlan(again, f.saved(t), f.scope())
+	second := ApplyAdoptPlan(f.plan(t, cfg, ""), cfg, f.scope())
 
-	if second.Blocked != 0 || second.Failed != 0 || len(second.Adopted()) != 1 {
-		t.Fatalf("re-run = %#v; want it adopted", second)
-	}
+	assertAdoptStates(t, second, AdoptAdopted)
 	assertManagedLink(t, f, adoptOtherAgent, "mine")
 	f.assertSettled(t, "mine")
+}
+
+// Declaring a Skill whose Config cannot be saved undoes its move and leaves
+// Config in memory as it was.
+func TestAdoptRestoresTheMoveWhenConfigCannotBeSaved(t *testing.T) {
+	f := newAdoptFixture(t)
+	dir := f.untracked(t, "mine", "# Mine\n")
+	blocker := filepath.Join(f.root, "blocker")
+	mustWriteScopeStateTestFile(t, blocker, []byte("a file\n"))
+	scope := f.scope()
+	scope.ConfigPath = filepath.Join(blocker, "skills.json")
+	cfg := config.DefaultConfig()
+	plan, err := BuildAdoptPlan(cfg, scope, AdoptOptions{LockPath: f.lockPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := ApplyAdoptPlan(plan, cfg, scope)
+
+	assertAdoptStates(t, result, AdoptFailed)
+	if got := result.Skills[0]; got.Declared || got.Reason == "" {
+		t.Fatalf("failed = %#v; want it undeclared, with a reason", got)
+	}
+	if !isRealDir(dir) {
+		t.Fatal("the directory must be moved back onto the skills directory")
+	}
+	if _, err := os.Lstat(plan.Items[0].MoveTo); !os.IsNotExist(err) {
+		t.Fatalf("nothing may stay at the move target: %v", err)
+	}
+	if _, ok := cfg.Local["mine"]; ok {
+		t.Fatal("the declaration must be rolled back in memory")
+	}
+}
+
+// A copy that changed after the plan is not removed to make room for an
+// Availability link. The Skill stays declared and the copy is named.
+func TestAdoptKeepsTheDeclarationAndNamesACopyItCouldNotReplace(t *testing.T) {
+	f := newAdoptFixture(t)
+	f.onAgent(t, adoptDefaultAgent, "dup", "# Dup\n")
+	f.onAgent(t, adoptOtherAgent, "dup", "# Dup\n")
+	cfg := config.DefaultConfig()
+	plan := f.plan(t, cfg, "")
+	replaced := agentItem(t, plan, "dup").CopiesWith(AgentCopyReplace)
+	if len(replaced) != 1 {
+		t.Fatalf("planned %#v; want one copy to replace", plan.Items)
+	}
+	mustWriteScopeStateTestFile(t, filepath.Join(replaced[0].Path, "SKILL.md"), []byte("# Dup, edited since the plan\n"))
+
+	result := ApplyAdoptPlan(plan, cfg, f.scope())
+
+	assertAdoptStates(t, result, AdoptDeclaredWithCopiesLeft)
+	if got := result.Skills[0]; !got.Declared || !reflect.DeepEqual(got.CopiesLeft, []string{replaced[0].Path}) {
+		t.Fatalf("outcome = %#v; want it declared with %s left", got, replaced[0].Path)
+	}
+	if _, ok := f.saved(t).Local["dup"]; !ok {
+		t.Fatal("the Skill must stay declared")
+	}
+	if data, err := os.ReadFile(filepath.Join(replaced[0].Path, "SKILL.md")); err != nil || string(data) != "# Dup, edited since the plan\n" {
+		t.Fatalf("the changed copy must stay untouched: %q, %v", data, err)
+	}
+}
+
+// An Availability link that cannot be made after the Skill is declared keeps
+// the declaration: Sync finishes it once the cause is fixed.
+func TestAdoptKeepsTheDeclarationWhenAvailabilityFailsAfterIt(t *testing.T) {
+	f := newAdoptFixture(t)
+	f.untracked(t, "mine", "# Mine\n")
+	// The default Agent's directory cannot be created.
+	mustWriteScopeStateTestFile(t, filepath.Join(f.root, ".claude"), []byte("a file\n"))
+	cfg := config.DefaultConfig()
+
+	result := f.adopt(t, cfg)
+
+	assertAdoptStates(t, result, AdoptFailed)
+	if got := result.Skills[0]; !got.Declared || got.Reason == "" {
+		t.Fatalf("failed = %#v; want it declared, with a reason", got)
+	}
+	if entry := f.saved(t).Local["mine"]; entry.Source != ".agents/skills-local/mine" {
+		t.Fatalf("declared = %#v; the declaration must stay", entry)
+	}
+	if !isRealDir(filepath.Join(f.root, ".agents", "skills-local", "mine")) {
+		t.Fatal("the moved directory must stay where it is declared")
+	}
 }

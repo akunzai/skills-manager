@@ -33,15 +33,6 @@ type InstallerLockRecord struct {
 // as a remote Source.
 func (r InstallerLockRecord) Remote() bool { return r.Source != "" }
 
-// StoredURL is the URL Config records for the Source: none for a plain GitHub
-// Source, whose URL follows from its key, as Add stores it.
-func (r InstallerLockRecord) StoredURL() string {
-	if r.RepoType == "github" && strings.HasPrefix(r.URL, "https://github.com/") {
-		return ""
-	}
-	return r.URL
-}
-
 // installerLockFile is the shape installer lock files share: Skill name to
 // entry under "skills". Anything else in the file, and any other field of an
 // entry, is ignored, so a newer version still reads.

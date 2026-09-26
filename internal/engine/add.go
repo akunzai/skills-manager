@@ -85,11 +85,19 @@ func AddBranch(cfg *config.Config, key, requested string) (string, error) {
 	if requested == "" {
 		return repo.Branch, nil
 	}
+	return "", branchConflictError{key: key, declared: repo.Branch, requested: requested}
+}
+
+// branchConflictError is AddBranch refusing a branch other than the one a
+// Source is declared on: a state for the user to resolve, not a failure.
+type branchConflictError struct{ key, declared, requested string }
+
+func (e branchConflictError) Error() string {
 	current := "its default branch"
-	if repo.Branch != "" {
-		current = fmt.Sprintf("branch %q", repo.Branch)
+	if e.declared != "" {
+		current = fmt.Sprintf("branch %q", e.declared)
 	}
-	return "", fmt.Errorf("Source %s is already declared on %s; remove its Skills with 'skills rm' before adding it on %q", key, current, requested)
+	return fmt.Sprintf("Source %s is already declared on %s; remove its Skills with 'skills rm' before adding it on %q", e.key, current, e.requested)
 }
 
 func NewRemoteAddSource(intake *RemoteIntake) AddSource {
