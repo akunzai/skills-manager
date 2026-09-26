@@ -185,9 +185,10 @@ func printUnknownDetails(out io.Writer, skills []engine.SkillFreshness) {
 // printSyncPlan renders what Sync would do, straight from the plan. Nothing
 // here touches the filesystem or runs a Skill-supplied command.
 func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDecision, scopeFlag string) {
-	if plan.StateError != "" && plan.NeedsBaselines() {
+	switch plan.StateVerdict() {
+	case engine.StateFail:
 		fmt.Fprintf(out, "  %sSkipped : %s%s\n", colorYellow, plan.StateError, colorReset)
-	} else if plan.StateError != "" {
+	case engine.StateWarn:
 		printScopeStateWarning(out, plan.StateError, scopeFlag)
 	}
 	for _, source := range plan.Sources {

@@ -128,12 +128,13 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 		result.Skills[i].RemovedMaster = true
 	}
 	baselines := OpenBaselines(skillsDir)
-	if stateErr := baselines.Err(); stateErr != nil && !plan.needsBaselines() {
-		result.StateWarning = stateErr.Error()
+	switch baselines.Verdict(plan.needsBaselines()) {
+	case StateWarn:
+		result.StateWarning = baselines.Err().Error()
 		return result, result.Err()
-	} else if stateErr != nil {
-		result.StateError = stateErr.Error()
-		return result, errors.Join(result.Err(), fmt.Errorf("removed Skills but did not forget their Baselines: %w", stateErr))
+	case StateFail:
+		result.StateError = baselines.Err().Error()
+		return result, errors.Join(result.Err(), fmt.Errorf("removed Skills but did not forget their Baselines: %w", baselines.Err()))
 	}
 	if err := baselines.Forget(names...); err != nil {
 		return result, errors.Join(result.Err(), err)
