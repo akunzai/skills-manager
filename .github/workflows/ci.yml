@@ -57,7 +57,7 @@ jobs:
           use_oidc: true
 
       - name: Build binary
-        run: go build -v ./cmd/skills
+        run: go build -v -o bin/ ./cmd/skills
 
   windows:
     name: Test & Build (Windows)
@@ -102,4 +102,4 @@ jobs:
         run: go test ./...
 
       - name: Build binary
-        run: go build -v ./cmd/skills
+        run: go build -v -o bin/ ./cmd/skills

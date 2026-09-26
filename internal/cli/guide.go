@@ -9,7 +9,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
-	skillsmanager "github.com/akunzai/skills-manager/skills-manager"
+	skillsmanager "github.com/akunzai/skills-manager/skills/skills-manager"
 	"github.com/spf13/cobra"
 )
 

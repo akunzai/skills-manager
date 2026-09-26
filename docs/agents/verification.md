@@ -14,13 +14,13 @@ mise run check
 <!-- drift:entrypoint-cmd mise run check -->
 
 This is the project's own gate, and it is what CI runs, in CI's order:
-`gofmt -l .`, `go vet ./...`, `go test -race ./...`, `go build
-./cmd/skills`. It never prompts. A step needing a human aborts non-zero
+`gofmt -l .`, `go vet ./...`, `go test -race ./...`, `go build -o
+bin/ ./cmd/skills`. It never prompts. A step needing a human aborts non-zero
 naming the prerequisite — see Human prerequisites below.
 
 The task is a POSIX shell script and does not run on Windows. There is no
 second script for a platform nobody develops on: CI's Windows job runs
-`go test ./...` and `go build ./cmd/skills` directly, and so should you if
+`go test ./...` and `go build -o bin/ ./cmd/skills` directly, and so should you if
 you ever hold a Windows machine.
 
 **Proof it ran**: `go run ./cmd/skills version` prints `skills-manager
