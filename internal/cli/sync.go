@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -244,6 +245,11 @@ func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDec
 	for _, item := range plan.LocalItems() {
 		printSyncPlanItem(out, item, decision)
 	}
+	// Doctor is where a path Availability refuses is inspected, and replaced
+	// once the user confirms.
+	if slices.ContainsFunc(plan.Failed(decision), func(item engine.SyncPlanItem) bool { return item.Drift.Refused() }) {
+		fmt.Fprintf(out, "Next: run 'skills doctor%s --fix'.\n", scopeFlag)
+	}
 }
 
 func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.SyncDecision) {
@@ -284,6 +290,12 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 	}
 	if len(item.Drift.Unexpected) > 0 {
 		fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", item.Name, strings.Join(item.Drift.Unexpected, ", "))
+	}
+	for _, foreign := range item.Drift.Foreign {
+		fmt.Fprintf(out, "  %s[Dry-run] Would fail %s: %s is not managed by skills%s\n", colorRed, item.Name, models.ToTildePath(foreign.Path), colorReset)
+	}
+	for _, unobservable := range item.Drift.Unobservable {
+		fmt.Fprintf(out, "  %s[Dry-run] Would fail %s: cannot inspect %s: %s%s\n", colorRed, item.Name, models.ToTildePath(unobservable.Dir), unobservable.Err, colorReset)
 	}
 }
 

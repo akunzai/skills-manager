@@ -216,6 +216,65 @@ func TestOccupancyDriftDistinguishesDriftBranches(t *testing.T) {
 	})
 }
 
+// Sync plans from the Drift verdict and then applies, so the verdict must
+// say what Apply does: reconcile a link, refuse a path, or leave a copy be.
+func TestDriftVerdictMatchesApply(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		setup                 func(t *testing.T, availability *Availability, linkPath string)
+		reconcilable, refused bool
+	}{
+		{"missing link", func(*testing.T, *Availability, string) {}, true, false},
+		{"unexpected link", func(t *testing.T, availability *Availability, _ string) {
+			if _, err := availability.Apply("sample"); err != nil {
+				t.Fatal(err)
+			}
+			if err := availability.Exclude("sample", "claude"); err != nil {
+				t.Fatal(err)
+			}
+		}, true, false},
+		{"foreign directory", func(t *testing.T, _ *Availability, linkPath string) {
+			if err := os.MkdirAll(linkPath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, false, true},
+		{"unobservable agent directory", func(t *testing.T, _ *Availability, linkPath string) {
+			agentDir := filepath.Dir(linkPath)
+			if err := os.MkdirAll(filepath.Dir(agentDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(agentDir, []byte("not a directory\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, false, true},
+		{"copy", func(t *testing.T, availability *Availability, _ string) {
+			denyLinkCreation(t, ErrLinkPrivilegeNotHeld)
+			if _, err := availability.Apply("sample"); err != nil {
+				t.Fatal(err)
+			}
+		}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			availability, linkPath, _ := projectAvailability(t, "sample")
+			tc.setup(t, availability, linkPath)
+
+			drift := availability.ObserveOccupancy().Drift("sample")
+			if drift.Reconcilable() != tc.reconcilable || drift.Refused() != tc.refused {
+				t.Fatalf("Drift %#v: Reconcilable = %v, Refused = %v; want %v, %v", drift, drift.Reconcilable(), drift.Refused(), tc.reconcilable, tc.refused)
+			}
+			_, err := availability.Apply("sample")
+			if refused := err != nil; refused != tc.refused {
+				t.Fatalf("Apply error = %v; want refused = %v", err, tc.refused)
+			}
+			if !tc.refused {
+				if after := availability.ObserveOccupancy().Drift("sample"); !after.Empty() {
+					t.Fatalf("Drift after Apply = %#v; want none", after)
+				}
+			}
+		})
+	}
+}
+
 // ReplaceForeign is the one mutation that removes a path the user did not
 // declare, so it refuses to act on a diagnosis the filesystem has moved past.
 func TestReplaceForeignRefusesAStaleDiagnosis(t *testing.T) {

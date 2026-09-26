@@ -353,10 +353,10 @@ func (plan *SyncPlan) Pending(decision SyncDecision) []SyncPlanItem {
 	var pending []SyncPlanItem
 	for _, item := range plan.Items {
 		action, _ := item.Resolve(decision)
-		if item.Err != "" || action == SyncActionSkip {
+		if item.Err != "" || action == SyncActionSkip || item.Drift.Refused() {
 			continue
 		}
-		if item.changes(action) || !item.Drift.Empty() {
+		if item.changes(action) || item.Drift.Reconcilable() {
 			pending = append(pending, item)
 		}
 	}
@@ -390,12 +390,18 @@ func (plan *SyncPlan) Forceable(decision SyncDecision) bool {
 	return false
 }
 
-// Failed is the Skills whose observation itself did not succeed, plus a Scope
-// baseline that could not be read. Nothing the user answers changes these.
-func (plan *SyncPlan) Failed() []SyncPlanItem {
+// Failed is the Skills whose observation itself did not succeed, and those
+// Apply would reach but whose Availability it would refuse (ADR-0002). A
+// refused Skill that is blocked under decision stays blocked: Apply never
+// reaches its Availability.
+func (plan *SyncPlan) Failed(decision SyncDecision) []SyncPlanItem {
 	var failed []SyncPlanItem
 	for _, item := range plan.Items {
 		if item.Err != "" {
+			failed = append(failed, item)
+			continue
+		}
+		if action, _ := item.Resolve(decision); action != SyncActionSkip && item.Drift.Refused() {
 			failed = append(failed, item)
 		}
 	}
@@ -427,14 +433,14 @@ func (plan *SyncPlan) Summary(decision SyncDecision) SyncSummary {
 		Configured: len(plan.Names()),
 		Pending:    len(plan.Pending(decision)),
 		Blocked:    len(plan.Blocked(decision)),
-		Failed:     plan.FailedCount(),
+		Failed:     plan.FailedCount(decision),
 		Forceable:  plan.Forceable(decision),
 	}
 }
 
 // FailedCount counts the failures observable before anything is applied.
-func (plan *SyncPlan) FailedCount() int {
-	count := len(plan.Failed())
+func (plan *SyncPlan) FailedCount(decision SyncDecision) int {
+	count := len(plan.Failed(decision))
 	if plan.StateVerdict() == StateFail {
 		count++
 	}
