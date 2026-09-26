@@ -174,10 +174,11 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 		return fmt.Errorf("no matching skills to add")
 	}
 
-	configPath, skillsDir, cfg, agents, err := prepareAddTarget(cmd, prompter, interactive, req.agents)
+	scope, cfg, agents, err := prepareAddTarget(cmd, prompter, interactive, req.agents)
 	if err != nil {
 		return err
 	}
+	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 	req.agents = agents
 	intent, err := promptAddAvailability(cfg, skillsToAdd, skillsDir, prompter, interactive, req.agents)
 	if err != nil {
@@ -215,14 +216,14 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	if err != nil {
 		return err
 	}
-	return reportAddOutcome(out, result, filepath.Base(configPath))
+	return reportAddOutcome(out, result, filepath.Base(configPath), scopeFlagOf(scope))
 }
 
 // reportAddOutcome says why any Skill could not be applied, in Sync's words,
 // then sums up. Add has already declared every Skill, so it adopts ADR-0002's
 // codes: a blocked Skill leaves the Scope not matching its Config (1), a
 // failed one is work that broke (2).
-func reportAddOutcome(out io.Writer, result engine.AddResult, configName string) error {
+func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeFlag string) error {
 	for _, ev := range result.Events {
 		if !syncEventIsProgress(ev.Kind) {
 			printSyncEvent(out, ev)
@@ -230,6 +231,9 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName string)
 	}
 	if result.StateError != "" {
 		printScopeStateUnreadable(out, result.StateError)
+	}
+	if result.StateWarning != "" {
+		printScopeStateWarning(out, result.StateWarning, scopeFlag)
 	}
 	added := fmt.Sprintf("Added %d skill(s) [%s]", len(result.AddedSkills), strings.Join(result.AddedSkills, ", "))
 	if result.Blocked == 0 && result.Failed == 0 {

@@ -192,37 +192,143 @@ func TestCLIRmPrintsRemovalSummaryThroughCapturedOutput(t *testing.T) {
 
 // An unreadable Scope state keeps rm from forgetting the Baseline, not from
 // removing the Skill: it says why and exits 2.
-func TestCLIRmReportsUnreadableScopeState(t *testing.T) {
-	resetRootCmdFlags()
-	home := isolateHome(t)
-	configFile := filepath.Join(home, "skills.json")
-	skillsDir := filepath.Join(home, "skills")
-	cacheDir := filepath.Join(home, ".cache")
-	localSkillDir := filepath.Join(home, "my-local-skill")
-	if err := os.MkdirAll(localSkillDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte("# My Skill"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := runCLI(t, "add", "--symlink", localSkillDir, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
-		t.Fatalf("add --symlink: %v\n%s", err, out)
-	}
-	statePath, bad := makeScopeStateUnreadable(t, skillsDir)
+// A local Skill has no Baseline to forget, so an unreadable Scope state is a
+// warning for rm, not a failure (ADR-0002). A remote Skill's Baseline cannot
+// be forgotten, which is.
+func TestCLIRmOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		remote   bool
+		wantExit int
+		wantLine string
+	}{
+		{name: "local", wantExit: 0, wantLine: "Scope state is unreadable: "},
+		{name: "remote", remote: true, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetSubcommandFlags()
+			t.Cleanup(resetSubcommandFlags)
+			isolateHome(t)
+			root := t.TempDir()
+			configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
+			addArgs := []string{"add", "--symlink", writeCLILocalSkill(t, root, "sample")}
+			if tc.remote {
+				origin := filepath.Join(root, "origin")
+				writeCLIGitSkill(t, origin, "sample")
+				addArgs = []string{"add", "owner/repo", "--url", origin, "--skill", "sample", "-y"}
+			}
+			if out, err := runCLI(t, append(addArgs, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)...); err != nil {
+				t.Fatalf("add: %v\n%s", err, out)
+			}
+			statePath, bad := makeScopeStateUnreadable(t, skillsDir)
 
-	out, err := runCLI(t, "rm", "my-local-skill", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
-	if err == nil || ExitCode(err) != 2 {
-		t.Fatalf("rm error = %v (exit %d); want exit 2\n%s", err, ExitCode(err), out)
+			out, err := runCLI(t, "rm", "sample", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+
+			if exit := exitCodeOf(err); exit != tc.wantExit {
+				t.Fatalf("rm error = %v (exit %d); want exit %d\n%s", err, exit, tc.wantExit, out)
+			}
+			if !strings.Contains(out, tc.wantLine) {
+				t.Fatalf("output does not contain %q:\n%s", tc.wantLine, out)
+			}
+			if _, err := os.Lstat(filepath.Join(skillsDir, "sample")); !os.IsNotExist(err) {
+				t.Fatal("the Skill must still be removed")
+			}
+			if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+				t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+			}
+		})
 	}
-	if !strings.Contains(out, "Failed to read the Scope baseline: ") {
-		t.Fatalf("output does not report the unreadable Scope state:\n%s", out)
+}
+
+// Sync needs a Baseline only for a remote Skill. A Scope declaring none still
+// matches its Config with an unreadable Scope state, and says so with a
+// warning; one declaring a remote Skill cannot record its Baseline.
+func TestCLISyncOnUnreadableScopeStateFailsOnlyWithARemoteSkill(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		remote   bool
+		command  []string
+		wantExit int
+		wantLine string
+	}{
+		{name: "local", command: []string{"sync"}, wantExit: 0, wantLine: "Scope state is unreadable: "},
+		{name: "local dry run", command: []string{"sync", "--dry-run"}, wantExit: 0, wantLine: "Scope state is unreadable: "},
+		{name: "local update", command: []string{"update"}, wantExit: 0, wantLine: "Scope state is unreadable: "},
+		{name: "remote", remote: true, command: []string{"sync"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
+		{name: "remote update", remote: true, command: []string{"update"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetSubcommandFlags()
+			t.Cleanup(resetSubcommandFlags)
+			isolateHome(t)
+			root := t.TempDir()
+			configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
+			addArgs := []string{"add", "--symlink", writeCLILocalSkill(t, root, "sample")}
+			if tc.remote {
+				origin := filepath.Join(root, "origin")
+				writeCLIGitSkill(t, origin, "sample")
+				addArgs = []string{"add", "owner/repo", "--url", origin, "--skill", "sample", "-y"}
+			}
+			if out, err := runCLI(t, append(addArgs, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)...); err != nil {
+				t.Fatalf("add: %v\n%s", err, out)
+			}
+			statePath, bad := makeScopeStateUnreadable(t, skillsDir)
+
+			out, err := runCLI(t, append(tc.command, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)...)
+
+			if exit := exitCodeOf(err); exit != tc.wantExit {
+				t.Fatalf("%s error = %v (exit %d); want exit %d\n%s", strings.Join(tc.command, " "), err, exit, tc.wantExit, out)
+			}
+			if !strings.Contains(out, tc.wantLine) {
+				t.Fatalf("output does not contain %q:\n%s", tc.wantLine, out)
+			}
+			if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+				t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+			}
+		})
 	}
-	if _, err := os.Lstat(filepath.Join(skillsDir, "my-local-skill")); !os.IsNotExist(err) {
-		t.Fatal("the Skill must still be removed")
+}
+
+// A local Add has no Baseline to record: it warns about an unreadable Scope
+// state and succeeds. TestCLIAddReportsUnreadableScopeState covers remote.
+func TestCLIAddOfALocalSkillWarnsOnUnreadableScopeState(t *testing.T) {
+	resetSubcommandFlags()
+	t.Cleanup(resetSubcommandFlags)
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
+	makeScopeStateUnreadable(t, skillsDir)
+
+	out, err := runCLI(t, "add", "--symlink", writeCLILocalSkill(t, root, "sample"), "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+
+	if err != nil {
+		t.Fatalf("add error = %v (exit %d); want exit 0\n%s", err, ExitCode(err), out)
 	}
-	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
-		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+	if !strings.Contains(out, "Scope state is unreadable: ") || !strings.Contains(out, "--fix' to reset it.") {
+		t.Fatalf("output does not warn about the unreadable Scope state:\n%s", out)
 	}
+}
+
+// exitCodeOf is the process exit code for a command's returned error.
+func exitCodeOf(err error) int {
+	if err == nil {
+		return 0
+	}
+	return ExitCode(err)
+}
+
+// writeCLILocalSkill writes a local Skill directory named name under root and
+// returns its path.
+func writeCLILocalSkill(t *testing.T, root, name string) string {
+	t.Helper()
+	dir := filepath.Join(root, "local", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# "+name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // outdated previously wrote with raw fmt.Printf/Println. Assert its no-remote

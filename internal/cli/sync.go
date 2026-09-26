@@ -72,7 +72,7 @@ completed.`,
 			decision := engine.SyncDecision{Force: flagForce}
 
 			if flagDryRun {
-				printSyncPlan(out, plan, decision)
+				printSyncPlan(out, plan, decision, scopeFlagOf(scope))
 				return reportSyncOutcome(out, plan.Summary(decision), true, "skills sync")
 			}
 
@@ -117,12 +117,12 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 	}
 	report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev) })
 	region.Stop()
-	// The flag the user passed, not the shape of --skills-dir (root.go).
-	scopeFlag := ""
-	if scope.IsProject {
-		scopeFlag = " -p"
+	for _, ev := range report.Events {
+		if ev.Kind == engine.SyncStateUnreadable {
+			printScopeStateWarning(out, ev.Err, scopeFlagOf(scope))
+		}
 	}
-	printCopiedAvailability(out, report, scopeFlag)
+	printCopiedAvailability(out, report, scopeFlagOf(scope))
 	return report, err
 }
 
@@ -184,9 +184,11 @@ func printUnknownDetails(out io.Writer, skills []engine.SkillFreshness) {
 
 // printSyncPlan renders what Sync would do, straight from the plan. Nothing
 // here touches the filesystem or runs a Skill-supplied command.
-func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDecision) {
-	if plan.StateError != "" {
+func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDecision, scopeFlag string) {
+	if plan.StateError != "" && plan.NeedsBaselines() {
 		fmt.Fprintf(out, "  %sSkipped : %s%s\n", colorYellow, plan.StateError, colorReset)
+	} else if plan.StateError != "" {
+		printScopeStateWarning(out, plan.StateError, scopeFlag)
 	}
 	for _, source := range plan.Sources {
 		items := plan.SourceItems(source)
@@ -344,6 +346,9 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
 		fmt.Fprintf(out, "  %sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
 	case engine.SyncSkipped:
 		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
+	case engine.SyncStateUnreadable:
+		// applySyncPlan warns once the region is gone, with the scope flag
+		// its next action needs.
 	case engine.SyncStateFailed:
 		if ev.Skill == "" {
 			printScopeStateUnreadable(out, ev.Err)
@@ -351,6 +356,13 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
 		}
 		fmt.Fprintf(out, "  %sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	}
+}
+
+// printScopeStateWarning is the sentence for an unreadable Scope state that
+// costs nothing, because the command had no Baseline to record, compare, or
+// forget (ADR-0002).
+func printScopeStateWarning(out io.Writer, reason, scopeFlag string) {
+	fmt.Fprintf(out, "  %sScope state is unreadable: %s. Run 'skills doctor%s --fix' to reset it.%s\n", colorYellow, reason, scopeFlag, colorReset)
 }
 
 // printScopeStateUnreadable is the one sentence every command prints when the

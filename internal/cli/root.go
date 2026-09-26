@@ -86,6 +86,15 @@ func resolveScopeFor(isProject bool) Scope {
 	return resolveScope(isProject, workingDir(), configOverride, skillsDirOverride, cacheDirOverride)
 }
 
+// scopeFlagOf is the scope flag a suggested command needs to reach scope: the
+// flag the user passed, not the shape of --skills-dir.
+func scopeFlagOf(s Scope) string {
+	if s.IsProject {
+		return " -p"
+	}
+	return ""
+}
+
 // ResolveScope reads the parsed --project/--global/--config/--skills-dir/
 // --cache-dir flags and the working directory, and resolves them to a Scope.
 // Call it once per command invocation.

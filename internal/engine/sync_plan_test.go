@@ -294,6 +294,37 @@ func TestSyncApplyReportsScopeStateUnreadableSincePlanning(t *testing.T) {
 	}
 }
 
+// A Scope that declares no remote Skill has no Baseline to record, so an
+// unreadable Scope state is a warning event, not a failure (ADR-0002).
+func TestSyncApplyWarnsOnUnreadableScopeStateWithoutRemoteSkills(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, "skills")
+	local := filepath.Join(root, "local")
+	mustWriteScopeStateTestFile(t, filepath.Join(local, "SKILL.md"), []byte("# Local\n"))
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "local", local, "")
+	writeUnreadableScopeState(t, skillsDir)
+	plan, err := PlanSync(cfg, "", skillsDir, filepath.Join(root, "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.NeedsBaselines() || plan.StateError == "" || plan.FailedCount() != 0 {
+		t.Fatalf("NeedsBaselines=%v StateError=%q FailedCount=%d; want an unreadable state that is not a failure",
+			plan.NeedsBaselines(), plan.StateError, plan.FailedCount())
+	}
+
+	var kinds []string
+	report, err := plan.Apply(SyncDecision{}, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if report.Failed != 0 || !slices.Contains(kinds, SyncStateUnreadable) || slices.Contains(kinds, SyncStateFailed) {
+		t.Fatalf("failed=%d events=%#v; want a warning, not a failure", report.Failed, kinds)
+	}
+}
+
 func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()

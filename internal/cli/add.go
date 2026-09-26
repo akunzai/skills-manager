@@ -44,28 +44,27 @@ func markInstalledSkills(options []tui.SelectOption, skillsDirs []string) {
 	}
 }
 
-func prepareAddTarget(cmd *cobra.Command, prompter addPrompter, interactive bool, agents []string) (string, string, *config.Config, []string, error) {
+func prepareAddTarget(cmd *cobra.Command, prompter addPrompter, interactive bool, agents []string) (Scope, *config.Config, []string, error) {
 	scope := ResolveScope()
 	if interactive && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
 		project, err := prompter.SelectScope()
 		if err != nil {
-			return "", "", nil, nil, err
+			return Scope{}, nil, nil, err
 		}
 		scope = resolveScopeFor(project)
 	}
 
-	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := config.LoadConfig(scope.ConfigPath)
 	if err != nil {
-		return "", "", nil, nil, err
+		return Scope{}, nil, nil, err
 	}
 	if len(agents) > 0 {
-		agents, err = engine.NewAvailability(cfg, skillsDir).ValidateManagedAgents(agents)
+		agents, err = engine.NewAvailability(cfg, scope.SkillsDir).ValidateManagedAgents(agents)
 		if err != nil {
-			return "", "", nil, nil, err
+			return Scope{}, nil, nil, err
 		}
 	}
-	return configPath, skillsDir, cfg, agents, nil
+	return scope, cfg, agents, nil
 }
 
 func groupDiscoveredSkills(discovered map[string]string) (tui.GroupedItems, bool) {
