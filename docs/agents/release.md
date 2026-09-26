@@ -8,6 +8,9 @@ The release pipeline is automated via GitHub Actions (`.github/workflows/release
 1. Multi-platform cross-compilation for Linux, macOS, and Windows (arm64 & amd64).
 2. Generating checksums and GitHub release assets (`.tar.gz` and `.zip`).
 3. Generating categorized release notes.
+4. Signing a build provenance attestation for every archive listed in `checksums.txt`.
+
+The tests run again before GoReleaser, and release assets are uploaded before the release is published, so the repository's immutable-releases setting holds: a published tag and its assets cannot change. A bad release is fixed by a new patch version, never by re-tagging.
 
 ## Release Notes Categorization
 
