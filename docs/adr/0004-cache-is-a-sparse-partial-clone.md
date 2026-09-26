@@ -65,9 +65,10 @@ from the Cache, so Sync never Materializes a partial copy of it.
 **Existing Caches are narrowed in place.** A full Cache from an earlier
 release is switched to a sparse checkout on its next fetching refresh, before
 the new commit is written. Its objects are kept; only the working tree shrinks.
-Doctor's legacy Cache migration copies a sparse Cache's `.git` and rebuilds
+Doctor's legacy Cache migration copied a sparse Cache's `.git` and rebuilt
 its working tree offline, because a local clone of a partial clone fails on
-the blobs it never fetched.
+the blobs it never fetched — see the amendment below: the rebuild was
+replaced by a plain removal.
 
 Git 2.35 or newer is required: it is the release that let `sparse-checkout set`
 switch between cone and non-cone mode. Older git fails with that requirement
@@ -102,3 +103,13 @@ paths off disk.
 A symlink inside a Skill that points outside it now points at a path the Cache
 may not have. Materialize already copied such links verbatim, so the
 Materialized Skill was dangling before this change too.
+
+## Amendment (2026-09-26)
+
+Doctor's legacy Cache migration no longer rebuilds a legacy branchless Cache
+before removing it (#177). `skills doctor --fix` now removes a detected
+legacy root outright, without the network; the next `skills update` fetches a
+fresh branch-aware Cache in its place. Detection is unchanged — a `.git`
+directly at `<cache>/<SourceKey>` still marks a legacy root — only the repair
+changed, once the migration this ADR describes had shipped in every release
+since v0.8.0 and few users could still be coming from v0.6 or earlier.

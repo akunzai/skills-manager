@@ -83,7 +83,7 @@ func (f adoptFixture) assertSettled(t *testing.T, name string) {
 	if summary := plan.Summary(SyncDecision{}); !summary.Converged() {
 		t.Fatalf("sync --dry-run = %#v; want converged", summary)
 	}
-	outcome, err := NewDoctorWithCache(cfg, f.skillsDir, f.cacheDir).Run(false, nil, nil)
+	outcome, err := NewDoctorWithCache(cfg, f.skillsDir, f.cacheDir).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

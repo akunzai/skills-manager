@@ -34,7 +34,7 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil, nil)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	doctor := engine.NewDoctor(cfg, skillsDir)
-	beforeOutcome, err := doctor.Run(false, nil, nil)
+	beforeOutcome, err := doctor.Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 		t.Fatalf("expected a pre-fix warning finding, got %#v", before)
 	}
 
-	afterOutcome, err := doctor.Run(true, nil, nil)
+	afterOutcome, err := doctor.Run(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(true, nil, nil)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 		writeUntracked(t, skillsDir)
 
-		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil, nil)
+		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -374,7 +374,7 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 		writeUntracked(t, skillsDir)
 
-		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil, nil)
+		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -407,7 +407,7 @@ func TestFindingsLeftoverMasterSymlinkNamesPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil, nil)
+	outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "linked", source, "")
 	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "")
 
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil, nil)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 		t.Errorf("an unreadable path is neither missing nor foreign: %#v", drift)
 	}
 
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil, nil)
+	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,43 +568,43 @@ func TestDoctorFindingsPrintEveryReportField(t *testing.T) {
 			Foreign:      []engine.ForeignAvailabilityPath{{Agent: "claude-code", Path: "/scope/foreign-path", Kind: engine.ForeignAvailabilityFile}},
 			Unobservable: []engine.UnobservableAvailabilityPath{{Agent: "claude-code", Dir: "/scope", Path: "/scope/unobservable-path", Err: "denied"}},
 		}},
-		Missing:         []string{"missing-skill"},
-		Untracked:       []string{"untracked-skill"},
-		UntrackedLinks:  []string{"untracked-link"},
-		IllegalLocal:    []engine.IllegalLocalSource{{Name: "illegal-skill"}},
-		Invalid:         []engine.InvalidSkill{{Name: "invalid-skill"}},
-		Stubs:           []string{"stub-skill"},
-		UnknownAgents:   []engine.UnknownAgentReference{{Agent: "unknown-agent", Field: "default_agents"}},
-		ReservedNames:   []engine.ReservedAvailability{{Skill: "reserved-skill", Agent: "claude-code"}},
-		StateError:      "state-error",
-		StaleState:      []string{"stale-baseline"},
-		StateRepair:     engine.ItemRepair{Status: engine.RepairFailed, Err: errors.New("state-repair-error")},
-		CacheRecovery:   []string{"recovery-artifact"},
-		CacheMigrations: []engine.CacheMigrationOutcome{{Root: "migration-root", Status: engine.CacheMigrationFailed, Err: errors.New("migration-error")}},
-		StaleScopes:     []engine.ScopeStateArtifact{{ScopePath: "stale-scope-path"}},
-		GitError:        "git-error",
+		Missing:        []string{"missing-skill"},
+		Untracked:      []string{"untracked-skill"},
+		UntrackedLinks: []string{"untracked-link"},
+		IllegalLocal:   []engine.IllegalLocalSource{{Name: "illegal-skill"}},
+		Invalid:        []engine.InvalidSkill{{Name: "invalid-skill"}},
+		Stubs:          []string{"stub-skill"},
+		UnknownAgents:  []engine.UnknownAgentReference{{Agent: "unknown-agent", Field: "default_agents"}},
+		ReservedNames:  []engine.ReservedAvailability{{Skill: "reserved-skill", Agent: "claude-code"}},
+		StateError:     "state-error",
+		StaleState:     []string{"stale-baseline"},
+		StateRepair:    engine.ItemRepair{Status: engine.RepairFailed, Err: errors.New("state-repair-error")},
+		CacheRecovery:  []string{"recovery-artifact"},
+		CacheRemovals:  []engine.CacheRemoval{{Path: "removal-path", Repair: engine.ItemRepair{Status: engine.RepairFailed, Err: errors.New("removal-error")}}},
+		StaleScopes:    []engine.ScopeStateArtifact{{ScopePath: "stale-scope-path"}},
+		GitError:       "git-error",
 	}
 	want := map[string][]string{
-		"SkillsDir":       {"/scope/skills-dir"},
-		"MasterMissing":   {"Missing master skills directory"},
-		"Agents":          {"unusable-agent", "[goose]", "broken-link", "physical-dir"},
-		"Leftover":        {"[codex]", "dangling-skill", "live-skill", "empty-agent"},
-		"Drift":           {"drift-skill", "missing-agent", "unexpected-agent", "broken-agent", "for claude-code", "foreign-path", "unreadable claude-code path", "unobservable-path"},
-		"Missing":         {"missing-skill"},
-		"Untracked":       {"untracked-skill"},
-		"UntrackedLinks":  {"untracked-link"},
-		"IllegalLocal":    {"illegal-skill"},
-		"Invalid":         {"invalid-skill"},
-		"Stubs":           {"stub-skill"},
-		"UnknownAgents":   {`Unknown agent "unknown-agent"`},
-		"ReservedNames":   {"reserved-skill cannot be available to claude-code: Claude Code reserves that directory name."},
-		"StateError":      {"state-error"},
-		"StaleState":      {"stale-baseline"},
-		"StateRepair":     {"state-repair-error"},
-		"CacheRecovery":   {"recovery-artifact"},
-		"CacheMigrations": {"migration-root"},
-		"StaleScopes":     {"stale-scope-path"},
-		"GitError":        {"git-error"},
+		"SkillsDir":      {"/scope/skills-dir"},
+		"MasterMissing":  {"Missing master skills directory"},
+		"Agents":         {"unusable-agent", "[goose]", "broken-link", "physical-dir"},
+		"Leftover":       {"[codex]", "dangling-skill", "live-skill", "empty-agent"},
+		"Drift":          {"drift-skill", "missing-agent", "unexpected-agent", "broken-agent", "for claude-code", "foreign-path", "unreadable claude-code path", "unobservable-path"},
+		"Missing":        {"missing-skill"},
+		"Untracked":      {"untracked-skill"},
+		"UntrackedLinks": {"untracked-link"},
+		"IllegalLocal":   {"illegal-skill"},
+		"Invalid":        {"invalid-skill"},
+		"Stubs":          {"stub-skill"},
+		"UnknownAgents":  {`Unknown agent "unknown-agent"`},
+		"ReservedNames":  {"reserved-skill cannot be available to claude-code: Claude Code reserves that directory name."},
+		"StateError":     {"state-error"},
+		"StaleState":     {"stale-baseline"},
+		"StateRepair":    {"state-repair-error"},
+		"CacheRecovery":  {"recovery-artifact"},
+		"CacheRemovals":  {"removal-path"},
+		"StaleScopes":    {"stale-scope-path"},
+		"GitError":       {"git-error"},
 	}
 
 	var out strings.Builder

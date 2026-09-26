@@ -82,16 +82,19 @@ type DoctorReport struct {
 	UnknownAgents []UnknownAgentReference
 	// ReservedNames are declared Skills whose name an Agent they are
 	// available to keeps for its own content. Availability skips that pair.
-	ReservedNames   []ReservedAvailability
-	StateError      string
-	StaleState      []string
-	StateRepair     ItemRepair
-	CacheRecovery   []string
-	CacheMigrations []CacheMigrationOutcome
-	// legacyCache holds the migration plans repair executes. Only their
-	// roots are reportable (LegacyCacheRoots); the migration machinery is
+	ReservedNames []ReservedAvailability
+	StateError    string
+	StaleState    []string
+	StateRepair   ItemRepair
+	CacheRecovery []string
+	// CacheRemovals is what --fix did to each detected legacy Cache artifact
+	// (LegacyCacheRoots and CacheRecovery combined, roots first). Empty until
+	// --fix runs.
+	CacheRemovals []CacheRemoval
+	// legacyCache holds the detected branchless Cache roots repair removes.
+	// Only the roots are reportable (LegacyCacheRoots); detection itself is
 	// an engine concern and stays unexported.
-	legacyCache []legacyCacheMigrationPlan
+	legacyCache []string
 	baselines   *Baselines
 	StaleScopes []ScopeStateArtifact
 	// GitError is why the git on PATH cannot maintain the sparse Cache
@@ -103,11 +106,11 @@ type DoctorReport struct {
 // Doctor diagnoses and optionally repairs one Scope's Skill, Agent directory,
 // and Availability health.
 type Doctor struct {
-	cfg            *config.Config
-	skillsDir      string
-	availability   *Availability
-	cacheDir       string
-	cacheMigration *legacyCacheMigrator
+	cfg           *config.Config
+	skillsDir     string
+	availability  *Availability
+	cacheDir      string
+	cacheDetector *legacyCacheDetector
 }
 
 // DoctorOutcome is what Doctor diagnosed and repaired, plus the issues that
@@ -122,11 +125,10 @@ type Doctor struct {
 // would be cheaper today and unusable for either.
 type DoctorOutcome struct {
 	// Report is the pre-fix diagnosis. When AttemptedFix is set, repaired
-	// items carry their ItemRepair (or CacheMigrationOutcome) on the value.
-	Report         DoctorReport
-	AttemptedFix   bool
-	Remaining      int
-	RecoveryNeeded bool
+	// items carry their ItemRepair (or CacheRemoval) on the value.
+	Report       DoctorReport
+	AttemptedFix bool
+	Remaining    int
 	// Failed is how many repair actions --fix attempted and could not
 	// complete. It is kept apart from Remaining because ADR-0002 keeps the
 	// two apart: a finding is a state to act on, a failed repair is work
@@ -138,17 +140,6 @@ type DoctorOutcome struct {
 	// Remaining (ADR-0002).
 	Warnings []DoctorWarning
 }
-
-// DoctorEvent reports a legacy Cache rebuild: once when a Source starts, then
-// with Finished set when the Cache it shares with its siblings is done, and
-// Failed set when that rebuild did not succeed.
-type DoctorEvent struct {
-	Source           string
-	Index, Total     int
-	Finished, Failed bool
-}
-
-type DoctorProgress func(DoctorEvent)
 
 type DoctorReplaceForeign func([]ForeignAvailabilityPath) (bool, error)
 
@@ -169,25 +160,25 @@ func NewDoctorWithCache(cfg *config.Config, skillsDir, cacheDir string) *Doctor 
 		availability: availability,
 		cacheDir:     cacheDirOrDefault(cacheDir),
 	}
-	doctor.cacheMigration = newLegacyCacheMigrator(doctor.cfg, doctor.cacheDir)
+	doctor.cacheDetector = newLegacyCacheDetector(doctor.cfg, doctor.cacheDir)
 	return doctor
 }
 
 // Run diagnoses the Scope. With fix, it repairs independent findings, keeps
 // their action report, then diagnoses again to count the actual remaining
-// state. progress and approve are optional: a nil progress reports nothing, a
-// nil approve declines every foreign-path replacement.
+// state. approve is optional: a nil approve declines every foreign-path
+// replacement.
 //
 // One entry point on purpose. Run/RunWithProgress/RunWithRepairApproval used
 // to layer over this one, which made the interface read as three shapes when
 // only this signature ever ran — the two wrappers had no caller outside tests.
-func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceForeign) (DoctorOutcome, error) {
+func (d *Doctor) Run(fix bool, approve DoctorReplaceForeign) (DoctorOutcome, error) {
 	plan, err := d.diagnose()
 	if err != nil {
 		return DoctorOutcome{}, err
 	}
 	if !fix {
-		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), RecoveryNeeded: len(plan.CacheRecovery) > 0, Warnings: plan.warnings()}, nil
+		return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Warnings: plan.warnings()}, nil
 	}
 
 	replaceForeign := false
@@ -197,15 +188,14 @@ func (d *Doctor) Run(fix bool, progress DoctorProgress, approve DoctorReplaceFor
 			return DoctorOutcome{Report: plan, Remaining: plan.issueCount(), Warnings: plan.warnings()}, err
 		}
 	}
-	d.repair(&plan, progress, replaceForeign)
-	outcome := DoctorOutcome{Report: plan, AttemptedFix: true, RecoveryNeeded: plan.cacheRecoveryNeeded(), Failed: plan.repairFailures()}
+	d.repair(&plan, replaceForeign)
+	outcome := DoctorOutcome{Report: plan, AttemptedFix: true, Failed: plan.repairFailures()}
 	after, err := d.diagnose()
 	if err != nil {
 		return outcome, err
 	}
 	outcome.Remaining = after.issueCount()
 	outcome.Warnings = after.warnings()
-	outcome.RecoveryNeeded = outcome.RecoveryNeeded || len(after.CacheRecovery) > 0
 	return outcome, nil
 }
 
@@ -237,21 +227,12 @@ func (p DoctorReport) repairFailures() int {
 			failures++
 		}
 	}
-	for _, migration := range p.CacheMigrations {
-		if migration.Status == CacheMigrationFailed {
+	for _, removal := range p.CacheRemovals {
+		if removal.Repair.Status == RepairFailed {
 			failures++
 		}
 	}
 	return failures
-}
-
-func (p DoctorReport) cacheRecoveryNeeded() bool {
-	for _, migration := range p.CacheMigrations {
-		if migration.Status == CacheMigrationRecoveryNeeded {
-			return true
-		}
-	}
-	return false
 }
 
 func (p DoctorReport) foreignAvailabilityPaths() []ForeignAvailabilityPath {
@@ -288,11 +269,11 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 			plan.GitError = err.Error()
 		}
 	}
-	legacyCache, cacheRecovery, err := d.cacheMigration.detect()
+	cacheRecovery, err := d.cacheDetector.detectRecoveryArtifacts()
 	if err != nil {
 		return DoctorReport{}, err
 	}
-	plan.legacyCache = legacyCache
+	plan.legacyCache = d.cacheDetector.detectRoots()
 	plan.CacheRecovery = cacheRecovery
 	if _, err := os.Stat(d.skillsDir); os.IsNotExist(err) {
 		plan.MasterMissing = true
@@ -355,37 +336,14 @@ func (p DoctorReport) issueCount() int {
 
 // repair leaves physical dirs, unmanaged broken links, and missing/untracked/
 // invalid Skills unchanged. Independent repair failures do not stop the run.
-func (d *Doctor) repair(plan *DoctorReport, progress DoctorProgress, replaceForeign bool) {
+func (d *Doctor) repair(plan *DoctorReport, replaceForeign bool) {
 	if plan.StateError != "" {
 		plan.StateRepair = itemRepairFromErr(plan.baselines.Reset())
 	} else if len(plan.StaleState) > 0 {
 		plan.StateRepair = itemRepairFromErr(plan.baselines.ForgetStale(d.cfg))
 	}
-	total := 0
-	for _, migration := range plan.legacyCache {
-		total += len(migration.Sources)
-	}
-	index := 0
-	var staged []string
-	migrations := d.cacheMigration.apply(plan.legacyCache, func(event legacyCacheMigrationEvent) {
-		if progress == nil {
-			return
-		}
-		switch event.Phase {
-		case legacyCacheMigrationStaging:
-			index++
-			staged = append(staged, event.Source)
-			progress(DoctorEvent{Source: event.Source, Index: index, Total: total})
-		case legacyCacheMigrationFinished:
-			for _, source := range staged {
-				progress(DoctorEvent{Source: source, Index: index, Total: total, Finished: true, Failed: event.Status != legacyCacheRebuilt})
-			}
-			staged = nil
-		}
-	})
-	for _, migration := range migrations {
-		plan.CacheMigrations = append(plan.CacheMigrations, migration.outcome())
-	}
+	plan.CacheRemovals = append(plan.CacheRemovals, d.cacheDetector.remove(plan.legacyCache)...)
+	plan.CacheRemovals = append(plan.CacheRemovals, d.cacheDetector.remove(plan.CacheRecovery)...)
 	for i, artifact := range plan.StaleScopes {
 		if err := os.Remove(artifact.Path); err != nil && !os.IsNotExist(err) {
 			plan.StaleScopes[i].Repair = itemRepairFromErr(err)
@@ -428,11 +386,7 @@ func itemRepairFromErr(err error) ItemRepair {
 }
 
 // LegacyCacheRoots names the legacy branchless Cache roots doctor found, for
-// callers that report them. The migration plans themselves stay internal.
+// callers that report them.
 func (p DoctorReport) LegacyCacheRoots() []string {
-	roots := make([]string, 0, len(p.legacyCache))
-	for _, migration := range p.legacyCache {
-		roots = append(roots, migration.Root)
-	}
-	return roots
+	return p.legacyCache
 }
