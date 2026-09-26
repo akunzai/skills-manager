@@ -526,7 +526,7 @@
 
 <section id="commands">
   <div class="wrap">
-    <h2>Daily Commands</h2>
+    <h2>Commands</h2>
     <div class="table-box">
       <table>
         <thead>
@@ -538,9 +538,9 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>skills ls</code></td>
-            <td>Inspect declared skills, sources, and agent availability</td>
-            <td><code>0</code> clean</td>
+            <td><code>skills init</code></td>
+            <td>Create a schema-backed <code>skills.json</code> for the selected Scope</td>
+            <td><code>0</code> created</td>
           </tr>
           <tr>
             <td><code>skills add</code></td>
@@ -553,24 +553,24 @@
             <td><code>0</code> listed, <code>1</code> none found</td>
           </tr>
           <tr>
-            <td><code>skills sync</code></td>
-            <td>Reconcile Scope from existing Cache without network access</td>
-            <td><code>0</code> synced, <code>1</code> drift</td>
+            <td><code>skills adopt</code></td>
+            <td>Declare untracked or agent-directory skills, keeping their content</td>
+            <td><code>0</code> adopted, <code>1</code> left for you</td>
           </tr>
           <tr>
-            <td><code>skills sync --dry-run</code></td>
-            <td>Preview reconciliation actions non-mutatingly</td>
-            <td><code>0</code> synced, <code>1</code> pending work</td>
+            <td><code>skills ls</code></td>
+            <td>Inspect declared skills, sources, and agent availability</td>
+            <td><code>0</code> clean</td>
           </tr>
           <tr>
-            <td><code>skills update</code></td>
-            <td>Refresh declared remote Sources, then sync the Scope</td>
-            <td><code>0</code> synced, <code>1</code> drift</td>
+            <td><code>skills agents</code></td>
+            <td>Inspect or change where a skill is available (include, exclude, reset, follow defaults)</td>
+            <td><code>0</code> applied</td>
           </tr>
           <tr>
-            <td><code>skills self-update</code></td>
-            <td>Replace this CLI with a newer release (Homebrew and Scoop installs name their upgrade command instead)</td>
-            <td><code>0</code> replaced</td>
+            <td><code>skills config</code></td>
+            <td>Inspect or change settings; <code>config edit</code> opens <code>skills.json</code></td>
+            <td><code>0</code> applied</td>
           </tr>
           <tr>
             <td><code>skills outdated</code></td>
@@ -583,6 +583,21 @@
             <td><code>0</code> no changes, <code>1</code> changes</td>
           </tr>
           <tr>
+            <td><code>skills update</code></td>
+            <td>Refresh declared remote Sources, then sync the Scope</td>
+            <td><code>0</code> synced, <code>1</code> drift</td>
+          </tr>
+          <tr>
+            <td><code>skills sync</code></td>
+            <td>Reconcile Scope from existing Cache without network access</td>
+            <td><code>0</code> synced, <code>1</code> drift</td>
+          </tr>
+          <tr>
+            <td><code>skills sync --dry-run</code></td>
+            <td>Preview reconciliation actions non-mutatingly</td>
+            <td><code>0</code> synced, <code>1</code> pending work</td>
+          </tr>
+          <tr>
             <td><code>skills doctor</code></td>
             <td>Diagnose broken symlinks, collisions, and drift</td>
             <td><code>0</code> healthy, <code>1</code> findings</td>
@@ -593,9 +608,9 @@
             <td><code>0</code> repaired</td>
           </tr>
           <tr>
-            <td><code>skills adopt</code></td>
-            <td>Declare untracked or agent-directory skills, keeping their content</td>
-            <td><code>0</code> adopted, <code>1</code> left for you</td>
+            <td><code>skills rm &lt;skill&gt;</code></td>
+            <td>Remove a skill: its declaration, copy, availability links, and Baseline</td>
+            <td><code>0</code> removed, <code>2</code> not fully removed</td>
           </tr>
           <tr>
             <td><code>skills prune</code></td>
@@ -606,6 +621,11 @@
             <td><code>skills guide</code></td>
             <td>Print or install agent guidance for AI agents</td>
             <td><code>0</code> completed</td>
+          </tr>
+          <tr>
+            <td><code>skills self-update</code></td>
+            <td>Replace this CLI with a newer release (Homebrew and Scoop installs name their upgrade command instead)</td>
+            <td><code>0</code> replaced</td>
           </tr>
         </tbody>
       </table>
