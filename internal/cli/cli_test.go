@@ -1516,6 +1516,13 @@ func TestCLIUpdateSyncsAScopeWithoutRemoteSources(t *testing.T) {
 	if _, err := os.Readlink(filepath.Join(skillsDir, "local")); err != nil {
 		t.Fatalf("update did not link the local Skill: %v", err)
 	}
+
+	// A target names a remote Source or Skill; with none declared, a typo
+	// must not pass for a request to sync everything.
+	resetSubcommandFlags()
+	if out, err := runCLI(t, "update", "typo", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache")); err == nil || !strings.Contains(err.Error(), `unknown update target "typo"`) {
+		t.Fatalf("update typo = %v; want the unknown target refused:\n%s", err, out)
+	}
 }
 
 // One Source that cannot be fetched does not hold back the others: update
