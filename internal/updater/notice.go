@@ -17,8 +17,13 @@ const NoticeCheckTimeoutSec = 2
 
 const noticeCheckInterval = 24 * time.Hour
 
-func NoticeLine(latestVersion string) string {
-	return fmt.Sprintf("Self-update %s is available. Run: skills self-update", latestVersion)
+// NoticeLine is the daily TTY notice. command is normally "skills
+// self-update"; a caller whose executable a package manager owns passes
+// that package manager's upgrade command instead (see
+// ClassifyExecutablePath), so the notice never suggests an action
+// self-update itself would refuse.
+func NoticeLine(latestVersion, command string) string {
+	return fmt.Sprintf("Self-update %s is available. Run: %s", latestVersion, command)
 }
 
 func SkipSelfUpdateCheck() bool {
