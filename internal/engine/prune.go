@@ -3,6 +3,7 @@ package engine
 import (
 	"cmp"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 
@@ -24,10 +25,76 @@ type PrunePlan struct {
 	// StateError is why the Scope state could not be read. Its stale
 	// Baselines are left alone; everything else is still pruned.
 	StateError string
+	// approvedDirs are the UntrackedDirs the user selected. An untracked real
+	// directory is the user's own content, so only Select sets this and
+	// ApplyPrunePlan removes no other real directory.
+	approvedDirs []string
 }
 
 func (p PrunePlan) AllUntracked() []string {
 	return append(slices.Clone(p.UntrackedSkills), p.UntrackedDirs...)
+}
+
+// Empty reports whether applying the plan would remove nothing at all. An
+// untracked real directory Select has not approved is never removed, so it
+// does not count.
+func (p PrunePlan) Empty() bool {
+	return len(p.UntrackedSkills) == 0 && len(p.approvedDirs) == 0 && len(p.Unconfigured) == 0 && len(p.EmptyAgentDirs) == 0 && len(p.StateSkills) == 0
+}
+
+// PruneSelection is what the user chose from a PrunePlan: untracked master
+// Skills by name, managed links by path, empty Agent directories by path, and
+// stale Baselines by Skill name.
+type PruneSelection struct {
+	Masters   []string
+	Links     []string
+	EmptyDirs []string
+	Baselines []string
+}
+
+// Select narrows the plan to selection. A selected untracked master Skill
+// takes its managed links with it, and a selected untracked real directory is
+// approved for removal; one not selected stays, whatever else is chosen.
+func (p PrunePlan) Select(selection PruneSelection) PrunePlan {
+	masters := setOf(selection.Masters)
+	links := setOf(selection.Links)
+	emptyDirs := setOf(selection.EmptyDirs)
+	baselines := setOf(selection.Baselines)
+	var selected PrunePlan
+	for _, skill := range p.UntrackedSkills {
+		if masters[skill] {
+			selected.UntrackedSkills = append(selected.UntrackedSkills, skill)
+		}
+	}
+	for _, dir := range p.UntrackedDirs {
+		if masters[dir] {
+			selected.approvedDirs = append(selected.approvedDirs, dir)
+		}
+	}
+	for _, link := range p.Unconfigured {
+		if links[link.Path] || masters[link.Skill] {
+			selected.Unconfigured = append(selected.Unconfigured, link)
+		}
+	}
+	for _, dir := range p.EmptyAgentDirs {
+		if emptyDirs[dir.Dir] {
+			selected.EmptyAgentDirs = append(selected.EmptyAgentDirs, dir)
+		}
+	}
+	for _, name := range p.StateSkills {
+		if baselines[name] {
+			selected.StateSkills = append(selected.StateSkills, name)
+		}
+	}
+	return selected
+}
+
+func setOf(values []string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		set[value] = true
+	}
+	return set
 }
 
 // PruneFailure identifies a planned path that could not be removed.
@@ -38,7 +105,10 @@ type PruneFailure struct {
 
 // PruneResult records what happened while applying a plan.
 type PruneResult struct {
-	RemovedSkills    []string
+	RemovedSkills []string
+	// SkippedSkills are untracked entries listed for removal as links that are
+	// not links: only Select can approve removing a real directory.
+	SkippedSkills    []string
 	RemovedLinks     []ManagedAgentPath
 	SkippedLinks     []ManagedAgentPath
 	RemovedEmptyDirs []AgentDir
@@ -51,8 +121,8 @@ type PruneResult struct {
 // BuildPrunePlan finds untracked master skills and managed links that are no
 // longer selected by the current configuration. Agent Availability paths are
 // selected only when they are managed links into the master skills directory.
-// Untracked real directories on the master are included so a TTY prune can
-// offer them; callers that skip confirmation must omit those from apply.
+// Untracked real directories on the master are listed so a TTY prune can
+// offer them; only Select can approve one for removal.
 func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, includeConfiguredLinks bool) (PrunePlan, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -125,14 +195,26 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 			result.RemovedLinks = append(result.RemovedLinks, link)
 		}
 	}
-	for _, skill := range plan.UntrackedSkills {
+	remove := func(skill string) {
 		path := filepath.Join(skillsDir, skill)
 		if err := RemoveAll(path); err != nil {
 			result.Failures = append(result.Failures, PruneFailure{Path: path, Err: err})
 			errs = append(errs, err)
-			continue
+			return
 		}
 		result.RemovedSkills = append(result.RemovedSkills, skill)
+	}
+	for _, skill := range plan.UntrackedSkills {
+		// Checked again right before removal: a real directory here, listed
+		// by a caller or put in place since planning, was never approved.
+		if info, err := os.Lstat(filepath.Join(skillsDir, skill)); err == nil && info.Mode()&os.ModeSymlink == 0 {
+			result.SkippedSkills = append(result.SkippedSkills, skill)
+			continue
+		}
+		remove(skill)
+	}
+	for _, dir := range plan.approvedDirs {
+		remove(dir)
 	}
 	for i, repair := range removeEmptyAgentDirs(skillsDir, plan.EmptyAgentDirs) {
 		dir := plan.EmptyAgentDirs[i]
