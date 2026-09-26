@@ -134,6 +134,13 @@ func gitOpErr(action, repoURL, stdout, stderr string, err error) error {
 //   - https://git-scm.com/docs/git-config#Documentation/git-config.txt-corelongpaths
 //   - https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation
 func runGit(cwd string, args ...string) (string, string, error) {
+	stdout, stderr, err := runGitRaw(cwd, args...)
+	return strings.TrimSpace(string(stdout)), stderr, err
+}
+
+// runGitRaw is runGit for output whose bytes matter, such as a blob or a
+// patch, where trimming would drop a trailing blank line.
+func runGitRaw(cwd string, args ...string) ([]byte, string, error) {
 	cmdArgs := args
 	if runtime.GOOS == "windows" {
 		cmdArgs = append([]string{"-c", "core.longpaths=true"}, args...)
@@ -154,7 +161,7 @@ func runGit(cwd string, args ...string) (string, string, error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+	return stdout.Bytes(), strings.TrimSpace(stderr.String()), err
 }
 
 // ensureGitRepo clones or refreshes one Source's Cache and makes sure the

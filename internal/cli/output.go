@@ -17,6 +17,8 @@ var (
 	tableRule      string
 	treeBranch     string
 	treeLastBranch string
+	// arrow reads "from → to" on a terminal and "from -> to" in plain output.
+	arrow string
 
 	// errStyle mirrors the vars above but is keyed to the command's error
 	// writer rather than its output writer. Stdout and stderr can have
@@ -38,6 +40,10 @@ func applyOutputStyle(out io.Writer) {
 	tableRule = style.Rule
 	treeBranch = style.Branch
 	treeLastBranch = style.LastBranch
+	arrow = "→"
+	if style.Plain {
+		arrow = "->"
+	}
 }
 
 func applyErrorOutputStyle(errOut io.Writer) {

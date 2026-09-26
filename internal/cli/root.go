@@ -136,6 +136,7 @@ func init() {
 	RootCmd.AddCommand(newPruneCmd())
 	RootCmd.AddCommand(newOutdatedCmd())
 	RootCmd.AddCommand(newUpdateCmd())
+	RootCmd.AddCommand(newDiffCmd())
 	RootCmd.AddCommand(newDoctorCmd())
 	RootCmd.AddCommand(newSelfUpdateCmd())
 	RootCmd.AddCommand(newInitCmd())

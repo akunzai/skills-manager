@@ -138,6 +138,7 @@ Universal agents that read the central skills directory directly do not need lin
 | Reconcile the selected Scope from its existing Cache | `skills sync` |
 | Preview reconciliation | `skills sync --dry-run` |
 | Inspect remote → Cache → Scope freshness | `skills outdated` |
+| Show a remote skill's upstream and local changes | `skills diff <skill>` |
 | Refresh remote Sources, then sync the Scope | `skills update` |
 | Diagnose drift | `skills doctor` |
 | Repair diagnosed health issues | `skills doctor --fix` |
@@ -147,7 +148,7 @@ Universal agents that read the central skills directory directly do not need lin
 
 Every operational command accepts `-p` (or `--project`). Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
 
-For remote Skills, the normal flow is `skills outdated`, then `skills update`. When nothing changed, Update prints one line and asks nothing, so it fits a shell startup file. Sync, including the one Update runs, protects known local changes and unknown baselines; inspect them first, or explicitly overwrite with `skills sync --force`. `sync --dry-run` is a non-mutating freshness gate: it reports what Sync would do without writing anything, and without running a skill's own commands.
+For remote Skills, the normal flow is `skills outdated`, then `skills update`. When nothing changed, Update prints one line and asks nothing, so it fits a shell startup file. Sync, including the one Update runs, protects known local changes and unknown baselines; inspect them first with `skills diff <skill>`, or explicitly overwrite with `skills sync --force`. `skills diff` shows what the Source changed since the copy was applied and what was changed locally; it reads the existing Cache unless `--fetch` refreshes the Source first, and exits `0` with nothing to show, `1` with differences, and `2` when it cannot compare. `sync --dry-run` is a non-mutating freshness gate: it reports what Sync would do without writing anything, and without running a skill's own commands.
 
 When upgrading from a legacy branchless Cache layout, `skills doctor --fix` may access the network to rebuild affected Cache entries; it does not run Sync automatically.
 
