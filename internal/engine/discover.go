@@ -12,23 +12,43 @@ import (
 	"strings"
 )
 
-var frontmatterNameRegex = regexp.MustCompile(`(?m)^name:\s*["']?([a-zA-Z0-9_\-\.]+)["']?`)
+var (
+	frontmatterNameRegex        = regexp.MustCompile(`(?m)^name:\s*["']?([a-zA-Z0-9_\-\.]+)["']?`)
+	frontmatterDescriptionRegex = regexp.MustCompile(`(?m)^description:\s*["']?(.*?)["']?\s*$`)
+)
 
-func ParseSkillNameFromMD(skillMdPath string) string {
+// frontmatterBody returns a SKILL.md's leading `---`-delimited block, or ""
+// when the file cannot be read or has none.
+func frontmatterBody(skillMdPath string) string {
 	contentBytes, err := os.ReadFile(skillMdPath)
 	if err != nil {
 		return ""
 	}
 	content := string(contentBytes)
-	if strings.HasPrefix(content, "---") {
-		parts := strings.SplitN(content, "---", 3)
-		if len(parts) >= 3 {
-			frontmatter := parts[1]
-			match := frontmatterNameRegex.FindStringSubmatch(frontmatter)
-			if len(match) > 1 {
-				return strings.TrimSpace(match[1])
-			}
-		}
+	if !strings.HasPrefix(content, "---") {
+		return ""
+	}
+	parts := strings.SplitN(content, "---", 3)
+	if len(parts) < 3 {
+		return ""
+	}
+	return parts[1]
+}
+
+func ParseSkillNameFromMD(skillMdPath string) string {
+	match := frontmatterNameRegex.FindStringSubmatch(frontmatterBody(skillMdPath))
+	if len(match) > 1 {
+		return strings.TrimSpace(match[1])
+	}
+	return ""
+}
+
+// ParseSkillDescriptionFromMD reads a Skill's declared description from its
+// SKILL.md frontmatter, or "" when it has none.
+func ParseSkillDescriptionFromMD(skillMdPath string) string {
+	match := frontmatterDescriptionRegex.FindStringSubmatch(frontmatterBody(skillMdPath))
+	if len(match) > 1 {
+		return strings.TrimSpace(match[1])
 	}
 	return ""
 }
@@ -55,35 +75,49 @@ var IgnoredScanDirs = map[string]bool{
 
 type DiscoveredSkills map[string][]string
 
+// DiscoveredSkillDescriptions maps each candidate path in a DiscoveredSkills
+// value to that Skill's SKILL.md description, for callers that show it
+// (Add's --list) without a second scan.
+type DiscoveredSkillDescriptions map[string]string
+
 func DiscoverSkillsInRepo(repoDir, scope string) (DiscoveredSkills, error) {
+	discovered, _, err := discoverSkills(repoDir, scope, fileBundleIdentity(repoDir))
+	return discovered, err
+}
+
+// DiscoverSkillsInRepoWithDescriptions is DiscoverSkillsInRepo plus each
+// candidate's description.
+func DiscoverSkillsInRepoWithDescriptions(repoDir, scope string) (DiscoveredSkills, DiscoveredSkillDescriptions, error) {
 	return discoverSkills(repoDir, scope, fileBundleIdentity(repoDir))
 }
 
 // discoverRemoteSkills discovers Skills in a Cache whose sparse checkout holds
 // only SKILL.md files (withSkillFiles), so duplicate candidates are
 // compared by their committed tree rather than the files on disk.
-func discoverRemoteSkills(cache Cache, scope string) (DiscoveredSkills, error) {
+func discoverRemoteSkills(cache Cache, scope string) (DiscoveredSkills, DiscoveredSkillDescriptions, error) {
 	var found DiscoveredSkills
+	var descriptions DiscoveredSkillDescriptions
 	err := cache.withSkillFiles(func(repoDir string) error {
 		var err error
-		found, err = discoverSkills(repoDir, scope, gitTreeIdentity(repoDir))
+		found, descriptions, err = discoverSkills(repoDir, scope, gitTreeIdentity(repoDir))
 		// A committed directory holding no SKILL.md is not on disk at all.
 		if errors.Is(err, os.ErrNotExist) {
 			if kind, _, gitErr := runGit(repoDir, "cat-file", "-t", "HEAD:"+filepath.ToSlash(filepath.Clean(scope))); gitErr == nil && kind == "tree" {
-				found, err = DiscoveredSkills{}, nil
+				found, descriptions, err = DiscoveredSkills{}, DiscoveredSkillDescriptions{}, nil
 			}
 		}
 		return err
 	})
-	return found, err
+	return found, descriptions, err
 }
 
-func discoverSkills(repoDir, scope string, identity bundleIdentity) (DiscoveredSkills, error) {
+func discoverSkills(repoDir, scope string, identity bundleIdentity) (DiscoveredSkills, DiscoveredSkillDescriptions, error) {
 	scanRoot, err := discoveryRoot(repoDir, scope)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	foundPaths := make(map[string][]string)
+	rawDescriptions := make(map[string]string)
 
 	err = filepath.Walk(scanRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -118,22 +152,28 @@ func discoverSkills(repoDir, scope string, identity bundleIdentity) (DiscoveredS
 				}
 			}
 			foundPaths[name] = append(foundPaths[name], relPathStr)
+			rawDescriptions[relPathStr] = ParseSkillDescriptionFromMD(path)
 		}
 		return nil
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	found := make(DiscoveredSkills, len(foundPaths))
+	descriptions := make(DiscoveredSkillDescriptions, len(rawDescriptions))
 	for _, name := range slices.Sorted(maps.Keys(foundPaths)) {
 		paths := foundPaths[name]
 		slices.Sort(paths)
-		found[name] = canonicalizeSkillCandidates(name, paths, identity)
+		candidates := canonicalizeSkillCandidates(name, paths, identity)
+		found[name] = candidates
+		for _, path := range candidates {
+			descriptions[path] = rawDescriptions[path]
+		}
 	}
 
-	return found, nil
+	return found, descriptions, nil
 }
 
 func discoveryRoot(repoDir, scope string) (string, error) {

@@ -22,6 +22,48 @@ func TestPrepareRemoteSourceRefreshesCacheAndDiscoversSkills(t *testing.T) {
 	}
 }
 
+// PrepareRemoteSourceWithDescriptions is what Add's --list uses for a remote
+// Source: the same fetch and discovery as PrepareRemoteSource, plus each
+// candidate's description, captured while the Cache's transient SKILL.md-only
+// checkout (ADR-0004) still holds the file.
+func TestPrepareRemoteSourceWithDescriptionsCapturesEachCandidatesDescription(t *testing.T) {
+	origin := filepath.Join(t.TempDir(), "origin")
+	dir := filepath.Join(origin, "sample")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: sample\ndescription: Remote sample skill.\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+		{"add", "."},
+		{"commit", "-m", "init"},
+	} {
+		if _, stderr, err := runGit(origin, args...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, stderr)
+		}
+	}
+
+	repoDir, discovered, descriptions, err := PrepareRemoteSourceWithDescriptions("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repoDir == "" {
+		t.Fatal("expected a Cache directory")
+	}
+	want := DiscoveredSkills{"sample": {"sample"}}
+	if !reflect.DeepEqual(discovered, want) {
+		t.Fatalf("discovered = %#v; want %#v", discovered, want)
+	}
+	if got := descriptions["sample"]; got != "Remote sample skill." {
+		t.Fatalf("description = %q; want %q", got, "Remote sample skill.")
+	}
+}
+
 func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()

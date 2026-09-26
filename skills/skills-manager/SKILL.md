@@ -37,7 +37,7 @@ When calling `skills` in automated scripts or tool calls:
 - **Pass `-y` / `--yes`**: Suppresses interactive prompts so commands run deterministically without blocking on stdin.
 - **Specify skills explicitly on `add`**: Use `--skill <name>` (or `--all`).
 - **Resolve ambiguous repository paths**: If a repository contains duplicate skill names across subdirectories, pass `--path <subpath>` or append the path (e.g. `owner/repo/skills`).
-- **Inspect with `--json`**: `skills ls --json` outputs structured inventory.
+- **Inspect with `--json`**: `skills ls --json` outputs structured inventory; `skills add <source> --list --json` previews a Source's Skills the same way, before choosing `--skill` names.
 - **Non-interactive Source Replacement**: When overwriting or migrating an existing skill (e.g. from a remote Git repository to a local CLI command), pass `-y` to automatically accept the replacement plan.
 - **Self-update only on request**: Run `skills self-update` only when the human explicitly asks. A TTY notice that a newer release exists is not a request.
 
@@ -62,6 +62,9 @@ skills add akunzai/agent-skills --skill agents-md --yes
 
 # Add multiple skills from a repository
 skills add akunzai/agent-skills --skill agents-md --skill writing-for-agents --yes
+
+# Preview a Source's Skills (name, subpath, description) without declaring any
+skills add microsoft/azure-skills --path skills --list --json
 
 # Add all skills from a specific subpath
 skills add microsoft/azure-skills --path skills --all --yes
