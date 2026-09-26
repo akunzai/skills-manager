@@ -217,21 +217,37 @@ func TestRemoteIntakeDeclareRecordsTheSourceAndBranch(t *testing.T) {
 	}
 }
 
-// A URL the key already implies is not stored, however it was given: parsed
-// from the key, or passed as --url.
-func TestRemoteIntakeDeclareStoresTheURLOnlyWhenTheKeyDoesNotImplyIt(t *testing.T) {
-	origin := filepath.Join(t.TempDir(), "origin")
-	writeLocalGitSkill(t, origin, "sample")
-	setGitConfig(t, "url."+localFileURL(origin)+".insteadOf", "https://github.com/owner/repo.git")
-	cfg := config.DefaultConfig()
-	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec("https://github.com/owner/repo.git", "", ""), t.TempDir())
+// A URL the key already implies is not stored, however it is spelled: a
+// trailing .git or / and the host's case do not make it another URL. Add and
+// adopt both declare through here, and installer lock files record URLs
+// without .git.
+func TestRemoteIntakeDeclareComparesNormalizedURLs(t *testing.T) {
+	for _, tc := range []struct {
+		url, stored string
+	}{
+		{url: "https://github.com/owner/repo.git"},
+		{url: "https://github.com/owner/repo"},
+		{url: "https://github.com/owner/repo/"},
+		{url: "https://github.com/owner/repo.git/"},
+		{url: "https://GitHub.com/owner/repo.git"},
+		{url: "https://github.com/owner/other.git", stored: "https://github.com/owner/other.git"},
+		{url: "https://github.com/Owner/repo", stored: "https://github.com/Owner/repo"},
+	} {
+		t.Run(tc.url, func(t *testing.T) {
+			origin := filepath.Join(t.TempDir(), "origin")
+			writeLocalGitSkill(t, origin, "sample")
+			setGitConfig(t, "url."+localFileURL(origin)+".insteadOf", tc.url)
+			cfg := config.DefaultConfig()
+			intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(tc.url, "", ""), t.TempDir())
 
-	if err := intake.Declare(cfg, map[string]string{"sample": "sample"}); err != nil {
-		t.Fatal(err)
-	}
+			if err := intake.Declare(cfg, map[string]string{"sample": "sample"}); err != nil {
+				t.Fatal(err)
+			}
 
-	if got := cfg.Remote["owner/repo"]; got.URL != "" || got.Skills["sample"] != "sample" {
-		t.Fatalf("declared Source = %#v; want sample declared with no stored URL", got)
+			if got := cfg.Remote["owner/repo"].URL; got != tc.stored {
+				t.Fatalf("stored URL = %q; want %q", got, tc.stored)
+			}
+		})
 	}
 }
 

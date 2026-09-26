@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -113,12 +114,9 @@ func TestAdoptDeclaresALockRecordedIdenticalCopyWithItsBaseline(t *testing.T) {
 
 	result := f.adopt(t, cfg)
 
-	if result.Blocked != 0 || result.Failed != 0 || len(result.Skills) != 1 {
-		t.Fatalf("result = %#v; want one Skill adopted", result)
-	}
-	got := result.Skills[0]
-	if got.Outcome != SyncDone || !got.Baseline || !got.Recorded || got.Action != AdoptDeclareRemote {
-		t.Fatalf("adopted = %#v; want a remote declaration with its Baseline", got)
+	assertAdoptStates(t, result, AdoptAdopted)
+	if got := result.Skills[0]; !got.Recorded || got.Action != AdoptDeclareRemote || got.Subpath != "sample" {
+		t.Fatalf("adopted = %#v; want a remote declaration at sample", got)
 	}
 	saved, err := config.LoadConfig(f.configPath)
 	if err != nil {
@@ -149,11 +147,9 @@ func TestAdoptDeclaresALockRecordedModifiedCopyWithoutABaseline(t *testing.T) {
 
 	result := f.adopt(t, cfg)
 
-	if len(result.Skills) != 1 || result.Blocked != 1 || result.Failed != 0 {
-		t.Fatalf("result = %#v; want the Skill declared but blocked", result)
-	}
-	if got := result.Skills[0]; got.Baseline || got.Reason == "" {
-		t.Fatalf("adopted = %#v; want no Baseline and a reason", got)
+	assertAdoptStates(t, result, AdoptDeclaredWithoutBaseline)
+	if got := result.Skills[0]; !got.Declared {
+		t.Fatalf("adopted = %#v; want it declared", got)
 	}
 	saved, err := config.LoadConfig(f.configPath)
 	if err != nil {
@@ -174,6 +170,36 @@ func TestAdoptDeclaresALockRecordedModifiedCopyWithoutABaseline(t *testing.T) {
 	}
 }
 
+// A Source Config declares on another branch is refused, not re-pointed, and
+// the copy is left as it was.
+func TestAdoptSkipsASourceDeclaredOnAnotherBranch(t *testing.T) {
+	f := newAdoptFixture(t)
+	dir := f.untracked(t, "sample", "# Sample\n")
+	branch := mustGit(t, f.origin, "symbolic-ref", "--short", "HEAD")
+	data, err := json.Marshal(map[string]any{"skills": map[string]any{
+		"sample": map[string]any{"source": "owner/repo", "sourceType": "github", "sourceUrl": f.origin, "ref": branch, "skillPath": "sample"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWriteScopeStateTestFile(t, f.lockPath, data)
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{Type: "github", URL: f.origin, Branch: "dev", Skills: map[string]string{"other": "other"}}
+
+	result := f.adopt(t, cfg)
+
+	assertAdoptStates(t, result, AdoptSkipped)
+	if reason := result.Skills[0].Reason; !strings.Contains(reason, `already declared on branch "dev"`) {
+		t.Fatalf("reason = %q; want the branch conflict", reason)
+	}
+	if _, ok := cfg.Remote["owner/repo"].Skills["sample"]; ok || cfg.Remote["owner/repo"].Branch != "dev" {
+		t.Fatalf("Config = %#v; a refused Source must stay as it was", cfg.Remote["owner/repo"])
+	}
+	if !isRealDir(dir) {
+		t.Fatal("the copy must stay where it is")
+	}
+}
+
 func TestAdoptMovesAnUnknownOriginBesideTheSkillsDirectory(t *testing.T) {
 	f := newAdoptFixture(t)
 	f.untracked(t, "mine", "# Mine\n")
@@ -181,9 +207,7 @@ func TestAdoptMovesAnUnknownOriginBesideTheSkillsDirectory(t *testing.T) {
 
 	result := f.adopt(t, cfg)
 
-	if result.Blocked != 0 || result.Failed != 0 || len(result.Adopted()) != 1 {
-		t.Fatalf("result = %#v; want one Skill adopted", result)
-	}
+	assertAdoptStates(t, result, AdoptAdopted)
 	moved := filepath.Join(f.root, ".agents", "skills-local", "mine")
 	if got := result.Skills[0]; got.Action != AdoptMoveLocal || got.MoveTo != moved {
 		t.Fatalf("adopted = %#v; want a move to %s", got, moved)
@@ -226,9 +250,7 @@ func TestAdoptMovesAGitCheckoutWithItsGitDirectoryEvenWhenLockRecorded(t *testin
 
 	result := f.adopt(t, cfg)
 
-	if result.Blocked != 0 || result.Failed != 0 || len(result.Skills) != 1 {
-		t.Fatalf("result = %#v; want one Skill adopted", result)
-	}
+	assertAdoptStates(t, result, AdoptAdopted)
 	got := result.Skills[0]
 	if got.Action != AdoptMoveLocal || !got.GitCheckout || !got.Recorded {
 		t.Fatalf("adopted = %#v; want a recorded git checkout moved", got)
@@ -257,9 +279,7 @@ func TestAdoptRefusesAMoveOntoAnExistingTarget(t *testing.T) {
 	}
 	result := ApplyAdoptPlan(plan, cfg, f.scope())
 
-	if result.Blocked != 1 || len(result.Adopted()) != 0 {
-		t.Fatalf("result = %#v; want the Skill left blocked", result)
-	}
+	assertAdoptStates(t, result, AdoptSkipped)
 	if !isRealDir(filepath.Join(f.skillsDir, "mine")) {
 		t.Fatal("a refused move must leave the directory where it was")
 	}
@@ -299,7 +319,8 @@ func TestAdoptSelectLeavesUnselectedSkillsAlone(t *testing.T) {
 
 	result := f.adopt(t, config.DefaultConfig(), "mine")
 
-	if len(result.Skills) != 1 || result.Skills[0].Name != "mine" {
+	assertAdoptStates(t, result, AdoptAdopted)
+	if result.Skills[0].Name != "mine" {
 		t.Fatalf("result = %#v; want only the selected Skill", result)
 	}
 	if !isRealDir(filepath.Join(f.skillsDir, "other")) {
@@ -336,9 +357,6 @@ func TestReadInstallerLockNormalisesSkillPathAndIgnoresNonGitSources(t *testing.
 	if !reflect.DeepEqual(records, want) {
 		t.Fatalf("records = %#v\nwant %#v", records, want)
 	}
-	if records["pdf"].StoredURL() != "" || records["dir"].StoredURL() == "" {
-		t.Fatalf("stored URLs: pdf %q, dir %q", records["pdf"].StoredURL(), records["dir"].StoredURL())
-	}
 }
 
 func TestInstallerLockPathFollowsTheScope(t *testing.T) {
@@ -359,6 +377,18 @@ func TestInstallerLockPathFollowsTheScope(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", state)
 	if got, want := InstallerLockPath(models.DefaultSkillsDir()), filepath.Join(state, "skills", ".skill-lock.json"); got != want {
 		t.Errorf("Global lock with XDG_STATE_HOME = %s; want %s", got, want)
+	}
+}
+
+// assertAdoptStates checks the state each Skill ended in, in plan order.
+func assertAdoptStates(t *testing.T, result AdoptResult, want ...AdoptState) {
+	t.Helper()
+	got := make([]AdoptState, len(result.Skills))
+	for i, skill := range result.Skills {
+		got[i] = skill.State
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("states = %v; want %v\n%#v", got, want, result.Skills)
 	}
 }
 

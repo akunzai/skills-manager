@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -262,26 +263,57 @@ func promptAdoptPlan(plan engine.AdoptPlan, skillsDir string) ([]string, error) 
 	return tui.PromptOrderedGroupedMultiSelect("Select skills to adopt:", groups, []string{adoptScopeGroup, adoptAgentGroup})
 }
 
-// reportAdoptOutcome words each Skill, then sums up in ADR-0002's codes: 0
-// when every Skill was adopted, 1 when one was left for the user, 2 when one
-// failed.
+// adoptExitCodes is ADR-0002's code for each state adopt reports: 0 adopted,
+// 1 something left for the user, 2 a failure.
+var adoptExitCodes = map[engine.AdoptState]int{
+	engine.AdoptAdopted:                 0,
+	engine.AdoptDeclaredWithoutBaseline: 1,
+	engine.AdoptDeclaredWithCopiesLeft:  1,
+	engine.AdoptSkipped:                 1,
+	engine.AdoptFailed:                  2,
+}
+
+// adoptStateParts names the states other than adopted in the summary line,
+// in the order it lists them.
+var adoptStateParts = []struct {
+	state engine.AdoptState
+	words string
+}{
+	{engine.AdoptDeclaredWithoutBaseline, "declared without a Baseline"},
+	{engine.AdoptDeclaredWithCopiesLeft, "declared with copies left"},
+	{engine.AdoptSkipped, "skipped"},
+	{engine.AdoptFailed, "failed"},
+}
+
+// reportAdoptOutcome words each Skill by the state the engine says it ended
+// in, then sums up with the highest of their exit codes.
 func reportAdoptOutcome(out io.Writer, result engine.AdoptResult, scope Scope) error {
+	syncCmd := "skills sync" + scopeFlagOf(scope)
 	var recorded []string
+	code := 0
+	counts := map[engine.AdoptState]int{}
 	for _, skill := range result.Skills {
-		switch {
-		case skill.Outcome == engine.SyncDone && skill.Action == engine.AdoptDeclareRemote:
-			fmt.Fprintf(out, "  %sAdopted %s from %s.%s\n", colorGreen, skill.Name, adoptSource(skill.Record.Source, skill.Subpath, ""), colorReset)
-		case skill.Outcome == engine.SyncDone && skill.Action == engine.AdoptLinkSource:
-			adopted, _ := skill.Adopted()
-			fmt.Fprintf(out, "  %sAdopted %s from %s.%s\n", colorGreen, skill.Name, models.ToTildePath(adopted.Target), colorReset)
-		case skill.Outcome == engine.SyncDone:
-			fmt.Fprintf(out, "  %sAdopted %s: moved to %s.%s\n", colorGreen, skill.Name, models.ToTildePath(skill.MoveTo), colorReset)
-		case skill.Declared && skill.Action == engine.AdoptDeclareRemote && skill.Reason != "":
-			fmt.Fprintf(out, "  %sDeclared %s from %s without a Baseline: %s.%s\n", colorYellow, skill.Name, adoptSource(skill.Record.Source, skill.Subpath, ""), skill.Reason, colorReset)
-		case skill.Outcome == engine.SyncBlocked && !skill.Declared:
+		counts[skill.State]++
+		code = max(code, adoptExitCodes[skill.State])
+		switch skill.State {
+		case engine.AdoptAdopted:
+			fmt.Fprintf(out, "  %sAdopted %s%s.%s\n", colorGreen, skill.Name, adoptedFrom(skill), colorReset)
+		case engine.AdoptDeclaredWithoutBaseline:
+			fmt.Fprintf(out, "  %sDeclared %s from %s without a Baseline: its copy differs from the Source, so the next Sync asks before overwriting it.%s\n", colorYellow, skill.Name, adoptSource(skill.Record.Source, skill.Subpath, ""), colorReset)
+		case engine.AdoptDeclaredWithCopiesLeft:
+			paths := make([]string, len(skill.CopiesLeft))
+			for i, path := range skill.CopiesLeft {
+				paths[i] = models.ToTildePath(path)
+			}
+			fmt.Fprintf(out, "  %sDeclared %s, but left %s in place. Remove %s, then run '%s'.%s\n", colorYellow, skill.Name, strings.Join(paths, ", "), objectPronoun(len(paths)), syncCmd, colorReset)
+		case engine.AdoptSkipped:
 			fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, skill.Name, skill.Reason, colorReset)
-		case skill.Reason != "":
-			fmt.Fprintf(out, "  %sFailed to adopt %s: %s%s\n", colorRed, skill.Name, skill.Reason, colorReset)
+		case engine.AdoptFailed:
+			if skill.Declared {
+				fmt.Fprintf(out, "  %sFailed to finish adopting %s: %s. It is declared; fix the cause, then run '%s'.%s\n", colorRed, skill.Name, skill.Reason, syncCmd, colorReset)
+			} else {
+				fmt.Fprintf(out, "  %sFailed to adopt %s: %s; it was not declared.%s\n", colorRed, skill.Name, skill.Reason, colorReset)
+			}
 		}
 		if skill.Declared && skill.OnAgentDirectories() {
 			printAdoptedAvailability(out, skill)
@@ -290,38 +322,49 @@ func reportAdoptOutcome(out io.Writer, result engine.AdoptResult, scope Scope) e
 			recorded = append(recorded, skill.Name)
 		}
 	}
-	for _, ev := range result.Events {
-		if !syncEventIsProgress(ev.Kind) {
-			printSyncEvent(out, ev)
-		}
-	}
 	if result.StateError != "" {
 		printScopeStateUnreadable(out, result.StateError)
+		code = 2
 	}
 	if result.StateWarning != "" {
 		printScopeStateWarning(out, result.StateWarning, scopeFlagOf(scope))
 	}
 	printInstallerWarning(out, recorded, scope.SkillsDir)
 
-	adopted := len(result.Adopted())
-	configName := filepath.Base(scope.ConfigPath)
-	if result.Blocked == 0 && result.Failed == 0 {
-		fmt.Fprintf(out, "%sAdopted %s and updated %s.%s\n", colorGreen, countOf(adopted, "skill"), configName, colorReset)
+	adopted := counts[engine.AdoptAdopted]
+	if code == 0 {
+		fmt.Fprintf(out, "%sAdopted %s and updated %s.%s\n", colorGreen, countOf(adopted, "skill"), filepath.Base(scope.ConfigPath), colorReset)
 		return nil
 	}
 	var parts []string
-	if result.Blocked > 0 {
-		parts = append(parts, fmt.Sprintf("%d blocked", result.Blocked))
+	for _, part := range adoptStateParts {
+		if n := counts[part.state]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, part.words))
+		}
 	}
-	if result.Failed > 0 {
-		parts = append(parts, fmt.Sprintf("%d failed", result.Failed))
+	summary := fmt.Sprintf("Adopted %d of %s", adopted, countOf(len(result.Skills), "skill"))
+	if len(parts) > 0 {
+		summary += "; " + strings.Join(parts, ", ")
 	}
-	fmt.Fprintf(out, "%sAdopted %d of %s; %s.%s\n", colorYellow, adopted, countOf(len(result.Skills), "skill"), strings.Join(parts, ", "), colorReset)
-	if result.Failed > 0 {
-		return exitError{message: fmt.Sprintf("Adopt did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill")), code: 2}
+	fmt.Fprintf(out, "%s%s.%s\n", colorYellow, summary, colorReset)
+	if code == 2 {
+		return exitError{message: "Adopt did not complete: " + cmp.Or(strings.Join(parts, ", "), "the Scope state could not be read"), code: 2}
 	}
-	fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync%s'.\n", scopeFlagOf(scope))
+	fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run '%s'.\n", syncCmd)
 	return exitError{message: "some skills were not adopted", code: 1}
+}
+
+// adoptedFrom words where an adopted Skill's Source now is.
+func adoptedFrom(skill engine.AdoptOutcome) string {
+	switch skill.Action {
+	case engine.AdoptDeclareRemote:
+		return " from " + adoptSource(skill.Record.Source, skill.Subpath, "")
+	case engine.AdoptLinkSource:
+		adopted, _ := skill.Adopted()
+		return " from " + models.ToTildePath(adopted.Target)
+	default:
+		return ": moved to " + models.ToTildePath(skill.MoveTo)
+	}
 }
 
 // printAdoptedAvailability connects a Skill adopted from Agent directories to

@@ -207,7 +207,7 @@ func BuildAdoptPlan(cfg *config.Config, scope models.Scope, options AdoptOptions
 			plan.NotSkills = append(plan.NotSkills, name)
 			continue
 		}
-		plan.Items = append(plan.Items, planDirectory(cfg, AdoptItem{Name: name}, dir, records, moveDir))
+		plan.Items = append(plan.Items, planDirectory(AdoptItem{Name: name}, dir, records, moveDir))
 	}
 	plan.Items = append(plan.Items, planAgentCopies(cfg, availability, skillsDir, from, records, moveDir)...)
 	return plan, nil
@@ -216,15 +216,12 @@ func BuildAdoptPlan(cfg *config.Config, scope models.Scope, options AdoptOptions
 // planDirectory plans a real directory the way an Untracked Skill is
 // adopted, whether it is on the skills directory already or will be moved
 // there from dir on an Agent directory.
-func planDirectory(cfg *config.Config, item AdoptItem, dir string, records map[string]InstallerLockRecord, moveDir string) AdoptItem {
+func planDirectory(item AdoptItem, dir string, records map[string]InstallerLockRecord, moveDir string) AdoptItem {
 	item.Record, item.Recorded = records[item.Name]
 	_, err := os.Lstat(filepath.Join(dir, ".git"))
 	item.GitCheckout = err == nil
 	if item.Record.Remote() && !item.GitCheckout {
 		item.Action = AdoptDeclareRemote
-		if _, err := AddBranch(cfg, item.Record.Source, item.Record.Branch); err != nil {
-			item.Block = err.Error()
-		}
 	} else {
 		item.Action = AdoptMoveLocal
 		item.MoveTo = filepath.Join(moveDir, item.Name)
@@ -302,14 +299,6 @@ func observeAgentCopy(path UnmanagedAgentPath, skillsDir string) (AgentCopy, boo
 	return c, true
 }
 
-// contentPath is where the copy's content is.
-func (c AgentCopy) contentPath() string {
-	if c.Symlink {
-		return c.Target
-	}
-	return c.Path
-}
-
 func (c AgentCopy) sameContent(other AgentCopy) bool {
 	return c.Problem == "" && other.Problem == "" && c.digests != nil && reflect.DeepEqual(c.digests, other.digests)
 }
@@ -382,7 +371,7 @@ func planAgentItem(cfg *config.Config, availability *Availability, skillsDir, na
 		item.Action = AdoptLinkSource
 		return item
 	}
-	return planDirectory(cfg, item, adopted.Path, records, moveDir)
+	return planDirectory(item, adopted.Path, records, moveDir)
 }
 
 // overlaps reports whether one path is the other or inside it, after
@@ -456,30 +445,55 @@ func (p AdoptPlan) narrow(keep func(AdoptItem) bool) AdoptPlan {
 	return narrowed
 }
 
-// AdoptOutcome is what became of one planned Skill. Declared says whether
-// Config now declares it, which a blocked Skill may be too. Reason says why it
-// was blocked or failed. Subpath is the Source subpath a remote Skill was
-// declared with, and Baseline whether its copy matched the Cache and so has
-// one.
+// AdoptState is the one state each Skill Adopt was asked to adopt ends in.
+// The CLI words each and maps it to an exit code (ADR-0002).
+type AdoptState string
+
+const (
+	// AdoptAdopted is a Skill declared and applied: the Scope matches Config
+	// for it, and a remote Skill has its Baseline.
+	AdoptAdopted AdoptState = "adopted"
+	// AdoptDeclaredWithoutBaseline is a remote Skill declared whose copy
+	// differs from its Source, so it has no Baseline and the next Sync asks
+	// before overwriting it.
+	AdoptDeclaredWithoutBaseline AdoptState = "declared-without-baseline"
+	// AdoptDeclaredWithCopiesLeft is a Skill declared whose copies on Agent
+	// directories, which were to become Availability links, are left in place
+	// (CopiesLeft). Nothing further was applied; Sync does it once they are
+	// gone.
+	AdoptDeclaredWithCopiesLeft AdoptState = "declared-with-copies-left"
+	// AdoptSkipped is a Skill left as it was, for Reason.
+	AdoptSkipped AdoptState = "skipped"
+	// AdoptFailed is a Skill whose adoption broke, for Reason. Before the
+	// declaration, Config and any move are restored; after it, the
+	// declaration stays and Sync finishes the Skill once the cause is fixed.
+	AdoptFailed AdoptState = "failed"
+)
+
+// AdoptOutcome is what became of one planned Skill: facts the CLI words,
+// never sentences.
 type AdoptOutcome struct {
 	AdoptItem
-	Outcome  SyncOutcome
+	State AdoptState
+	// Declared says Config declares the Skill: always in the declared states
+	// and AdoptAdopted, never in AdoptSkipped, and in AdoptFailed whether the
+	// failure came after the declaration.
 	Declared bool
-	Reason   string
-	Subpath  string
-	Baseline bool
+	// Reason is why the Skill was skipped or failed.
+	Reason string
+	// CopiesLeft are the copies on Agent directories left in place, in
+	// AdoptDeclaredWithCopiesLeft.
+	CopiesLeft []string
+	// Subpath is the Source subpath a remote Skill was declared with.
+	Subpath string
 	// Available is the Agents declared Availability selects for a declared
 	// Skill.
 	Available []string
 }
 
-// AdoptResult records the outcome of applying an AdoptPlan, counted like Sync
-// counts its Skills (ADR-0002).
+// AdoptResult records the outcome of applying an AdoptPlan.
 type AdoptResult struct {
-	SyncTally
 	Skills []AdoptOutcome
-	// Events are what applying each Skill reported, in Sync's words.
-	Events []SyncEvent
 	// StateError is why the Scope state could not be read when a remote
 	// Skill needed its Baseline recorded: a failure.
 	StateError string
@@ -488,7 +502,7 @@ type AdoptResult struct {
 	StateWarning string
 }
 
-// Adopted is the Skills Config now declares, whatever their outcome.
+// Adopted is the Skills Config now declares, whatever their state.
 func (r AdoptResult) Adopted() []AdoptOutcome {
 	var adopted []AdoptOutcome
 	for _, skill := range r.Skills {
@@ -500,7 +514,7 @@ func (r AdoptResult) Adopted() []AdoptOutcome {
 }
 
 // ApplyAdoptPlan declares each planned Skill, one at a time, continuing past
-// one that is blocked or fails. Config is saved after each Skill, so one that
+// one that is skipped or fails. Config is saved after each Skill, so one that
 // fails later does not take the others with it. An installer lock file is
 // never written.
 func ApplyAdoptPlan(plan AdoptPlan, cfg *config.Config, scope models.Scope) AdoptResult {
@@ -510,142 +524,307 @@ func ApplyAdoptPlan(plan AdoptPlan, cfg *config.Config, scope models.Scope) Adop
 	scope.SkillsDir = cmp.Or(scope.SkillsDir, models.DefaultSkillsDir())
 	scope.ConfigPath = cmp.Or(scope.ConfigPath, models.DefaultConfigFile())
 	var result AdoptResult
-	emit := func(ev SyncEvent) { result.Events = append(result.Events, ev) }
 	baselines := OpenBaselines(scope.SkillsDir)
 	needsBaselines := false
 	for _, item := range plan.Items {
-		outcome := AdoptOutcome{AdoptItem: item}
-		switch {
-		case item.Block != "":
-			outcome = adoptBlocked(outcome, item.Block)
-		case item.OnAgentDirectories():
-			needsBaselines = needsBaselines || item.Action == AdoptDeclareRemote
-			outcome = adoptFromAgent(cfg, scope, outcome, baselines, emit)
-		case item.Action == AdoptDeclareRemote:
-			needsBaselines = true
-			outcome = adoptRemote(cfg, scope, outcome, baselines, emit)
-		default:
-			outcome = adoptLocal(cfg, scope, outcome, emit)
-		}
+		a := &adoption{cfg: cfg, scope: scope, baselines: baselines, outcome: AdoptOutcome{AdoptItem: item}}
+		outcome := a.run()
+		needsBaselines = needsBaselines || a.neededBaseline
 		if outcome.Declared {
 			outcome.Available = NewAvailability(cfg, scope.SkillsDir).ManagedAgents(item.Name)
 		}
-		result.tally(outcome.Outcome)
 		result.Skills = append(result.Skills, outcome)
 	}
 	switch baselines.Verdict(needsBaselines) {
 	case StateFail:
 		result.StateError = baselines.Err().Error()
-		result.tally(SyncFailed)
 	case StateWarn:
 		result.StateWarning = baselines.Err().Error()
 	}
 	return result
 }
 
-func adoptBlocked(outcome AdoptOutcome, reason string) AdoptOutcome {
-	outcome.Outcome, outcome.Reason = SyncBlocked, reason
-	return outcome
+// adoption is one Skill going through the step all four of Adopt's paths
+// share: check it is still as planned, fetch a remote Source, move the
+// content where the path says, declare it and save Config, then clear the
+// copies it replaces and apply it as Sync would. Anything that stops it
+// before the declaration undoes the moves and Config.
+type adoption struct {
+	cfg       *config.Config
+	scope     models.Scope
+	baselines *Baselines
+	outcome   AdoptOutcome
+
+	// snapshot is Config before this Skill; configExisted and wroteConfig say
+	// whether its file existed then and has been written since.
+	snapshot      *config.Config
+	configExisted bool
+	wroteConfig   bool
+	// moves are the renames made so far, as from and to, undone in reverse.
+	moves [][2]string
+	// neededBaseline says a remote Skill reached the step that records its
+	// Baseline, which makes an unreadable Scope state a failure.
+	neededBaseline bool
 }
 
-func adoptFailed(outcome AdoptOutcome, err error) AdoptOutcome {
-	outcome.Outcome, outcome.Reason = SyncFailed, err.Error()
-	return outcome
+// remoteAdoption is a remote Source prepared through Remote intake, with the
+// subpath the Skill is declared from.
+type remoteAdoption struct {
+	intake  *RemoteIntake
+	subpath string
 }
 
-// stillUntracked re-checks, right before acting, that the directory is still
-// an Untracked real directory: a confirmation prompt may have been open for a
-// while.
-func stillUntracked(cfg *config.Config, skillsDir, name string) string {
-	if _, _, declared := config.FindSkillSource(cfg, name); declared {
+func (r *remoteAdoption) cachePath() string {
+	return filepath.Join(r.intake.dir, filepath.FromSlash(r.subpath))
+}
+
+func (a *adoption) run() AdoptOutcome {
+	item := a.outcome.AdoptItem
+	a.snapshot = cloneConfig(a.cfg)
+	if item.Block != "" {
+		return a.undo(AdoptSkipped, item.Block)
+	}
+	if reason := a.changedSincePlan(); reason != "" {
+		return a.undo(AdoptSkipped, reason)
+	}
+	var remote *remoteAdoption
+	if item.Action == AdoptDeclareRemote {
+		prepared, reason, err := prepareRemoteAdoption(a.cfg, a.scope.CacheDir, item)
+		if err != nil {
+			return a.undo(AdoptFailed, err.Error())
+		}
+		if reason != "" {
+			return a.undo(AdoptSkipped, reason)
+		}
+		remote = prepared
+	}
+	content, reason, err := a.stage()
+	if err != nil {
+		return a.undo(AdoptFailed, err.Error())
+	}
+	if reason != "" {
+		return a.undo(AdoptSkipped, reason)
+	}
+	if err := a.declare(remote, content); err != nil {
+		if _, conflict := errors.AsType[branchConflictError](err); conflict {
+			return a.undo(AdoptSkipped, err.Error())
+		}
+		return a.undo(AdoptFailed, err.Error())
+	}
+	return a.apply(remote, content)
+}
+
+// changedSincePlan re-checks, right before acting, that the Skill is still
+// what the plan saw: a confirmation prompt may have been open for a while.
+func (a *adoption) changedSincePlan() string {
+	item := a.outcome.AdoptItem
+	if _, _, declared := config.FindSkillSource(a.cfg, item.Name); declared {
 		return "already declared in Config"
 	}
-	if !isRealDir(filepath.Join(skillsDir, name)) {
-		return "no longer a directory on the skills directory"
+	if !item.OnAgentDirectories() {
+		if !isRealDir(filepath.Join(a.scope.SkillsDir, item.Name)) {
+			return "no longer a directory on the skills directory"
+		}
+		return ""
+	}
+	adopted, ok := item.Adopted()
+	if !ok {
+		return "no copy to adopt"
+	}
+	if reason := adopted.changed(); reason != "" {
+		return reason
+	}
+	if adopted.Symlink {
+		if _, err := os.Stat(filepath.Join(adopted.Target, "SKILL.md")); err != nil {
+			return fmt.Sprintf("its target %s no longer holds a Skill", models.ToTildePath(adopted.Target))
+		}
 	}
 	return ""
 }
 
-// adoptRemote declares the recorded Source, fetches it into the Cache as Add
-// would, and records a Baseline only when the copy on disk is exactly the
-// Cache content; a copy that differs is declared without one, so the next
-// Sync blocks and asks rather than overwriting it.
-func adoptRemote(cfg *config.Config, scope models.Scope, outcome AdoptOutcome, baselines *Baselines, emit func(SyncEvent)) AdoptOutcome {
-	record, name := outcome.Record, outcome.Name
-	if reason := stillUntracked(cfg, scope.SkillsDir, name); reason != "" {
-		return adoptBlocked(outcome, reason)
-	}
-	branch, err := AddBranch(cfg, record.Source, record.Branch)
+// prepareRemoteAdoption fetches the recorded Source through Remote intake and
+// finds the Skill in it: at the recorded path, or as the one Skill of its
+// name when the lock file records none.
+func prepareRemoteAdoption(cfg *config.Config, cacheDir string, item AdoptItem) (*remoteAdoption, string, error) {
+	record := item.Record
+	intake, err := PrepareRemoteIntake(cfg, models.ParsedRepoSource{
+		SourceKey: record.Source,
+		URL:       record.URL,
+		RepoType:  record.RepoType,
+		Branch:    record.Branch,
+		Subpath:   record.Subpath,
+	}, cacheDir)
 	if err != nil {
-		return adoptBlocked(outcome, err.Error())
+		return nil, "", err
 	}
-	cache := NewCache(record.Source, record.URL, branch, scope.CacheDir)
-	subpaths := declaredSubpaths(cfg.Remote[record.Source])
 	if record.Subpath != "" {
-		subpaths = append(subpaths, record.Subpath)
+		for paths := range maps.Values(intake.Discovered) {
+			if slices.Contains(paths, record.Subpath) {
+				return &remoteAdoption{intake: intake, subpath: record.Subpath}, "", nil
+			}
+		}
+		return nil, "", fmt.Errorf("Source %s has no Skill at %s", record.Source, record.Subpath)
 	}
-	repoDir, err := cache.Refresh(true, subpaths...)
-	if err != nil {
-		return adoptFailed(outcome, fmt.Errorf("refresh Source %s: %w", record.Source, err))
+	if paths := intake.Discovered[item.Name]; len(paths) == 1 {
+		return &remoteAdoption{intake: intake, subpath: paths[0]}, "", nil
 	}
-	subpath := record.Subpath
-	if subpath == "" {
-		found, _, err := discoverRemoteSkills(cache, "")
+	return nil, fmt.Sprintf("the installer lock file records no path for it, and Source %s does not have exactly one Skill named %s", record.Source, item.Name), nil
+}
+
+// stage moves the Skill's content to where its Source is declared and
+// returns that place, or why it cannot move there. A real directory on an
+// Agent directory moves onto the skills directory first, with its
+// Availability overrides saved before (ADR-0009); a directory with no known
+// Source moves on to the move directory; a user's symlink moves nothing.
+func (a *adoption) stage() (content, skip string, err error) {
+	item := a.outcome.AdoptItem
+	scopePath := filepath.Join(a.scope.SkillsDir, item.Name)
+	if adopted, ok := item.Adopted(); ok {
+		if adopted.Symlink {
+			// Nothing moves, but the Availability link goes onto the skills
+			// directory.
+			return adopted.Target, "", os.MkdirAll(a.scope.SkillsDir, 0o755)
+		}
+		if len(item.Include) > 0 || len(item.Exclude) > 0 {
+			if err := declareAvailability(a.cfg, a.scope.SkillsDir, item); err != nil {
+				return "", "", err
+			}
+			if err := a.save(); err != nil {
+				return "", "", err
+			}
+		}
+		if skip, err := a.move(adopted.Path, scopePath); skip != "" || err != nil {
+			return "", skip, err
+		}
+	}
+	if item.Action != AdoptMoveLocal {
+		return scopePath, "", nil
+	}
+	if skip, err := a.move(scopePath, item.MoveTo); skip != "" || err != nil {
+		return "", skip, err
+	}
+	return item.MoveTo, "", nil
+}
+
+// move renames from to to, refusing anything already at to.
+func (a *adoption) move(from, to string) (skip string, err error) {
+	if reason := moveTargetBlock(to); reason != "" {
+		return reason, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(from, to); err != nil {
+		return "", fmt.Errorf("move to %s: %w", models.ToTildePath(to), err)
+	}
+	a.moves = append(a.moves, [2]string{from, to})
+	return "", nil
+}
+
+// declare records the Skill's Source, a remote one through Remote intake,
+// with its Availability overrides, and saves Config.
+func (a *adoption) declare(remote *remoteAdoption, content string) error {
+	item := a.outcome.AdoptItem
+	if remote != nil {
+		if err := remote.intake.Declare(a.cfg, map[string]string{item.Name: remote.subpath}); err != nil {
+			return err
+		}
+	} else {
+		config.AddLocalSymlinkEntry(a.cfg, item.Name, models.StoreLocalSourcePath(content, a.scope.SkillsDir), "")
+	}
+	if err := declareAvailability(a.cfg, a.scope.SkillsDir, item); err != nil {
+		return err
+	}
+	return a.save()
+}
+
+func (a *adoption) save() error {
+	if !a.wroteConfig {
+		_, err := os.Stat(a.scope.ConfigPath)
+		a.configExisted = err == nil
+	}
+	if err := config.SaveConfig(a.cfg, a.scope.ConfigPath); err != nil {
+		return err
+	}
+	a.wroteConfig = true
+	return nil
+}
+
+// undo ends a Skill that stopped before its declaration: Config goes back to
+// what it was, in memory and on disk, and each move is reversed. Anything
+// that cannot be undone makes it a failure that says what stays where.
+func (a *adoption) undo(state AdoptState, reason string) AdoptOutcome {
+	*a.cfg = *a.snapshot
+	var errs []error
+	if a.wroteConfig {
+		var err error
+		if a.configExisted {
+			err = config.SaveConfig(a.cfg, a.scope.ConfigPath)
+		} else {
+			err = os.Remove(a.scope.ConfigPath)
+		}
 		if err != nil {
-			return adoptFailed(outcome, fmt.Errorf("discover Skills in %s: %w", record.Source, err))
-		}
-		if len(found[name]) != 1 {
-			return adoptBlocked(outcome, fmt.Sprintf("the installer lock file records no path for it, and Source %s does not have exactly one Skill named %s", record.Source, name))
-		}
-		subpath = found[name][0]
-		if err := cache.Cover(subpath); err != nil {
-			return adoptFailed(outcome, err)
+			errs = append(errs, fmt.Errorf("restore Config: %w", err))
 		}
 	}
-	outcome.Subpath = subpath
-	cachePath := filepath.Join(repoDir, filepath.FromSlash(subpath))
-	if _, err := os.Stat(filepath.Join(cachePath, "SKILL.md")); err != nil {
-		return adoptFailed(outcome, fmt.Errorf("Source %s has no Skill at %s", record.Source, subpath))
+	for _, m := range slices.Backward(a.moves) {
+		if err := os.Rename(m[1], m[0]); err != nil {
+			errs = append(errs, fmt.Errorf("the directory stays at %s: %w", models.ToTildePath(m[1]), err))
+		}
 	}
+	if len(errs) > 0 {
+		state = AdoptFailed
+		reason = errors.Join(append([]error{errors.New(reason)}, errs...)...).Error()
+	}
+	a.outcome.State, a.outcome.Reason = state, reason
+	return a.outcome
+}
 
-	config.AddRemoteSkillEntry(cfg, record.Source, name, subpath, record.RepoType, record.StoredURL())
-	if branch != "" {
-		repo := cfg.Remote[record.Source]
-		repo.Branch = branch
-		cfg.Remote[record.Source] = repo
+// apply finishes a declared Skill: it clears the copies it replaces, then
+// applies it as Sync would. A remote Skill whose copy differs from its Source
+// gets its Availability but no Baseline.
+func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
+	a.outcome.Declared = true
+	name, skillsDir := a.outcome.Name, a.scope.SkillsDir
+	if remote != nil {
+		a.outcome.Subpath = remote.subpath
 	}
-	if err := declareAvailability(cfg, scope.SkillsDir, outcome.AdoptItem); err != nil {
-		return adoptFailed(outcome, err)
+	if left := clearAgentCopies(a.outcome.AdoptItem, content); len(left) > 0 {
+		a.outcome.State, a.outcome.CopiesLeft = AdoptDeclaredWithCopiesLeft, left
+		return a.outcome
 	}
-	if err := config.SaveConfig(cfg, scope.ConfigPath); err != nil {
-		return adoptFailed(outcome, err)
-	}
-	outcome.Declared = true
-
-	scopePath := filepath.Join(scope.SkillsDir, name)
-	if err := clearAgentCopies(outcome.AdoptItem, scopePath); err != nil {
-		return adoptBlocked(outcome, err.Error())
-	}
-	availability := NewAvailability(cfg, scope.SkillsDir)
-	if !sameSkillContent(scopePath, cachePath) {
+	availability := NewAvailability(a.cfg, skillsDir)
+	drift := availability.ObserveOccupancy().Drift(name)
+	var applied SyncOutcome
+	var err error
+	switch {
+	case remote == nil:
+		applied, err = applyLocalItem(availability, skillsDir, planLocalItem(a.cfg, skillsDir, drift, name), nil)
+	case !sameSkillContent(content, remote.cachePath()):
 		if _, err := availability.Apply(name); err != nil {
-			// The event says why, in Sync's words.
-			emit(SyncEvent{Kind: SyncAvailabilityFailed, Source: record.Source, Skill: name, Err: err.Error()})
-			outcome.Outcome = SyncFailed
-			return outcome
+			a.outcome.State, a.outcome.Reason = AdoptFailed, err.Error()
+			return a.outcome
 		}
-		return adoptBlocked(outcome, "its copy differs from the Source, so the next Sync asks before overwriting it")
+		a.outcome.State = AdoptDeclaredWithoutBaseline
+		return a.outcome
+	default:
+		a.neededBaseline = true
+		repoDir := remote.intake.dir
+		item := baseRemoteItem(remote.intake.spec.SourceKey, repoDir, localRepoCommit(repoDir), SkillFreshness{
+			Name:      name,
+			Source:    remote.intake.spec.SourceKey,
+			Subpath:   remote.subpath,
+			ScopePath: content,
+			CachePath: remote.cachePath(),
+		}, drift)
+		applied, err = applyRemoteItem(availability, skillsDir, item, SyncDecision{}, a.baselines, nil)
 	}
-	item := baseRemoteItem(record.Source, repoDir, localRepoCommit(repoDir), SkillFreshness{
-		Name:      name,
-		Source:    record.Source,
-		Subpath:   subpath,
-		ScopePath: scopePath,
-		CachePath: cachePath,
-	}, availability.ObserveOccupancy().Drift(name))
-	outcome.Outcome = applyItem(availability, scope.SkillsDir, item, SyncDecision{}, baselines, emit)
-	outcome.Baseline = outcome.Outcome == SyncDone && baselines.Err() == nil
-	return outcome
+	if applied != SyncDone {
+		a.outcome.State, a.outcome.Reason = AdoptFailed, err.Error()
+		return a.outcome
+	}
+	a.outcome.State = AdoptAdopted
+	return a.outcome
 }
 
 // sameSkillContent compares two Skill directories the way Baselines digest
@@ -654,61 +833,6 @@ func sameSkillContent(a, b string) bool {
 	da, errA := DigestSkillContent(a)
 	db, errB := DigestSkillContent(b)
 	return errA == nil && errB == nil && reflect.DeepEqual(da, db)
-}
-
-// adoptLocal moves the directory to its planned place, declares it there as a
-// local Source, and links it back onto the skills directory as Sync would.
-func adoptLocal(cfg *config.Config, scope models.Scope, outcome AdoptOutcome, emit func(SyncEvent)) AdoptOutcome {
-	name := outcome.Name
-	if reason := stillUntracked(cfg, scope.SkillsDir, name); reason != "" {
-		return adoptBlocked(outcome, reason)
-	}
-	if reason := moveTargetBlock(outcome.MoveTo); reason != "" {
-		return adoptBlocked(outcome, reason)
-	}
-	source := filepath.Join(scope.SkillsDir, name)
-	if err := os.MkdirAll(filepath.Dir(outcome.MoveTo), 0o755); err != nil {
-		return adoptFailed(outcome, err)
-	}
-	if err := os.Rename(source, outcome.MoveTo); err != nil {
-		return adoptFailed(outcome, fmt.Errorf("move to %s: %w", models.ToTildePath(outcome.MoveTo), err))
-	}
-	if err := declareLocal(cfg, scope, outcome.AdoptItem, outcome.MoveTo); err != nil {
-		if moveErr := os.Rename(outcome.MoveTo, source); moveErr != nil {
-			err = errors.Join(err, fmt.Errorf("the directory stays at %s: %w", models.ToTildePath(outcome.MoveTo), moveErr))
-		}
-		return adoptFailed(outcome, err)
-	}
-	outcome.Declared = true
-	if err := clearAgentCopies(outcome.AdoptItem, outcome.MoveTo); err != nil {
-		return adoptBlocked(outcome, err.Error())
-	}
-	availability := NewAvailability(cfg, scope.SkillsDir)
-	item := planLocalItem(cfg, scope.SkillsDir, availability.ObserveOccupancy().Drift(name), name)
-	// Why a link or Availability failed is in the events applyItem emits.
-	outcome.Outcome = applyItem(availability, scope.SkillsDir, item, SyncDecision{}, nil, emit)
-	return outcome
-}
-
-// declareLocal declares source as the Skill's local symlink Source, with the
-// item's Availability overrides, and saves Config. On failure Config in memory
-// is as it was.
-func declareLocal(cfg *config.Config, scope models.Scope, item AdoptItem, source string) error {
-	previous, hadOverride := cfg.Settings.Availability[item.Name]
-	config.AddLocalSymlinkEntry(cfg, item.Name, models.StoreLocalSourcePath(source, scope.SkillsDir), "")
-	err := declareAvailability(cfg, scope.SkillsDir, item)
-	if err == nil {
-		err = config.SaveConfig(cfg, scope.ConfigPath)
-	}
-	if err != nil {
-		delete(cfg.Local, item.Name)
-		if hadOverride {
-			cfg.Settings.Availability[item.Name] = previous
-		} else {
-			delete(cfg.Settings.Availability, item.Name)
-		}
-	}
-	return err
 }
 
 // declareAvailability records the item's Include and Exclude, so the Skill
@@ -722,6 +846,27 @@ func declareAvailability(cfg *config.Config, skillsDir string, item AdoptItem) e
 		return err
 	}
 	return availability.Exclude(item.Name, item.Exclude...)
+}
+
+// cloneConfig is a copy of cfg that shares nothing mutable with it.
+func cloneConfig(cfg *config.Config) *config.Config {
+	c := *cfg
+	c.Settings.DefaultAgents = slices.Clone(cfg.Settings.DefaultAgents)
+	if cfg.Settings.Availability != nil {
+		c.Settings.Availability = make(map[string]config.AvailabilityOverride, len(cfg.Settings.Availability))
+		for name, o := range cfg.Settings.Availability {
+			c.Settings.Availability[name] = config.AvailabilityOverride{Include: slices.Clone(o.Include), Exclude: slices.Clone(o.Exclude)}
+		}
+	}
+	if cfg.Remote != nil {
+		c.Remote = make(map[string]config.RemoteRepo, len(cfg.Remote))
+		for key, repo := range cfg.Remote {
+			repo.Skills = maps.Clone(repo.Skills)
+			c.Remote[key] = repo
+		}
+	}
+	c.Local = maps.Clone(cfg.Local)
+	return &c
 }
 
 // changed says how a copy on an Agent directory is no longer what the plan
@@ -754,123 +899,30 @@ func (c AgentCopy) changed() string {
 // clearAgentCopies makes room for Availability links once the Skill is
 // declared: it removes the user's symlink the Skill was adopted from, and
 // each copy whose content is the adopted content, checked again first. It
-// never removes anything else. A copy that no longer matches is left, and
-// the error names it.
-func clearAgentCopies(item AdoptItem, adoptedContent string) error {
-	var errs []error
+// never removes anything else. It returns the copies it left in place: one
+// that no longer matches the plan, or that could not be removed.
+func clearAgentCopies(item AdoptItem, adoptedContent string) []string {
+	var left []string
 	for _, c := range item.Copies {
 		if c.Role != AgentCopyReplace && !(c.Role == AgentCopyAdopt && c.Symlink) {
 			continue
 		}
-		if reason := c.changed(); reason != "" {
-			if c.Role == AgentCopyAdopt || !strings.HasSuffix(reason, " is gone") {
-				errs = append(errs, fmt.Errorf("left %s in place: %s", models.ToTildePath(c.Path), reason))
-			}
+		if _, err := os.Lstat(c.Path); err != nil {
+			continue // gone already: nothing is in the way
+		}
+		var err error
+		switch {
+		case c.changed() != "", !c.Symlink && !sameSkillContent(c.Path, adoptedContent):
+			left = append(left, c.Path)
 			continue
-		}
-		if c.Symlink {
-			if err := os.Remove(c.Path); err != nil {
-				errs = append(errs, err)
-			}
-			continue
-		}
-		if !sameSkillContent(c.Path, adoptedContent) {
-			errs = append(errs, fmt.Errorf("left %s in place: its content changed since the plan", models.ToTildePath(c.Path)))
-			continue
-		}
-		if err := RemoveAll(c.Path); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// adoptFromAgent adopts a Skill found on Agent directories. A real directory
-// moves onto the skills directory first, so an interruption from then on
-// leaves an Untracked Skill that adopting again completes, and is then
-// adopted exactly as one. A user's symlink has its target declared in place.
-func adoptFromAgent(cfg *config.Config, scope models.Scope, outcome AdoptOutcome, baselines *Baselines, emit func(SyncEvent)) AdoptOutcome {
-	name := outcome.Name
-	if _, _, declared := config.FindSkillSource(cfg, name); declared {
-		return adoptBlocked(outcome, "already declared in Config")
-	}
-	scopePath := filepath.Join(scope.SkillsDir, name)
-	if _, err := os.Lstat(scopePath); err == nil {
-		return adoptBlocked(outcome, "an Untracked Skill of that name is on the skills directory; adopt that one first")
-	}
-	adopted, ok := outcome.Adopted()
-	if !ok {
-		return adoptBlocked(outcome, "no copy to adopt")
-	}
-	if reason := adopted.changed(); reason != "" {
-		return adoptBlocked(outcome, reason)
-	}
-	if adopted.Symlink {
-		return adoptLinkSource(cfg, scope, outcome, adopted, emit)
-	}
-	if outcome.Action == AdoptMoveLocal {
-		if reason := moveTargetBlock(outcome.MoveTo); reason != "" {
-			return adoptBlocked(outcome, reason)
-		}
-	}
-	if err := os.MkdirAll(scope.SkillsDir, 0o755); err != nil {
-		return adoptFailed(outcome, err)
-	}
-	// The Availability overrides are saved before the move: once the
-	// directory is an Untracked Skill, they are all that records where it was
-	// found, so adopting it again keeps it available there.
-	previous, hadOverride := cfg.Settings.Availability[name]
-	restore := func() {
-		if hadOverride {
-			cfg.Settings.Availability[name] = previous
-		} else {
-			delete(cfg.Settings.Availability, name)
-		}
-	}
-	if len(outcome.Include) > 0 || len(outcome.Exclude) > 0 {
-		err := declareAvailability(cfg, scope.SkillsDir, outcome.AdoptItem)
-		if err == nil {
-			err = config.SaveConfig(cfg, scope.ConfigPath)
+		case c.Symlink:
+			err = os.Remove(c.Path)
+		default:
+			err = RemoveAll(c.Path)
 		}
 		if err != nil {
-			restore()
-			return adoptFailed(outcome, err)
+			left = append(left, c.Path)
 		}
 	}
-	if err := os.Rename(adopted.Path, scopePath); err != nil {
-		restore()
-		err = fmt.Errorf("move to %s: %w", models.ToTildePath(scopePath), err)
-		if len(outcome.Include) > 0 || len(outcome.Exclude) > 0 {
-			if saveErr := config.SaveConfig(cfg, scope.ConfigPath); saveErr != nil {
-				err = errors.Join(err, saveErr)
-			}
-		}
-		return adoptFailed(outcome, err)
-	}
-	if outcome.Action == AdoptDeclareRemote {
-		return adoptRemote(cfg, scope, outcome, baselines, emit)
-	}
-	return adoptLocal(cfg, scope, outcome, emit)
-}
-
-// adoptLinkSource declares where the user's symlink points as a local Source
-// and replaces the symlink with an Availability link.
-func adoptLinkSource(cfg *config.Config, scope models.Scope, outcome AdoptOutcome, adopted AgentCopy, emit func(SyncEvent)) AdoptOutcome {
-	if _, err := os.Stat(filepath.Join(adopted.Target, "SKILL.md")); err != nil {
-		return adoptBlocked(outcome, fmt.Sprintf("its target %s no longer holds a Skill", models.ToTildePath(adopted.Target)))
-	}
-	if err := os.MkdirAll(scope.SkillsDir, 0o755); err != nil {
-		return adoptFailed(outcome, err)
-	}
-	if err := declareLocal(cfg, scope, outcome.AdoptItem, adopted.Target); err != nil {
-		return adoptFailed(outcome, err)
-	}
-	outcome.Declared = true
-	if err := clearAgentCopies(outcome.AdoptItem, adopted.Target); err != nil {
-		return adoptBlocked(outcome, err.Error())
-	}
-	availability := NewAvailability(cfg, scope.SkillsDir)
-	item := planLocalItem(cfg, scope.SkillsDir, availability.ObserveOccupancy().Drift(outcome.Name), outcome.Name)
-	outcome.Outcome = applyItem(availability, scope.SkillsDir, item, SyncDecision{}, nil, emit)
-	return outcome
+	return left
 }
