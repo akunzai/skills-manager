@@ -171,8 +171,8 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Legacy branchless Cache entries: %s", strings.Join(roots, ", ")), Blank: true})
 	}
 	for _, artifact := range p.CacheRecovery {
-		add(Finding{Severity: SeverityError, Message: "Manual Cache recovery required; preserved artifact: " + artifact, Blank: true})
-		add(Finding{Severity: SeverityInfo, Message: "  Inspect the preserved Cache, restore it to the intended Cache path if needed, then remove the artifact."})
+		add(Finding{Severity: SeverityWarning, Message: "Leftover Cache recovery artifact from an earlier release: " + artifact, Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: run 'skills doctor --fix%s' to remove it.", scopeFlag(p))})
 	}
 	for _, artifact := range p.StaleScopes {
 		add(Finding{Severity: SeverityWarning, Message: "Scope state references missing path: " + artifact.ScopePath, Blank: true})
@@ -189,15 +189,12 @@ func doctorFindings(p engine.DoctorReport) []Finding {
 	case engine.RepairSucceeded:
 		add(Finding{Severity: SeverityOK, Message: "Repaired Scope state."})
 	}
-	for _, migration := range p.CacheMigrations {
-		switch migration.Status {
-		case engine.CacheMigrationRebuilt:
-			add(Finding{Severity: SeverityOK, Message: "Rebuilt branch-aware Cache and removed legacy Cache: " + migration.Root})
-		case engine.CacheMigrationRecoveryNeeded:
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Manual Cache recovery required after rebuilding %s: %s; preserved artifacts: %s", migration.Root, migration.Err, strings.Join(migration.Artifacts, ", "))})
-			add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Inspect the preserved Cache trees, restore the desired tree to %s if needed, then remove the artifacts.", migration.Root)})
-		case engine.CacheMigrationFailed:
-			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to rebuild legacy Cache %s: %s", migration.Root, migration.Err)})
+	for _, removal := range p.CacheRemovals {
+		switch removal.Repair.Status {
+		case engine.RepairSucceeded:
+			add(Finding{Severity: SeverityOK, Message: "Removed legacy Cache artifact: " + removal.Path})
+		case engine.RepairFailed:
+			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("Failed to remove legacy Cache artifact %s: %s", removal.Path, removal.Repair.Err)})
 		}
 	}
 	for _, ref := range p.UnknownAgents {

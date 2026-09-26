@@ -2027,23 +2027,24 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	}
 }
 
-func TestCLIDoctorFixReportsEachRebuiltCacheOnceWithoutATerminal(t *testing.T) {
+// A legacy branchless Cache root (#177) is a plain removal under --fix: no
+// rebuild, no network, and so no progress region — only the finding and its
+// repair outcome.
+func TestCLIDoctorFixRemovesLegacyCacheRootWithoutRebuilding(t *testing.T) {
 	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeCLIGitSkill(t, origin, "sample")
 	skillsDir := filepath.Join(root, "skills")
-	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cacheDir := filepath.Join(root, "cache")
-	cliRunGit(t, "", "clone", origin, filepath.Join(cacheDir, "owner", "repo"))
+	legacyRoot := filepath.Join(cacheDir, "owner", "repo")
+	cliRunGit(t, "", "clone", origin, legacyRoot)
 	cfg := config.DefaultConfig()
-	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: origin, Skills: map[string]string{}}
 	configFile := filepath.Join(root, "skills.json")
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
@@ -2051,10 +2052,13 @@ func TestCLIDoctorFixReportsEachRebuiltCacheOnceWithoutATerminal(t *testing.T) {
 
 	out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("doctor --fix: %v\n%s", err, out)
 	}
-	if want := "ok  owner/repo\n"; !strings.HasPrefix(out, want) {
-		t.Fatalf("output = %q; want it to start %q", out, want)
+	if !strings.Contains(out, "Removed legacy Cache artifact: "+legacyRoot) {
+		t.Fatalf("output = %q; want the removal reported", out)
+	}
+	if _, err := os.Stat(legacyRoot); !os.IsNotExist(err) {
+		t.Fatalf("legacy Cache root still exists: %v", err)
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
-	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -44,28 +43,13 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 
-			var region *presentation.Region
 			var approve engine.DoctorReplaceForeign
 			if flagFix && doctorIsTerminal() {
 				approve = func(paths []engine.ForeignAvailabilityPath) (bool, error) {
 					return promptReplaceForeignAvailability(out, paths)
 				}
 			}
-			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix, func(event engine.DoctorEvent) {
-				if region == nil {
-					region = presentation.StartRegion(cmd.ErrOrStderr(), "Rebuilding "+countOf(event.Total, "Cache"), event.Total)
-				}
-				switch {
-				case !event.Finished:
-					region.Start(presentation.Job{Name: event.Source, Phase: "rebuilding"})
-				case event.Failed:
-					// The health report below says why.
-					region.Fail(event.Source)
-				default:
-					region.Done(event.Source)
-				}
-			}, approve)
-			region.Stop()
+			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix, approve)
 			printHealthReport(out, doctorFindings(outcome.Report))
 			if runErr != nil {
 				return runErr
@@ -90,22 +74,15 @@ func newDoctorCmd() *cobra.Command {
 				return nil
 			}
 
-			if outcome.RecoveryNeeded {
-				fmt.Fprintf(out, "%s%sFound %d issue(s). Resolve the reported Cache recovery artifacts, then run 'skills doctor' again.%s\n", colorBold, colorYellow, outcome.Remaining, colorReset)
-			} else {
-				// Not every issue is repairable by --fix or Sync — an invalid
-				// folder and an untracked Skill are not — so this line points
-				// at the per-finding next actions instead of promising a
-				// blanket repair it cannot deliver.
-				fmt.Fprintf(out, "%s%sFound %d issue(s). See the next action for each, or run with --fix.%s\n", colorBold, colorYellow, outcome.Remaining, colorReset)
-			}
+			// Not every issue is repairable by --fix or Sync — an invalid
+			// folder and an untracked Skill are not — so this line points at
+			// the per-finding next actions instead of promising a blanket
+			// repair it cannot deliver.
+			fmt.Fprintf(out, "%s%sFound %d issue(s). See the next action for each, or run with --fix.%s\n", colorBold, colorYellow, outcome.Remaining, colorReset)
 			// doctor is ADR-0002's third adopter: findings are a state to act
 			// on, not a command failure, so they exit 1 without the Error:
 			// prefix. 2 stays reserved for work that genuinely broke, and wins
 			// when both are present.
-			if outcome.RecoveryNeeded {
-				return exitError{message: "Cache recovery could not be completed", code: 2}
-			}
 			if outcome.Failed > 0 {
 				return exitError{message: fmt.Sprintf("doctor could not complete %s", countOf(outcome.Failed, "repair")), code: 2}
 			}
