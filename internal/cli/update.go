@@ -74,7 +74,7 @@ completed.`,
 				// A converged plan needed no Baseline, so an unreadable Scope
 				// state is at most a warning (ADR-0002).
 				if plan.StateVerdict() == engine.StateWarn {
-					printScopeStateWarning(out, plan.StateError, scopeFlagOf(scope))
+					printScopeStateWarning(out, plan.StateError, scopeFlagsOf(scope))
 				}
 				summary := newUpdateSyncJSON(planned, nil)
 				switch {
@@ -90,7 +90,7 @@ completed.`,
 					return updateErr
 				}
 				if flagDryRun && refreshed > 0 {
-					fmt.Fprintf(out, "Next: run 'skills update'.\n")
+					fmt.Fprintf(out, "Next: run 'skills update%s'.\n", scopeFlagsOf(scope))
 					return exitError{message: "Scope does not match its Config", code: 1}
 				}
 				return nil
@@ -102,7 +102,7 @@ completed.`,
 			outcome := planned
 			var report *engine.SyncReport
 			if flagDryRun {
-				printSyncPlan(out, plan, decision, scopeFlagOf(scope))
+				printSyncPlan(out, plan, decision, scopeFlagsOf(scope))
 			} else {
 				var applyErr error
 				if flagJSON {
@@ -117,7 +117,7 @@ completed.`,
 				}
 				outcome = report.Summary()
 			}
-			syncErr := reportSyncOutcome(out, outcome, flagDryRun, "skills update")
+			syncErr := reportSyncOutcome(out, outcome, flagDryRun, "update", scopeFlagsOf(scope))
 			if flagJSON {
 				printUpdateJSON(cmd.OutOrStdout(), result, newUpdateSyncJSON(outcome, report))
 			}

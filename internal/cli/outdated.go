@@ -46,7 +46,7 @@ func newOutdatedCmd() *cobra.Command {
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), string(data))
 			} else {
-				printOutdatedReport(cmd, report)
+				printOutdatedReport(cmd, report, scopeFlagsOf(scope))
 			}
 			if !report.Fresh() {
 				return exitError{message: "remote Source, Cache, or Scope is not current", code: 1}
@@ -58,7 +58,7 @@ func newOutdatedCmd() *cobra.Command {
 	return cmd
 }
 
-func printOutdatedReport(cmd *cobra.Command, report *engine.FreshnessSnapshot) {
+func printOutdatedReport(cmd *cobra.Command, report *engine.FreshnessSnapshot, scopeFlags string) {
 	out := cmd.OutOrStdout()
 	for _, repository := range report.Repositories {
 		fmt.Fprintf(out, "%s%s%s  %sCache:%s %s", colorBold, repository.Source, colorReset, colorDim, colorReset, styledStatus(string(repository.RemoteStatus)))
@@ -84,16 +84,16 @@ func printOutdatedReport(cmd *cobra.Command, report *engine.FreshnessSnapshot) {
 	for _, disposition := range report.DispositionKinds() {
 		switch disposition {
 		case engine.FreshnessUpdate:
-			hints = append(hints, "run 'skills update'")
+			hints = append(hints, "run 'skills update"+scopeFlags+"'")
 		case engine.FreshnessSync:
-			hints = append(hints, "run 'skills sync'")
+			hints = append(hints, "run 'skills sync"+scopeFlags+"'")
 		case engine.FreshnessProtectDrift:
-			hints = append(hints, "review local changes, then use 'skills sync --force' if intended")
+			hints = append(hints, "review local changes, then use 'skills sync"+scopeFlags+" --force' if intended")
 		}
 	}
 	for _, disposition := range report.Dispositions() {
 		if disposition.Reason == string(engine.SkillRemovedUpstream) {
-			hints = append(hints, fmt.Sprintf("%s is no longer in %s; run 'skills rm %s'", disposition.Skill, disposition.Source, disposition.Skill))
+			hints = append(hints, fmt.Sprintf("%s is no longer in %s; run 'skills rm%s %s'", disposition.Skill, disposition.Source, scopeFlags, disposition.Skill))
 		}
 	}
 	if len(hints) > 0 {

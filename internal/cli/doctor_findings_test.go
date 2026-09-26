@@ -38,7 +38,7 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings := doctorFindings(outcome.Report)
+	findings := findingsFor(outcome.Report)
 	var leftover *Finding
 	for i := range findings {
 		if strings.Contains(findings[i].Message, "leftover empty agent director") {
@@ -77,7 +77,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := doctorFindings(beforeOutcome.Report)
+	before := findingsFor(beforeOutcome.Report)
 	if finding, ok := findingWith(before, "leftover empty agent director"); !ok || finding.Severity != SeverityWarning {
 		t.Fatalf("expected a pre-fix warning finding, got %#v", before)
 	}
@@ -86,7 +86,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after := doctorFindings(afterOutcome.Report)
+	after := findingsFor(afterOutcome.Report)
 	if finding, ok := findingWith(after, "leftover empty agent director"); !ok || finding.Severity != SeverityWarning {
 		t.Errorf("post-fix findings dropped the leftover diagnosis: %#v", after)
 	}
@@ -105,9 +105,9 @@ func TestFindingsUnmanagedAgentDirectoryIsWarningWithoutRepairAttempt(t *testing
 		},
 	}
 
-	finding, ok := findingWith(doctorFindings(report), "physical-dir")
+	finding, ok := findingWith(findingsFor(report), "physical-dir")
 	if !ok {
-		t.Fatalf("expected a finding naming the unmanaged directory, got %#v", doctorFindings(report))
+		t.Fatalf("expected a finding naming the unmanaged directory, got %#v", findingsFor(report))
 	}
 	if finding.Severity != SeverityWarning {
 		t.Errorf("severity = %v; want SeverityWarning", finding.Severity)
@@ -118,7 +118,7 @@ func TestFindingsUnmanagedAgentDirectoryIsWarningWithoutRepairAttempt(t *testing
 	if strings.Contains(finding.Message, "Warning:") {
 		t.Errorf("message = %q; must not carry the literal Warning: prefix", finding.Message)
 	}
-	if findings := doctorFindings(report); containsMessage(findings, "Cannot replace unmanaged directory") {
+	if findings := findingsFor(report); containsMessage(findings, "Cannot replace unmanaged directory") {
 		t.Errorf("doctor must not claim it attempted to replace an unmanaged directory: %#v", findings)
 	}
 }
@@ -253,7 +253,7 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings := doctorFindings(outcome.Report)
+	findings := findingsFor(outcome.Report)
 	var removedMsg string
 	for _, f := range findings {
 		if strings.Contains(f.Message, "Removed leftover empty agent directory") {
@@ -278,7 +278,7 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 }
 
 func TestFindingsReportsWorkingLeftoverOccupancyApartFromDangling(t *testing.T) {
-	findings := doctorFindings(engine.DoctorReport{
+	findings := findingsFor(engine.DoctorReport{
 		Leftover: engine.LeftoverOccupancy{
 			Paths: []engine.LeftoverPath{
 				{Agent: "codex", Skill: "gone", Path: "/tmp/gone", Dangling: true},
@@ -352,11 +352,11 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if containsMessage(doctorFindings(outcome.Report), "skills add") {
-			t.Fatalf("untracked real directory must not suggest add: %#v", doctorFindings(outcome.Report))
+		if containsMessage(findingsFor(outcome.Report), "skills add") {
+			t.Fatalf("untracked real directory must not suggest add: %#v", findingsFor(outcome.Report))
 		}
-		if !containsMessage(doctorFindings(outcome.Report), "Not in Config; left as-is. Declare it with 'skills adopt -p', or remove it with a TTY prune; 'skills prune -p --yes' will not.") {
-			t.Fatalf("untracked finding has no Project-scoped next action: %#v", doctorFindings(outcome.Report))
+		if !containsMessage(findingsFor(outcome.Report), "Not in Config; left as-is. Declare it with 'skills adopt -p', or remove it with a TTY prune; 'skills prune -p --yes' will not.") {
+			t.Fatalf("untracked finding has no Project-scoped next action: %#v", findingsFor(outcome.Report))
 		}
 		if want := []engine.DoctorWarning{{Kind: engine.DoctorFindingUntracked, Count: 1}}; !reflect.DeepEqual(outcome.Warnings, want) {
 			t.Errorf("Warnings = %#v; want %#v", outcome.Warnings, want)
@@ -378,14 +378,14 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if containsMessage(doctorFindings(outcome.Report), "skills add") {
-			t.Fatalf("untracked real directory must not suggest add: %#v", doctorFindings(outcome.Report))
+		if containsMessage(findingsFor(outcome.Report), "skills add") {
+			t.Fatalf("untracked real directory must not suggest add: %#v", findingsFor(outcome.Report))
 		}
-		if !containsMessage(doctorFindings(outcome.Report), "Not in Config; left as-is. Declare it with 'skills adopt', or remove it with a TTY prune; 'skills prune --yes' will not.") {
-			t.Fatalf("untracked finding has no Global-scoped next action: %#v", doctorFindings(outcome.Report))
+		if !containsMessage(findingsFor(outcome.Report), "Not in Config; left as-is. Declare it with 'skills adopt', or remove it with a TTY prune; 'skills prune --yes' will not.") {
+			t.Fatalf("untracked finding has no Global-scoped next action: %#v", findingsFor(outcome.Report))
 		}
-		if containsMessage(doctorFindings(outcome.Report), "skills prune -p") {
-			t.Errorf("Global finding suggested a Project command: %#v", doctorFindings(outcome.Report))
+		if containsMessage(findingsFor(outcome.Report), "skills prune -p") {
+			t.Errorf("Global finding suggested a Project command: %#v", findingsFor(outcome.Report))
 		}
 	})
 }
@@ -411,11 +411,11 @@ func TestFindingsLeftoverMasterSymlinkNamesPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsMessage(doctorFindings(outcome.Report), "Remove it with 'skills prune -p'.") {
-		t.Fatalf("leftover symlink has no prune next action: %#v", doctorFindings(outcome.Report))
+	if !containsMessage(findingsFor(outcome.Report), "Remove it with 'skills prune -p'.") {
+		t.Fatalf("leftover symlink has no prune next action: %#v", findingsFor(outcome.Report))
 	}
-	if containsMessage(doctorFindings(outcome.Report), "skills add") {
-		t.Fatalf("leftover symlink must not suggest add: %#v", doctorFindings(outcome.Report))
+	if containsMessage(findingsFor(outcome.Report), "skills add") {
+		t.Fatalf("leftover symlink must not suggest add: %#v", findingsFor(outcome.Report))
 	}
 	if outcome.Remaining != 0 {
 		t.Errorf("Remaining = %d; want 0", outcome.Remaining)
@@ -457,8 +457,8 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 		"Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm -p installed'.",
 	}
 	for _, message := range want {
-		if !containsMessage(doctorFindings(outcome.Report), message) {
-			t.Errorf("missing next action %q in %#v", message, doctorFindings(outcome.Report))
+		if !containsMessage(findingsFor(outcome.Report), message) {
+			t.Errorf("missing next action %q in %#v", message, findingsFor(outcome.Report))
 		}
 	}
 }
@@ -509,17 +509,17 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if containsMessage(doctorFindings(outcome.Report), "Symlinks healthy") {
-		t.Fatalf("doctor called a non-directory Agent path healthy: %#v", doctorFindings(outcome.Report))
+	if containsMessage(findingsFor(outcome.Report), "Symlinks healthy") {
+		t.Fatalf("doctor called a non-directory Agent path healthy: %#v", findingsFor(outcome.Report))
 	}
-	if !containsMessage(doctorFindings(outcome.Report), "[claude-code] Agent directory is not usable") {
-		t.Fatalf("doctor did not report the unusable Agent directory: %#v", doctorFindings(outcome.Report))
+	if !containsMessage(findingsFor(outcome.Report), "[claude-code] Agent directory is not usable") {
+		t.Fatalf("doctor did not report the unusable Agent directory: %#v", findingsFor(outcome.Report))
 	}
-	if !containsMessage(doctorFindings(outcome.Report), "Cannot observe availability for alpha") {
-		t.Fatalf("doctor did not report the unreadable availability path: %#v", doctorFindings(outcome.Report))
+	if !containsMessage(findingsFor(outcome.Report), "Cannot observe availability for alpha") {
+		t.Fatalf("doctor did not report the unreadable availability path: %#v", findingsFor(outcome.Report))
 	}
-	if !containsMessage(doctorFindings(outcome.Report), "Next: inspect "+models.ToTildePath(filepath.Join(claudeDir, "skills"))) {
-		t.Fatalf("the finding names no next action: %#v", doctorFindings(outcome.Report))
+	if !containsMessage(findingsFor(outcome.Report), "Next: inspect "+models.ToTildePath(filepath.Join(claudeDir, "skills"))) {
+		t.Fatalf("the finding names no next action: %#v", findingsFor(outcome.Report))
 	}
 	if outcome.Remaining == 0 {
 		t.Fatal("a Scope with no working availability must not report as clean")
@@ -531,7 +531,7 @@ func TestFindingsGitErrorNamesTheScopedUpdate(t *testing.T) {
 		SkillsDir: filepath.Join(t.TempDir(), ".agents", "skills"),
 		GitError:  "git 2.35 or newer is required for the sparse Cache",
 	}
-	findings := doctorFindings(report)
+	findings := findingsFor(report)
 	if !containsMessage(findings, "Remote Sources cannot be fetched: git 2.35 or newer is required") {
 		t.Fatalf("git error not reported: %#v", findings)
 	}
@@ -608,7 +608,7 @@ func TestDoctorFindingsPrintEveryReportField(t *testing.T) {
 	}
 
 	var out strings.Builder
-	for _, finding := range doctorFindings(report) {
+	for _, finding := range findingsFor(report) {
 		out.WriteString(finding.Message + "\n")
 	}
 	fields := reflect.TypeFor[engine.DoctorReport]()
@@ -651,4 +651,14 @@ func TestEveryDoctorWarningKindIsWorded(t *testing.T) {
 			}
 		}
 	}
+}
+
+// findingsFor words p as doctor does for a Scope chosen with -p alone, the
+// only Scope flag these reports need.
+func findingsFor(p engine.DoctorReport) []Finding {
+	flags := ""
+	if models.IsProjectScope(p.SkillsDir) {
+		flags = " -p"
+	}
+	return doctorFindings(p, flags)
 }

@@ -65,7 +65,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 	stateWarning := plan.StateWarning
 	finish := func(err error) error {
 		if stateWarning != "" {
-			printScopeStateWarning(cmd.OutOrStdout(), stateWarning, scopeFlagOf(scope))
+			printScopeStateWarning(cmd.OutOrStdout(), stateWarning, scopeFlagsOf(scope))
 		}
 		return err
 	}

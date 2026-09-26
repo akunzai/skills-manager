@@ -74,15 +74,15 @@ completed.`,
 			decision := engine.SyncDecision{Force: flagForce}
 
 			if flagDryRun {
-				printSyncPlan(out, plan, decision, scopeFlagOf(scope))
-				return reportSyncOutcome(out, plan.Summary(decision), true, "skills sync")
+				printSyncPlan(out, plan, decision, scopeFlagsOf(scope))
+				return reportSyncOutcome(out, plan.Summary(decision), true, "sync", scopeFlagsOf(scope))
 			}
 
 			report, err := applySyncPlan(cmd, out, scope, plan, decision)
 			if err != nil {
 				return err
 			}
-			return reportSyncOutcome(out, report.Summary(), false, "skills sync")
+			return reportSyncOutcome(out, report.Summary(), false, "sync", scopeFlagsOf(scope))
 		},
 	}
 
@@ -117,15 +117,15 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 	if n := len(plan.Items); n > 0 {
 		region = presentation.StartRegion(cmd.ErrOrStderr(), "Syncing "+countOf(n, "Skill"), n)
 	}
-	report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev) })
+	report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev, scopeFlagsOf(scope)) })
 	region.Stop()
 	for _, ev := range report.Events {
 		if ev.Kind == engine.SyncStateUnreadable {
-			printScopeStateWarning(out, ev.Err, scopeFlagOf(scope))
+			printScopeStateWarning(out, ev.Err, scopeFlagsOf(scope))
 		}
 	}
 	printMaterialized(out, report)
-	printCopiedAvailability(out, report, scopeFlagOf(scope))
+	printCopiedAvailability(out, report, scopeFlagsOf(scope))
 	return report, err
 }
 
@@ -175,7 +175,7 @@ func materializedLine(verb string, skills []string, width int) string {
 // 2 the work could not be completed. next is the command that finishes
 // pending work. A blocked Skill is a state to decide on,
 // not an error, so it never reads as a failure.
-func reportSyncOutcome(out io.Writer, summary engine.SyncSummary, dryRun bool, next string) error {
+func reportSyncOutcome(out io.Writer, summary engine.SyncSummary, dryRun bool, next, scopeFlags string) error {
 	if summary.Failed > 0 {
 		return exitError{message: fmt.Sprintf("Sync did not converge: %s, %s", countOf(summary.Failed, "failure"), countOf(summary.Blocked, "blocked skill")), code: 2}
 	}
@@ -189,11 +189,11 @@ func reportSyncOutcome(out io.Writer, summary engine.SyncSummary, dryRun bool, n
 		}
 		fmt.Fprintf(out, "%s%sSync did not converge. %s.%s\n", colorBold, colorYellow, strings.Join(parts, ", "), colorReset)
 		if summary.Blocked > 0 && summary.Forceable {
-			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n")
+			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync%s --force' to overwrite them.\n", scopeFlags)
 		} else if summary.Blocked > 0 {
 			fmt.Fprintf(out, "Next: follow the reason given for each skipped skill above.\n")
 		} else {
-			fmt.Fprintf(out, "Next: run '%s'.\n", next)
+			fmt.Fprintf(out, "Next: run 'skills %s%s'.\n", next, scopeFlags)
 		}
 		return exitError{message: "Scope does not match its Config", code: 1}
 	}
@@ -239,11 +239,11 @@ func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDec
 		items := plan.SourceItems(source)
 		fmt.Fprintf(out, "Syncing Source: %s%s%s (%d skills)...\n", colorBold, source, colorReset, len(items))
 		for _, item := range items {
-			printSyncPlanItem(out, item, decision)
+			printSyncPlanItem(out, item, decision, scopeFlag)
 		}
 	}
 	for _, item := range plan.LocalItems() {
-		printSyncPlanItem(out, item, decision)
+		printSyncPlanItem(out, item, decision, scopeFlag)
 	}
 	// Doctor is where a path Availability refuses is inspected, and replaced
 	// once the user confirms.
@@ -252,7 +252,7 @@ func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDec
 	}
 }
 
-func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.SyncDecision) {
+func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.SyncDecision, scopeFlags string) {
 	if item.Err != "" {
 		fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, item.Source, item.Err, colorReset)
 		return
@@ -265,7 +265,7 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 	case action == engine.SyncActionSkip:
 		reason := string(block)
 		if item.BlockReason != "" {
-			reason += ": " + item.BlockReason
+			reason += ": " + withNext(item.BlockReason, item.BlockNext, scopeFlags)
 		}
 		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, item.Name, reason, colorReset)
 		return
@@ -324,7 +324,7 @@ func printCopiedAvailability(out io.Writer, report *engine.SyncReport, scopeFlag
 // showSyncProgress moves one Skill's row through the region. Only what stands
 // in the way, or a rename, stays on screen; a line that just says a step went
 // well would repeat the row it replaces.
-func showSyncProgress(region *presentation.Region, out io.Writer, ev engine.SyncEvent) {
+func showSyncProgress(region *presentation.Region, out io.Writer, ev engine.SyncEvent, scopeFlags string) {
 	switch ev.Kind {
 	case engine.SyncItemStart:
 		region.Start(presentation.Job{Name: ev.Skill, Phase: syncPhase(ev.Action)})
@@ -340,7 +340,7 @@ func showSyncProgress(region *presentation.Region, out io.Writer, ev engine.Sync
 		}
 	default:
 		if !syncEventIsProgress(ev.Kind) {
-			region.Above(func() { printSyncEvent(out, ev) })
+			region.Above(func() { printSyncEvent(out, ev, scopeFlags) })
 		}
 	}
 }
@@ -378,10 +378,10 @@ func syncEventIsProgress(kind string) bool {
 // applied through it too, so that reason reads the same whichever command
 // applied the Skill. Events that only say a step went well have no words here;
 // the progress region shows them.
-func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
+func printSyncEvent(out io.Writer, ev engine.SyncEvent, scopeFlags string) {
 	switch ev.Kind {
 	case engine.SyncFetchFailed:
-		fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
+		fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
 	case engine.SyncPathMissing:
 		fmt.Fprintf(out, "  %sSkill path missing in Source: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
 	case engine.SyncAvailabilityFailed:
@@ -401,7 +401,7 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent) {
 	case engine.SyncRenameFailed:
 		fmt.Fprintf(out, "  %sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
 	case engine.SyncSkipped:
-		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
 	case engine.SyncStateUnreadable:
 		// applySyncPlan warns once the region is gone, with the scope flag
 		// its next action needs.

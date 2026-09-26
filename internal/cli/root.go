@@ -3,7 +3,9 @@ package cli
 import (
 	"errors"
 	"os"
+	"strings"
 
+	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/cobra"
@@ -86,13 +88,55 @@ func resolveScopeFor(isProject bool) Scope {
 	return resolveScope(isProject, workingDir(), configOverride, skillsDirOverride, cacheDirOverride)
 }
 
-// scopeFlagOf is the scope flag a suggested command needs to reach scope: the
-// flag the user passed, not the shape of --skills-dir.
-func scopeFlagOf(s Scope) string {
+// scopeFlagsOf is what a suggested command needs after its subcommand to act
+// on s: the Scope flags the user passed, -p and any path override, so it
+// reaches the same Config, skills directory and Cache. It follows the flags,
+// not the shape of --skills-dir, and adds nothing the user did not pass.
+func scopeFlagsOf(s Scope) string {
+	var flags strings.Builder
 	if s.IsProject {
-		return " -p"
+		flags.WriteString(" -p")
 	}
-	return ""
+	configOverride, skillsDirOverride, cacheDirOverride := flagPathOverrides()
+	for _, override := range []struct{ flag, value string }{
+		{"--config", configOverride},
+		{"--skills-dir", skillsDirOverride},
+		{"--cache-dir", cacheDirOverride},
+	} {
+		if override.value != "" {
+			flags.WriteString(" " + override.flag + " " + shellWord(override.value))
+		}
+	}
+	return flags.String()
+}
+
+// shellWord is path as one shell word: bare when nothing in it needs quoting,
+// which keeps a suggested command readable inside the quotes around it.
+func shellWord(path string) string {
+	tilded := models.ToTildePath(path)
+	if strings.Trim(tilded, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._~-") == "" && !strings.HasPrefix(tilded, "-") {
+		return tilded
+	}
+	return shellQuotePath(path)
+}
+
+// withNext is reason followed by the skills command next names, if any,
+// rendered to reach the Scope scopeFlags name.
+func withNext(reason, next, scopeFlags string) string {
+	if next == "" {
+		return reason
+	}
+	return engine.NextCommand{Reason: reason, Command: next}.Render(scopeFlags)
+}
+
+// withScopeFlags is err with any skills command it names rendered to reach
+// the Scope scopeFlags name, keeping whatever context wraps it.
+func withScopeFlags(err error, scopeFlags string) error {
+	next, ok := errors.AsType[engine.NextCommand](err)
+	if !ok {
+		return err
+	}
+	return errors.New(strings.Replace(err.Error(), next.Error(), next.Render(scopeFlags), 1))
 }
 
 // ResolveScope reads the parsed --project/--global/--config/--skills-dir/

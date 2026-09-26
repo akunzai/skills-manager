@@ -288,7 +288,7 @@ var adoptStateParts = []struct {
 // reportAdoptOutcome words each Skill by the state the engine says it ended
 // in, then sums up with the highest of their exit codes.
 func reportAdoptOutcome(out io.Writer, result engine.AdoptResult, scope Scope) error {
-	syncCmd := "skills sync" + scopeFlagOf(scope)
+	syncCmd := "skills sync" + scopeFlagsOf(scope)
 	var recorded []string
 	code := 0
 	counts := map[engine.AdoptState]int{}
@@ -327,7 +327,7 @@ func reportAdoptOutcome(out io.Writer, result engine.AdoptResult, scope Scope) e
 		code = 2
 	}
 	if result.StateWarning != "" {
-		printScopeStateWarning(out, result.StateWarning, scopeFlagOf(scope))
+		printScopeStateWarning(out, result.StateWarning, scopeFlagsOf(scope))
 	}
 	printInstallerWarning(out, recorded, scope.SkillsDir)
 

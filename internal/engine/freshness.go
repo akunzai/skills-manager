@@ -3,7 +3,6 @@ package engine
 import (
 	"cmp"
 	"errors"
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -417,7 +416,7 @@ func (skill SkillFreshness) appliedState(cacheIdentity, commit string) AppliedSk
 
 func (skill SkillFreshness) validateCache() error {
 	if skill.Status == SkillUnverified {
-		return fmt.Errorf("Cache missing for Source %s; run 'skills update' first", skill.Source)
+		return NextCommand{Reason: "Cache missing for Source " + skill.Source, Command: "update"}
 	}
 	if skill.Status == SkillError {
 		return errors.New(skill.Error)

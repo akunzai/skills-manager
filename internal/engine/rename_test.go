@@ -426,8 +426,8 @@ func TestSyncNamesRmForASkillRemovedUpstream(t *testing.T) {
 	}
 	plan := f.plan(t)
 	item := plan.Items[0]
-	if item.Block != SyncBlockRemovedUpstream || !strings.Contains(item.BlockReason, "skills rm old") || strings.Contains(item.BlockReason, "skills update") {
-		t.Fatalf("block = %q (%s)", item.Block, item.BlockReason)
+	if item.Block != SyncBlockRemovedUpstream || item.BlockNext != "rm old" {
+		t.Fatalf("block = %q (%s; next %q)", item.Block, item.BlockReason, item.BlockNext)
 	}
 	snapshot, err := InspectFreshness(f.cfg, f.skillsDir, f.cacheDir, FreshnessOptions{ObserveScope: true})
 	if err != nil {

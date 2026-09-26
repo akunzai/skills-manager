@@ -124,7 +124,7 @@ func newConfigSetCmd() *cobra.Command {
 			// follows it.
 			outcomes := availability.Reconcile()
 			fmt.Fprintf(cmd.OutOrStdout(), "Set %s in %s.\n", args[0], models.ToTildePath(configPath))
-			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagOf(scope))
+			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagsOf(scope))
 		},
 	}
 }

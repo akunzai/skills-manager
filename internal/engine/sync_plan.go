@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -61,9 +62,11 @@ type SyncPlanItem struct {
 	Source string
 
 	// Block is what was observed to stand in the way. Resolve decides whether
-	// the decision lifts it; BlockReason carries any detail worth printing.
+	// the decision lifts it; BlockReason carries any detail worth printing,
+	// and BlockNext the skills command that clears it, if one does.
 	Block       SyncBlock
 	BlockReason string
+	BlockNext   string
 	// Err is an observation that leaves the Skill unactionable regardless of
 	// the decision, such as a Cache that cannot be read.
 	Err string
@@ -251,7 +254,8 @@ func planRemoteItem(source string, cache Cache, skill SkillFreshness, drift Avai
 	switch skill.Status {
 	case SkillRemovedUpstream:
 		item.Block = SyncBlockRemovedUpstream
-		item.BlockReason = fmt.Sprintf("no longer in Source %s; run 'skills rm %s'", source, skill.Name)
+		item.BlockReason = fmt.Sprintf("no longer in Source %s", source)
+		item.BlockNext = "rm " + skill.Name
 		return item
 	case SkillRenamed:
 		return item
@@ -260,9 +264,9 @@ func planRemoteItem(source string, cache Cache, skill SkillFreshness, drift Avai
 	// out, and no decision here can substitute for it. A Cache that
 	// cannot be read is a genuine failure.
 	if err := skill.validateCache(); err != nil {
-		if skill.Status == SkillUnverified {
+		if next, ok := errors.AsType[NextCommand](err); ok {
 			item.Block = SyncBlockCacheMissing
-			item.BlockReason = err.Error()
+			item.BlockReason, item.BlockNext = next.Reason, next.Command
 		} else {
 			item.Err = err.Error()
 		}

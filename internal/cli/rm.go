@@ -114,7 +114,7 @@ func newRmCmd() *cobra.Command {
 			}
 			printRemoveResult(out, result)
 			if result.StateWarning != "" {
-				printScopeStateWarning(out, result.StateWarning, scopeFlagOf(scope))
+				printScopeStateWarning(out, result.StateWarning, scopeFlagsOf(scope))
 			}
 			if result.StateError != "" {
 				printScopeStateUnreadable(out, result.StateError)
