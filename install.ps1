@@ -46,9 +46,9 @@ $arch = if ([System.Environment]::Is64BitOperatingSystem) {
 
 Write-Host "Platform: windows_$arch"
 
-# 3. Fetch latest release from GitHub API
-$apiUrl = "https://api.github.com/repos/$githubRepo/releases/latest"
-Write-Host "Fetching latest release information..."
+# 3. Download the archive and checksum manifest; names mirror .goreleaser.yaml
+$assetName = "skills_windows_$arch.zip"
+$downloadBase = "https://github.com/$githubRepo/releases/latest/download"
 
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("skills_inst_" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
@@ -56,45 +56,37 @@ New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $headers = @{ "User-Agent" = "skills-manager-installer" }
-    $release = Invoke-RestMethod -Uri $apiUrl -Headers $headers -UseBasicParsing
+    $archiveFile = Join-Path $tempDir $assetName
+    $checksumsFile = Join-Path $tempDir "checksums.txt"
 
-    $assetUrl = $null
-    foreach ($asset in $release.assets) {
-        $name = $asset.name.ToLower()
-        if ($name.Contains("windows") -and $name.Contains($arch)) {
-            $assetUrl = $asset.browser_download_url
-            break
-        }
-    }
-
-    if (-not $assetUrl) {
-        foreach ($asset in $release.assets) {
-            if ($asset.name -eq "skills.exe" -or $asset.name -eq "skills") {
-                $assetUrl = $asset.browser_download_url
-                break
-            }
-        }
-    }
-
-    if (-not $assetUrl) {
+    Write-Host "Downloading: $downloadBase/$assetName"
+    try {
+        Invoke-WebRequest -Uri "$downloadBase/$assetName" -OutFile $archiveFile -Headers $headers -UseBasicParsing
+    } catch {
         Write-Err "No prebuilt binary found for windows_$arch."
         exit 1
     }
-
-    Write-Host "Downloading: $assetUrl"
-    $archiveFile = Join-Path $tempDir "downloaded.zip"
-    Invoke-WebRequest -Uri $assetUrl -OutFile $archiveFile -Headers $headers -UseBasicParsing
-
-    if ($assetUrl.EndsWith(".zip")) {
-        Expand-Archive -Path $archiveFile -DestinationPath $tempDir -Force
-        $extractedExe = Join-Path $tempDir "skills.exe"
-        if (-not (Test-Path $extractedExe)) {
-            $extractedExe = Join-Path $tempDir "skills"
-        }
-        Move-Item -Path $extractedExe -Destination $targetBin -Force
-    } else {
-        Move-Item -Path $archiveFile -Destination $targetBin -Force
+    try {
+        Invoke-WebRequest -Uri "$downloadBase/checksums.txt" -OutFile $checksumsFile -Headers $headers -UseBasicParsing
+    } catch {
+        Write-Err "Failed to download checksums.txt; refusing to install an unverified binary."
+        exit 1
     }
+
+    $expected = $null
+    foreach ($line in Get-Content $checksumsFile) {
+        $fields = -split $line
+        if ($fields.Count -eq 2 -and $fields[1] -eq $assetName) { $expected = $fields[0] }
+    }
+    $actual = (Get-FileHash -Algorithm SHA256 $archiveFile).Hash
+    if (-not $expected -or $expected -ne $actual) {
+        Write-Err "Checksum verification failed for $assetName."
+        exit 1
+    }
+    Write-Host "Checksum verified."
+
+    Expand-Archive -Path $archiveFile -DestinationPath $tempDir -Force
+    Move-Item -Path (Join-Path $tempDir "skills.exe") -Destination $targetBin -Force
 
     Write-Host ""
     Write-Success "Installed Skills Manager."

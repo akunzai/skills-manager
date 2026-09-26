@@ -101,7 +101,7 @@ Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talk
 			}
 
 			fmt.Fprintf(out, "\nDownloading and installing %s...\n", info.LatestTag)
-			installedDest, err := updater.DownloadAndInstallBinary(info.AssetURL, targetPath, 30)
+			installedDest, err := updater.DownloadAndInstallBinary(info.AssetURL, info.ChecksumsURL, targetPath, 30)
 			if err != nil {
 				return fmt.Errorf("update failed: %w", err)
 			}
