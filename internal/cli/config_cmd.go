@@ -22,6 +22,7 @@ func newConfigCmd() *cobra.Command {
 		Short: "Inspect and change skills configuration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
 			scope := ResolveScope()
 			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
@@ -56,6 +57,9 @@ func newConfigGetCmd() *cobra.Command {
 		Short: "Read a configuration value",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Only an unknown key is misuse; every other failure is a runtime
+			// problem a usage dump would mislead about.
+			cmd.SilenceUsage = true
 			configPath := ResolveScope().ConfigPath
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
@@ -68,6 +72,7 @@ func newConfigGetCmd() *cobra.Command {
 			case strings.HasPrefix(args[0], "availability."):
 				value = cfg.Settings.Availability[strings.TrimPrefix(args[0], "availability.")]
 			default:
+				cmd.SilenceUsage = false
 				return fmt.Errorf("unknown config key %q", args[0])
 			}
 			data, err := json.Marshal(value)
@@ -86,6 +91,9 @@ func newConfigSetCmd() *cobra.Command {
 		Short: "Set a configuration value",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Only a missing value or an unknown key is misuse; every other
+			// failure is a runtime problem a usage dump would mislead about.
+			cmd.SilenceUsage = true
 			scope := ResolveScope()
 			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 			cfg, err := config.LoadConfig(configPath)
@@ -97,6 +105,7 @@ func newConfigSetCmd() *cobra.Command {
 			switch args[0] {
 			case "defaultAgents":
 				if len(values) == 0 {
+					cmd.SilenceUsage = false
 					return fmt.Errorf("defaultAgents requires at least one agent")
 				}
 				normalized, err := availability.ValidateManagedAgents(values)
@@ -105,26 +114,17 @@ func newConfigSetCmd() *cobra.Command {
 				}
 				cfg.Settings.DefaultAgents = normalized
 			default:
+				cmd.SilenceUsage = false
 				return fmt.Errorf("unknown config key %q", args[0])
 			}
 			if err := config.SaveConfig(cfg, configPath); err != nil {
 				return err
 			}
-			if args[0] == "defaultAgents" {
-				for _, skill := range config.GetConfiguredSkillNames(cfg) {
-					_, installed, err := configuredSkillSource(cfg, skill, skillsDir)
-					if err != nil {
-						return err
-					}
-					if installed {
-						if _, err := availability.Apply(skill); err != nil {
-							return fmt.Errorf("saved %s but failed to apply availability for %s: %w", args[0], skill, err)
-						}
-					}
-				}
-			}
+			// defaultAgents is the only key, and it moves every Skill that
+			// follows it.
+			outcomes := availability.Reconcile()
 			fmt.Fprintf(cmd.OutOrStdout(), "Set %s in %s.\n", args[0], models.ToTildePath(configPath))
-			return nil
+			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagOf(scope))
 		},
 	}
 }
@@ -135,6 +135,7 @@ func newConfigEditCmd() *cobra.Command {
 		Short: "Open the active configuration in an editor",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
 			configPath := ResolveScope().ConfigPath
 			if _, err := os.Stat(configPath); os.IsNotExist(err) {
 				if err := config.SaveConfig(config.DefaultConfig(), configPath); err != nil {

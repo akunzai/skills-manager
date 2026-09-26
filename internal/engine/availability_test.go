@@ -275,6 +275,37 @@ func TestDriftVerdictMatchesApply(t *testing.T) {
 	}
 }
 
+// Reconcile runs after a policy change: a refused Skill is its own outcome,
+// the rest are still applied, and a Skill not on the Scope is left to Sync.
+func TestReconcileAppliesPastARefusedSkill(t *testing.T) {
+	availability, linkPath, skillsDir := projectAvailability(t, "alpha")
+	cfg := availability.cfg
+	for _, name := range []string{"beta", "gamma"} {
+		config.AddLocalSymlinkEntry(cfg, name, filepath.Join(skillsDir, name), "")
+	}
+	if err := os.MkdirAll(filepath.Join(skillsDir, "beta"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(linkPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outcomes := availability.Reconcile()
+
+	if len(outcomes) != 2 || outcomes[0].Skill != "alpha" || outcomes[1].Skill != "beta" {
+		t.Fatalf("outcomes = %#v; want alpha and beta, gamma left to Sync", outcomes)
+	}
+	if outcomes[0].Err == nil || !outcomes[0].Refused {
+		t.Fatalf("alpha = %#v; want a refused failure", outcomes[0])
+	}
+	if outcomes[1].Err != nil {
+		t.Fatalf("beta = %#v; want it applied", outcomes[1])
+	}
+	if _, err := os.Lstat(filepath.Join(filepath.Dir(linkPath), "beta")); err != nil {
+		t.Fatalf("beta not linked past alpha's failure: %v", err)
+	}
+}
+
 // ReplaceForeign is the one mutation that removes a path the user did not
 // declare, so it refuses to act on a diagnosis the filesystem has moved past.
 func TestReplaceForeignRefusesAStaleDiagnosis(t *testing.T) {

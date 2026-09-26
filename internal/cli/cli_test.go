@@ -1924,6 +1924,48 @@ func TestCLIConfigAgentDefaultsReconcileInstalledSkills(t *testing.T) {
 	}
 }
 
+// The policy is saved before it is applied, so a Skill whose Agent path is
+// not Availability's to change must not keep the rest from following it.
+func TestCLIConfigAgentDefaultsApplyPastARefusedSkill(t *testing.T) {
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	for _, name := range []string{"alpha", "beta"} {
+		source := filepath.Join(home, name+"-source")
+		if err := os.MkdirAll(source, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: "+name+"\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		resetSubcommandFlags()
+		if _, err := runCLI(t, "add", "--symlink", source, "--skill", name, "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+			t.Fatalf("add %s: %v", name, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".continue", "skills", "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "config", "set", "defaultAgents", "claude,continue", "--config", configFile, "--skills-dir", skillsDir)
+	if ExitCode(err) != 2 {
+		t.Fatalf("config set = %v; want exit 2:\n%s", err, out)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".continue", "skills", "beta")); err != nil {
+		t.Fatalf("beta was not applied past alpha's failure: %v", err)
+	}
+	for _, want := range []string{"Set defaultAgents in", "Failed to apply availability for alpha", "Next: run 'skills doctor"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Usage:") {
+		t.Fatalf("a runtime failure printed usage:\n%s", out)
+	}
+}
+
 func TestCLIAgentsMutationsPersistAndReconcile(t *testing.T) {
 	resetRootCmdFlags()
 	t.Cleanup(resetRootCmdFlags)
