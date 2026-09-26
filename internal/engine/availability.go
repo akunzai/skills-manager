@@ -508,8 +508,23 @@ type AvailabilityDrift struct {
 	Unobservable []UnobservableAvailabilityPath
 }
 
+// Empty reports whether nothing stands between the Skill's declared
+// Availability and the filesystem. Copies are a working Availability by
+// another mechanism (ADR-0003), not Drift.
 func (d AvailabilityDrift) Empty() bool {
-	return len(d.Missing) == 0 && len(d.Unexpected) == 0 && len(d.Broken) == 0 && len(d.Foreign) == 0 && len(d.Unobservable) == 0
+	return !d.Reconcilable() && !d.Refused()
+}
+
+// Reconcilable reports whether Apply would change the Skill's Availability: a
+// link to add, repair, or remove.
+func (d AvailabilityDrift) Reconcilable() bool {
+	return len(d.Missing) > 0 || len(d.Unexpected) > 0 || len(d.Broken) > 0
+}
+
+// Refused reports whether Apply would fail for the Skill: a path it does not
+// manage, which it fails closed on, or one it cannot inspect.
+func (d AvailabilityDrift) Refused() bool {
+	return len(d.Foreign) > 0 || len(d.Unobservable) > 0
 }
 
 func (a *Availability) declaredSkills() map[string]struct{} {

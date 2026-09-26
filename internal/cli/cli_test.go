@@ -483,6 +483,46 @@ func TestCLISyncPrintsCommandFailed(t *testing.T) {
 	}
 }
 
+// A path Availability refuses fails Sync (ADR-0002), so the preview says so
+// up front rather than promising work the Sync it points to cannot do.
+func TestCLISyncDryRunReportsARefusedAgentPathAsFailed(t *testing.T) {
+	resetRootCmdFlags()
+	isolateHome(t)
+	project := t.TempDir()
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, ".claude", "skills", "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
+
+	out, err := runCLI(t, append(args, "--dry-run")...)
+	if ExitCode(err) != 2 {
+		t.Fatalf("dry-run = %v; want exit 2:\n%s", err, out)
+	}
+	if !strings.Contains(out, "Would fail sample: ") || !strings.Contains(out, "is not managed by skills") || !strings.Contains(out, "Next: run 'skills doctor") {
+		t.Fatalf("dry-run did not preview the refused path:\n%s", out)
+	}
+	if strings.Contains(out, "to reconcile") {
+		t.Fatalf("dry-run still counts the refused Skill as pending:\n%s", out)
+	}
+	if out, err := runCLI(t, args...); ExitCode(err) != 2 {
+		t.Fatalf("sync = %v; want the exit 2 the preview promised:\n%s", err, out)
+	}
+}
+
 func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	resetRootCmdFlags()
 	isolateHome(t)

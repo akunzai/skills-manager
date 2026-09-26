@@ -309,9 +309,9 @@ func TestSyncApplyWarnsOnUnreadableScopeStateWithoutRemoteSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.StateVerdict() != StateWarn || plan.FailedCount() != 0 {
+	if plan.StateVerdict() != StateWarn || plan.FailedCount(SyncDecision{}) != 0 {
 		t.Fatalf("StateVerdict=%v FailedCount=%d; want an unreadable state that is not a failure",
-			plan.StateVerdict(), plan.FailedCount())
+			plan.StateVerdict(), plan.FailedCount(SyncDecision{}))
 	}
 
 	var kinds []string
