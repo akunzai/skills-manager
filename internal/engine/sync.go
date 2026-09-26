@@ -89,15 +89,19 @@ type SyncReport struct {
 	Configured []string
 	Events     []SyncEvent
 	Unknown    []SkillFreshness
+	// forceable is whether --force would lift a block left under the
+	// decision Apply applied.
+	forceable bool
 }
 
 func (r *SyncReport) add(ev SyncEvent) {
 	r.Events = append(r.Events, ev)
 }
 
-// Converged reports whether every declared Skill reached its declared state.
-func (r *SyncReport) Converged() bool {
-	return r.Blocked == 0 && r.Failed == 0
+// Summary is where the Scope stands after Apply. Nothing is pending once
+// applied: each Skill was done, blocked, or failed.
+func (r *SyncReport) Summary() SyncSummary {
+	return SyncSummary{Configured: len(r.Configured), Blocked: r.Blocked, Failed: r.Failed, Forceable: r.forceable}
 }
 
 // Apply materializes the planned Skills and applies Availability. The plan is
@@ -106,7 +110,7 @@ func (r *SyncReport) Converged() bool {
 // failures are events and continue. A failed command installer is an event;
 // Availability is still applied.
 func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (*SyncReport, error) {
-	report := &SyncReport{}
+	report := &SyncReport{forceable: plan.Forceable(decision)}
 	emit := func(ev SyncEvent) {
 		report.add(ev)
 		if onProgress != nil {

@@ -92,8 +92,8 @@ func TestPlanSyncWritesNothing(t *testing.T) {
 	if _, err := os.Stat(checkMarker); !os.IsNotExist(err) {
 		t.Fatalf("planning ran a Skill-supplied check command: %v", err)
 	}
-	if plan.Fresh(SyncDecision{}) {
-		t.Fatal("a Scope with a missing Skill should not read as fresh")
+	if plan.Summary(SyncDecision{}).Converged() {
+		t.Fatal("a Scope with a missing Skill should not read as converged")
 	}
 }
 
@@ -145,11 +145,18 @@ func TestSyncPlanResolvesEachDecision(t *testing.T) {
 	for _, tc := range []struct {
 		decision SyncDecision
 		want     map[string]SyncAction
+		summary  SyncSummary
 	}{
-		{SyncDecision{}, map[string]SyncAction{"drifted": SyncActionSkip, "unknown": SyncActionSkip, "missing": SyncActionMaterialize}},
-		{SyncDecision{AllowUnknown: true}, map[string]SyncAction{"drifted": SyncActionSkip, "unknown": SyncActionMaterialize, "missing": SyncActionMaterialize}},
-		{SyncDecision{Force: true}, map[string]SyncAction{"drifted": SyncActionMaterialize, "unknown": SyncActionMaterialize, "missing": SyncActionMaterialize}},
+		{SyncDecision{}, map[string]SyncAction{"drifted": SyncActionSkip, "unknown": SyncActionSkip, "missing": SyncActionMaterialize},
+			SyncSummary{Configured: 3, Pending: 1, Blocked: 2, Forceable: true}},
+		{SyncDecision{AllowUnknown: true}, map[string]SyncAction{"drifted": SyncActionSkip, "unknown": SyncActionMaterialize, "missing": SyncActionMaterialize},
+			SyncSummary{Configured: 3, Pending: 2, Blocked: 1, Forceable: true}},
+		{SyncDecision{Force: true}, map[string]SyncAction{"drifted": SyncActionMaterialize, "unknown": SyncActionMaterialize, "missing": SyncActionMaterialize},
+			SyncSummary{Configured: 3, Pending: 3}},
 	} {
+		if got := plan.Summary(tc.decision); got != tc.summary {
+			t.Fatalf("decision %+v summary = %+v, want %+v", tc.decision, got, tc.summary)
+		}
 		got := make(map[string]SyncAction, len(plan.Items))
 		for _, item := range plan.Items {
 			action, _ := item.Resolve(tc.decision)
@@ -310,7 +317,7 @@ func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.Fresh(SyncDecision{}) {
+	if !plan.Summary(SyncDecision{}).Converged() {
 		t.Fatalf("an installed command Skill must not keep the gate red: %#v", plan.Pending(SyncDecision{}))
 	}
 }
@@ -387,5 +394,54 @@ func TestPlanDeclaredRemoteItemIsAlwaysWritten(t *testing.T) {
 	}
 	if action, block := item.Resolve(SyncDecision{}); action != SyncActionMaterialize || block != SyncBlockNone {
 		t.Fatalf("Resolve = %q, %q; want materialize", action, block)
+	}
+}
+
+// Whether --force would help is asked of the decision Apply applied, not the
+// one the caller started from: allowing the unknown baseline leaves nothing
+// for --force to lift.
+func TestSyncReportSummaryUsesTheAppliedDecision(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	skillsDir, cacheDir, origin := filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "unknown")
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "unknown"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "unknown", "unknown", "git", origin)
+	if _, err := applyPlan(t, cfg, skillsDir, cacheDir, SyncDecision{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "unknown", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := newScopeStateStore(skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(state.Skills, "unknown")
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := plan.Summary(SyncDecision{}), (SyncSummary{Configured: 1, Blocked: 1, Forceable: true}); got != want {
+		t.Fatalf("plan summary = %+v, want %+v", got, want)
+	}
+
+	report, err := plan.Apply(SyncDecision{AllowUnknown: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := report.Summary(), (SyncSummary{Configured: 1}); got != want || !got.Converged() {
+		t.Fatalf("report summary = %+v, want %+v and converged", got, want)
 	}
 }

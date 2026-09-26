@@ -73,14 +73,14 @@ completed.`,
 
 			if flagDryRun {
 				printSyncPlan(out, plan, decision)
-				return reportSyncOutcome(out, plan.FailedCount(), len(plan.Blocked(decision)), len(plan.Pending(decision)), len(plan.Names()), plan.Forceable(decision), true, "skills sync")
+				return reportSyncOutcome(out, plan.Summary(decision), true, "skills sync")
 			}
 
-			report, decision, err := applySyncPlan(cmd, out, scope, plan, decision)
+			report, err := applySyncPlan(cmd, out, scope, plan, decision)
 			if err != nil {
 				return err
 			}
-			return reportSyncOutcome(out, report.Failed, report.Blocked, 0, len(report.Configured), plan.Forceable(decision), false, "skills sync")
+			return reportSyncOutcome(out, report.Summary(), false, "skills sync")
 		},
 	}
 
@@ -91,15 +91,15 @@ completed.`,
 }
 
 // applySyncPlan asks about unknown baselines when a person is there to answer,
-// then applies plan with progress on stderr. It returns the decision it
-// applied, so the caller can tell whether --force would lift what is left.
+// then applies plan with progress on stderr. The report's Summary already
+// answers whether --force would lift what is left under the decision applied.
 // Sync and update both reconcile a Scope through it.
-func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.SyncPlan, decision engine.SyncDecision) (*engine.SyncReport, engine.SyncDecision, error) {
+func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.SyncPlan, decision engine.SyncDecision) (*engine.SyncReport, error) {
 	if !decision.Force && syncIsTerminal() {
 		if unknown := plan.Unknown(); len(unknown) > 0 {
 			allowUnknown, promptErr := syncPromptUnknown(out, unknown)
 			if promptErr != nil {
-				return nil, decision, promptErr
+				return nil, promptErr
 			}
 			// Declining leaves those Skills blocked, as a Sync without a
 			// terminal would, and Sync still reconciles the rest. The Scope
@@ -123,7 +123,7 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 		scopeFlag = " -p"
 	}
 	printCopiedAvailability(out, report, scopeFlag)
-	return report, decision, err
+	return report, err
 }
 
 // reportSyncOutcome states where the Scope stands and picks the exit code.
@@ -131,22 +131,22 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 // 2 the work could not be completed. next is the command that finishes
 // pending work. A blocked Skill is a state to decide on,
 // not an error, so it never reads as a failure.
-func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, forceable, dryRun bool, next string) error {
-	if failed > 0 {
-		return exitError{message: fmt.Sprintf("Sync did not converge: %s, %s", countOf(failed, "failure"), countOf(blocked, "blocked skill")), code: 2}
+func reportSyncOutcome(out io.Writer, summary engine.SyncSummary, dryRun bool, next string) error {
+	if summary.Failed > 0 {
+		return exitError{message: fmt.Sprintf("Sync did not converge: %s, %s", countOf(summary.Failed, "failure"), countOf(summary.Blocked, "blocked skill")), code: 2}
 	}
-	if blocked > 0 || pending > 0 {
+	if summary.Blocked > 0 || summary.Pending > 0 {
 		parts := make([]string, 0, 2)
-		if pending > 0 {
-			parts = append(parts, countOf(pending, "skill")+" to reconcile")
+		if summary.Pending > 0 {
+			parts = append(parts, countOf(summary.Pending, "skill")+" to reconcile")
 		}
-		if blocked > 0 {
-			parts = append(parts, countOf(blocked, "blocked skill"))
+		if summary.Blocked > 0 {
+			parts = append(parts, countOf(summary.Blocked, "blocked skill"))
 		}
 		fmt.Fprintf(out, "%s%sSync did not converge. %s.%s\n", colorBold, colorYellow, strings.Join(parts, ", "), colorReset)
-		if blocked > 0 && forceable {
+		if summary.Blocked > 0 && summary.Forceable {
 			fmt.Fprintf(out, "Next: inspect the changes, then re-run with 'skills sync --force' to overwrite them.\n")
-		} else if blocked > 0 {
+		} else if summary.Blocked > 0 {
 			fmt.Fprintf(out, "Next: follow the reason given for each skipped skill above.\n")
 		} else {
 			fmt.Fprintf(out, "Next: run '%s'.\n", next)
@@ -154,10 +154,10 @@ func reportSyncOutcome(out io.Writer, failed, blocked, pending, configured int, 
 		return exitError{message: "Scope does not match its Config", code: 1}
 	}
 	if dryRun {
-		fmt.Fprintf(out, "%s%sScope already matches its Config. %d skills declared.%s\n", colorBold, colorGreen, configured, colorReset)
+		fmt.Fprintf(out, "%s%sScope already matches its Config. %d skills declared.%s\n", colorBold, colorGreen, summary.Configured, colorReset)
 		return nil
 	}
-	fmt.Fprintf(out, "%s%sSkills sync complete. %d skills configured.%s\n", colorBold, colorGreen, configured, colorReset)
+	fmt.Fprintf(out, "%s%sSkills sync complete. %d skills configured.%s\n", colorBold, colorGreen, summary.Configured, colorReset)
 	return nil
 }
 

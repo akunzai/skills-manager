@@ -61,6 +61,7 @@ completed.`,
 				return err
 			}
 			decision := engine.SyncDecision{}
+			planned := plan.Summary(decision)
 			refreshed := len(result.UpdatedRepos)
 			var updateErr error
 			if len(result.Errors) > 0 {
@@ -69,8 +70,8 @@ completed.`,
 
 			// A Scope that already matches its Config is left alone, so a
 			// shell startup that runs update prints one line and changes nothing.
-			if plan.Fresh(decision) {
-				summary := updateSyncJSON{Configured: len(plan.Names()), Converged: true}
+			if planned.Converged() {
+				summary := newUpdateSyncJSON(planned)
 				switch {
 				case flagJSON:
 					printUpdateJSON(cmd.OutOrStdout(), result, summary)
@@ -93,34 +94,27 @@ completed.`,
 			if refreshed > 0 {
 				printRefreshed(out, refreshed, len(result.SkippedRepos), flagDryRun)
 			}
-			var summary updateSyncJSON
-			var syncErr error
+			outcome := planned
 			if flagDryRun {
 				printSyncPlan(out, plan, decision)
-				summary = updateSyncJSON{Configured: len(plan.Names()), Pending: len(plan.Pending(decision)), Blocked: len(plan.Blocked(decision)), Failed: plan.FailedCount()}
-				syncErr = reportSyncOutcome(out, summary.Failed, summary.Blocked, summary.Pending, summary.Configured, plan.Forceable(decision), true, "skills update")
 			} else {
+				var report *engine.SyncReport
+				var applyErr error
 				if flagJSON {
 					// Without a terminal to ask, unknown baselines stay blocked,
 					// as they would for a Sync run from a script.
-					report, applyErr := plan.Apply(decision, nil)
-					if applyErr != nil {
-						return applyErr
-					}
-					summary = updateSyncJSON{Configured: len(report.Configured), Blocked: report.Blocked, Failed: report.Failed}
+					report, applyErr = plan.Apply(decision, nil)
 				} else {
-					report, applied, applyErr := applySyncPlan(cmd, out, scope, plan, decision)
-					if applyErr != nil {
-						return applyErr
-					}
-					decision = applied
-					summary = updateSyncJSON{Configured: len(report.Configured), Blocked: report.Blocked, Failed: report.Failed}
+					report, applyErr = applySyncPlan(cmd, out, scope, plan, decision)
 				}
-				syncErr = reportSyncOutcome(out, summary.Failed, summary.Blocked, 0, summary.Configured, plan.Forceable(decision), false, "skills update")
+				if applyErr != nil {
+					return applyErr
+				}
+				outcome = report.Summary()
 			}
-			summary.Converged = syncErr == nil
+			syncErr := reportSyncOutcome(out, outcome, flagDryRun, "skills update")
 			if flagJSON {
-				printUpdateJSON(cmd.OutOrStdout(), result, summary)
+				printUpdateJSON(cmd.OutOrStdout(), result, newUpdateSyncJSON(outcome))
 			}
 			if updateErr != nil {
 				fmt.Fprintf(out, "%s%sUpdate completed with errors.%s\n", colorBold, colorYellow, colorReset)
@@ -212,6 +206,16 @@ type updateSyncJSON struct {
 	Pending    int  `json:"pending"`
 	Blocked    int  `json:"blocked"`
 	Failed     int  `json:"failed"`
+}
+
+func newUpdateSyncJSON(summary engine.SyncSummary) updateSyncJSON {
+	return updateSyncJSON{
+		Converged:  summary.Converged(),
+		Configured: summary.Configured,
+		Pending:    summary.Pending,
+		Blocked:    summary.Blocked,
+		Failed:     summary.Failed,
+	}
 }
 
 // printUpdateJSON keeps the Update document's shape and adds the Sync that
