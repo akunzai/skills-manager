@@ -8,10 +8,29 @@ import (
 )
 
 func TestNoticeLine(t *testing.T) {
-	got := NoticeLine("0.13.0")
-	want := "Self-update 0.13.0 is available. Run: skills self-update"
-	if got != want {
-		t.Fatalf("NoticeLine = %q; want %q", got, want)
+	tests := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{
+			name:    "default self-update command",
+			command: "skills self-update",
+			want:    "Self-update 0.13.0 is available. Run: skills self-update",
+		},
+		{
+			name:    "package-manager command names the package manager instead",
+			command: HomebrewUpgradeCommand,
+			want:    "Self-update 0.13.0 is available. Run: brew upgrade akunzai/tap/skills-manager",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NoticeLine("0.13.0", tt.command)
+			if got != tt.want {
+				t.Fatalf("NoticeLine = %q; want %q", got, tt.want)
+			}
+		})
 	}
 }
 

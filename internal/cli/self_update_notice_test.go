@@ -18,6 +18,10 @@ func init() {
 	selfUpdateNoticeCheck = func() (*updater.SelfUpdateInfo, error) {
 		return nil, errors.New("self-update notice check not stubbed")
 	}
+	// Never the real executable's path: it must not accidentally resolve
+	// under a Cellar or scoop/apps directory on a machine that has this CLI
+	// installed via a package manager.
+	selfUpdateNoticeExecutablePath = func() string { return "/home/tester/.local/bin/skills" }
 }
 
 func TestSelfUpdateNoticePrintsOnTTY(t *testing.T) {
@@ -38,7 +42,7 @@ func TestSelfUpdateNoticePrintsOnTTY(t *testing.T) {
 	if stdout.String() != wantOut {
 		t.Fatalf("stdout = %q; want %q", stdout.String(), wantOut)
 	}
-	wantErr := updater.NoticeLine("0.13.0") + "\n"
+	wantErr := updater.NoticeLine("0.13.0", "skills self-update") + "\n"
 	if stderr.String() != wantErr {
 		t.Fatalf("stderr = %q; want %q", stderr.String(), wantErr)
 	}
@@ -214,9 +218,30 @@ func TestSelfUpdateNoticeAfterFailedCommand(t *testing.T) {
 	if err := Execute(); err == nil {
 		t.Fatal("expected init to fail when config exists")
 	}
-	wantErr := updater.NoticeLine("0.13.0") + "\n"
+	wantErr := updater.NoticeLine("0.13.0", "skills self-update") + "\n"
 	if stderr.String() != wantErr {
 		t.Fatalf("stderr = %q; want %q", stderr.String(), wantErr)
+	}
+}
+
+func TestSelfUpdateNoticeNamesPackageManagerCommand(t *testing.T) {
+	resetRootCmdFlags()
+	isolateHome(t)
+	stubSelfUpdateNotice(t, true, func() (*updater.SelfUpdateInfo, error) {
+		return &updater.SelfUpdateInfo{LatestVersion: "0.13.0", UpdateAvailable: true}, nil
+	})
+	stubSelfUpdateNoticeExecutablePath(t, "/opt/homebrew/Cellar/skills-manager/0.18.0/bin/skills")
+
+	var stderr bytes.Buffer
+	RootCmd.SetOut(&bytes.Buffer{})
+	RootCmd.SetErr(&stderr)
+	RootCmd.SetArgs([]string{"version"})
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	want := updater.NoticeLine("0.13.0", updater.HomebrewUpgradeCommand) + "\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr = %q; want %q", stderr.String(), want)
 	}
 }
 
@@ -228,6 +253,13 @@ func stubSelfUpdateNotice(t *testing.T, terminal bool, check func() (*updater.Se
 	t.Cleanup(func() {
 		selfUpdateNoticeIsTerminal, selfUpdateNoticeCheck = oldTerm, oldCheck
 	})
+}
+
+func stubSelfUpdateNoticeExecutablePath(t *testing.T, path string) {
+	t.Helper()
+	old := selfUpdateNoticeExecutablePath
+	selfUpdateNoticeExecutablePath = func() string { return path }
+	t.Cleanup(func() { selfUpdateNoticeExecutablePath = old })
 }
 
 func homeAgents(t *testing.T, home string) (configFile, skillsDir string) {

@@ -39,7 +39,7 @@ When calling `skills` in automated scripts or tool calls:
 - **Resolve ambiguous repository paths**: If a repository contains duplicate skill names across subdirectories, pass `--path <subpath>` or append the path (e.g. `owner/repo/skills`).
 - **Inspect with `--json`**: `skills ls --json` outputs structured inventory.
 - **Non-interactive Source Replacement**: When overwriting or migrating an existing skill (e.g. from a remote Git repository to a local CLI command), pass `-y` to automatically accept the replacement plan.
-- **Self-update only on request**: Run `skills self-update` only when the human explicitly asks. A TTY notice that a newer release exists is not a request.
+- **Self-update only on request**: Run `skills self-update` only when the human explicitly asks. A TTY notice that a newer release exists is not a request. A Homebrew or Scoop install refuses self-update and names that package manager's upgrade command instead.
 
 ## Configuration Structure (`skills.json`)
 

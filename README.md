@@ -26,7 +26,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/akunzai/skills-manager/main/install.ps1 | iex
 ```
 
-To replace this CLI with a newer release later: `skills self-update`. On a terminal, skills mentions a newer release at most once a day.
+To replace this CLI with a newer release later: `skills self-update`. On a terminal, skills mentions a newer release at most once a day. A Homebrew or Scoop install refuses to replace itself and names that package manager's upgrade command instead.
 
 The installers and `skills self-update` check each download against the release's `checksums.txt`. Every release archive also carries a build provenance attestation: `gh attestation verify skills_<os>_<arch>.tar.gz --repo akunzai/skills-manager`.
 

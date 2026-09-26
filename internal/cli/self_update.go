@@ -3,10 +3,23 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"runtime"
 
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/cobra"
+)
+
+var (
+	// selfUpdateExecutablePath and selfUpdateGOOS are seams over
+	// updater.GetCurrentExecutablePath and runtime.GOOS so tests can
+	// simulate a Homebrew or Scoop install without a real one.
+	selfUpdateExecutablePath = updater.GetCurrentExecutablePath
+	selfUpdateGOOS           = runtime.GOOS
+	// selfUpdateCheck is a seam over updater.CheckSelfUpdate so a test can
+	// assert it is never called when a package manager owns this install.
+	selfUpdateCheck = updater.CheckSelfUpdate
 )
 
 func newSelfUpdateCmd() *cobra.Command {
@@ -25,17 +38,30 @@ func newSelfUpdateCmd() *cobra.Command {
 		Long: `Replace this CLI's own binary with a newer GitHub release.
 
 On an interactive terminal, other commands mention a newer release at most once a day.
-Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talks to GitHub.`,
+Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talks to GitHub.
+
+A Homebrew or Scoop install refuses to replace itself and names that package
+manager's upgrade command instead; --check still reaches GitHub and reports
+the same command.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
+
+			pkgMgr := updater.ClassifyExecutablePath(selfUpdateExecutablePath(), selfUpdateGOOS)
+			if pkgMgr != nil && !flagCheck {
+				// Homebrew's acceptance policy forbids a formula updating
+				// itself, and a Scoop manifest owns the binary the same way,
+				// so refuse before any network call: no check, no download.
+				return reportPackageManagerManagedInstall(out, pkgMgr, flagJSON)
+			}
+
 			if !flagJSON {
 				fmt.Fprintf(out, "\n%s%sChecking for skills CLI updates from GitHub Releases...%s\n\n", colorBold, colorCyan, colorReset)
 			}
 
-			info, err := updater.CheckSelfUpdate(flagVersion)
+			info, err := selfUpdateCheck(flagVersion)
 			if err != nil {
 				// This branch already reports the failure itself (as JSON or as a
 				// colored message), so silence cobra's own error line to avoid
@@ -65,7 +91,11 @@ Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talk
 				fmt.Fprintf(out, "Latest release:  %s%s%s\n", colorBold, info.LatestTag, colorReset)
 				if info.UpdateAvailable {
 					fmt.Fprintf(out, "\n%s%sUpdate available: %s -> %s%s\n", colorYellow, colorBold, info.CurrentVersion, info.LatestTag, colorReset)
-					fmt.Fprintf(out, "Run '%s%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset, colorReset)
+					if pkgMgr != nil {
+						fmt.Fprintf(out, "Run '%s%s%s' to upgrade.\n\n", colorBold, pkgMgr.Command, colorReset)
+					} else {
+						fmt.Fprintf(out, "Run '%s%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset, colorReset)
+					}
 				} else if cmp > 0 {
 					fmt.Fprintf(out, "\n%sskills is running a development/pre-release version (%s) ahead of latest release (%s).%s\n\n", colorGreen, info.CurrentVersion, info.LatestTag, colorReset)
 				} else {
@@ -89,7 +119,7 @@ Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talk
 				return fmt.Errorf("no compatible binary asset found in release %s", info.LatestTag)
 			}
 
-			targetPath := updater.GetCurrentExecutablePath()
+			targetPath := selfUpdateExecutablePath()
 			fmt.Fprintf(out, "Upgrading skills CLI:\n")
 			fmt.Fprintf(out, "  Version:   %s%s%s -> %s%s%s\n", colorYellow, info.CurrentVersion, colorReset, colorGreen, info.LatestTag, colorReset)
 			fmt.Fprintf(out, "  Target:    %s\n", models.ToTildePath(targetPath))
@@ -118,4 +148,23 @@ Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talk
 	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON")
 
 	return cmd
+}
+
+// reportPackageManagerManagedInstall states that pkgMgr already owns this
+// install, so self-update refuses to replace it, and names the command to
+// run instead. This is a state with a next action, not a failure (ADR-0002):
+// exit 1, and main.go's "Error:" prefix stays off for that code.
+func reportPackageManagerManagedInstall(out io.Writer, pkgMgr *updater.PackageManagerInstall, jsonOutput bool) error {
+	if jsonOutput {
+		data, _ := json.MarshalIndent(map[string]string{
+			"status":          "package-manager-managed",
+			"package_manager": pkgMgr.Name,
+			"command":         pkgMgr.Command,
+		}, "", "  ")
+		fmt.Fprintln(out, string(data))
+	} else {
+		fmt.Fprintf(out, "\n%s%s%s manages this copy of skills-manager; self-update won't replace it.%s\n", colorBold, colorYellow, pkgMgr.Name, colorReset)
+		fmt.Fprintf(out, "Next: run '%s'.\n\n", pkgMgr.Command)
+	}
+	return exitError{message: fmt.Sprintf("%s manages this install; run '%s' instead of self-update", pkgMgr.Name, pkgMgr.Command), code: 1}
 }
