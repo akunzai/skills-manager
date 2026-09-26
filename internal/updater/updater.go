@@ -26,6 +26,10 @@ import (
 var Version = "0.19.0"
 var GitHubRepo = "akunzai/skills-manager"
 
+// gitHubAPI is the GitHub REST root releases are read from; a test points it
+// at a local server.
+var gitHubAPI = "https://api.github.com"
+
 type ReleaseAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
@@ -156,13 +160,13 @@ func IsNewerVersion(latest, current string) bool {
 }
 
 func FetchReleaseInfo(versionTag string, timeoutSec int) (*ReleaseInfo, error) {
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", GitHubRepo)
+	apiURL := fmt.Sprintf("%s/repos/%s/releases/latest", gitHubAPI, GitHubRepo)
 	if versionTag != "" {
 		tag := versionTag
 		if !strings.HasPrefix(tag, "v") {
 			tag = "v" + tag
 		}
-		apiURL = fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", GitHubRepo, tag)
+		apiURL = fmt.Sprintf("%s/repos/%s/releases/tags/%s", gitHubAPI, GitHubRepo, tag)
 	}
 
 	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
@@ -242,9 +246,11 @@ func CheckSelfUpdateWithTimeout(targetVersion string, timeoutSec int) (*SelfUpda
 
 	matchedAsset := FindMatchingAsset(rel.Assets)
 
+	// A pinned version is the one asked for, older or newer: any release other
+	// than the running one is an update to it.
 	isNewer := false
 	if targetVersion != "" {
-		isNewer = (latestV != strings.TrimPrefix(targetVersion, "v"))
+		isNewer = latestV != strings.TrimPrefix(currentV, "v")
 	} else {
 		isNewer = IsNewerVersion(latestV, currentV)
 	}

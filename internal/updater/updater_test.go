@@ -201,3 +201,33 @@ func TestZipExtraction(t *testing.T) {
 		t.Errorf("extracted content mismatch: %q", string(extracted))
 	}
 }
+
+// --version names the release to install, so any release other than the
+// running one is an update to it, a downgrade included.
+func TestCheckSelfUpdatePinnedVersionComparesWithTheRunningOne(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tag := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `"}`))
+	}))
+	t.Cleanup(server.Close)
+	previousAPI, previousVersion := gitHubAPI, Version
+	gitHubAPI, Version = server.URL, "0.19.0"
+	t.Cleanup(func() { gitHubAPI, Version = previousAPI, previousVersion })
+
+	for _, tc := range []struct {
+		target string
+		want   bool
+	}{
+		{"v0.20.0", true},
+		{"0.18.0", true},
+		{"v0.19.0", false},
+	} {
+		info, err := CheckSelfUpdateWithTimeout(tc.target, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.UpdateAvailable != tc.want {
+			t.Fatalf("--version %s on 0.19.0: UpdateAvailable = %v; want %v", tc.target, info.UpdateAvailable, tc.want)
+		}
+	}
+}

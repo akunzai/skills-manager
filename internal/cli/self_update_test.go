@@ -170,3 +170,36 @@ func stubSelfUpdateCheckMustNotBeCalled(t *testing.T) {
 		return nil, nil
 	})
 }
+
+// --version names a release, not the latest one, so the output says so and
+// a release other than the running one is offered, a downgrade included.
+func TestSelfUpdateCheckWithAPinnedVersion(t *testing.T) {
+	stubSelfUpdateExecutablePath(t, "/home/alice/.local/bin/skills")
+	for _, tc := range []struct {
+		name, latest string
+		update       bool
+		want         string
+	}{
+		{"older release", "0.18.0", true, "Update available: 0.19.0 -> v0.18.0"},
+		{"running release", "0.19.0", false, "skills is already on v0.19.0."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetSubcommandFlags()
+			t.Cleanup(resetSubcommandFlags)
+			stubSelfUpdateCheck(t, func(string) (*updater.SelfUpdateInfo, error) {
+				return &updater.SelfUpdateInfo{CurrentVersion: "0.19.0", LatestVersion: tc.latest, LatestTag: "v" + tc.latest, UpdateAvailable: tc.update}, nil
+			})
+
+			out, err := runCLI(t, "self-update", "--check", "--version", "v"+tc.latest)
+			if err != nil {
+				t.Fatalf("self-update --check --version: %v\n%s", err, out)
+			}
+			if !strings.Contains(out, "Target release:  v"+tc.latest) || strings.Contains(out, "Latest release") {
+				t.Fatalf("output = %q; want the pinned release labelled as the target", out)
+			}
+			if !strings.Contains(out, tc.want) || strings.Contains(out, "ahead of latest release") {
+				t.Fatalf("output = %q; want %q", out, tc.want)
+			}
+		})
+	}
+}

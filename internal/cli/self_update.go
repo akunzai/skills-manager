@@ -85,10 +85,14 @@ the same command.`,
 			}
 
 			cmp := updater.CompareSemver(info.CurrentVersion, info.LatestVersion)
+			releaseLabel := "Latest release: "
+			if flagVersion != "" {
+				releaseLabel = "Target release: "
+			}
 
 			if flagCheck {
 				fmt.Fprintf(out, "Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
-				fmt.Fprintf(out, "Latest release:  %s%s%s\n", colorBold, info.LatestTag, colorReset)
+				fmt.Fprintf(out, "%s %s%s%s\n", releaseLabel, colorBold, info.LatestTag, colorReset)
 				if info.UpdateAvailable {
 					fmt.Fprintf(out, "\n%s%sUpdate available: %s -> %s%s\n", colorYellow, colorBold, info.CurrentVersion, info.LatestTag, colorReset)
 					if pkgMgr != nil {
@@ -96,22 +100,16 @@ the same command.`,
 					} else {
 						fmt.Fprintf(out, "Run '%s%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset, colorReset)
 					}
-				} else if cmp > 0 {
-					fmt.Fprintf(out, "\n%sskills is running a development/pre-release version (%s) ahead of latest release (%s).%s\n\n", colorGreen, info.CurrentVersion, info.LatestTag, colorReset)
 				} else {
-					fmt.Fprintf(out, "\n%sskills is already on the latest version (%s).%s\n\n", colorGreen, info.LatestTag, colorReset)
+					printSelfUpdateCurrent(out, info, cmp, flagVersion != "")
 				}
 				return nil
 			}
 
 			if !info.UpdateAvailable && !flagForce {
 				fmt.Fprintf(out, "Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
-				fmt.Fprintf(out, "Latest release:  %s%s%s\n", colorBold, info.LatestTag, colorReset)
-				if cmp > 0 {
-					fmt.Fprintf(out, "\n%sskills is running a development/pre-release version (%s) ahead of latest release (%s).%s\n\n", colorGreen, info.CurrentVersion, info.LatestTag, colorReset)
-				} else {
-					fmt.Fprintf(out, "\n%sskills is already on the latest version (%s).%s\n\n", colorGreen, info.LatestTag, colorReset)
-				}
+				fmt.Fprintf(out, "%s %s%s%s\n", releaseLabel, colorBold, info.LatestTag, colorReset)
+				printSelfUpdateCurrent(out, info, cmp, flagVersion != "")
 				return nil
 			}
 
@@ -167,4 +165,18 @@ func reportPackageManagerManagedInstall(out io.Writer, pkgMgr *updater.PackageMa
 		fmt.Fprintf(out, "Next: run '%s'.\n\n", pkgMgr.Command)
 	}
 	return exitError{message: fmt.Sprintf("%s manages this install; run '%s' instead of self-update", pkgMgr.Name, pkgMgr.Command), code: 1}
+}
+
+// printSelfUpdateCurrent says that no update is needed. A pinned --version is
+// the release asked for, not the latest one, so the running build is only
+// ever on it, never ahead of the latest.
+func printSelfUpdateCurrent(out io.Writer, info *updater.SelfUpdateInfo, cmp int, pinned bool) {
+	switch {
+	case pinned:
+		fmt.Fprintf(out, "\n%sskills is already on %s.%s\n\n", colorGreen, info.LatestTag, colorReset)
+	case cmp > 0:
+		fmt.Fprintf(out, "\n%sskills is running a development/pre-release version (%s) ahead of latest release (%s).%s\n\n", colorGreen, info.CurrentVersion, info.LatestTag, colorReset)
+	default:
+		fmt.Fprintf(out, "\n%sskills is already on the latest version (%s).%s\n\n", colorGreen, info.LatestTag, colorReset)
+	}
 }
