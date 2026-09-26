@@ -111,12 +111,12 @@ func TestGuideCmd_InstallGlobal(t *testing.T) {
 }
 
 func TestGuideCmd_SingleSourceOfTruth(t *testing.T) {
-	repoSkill, err := os.ReadFile("../../skills-manager/SKILL.md")
+	repoSkill, err := os.ReadFile("../../skills/skills-manager/SKILL.md")
 	if err != nil {
-		t.Fatalf("failed to read skills-manager/SKILL.md: %v", err)
+		t.Fatalf("failed to read skills/skills-manager/SKILL.md: %v", err)
 	}
 
 	if string(repoSkill) != embeddedGuideSkill {
-		t.Errorf("embeddedGuideSkill and skills-manager/SKILL.md differ; they must be identical")
+		t.Errorf("embeddedGuideSkill and skills/skills-manager/SKILL.md differ; they must be identical")
 	}
 }

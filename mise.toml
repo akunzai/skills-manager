@@ -18,5 +18,5 @@ if [ -n "$unformatted" ]; then
 fi
 go vet ./...
 go test -race ./...
-go build ./cmd/skills
+go build -o bin/ ./cmd/skills
 """

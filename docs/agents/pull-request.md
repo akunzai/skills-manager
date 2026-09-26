@@ -77,7 +77,7 @@ username, home paths, and their real skills configuration.
   `internal/engine/sync_plan_test.go` are the two worked examples to
   follow.
 - **Exempt**: `docs/`, `*.md`, `.github/`, `scripts/`, `website/`,
-  `skills-manager/`, `mise.toml`, `.goreleaser.yaml`, and dependency
+  `skills/`, `mise.toml`, `.goreleaser.yaml`, and dependency
   bumps with no behaviour change.
 - **Structurally untestable** code — a terminal-only interactive path, a
   platform branch that cannot run on the developer's machine — is
