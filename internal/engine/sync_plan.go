@@ -212,12 +212,19 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 	return plan, nil
 }
 
-// planRemoteItem builds one remote Sync plan item from an observation.
-// A SkillFreshness with no Status is a just-declared Skill: Materialize is
-// required, and Drift or an unknown baseline do not block (Add). Classified
-// Status is Sync reconciling an existing declaration.
-func planRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
-	item := SyncPlanItem{
+// planDeclaredRemoteItem plans a remote Skill that was just declared, by Add or
+// as the new name of a Rename. It is always Materialized: neither Drift nor a
+// missing Baseline blocks it, because Add asked before overwriting and a
+// Rename already protected the old copy. skill carries no Freshness status.
+func planDeclaredRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	item := baseRemoteItem(source, cachePath, localSHA, skill, drift)
+	item.NeedsWrite = true
+	return item
+}
+
+// baseRemoteItem is the part of a remote item every plan shares.
+func baseRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	return SyncPlanItem{
 		Name:      skill.Name,
 		Kind:      SyncItemRemote,
 		Source:    source,
@@ -226,10 +233,12 @@ func planRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, dr
 		CachePath: cachePath,
 		LocalSHA:  localSHA,
 	}
-	if skill.Status == "" {
-		item.NeedsWrite = true
-		return item
-	}
+}
+
+// planRemoteItem plans one declared remote Skill from its classified
+// Freshness: Sync reconciling an existing declaration.
+func planRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	item := baseRemoteItem(source, cachePath, localSHA, skill, drift)
 	item.NeedsWrite = skill.Status == SkillMissing || skill.Status == SkillCacheUpdateAvailable || skill.Status == SkillUnknownBaseline
 	switch skill.Status {
 	case SkillLocalDrift:

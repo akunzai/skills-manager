@@ -66,26 +66,33 @@ type SyncEvent struct {
 	Outcome SyncOutcome
 }
 
+// SyncTally counts the declared Skills that did not reach their declared
+// state, blocked apart from failed (ADR-0002). Add and Sync both count through
+// it, so the two cannot disagree about what a Skill's outcome adds up to.
+type SyncTally struct {
+	Blocked int
+	Failed  int
+}
+
+func (t *SyncTally) tally(outcome SyncOutcome) {
+	switch outcome {
+	case SyncBlocked:
+		t.Blocked++
+	case SyncFailed:
+		t.Failed++
+	}
+}
+
 // SyncReport is the observable outcome of applying a SyncPlan.
 type SyncReport struct {
+	SyncTally
 	Configured []string
 	Events     []SyncEvent
-	Blocked    int
-	Failed     int
 	Unknown    []SkillFreshness
 }
 
 func (r *SyncReport) add(ev SyncEvent) {
 	r.Events = append(r.Events, ev)
-}
-
-func (r *SyncReport) tally(outcome SyncOutcome) {
-	switch outcome {
-	case SyncBlocked:
-		r.Blocked++
-	case SyncFailed:
-		r.Failed++
-	}
 }
 
 // Converged reports whether every declared Skill reached its declared state.
@@ -144,16 +151,14 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 				report.Configured = config.GetConfiguredSkillNames(plan.cfg)
 				continue
 			}
-			outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, item, decision, baselines, emit)
-			finish(item, outcome)
+			finish(item, applyItem(plan.availability, plan.skillsDir, item, decision, baselines, emit))
 		}
 	}
 
 	for _, item := range plan.LocalItems() {
 		action, _ := item.Resolve(decision)
 		progress(SyncEvent{Kind: SyncItemStart, Skill: item.Name, Action: action})
-		outcome, _ := applyLocalItem(plan.availability, plan.skillsDir, item, emit)
-		finish(item, outcome)
+		finish(item, applyItem(plan.availability, plan.skillsDir, item, decision, baselines, emit))
 	}
 	return report, nil
 }
@@ -164,8 +169,21 @@ func emitSync(emit func(SyncEvent), ev SyncEvent) {
 	}
 }
 
+// applyItem Materializes one planned Skill and applies its Availability. Add
+// and Sync apply every Skill through here. Each reason a Skill was not applied
+// is emitted as an event, so the outcome is all a caller needs back.
+func applyItem(availability *Availability, skillsDir string, item SyncPlanItem, decision SyncDecision, baselines *Baselines, emit func(SyncEvent)) SyncOutcome {
+	var outcome SyncOutcome
+	if item.Kind == SyncItemRemote {
+		outcome, _ = applyRemoteItem(availability, skillsDir, item, decision, baselines, emit)
+	} else {
+		outcome, _ = applyLocalItem(availability, skillsDir, item, emit)
+	}
+	return outcome
+}
+
 // applyRemoteItem Materializes one remote Skill, applies its Availability, and
-// records the baseline it was applied from. Add and Sync share this path.
+// records the baseline it was applied from.
 func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlanItem, decision SyncDecision, baselines *Baselines, emit func(SyncEvent)) (SyncOutcome, error) {
 	if item.Block == SyncBlockCacheMissing {
 		emitSync(emit, SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.BlockReason})
@@ -311,13 +329,12 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 	if item.RenameTargetDeclared {
 		return SyncDone
 	}
-	renamed := planRemoteItem(item.Source, item.CachePath, item.LocalSHA, SkillFreshness{
+	renamed := planDeclaredRemoteItem(item.Source, item.CachePath, item.LocalSHA, SkillFreshness{
 		Name:      skill.RenamedTo,
 		Source:    item.Source,
 		Subpath:   skill.RenamedSubpath,
 		ScopePath: filepath.Join(plan.skillsDir, skill.RenamedTo),
 		CachePath: filepath.Join(item.CachePath, filepath.FromSlash(skill.RenamedSubpath)),
 	}, occupancy.Drift(skill.RenamedTo))
-	outcome, _ := applyRemoteItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
-	return outcome
+	return applyItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
 }
