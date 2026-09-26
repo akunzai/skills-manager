@@ -53,7 +53,9 @@ func doctorFindings(p engine.DoctorReport, scopeFlags string) []Finding {
 			add(Finding{Severity: SeverityError, Message: fmt.Sprintf("  [%s] Agent directory is not usable: %s (%s)", agent.Name, models.ToTildePath(agent.Dir), agent.Unusable)})
 			continue
 		}
-		add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("  [%s] Symlinks healthy (%s).", agent.Name, models.ToTildePath(agent.Dir))})
+		if len(agent.UnmanagedBroken) == 0 && len(agent.Physical) == 0 {
+			add(Finding{Severity: SeverityOK, Message: fmt.Sprintf("  [%s] Symlinks healthy (%s).", agent.Name, models.ToTildePath(agent.Dir))})
+		}
 		if len(agent.UnmanagedBroken) > 0 {
 			add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("  [%s] Unmanaged broken symlinks were left unchanged: %s", agent.Name, strings.Join(agent.UnmanagedBroken, ", "))})
 		}

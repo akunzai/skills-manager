@@ -545,7 +545,7 @@ func TestObserveOccupancyListsUnmanagedPathsOnEveryLinkableAgentDirectory(t *tes
 	got := availability.ObserveOccupancy().Unmanaged
 
 	want := []UnmanagedAgentPath{
-		{Agent: "claude-code", Name: "dangling", Path: filepath.Join(claude, "dangling"), Symlink: true},
+		{Agent: "claude-code", Name: "dangling", Path: filepath.Join(claude, "dangling"), Symlink: true, Dangling: true},
 		{Agent: "claude-code", Name: "linked", Path: filepath.Join(claude, "linked"), Symlink: true},
 		{Agent: "claude-code", Name: "mine", Path: filepath.Join(claude, "mine")},
 		{Agent: "goose", Name: "alpha", Path: filepath.Join(goose, "alpha")},
@@ -553,5 +553,29 @@ func TestObserveOccupancyListsUnmanagedPathsOnEveryLinkableAgentDirectory(t *tes
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Unmanaged = %#v\nwant %#v", got, want)
+	}
+}
+
+// A dangling symlink the user put on a path Availability selects is one
+// finding: Drift reports it as Foreign, so Agent health leaves it out, the
+// way it already leaves out a real directory there.
+func TestAgentHealthLeavesASelectedPathToDrift(t *testing.T) {
+	availability, linkPath, _ := projectAvailability(t, "sample")
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone"), linkPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	occupancy := availability.ObserveOccupancy()
+
+	if drift := occupancy.Drift("sample"); len(drift.Foreign) != 1 {
+		t.Fatalf("Foreign = %#v; want the dangling symlink", drift.Foreign)
+	}
+	for _, agent := range occupancy.Agents {
+		if len(agent.UnmanagedBroken) != 0 {
+			t.Fatalf("Agent health also reports it: %#v", agent)
+		}
 	}
 }

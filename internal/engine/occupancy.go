@@ -60,6 +60,8 @@ type UnmanagedAgentPath struct {
 	Name    string
 	Path    string
 	Symlink bool
+	// Dangling is a symlink whose target is gone.
+	Dangling bool
 }
 
 // Occupancy is a Scope's Agent directory occupancy, observed once (see
@@ -69,8 +71,10 @@ type UnmanagedAgentPath struct {
 // Each path lands in at most one of Leftover, Unexpected and Unmanaged, and
 // Drift reads a Skill's Unexpected paths from here rather than scanning again,
 // so Sync, Doctor, prune, rm and adopt classify a path under the same rule.
-// Agent health is a per-directory view: its Physical entries are Unmanaged
-// directories on configured Agent directories.
+// Agent health is a per-directory view of Unmanaged on configured Agent
+// directories: its Physical entries are the real directories, and its
+// UnmanagedBroken ones the dangling symlinks, so no path is reported both as
+// Agent health and as Drift.
 type Occupancy struct {
 	Agents     []AgentHealth
 	Leftover   LeftoverOccupancy
@@ -123,19 +127,6 @@ func (a *Availability) ObserveOccupancy() Occupancy {
 	declared := a.declaredSkills()
 	knownDirs := a.agents.KnownDirs()
 	configured := a.ConfiguredAgentDirs()
-	for _, agent := range slices.Sorted(maps.Keys(configured)) {
-		dir := configured[agent]
-		info, err := os.Stat(dir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err == nil && !info.IsDir() {
-			observation.Agents = append(observation.Agents, AgentHealth{Name: agent, Dir: dir, Unusable: "not a directory"})
-			continue
-		}
-		entries, _ := readDir(dir)
-		observation.Agents = append(observation.Agents, a.agentHealth(agent, dir, entries, declared))
-	}
 
 	seen := make(map[string]struct{})
 	addPaths := func(agent, dir string, leftoverRoot bool) {
@@ -204,13 +195,31 @@ func (a *Availability) ObserveOccupancy() Occupancy {
 			}
 			if symlink, ok := a.unmanaged(agent, path, declared); ok {
 				seenUnmanaged[path] = struct{}{}
-				observation.Unmanaged = append(observation.Unmanaged, UnmanagedAgentPath{Agent: agent, Name: entry.Name(), Path: path, Symlink: symlink})
+				dangling := false
+				if symlink {
+					_, err := os.Stat(path)
+					dangling = err != nil
+				}
+				observation.Unmanaged = append(observation.Unmanaged, UnmanagedAgentPath{Agent: agent, Name: entry.Name(), Path: path, Symlink: symlink, Dangling: dangling})
 			}
 		}
 	}
 	slices.SortFunc(observation.Unmanaged, func(a, b UnmanagedAgentPath) int {
 		return cmp.Or(cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Name, b.Name))
 	})
+
+	for _, agent := range slices.Sorted(maps.Keys(configured)) {
+		dir := configured[agent]
+		info, err := os.Stat(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err == nil && !info.IsDir() {
+			observation.Agents = append(observation.Agents, AgentHealth{Name: agent, Dir: dir, Unusable: "not a directory"})
+			continue
+		}
+		observation.Agents = append(observation.Agents, observation.agentHealth(agent, dir))
+	}
 
 	for agent, dir := range knownDirs {
 		if _, ok := configured[agent]; ok {
@@ -227,35 +236,22 @@ func (a *Availability) ObserveOccupancy() Occupancy {
 	return observation
 }
 
-// agentHealth classifies the entries of one configured Agent directory:
-// dangling links this tool never created, and real directories that are
-// neither a copy this tool made, reserved by the Agent, nor on a path
-// Availability selects for a declared Skill.
-func (a *Availability) agentHealth(agent, dir string, entries []os.DirEntry, declared map[string]struct{}) AgentHealth {
+// agentHealth is the Unmanaged paths on one configured Agent directory, as
+// Doctor words them per directory. A directory several Agents share is
+// grouped by where the path is, not by the Agent it was observed under.
+func (o Occupancy) agentHealth(agent, dir string) AgentHealth {
 	health := AgentHealth{Name: agent, Dir: dir}
-	for _, entry := range entries {
-		name := entry.Name()
-		if a.agents.IsReserved(agent, name) {
-			continue
-		}
-		path := filepath.Join(dir, name)
-		fi, err := os.Lstat(path)
-		if err != nil {
-			continue
-		}
+	for _, path := range o.Unmanaged {
 		switch {
-		case fi.Mode()&os.ModeSymlink != 0:
-			// A dangling managed link is Drift or leftover occupancy,
-			// reported with the Skill it belongs to.
-			if _, err := os.Stat(path); err != nil && !isManagedSkillLink(path, name, a.skillsDir) {
-				health.UnmanagedBroken = append(health.UnmanagedBroken, name)
-			}
-		case fi.IsDir():
-			if _, ok := a.unmanaged(agent, path, declared); ok {
-				health.Physical = append(health.Physical, name)
-			}
+		case filepath.Dir(path.Path) != dir:
+		case !path.Symlink:
+			health.Physical = append(health.Physical, path.Name)
+		case path.Dangling:
+			health.UnmanagedBroken = append(health.UnmanagedBroken, path.Name)
 		}
 	}
+	slices.Sort(health.Physical)
+	slices.Sort(health.UnmanagedBroken)
 	return health
 }
 
