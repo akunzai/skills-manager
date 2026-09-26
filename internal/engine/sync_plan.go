@@ -11,15 +11,6 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-// SyncItemKind is how one declared Skill reaches the Scope skills directory.
-type SyncItemKind string
-
-const (
-	SyncItemRemote  SyncItemKind = "remote"
-	SyncItemSymlink SyncItemKind = "symlink"
-	SyncItemCommand SyncItemKind = "command"
-)
-
 // SyncAction is what Apply does with one planned Skill.
 type SyncAction string
 
@@ -66,7 +57,7 @@ type SyncDecision struct {
 // presentation.
 type SyncPlanItem struct {
 	Name   string
-	Kind   SyncItemKind
+	Kind   config.SkillKind
 	Source string
 
 	// Block is what was observed to stand in the way. Resolve decides whether
@@ -122,9 +113,9 @@ func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) 
 		}
 	}
 	switch item.Kind {
-	case SyncItemSymlink:
+	case config.SkillSymlink:
 		return SyncActionSymlink, SyncBlockNone
-	case SyncItemCommand:
+	case config.SkillCommand:
 		return SyncActionCommand, SyncBlockNone
 	}
 	if item.Freshness.Status == SkillRenamed {
@@ -236,7 +227,7 @@ func planRecordedRemoteItem(source string, cache Cache, skill SkillFreshness, dr
 func baseRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	return SyncPlanItem{
 		Name:      skill.Name,
-		Kind:      SyncItemRemote,
+		Kind:      config.SkillRemote,
 		Source:    source,
 		Drift:     drift,
 		Freshness: skill,
@@ -315,7 +306,7 @@ func planLocalItem(cfg *config.Config, skillsDir string, drift AvailabilityDrift
 		Drift:  drift,
 	}
 	if info.Type == "command" {
-		item.Kind = SyncItemCommand
+		item.Kind = config.SkillCommand
 		item.Command = info.Command
 		item.Check = info.Check
 		_, err := os.Stat(filepath.Join(skillsDir, name))
@@ -323,7 +314,7 @@ func planLocalItem(cfg *config.Config, skillsDir string, drift AvailabilityDrift
 		return item
 	}
 	absSource := models.ResolveLocalSourcePath(info.Source, skillsDir)
-	item.Kind = SyncItemSymlink
+	item.Kind = config.SkillSymlink
 	item.SourcePath = absSource
 	item.LinkPath = filepath.Join(skillsDir, name)
 	item.LinkTarget = models.LocalSymlinkTarget(absSource, skillsDir)
@@ -456,7 +447,7 @@ func (plan *SyncPlan) StateVerdict() StateVerdict {
 // needsBaselines reports whether applying the plan records or compares a
 // Baseline: whether it declares a remote Skill.
 func (plan *SyncPlan) needsBaselines() bool {
-	return slices.ContainsFunc(plan.Items, func(item SyncPlanItem) bool { return item.Kind == SyncItemRemote })
+	return slices.ContainsFunc(plan.Items, func(item SyncPlanItem) bool { return item.Kind == config.SkillRemote })
 }
 
 // Names is every declared Skill in the plan, sorted.
@@ -472,7 +463,7 @@ func (plan *SyncPlan) Names() []string {
 func (plan *SyncPlan) SourceItems(source string) []SyncPlanItem {
 	var items []SyncPlanItem
 	for _, item := range plan.Items {
-		if item.Kind == SyncItemRemote && item.Source == source {
+		if item.Kind == config.SkillRemote && item.Source == source {
 			items = append(items, item)
 		}
 	}
@@ -483,7 +474,7 @@ func (plan *SyncPlan) SourceItems(source string) []SyncPlanItem {
 func (plan *SyncPlan) LocalItems() []SyncPlanItem {
 	var items []SyncPlanItem
 	for _, item := range plan.Items {
-		if item.Kind != SyncItemRemote {
+		if item.Kind != config.SkillRemote {
 			items = append(items, item)
 		}
 	}

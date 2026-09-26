@@ -135,7 +135,7 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 	// Updated nor Restored.
 	before := make(map[string]SkillFreshnessStatus)
 	for _, item := range plan.Items {
-		if item.Kind == SyncItemRemote {
+		if item.Kind == config.SkillRemote {
 			before[item.Name] = item.Freshness.Status
 		}
 	}
@@ -212,7 +212,7 @@ func emitSync(emit func(SyncEvent), ev SyncEvent) {
 // is emitted as an event, so the outcome is all a caller needs back.
 func applyItem(availability *Availability, skillsDir string, item SyncPlanItem, decision SyncDecision, baselines *Baselines, emit func(SyncEvent)) SyncOutcome {
 	var outcome SyncOutcome
-	if item.Kind == SyncItemRemote {
+	if item.Kind == config.SkillRemote {
 		outcome, _ = applyRemoteItem(availability, skillsDir, item, decision, baselines, emit)
 	} else {
 		outcome, _ = applyLocalItem(availability, skillsDir, item, emit)
@@ -297,7 +297,7 @@ func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanI
 	}
 	outcome := SyncDone
 	var applyErr error
-	if item.Kind == SyncItemCommand {
+	if item.Kind == config.SkillCommand {
 		if item.Check != "" {
 			if _, _, err := RunCmd(item.Check, ""); err != nil {
 				emitSync(emit, SyncEvent{Kind: SyncCheckFailed, Skill: item.Name, Path: item.Check})
