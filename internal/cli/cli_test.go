@@ -1415,6 +1415,40 @@ func TestCLIUpdateNamesTheSkillsItWrote(t *testing.T) {
 	}
 }
 
+// Past ten names a terminal gets one line naming what fits and counting the
+// rest; a log, with no width, keeps every name.
+func TestMaterializedLineFitsOneTerminalLine(t *testing.T) {
+	names := func(n int) []string {
+		var skills []string
+		for i := range n {
+			skills = append(skills, fmt.Sprintf("skill-%02d", i+1))
+		}
+		return skills
+	}
+	all12 := "Updated 12 skills: " + strings.Join(names(12), ", ") + "."
+	for _, tc := range []struct {
+		name   string
+		skills []string
+		width  int
+		want   string
+	}{
+		{"ten stay whole on a narrow terminal", names(10), 20, "Updated 10 skills: " + strings.Join(names(10), ", ") + "."},
+		{"a log keeps every name", names(12), 0, all12},
+		{"a wide terminal keeps every name", names(12), len(all12), all12},
+		{"a narrow terminal names what fits", names(12), 60, "Updated 12 skills: skill-01, skill-02, skill-03, and 9 more."},
+		{"too narrow for one name counts only", names(12), 30, "Updated 12 skills."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := materializedLine("Updated", tc.skills, tc.width); got != tc.want {
+				t.Fatalf("line = %q\nwant   %q", got, tc.want)
+			}
+			if tc.width > 0 && len(tc.skills) > materializedLineFull && len(tc.want) > tc.width {
+				t.Fatalf("line of %d columns overflows %d", len(tc.want), tc.width)
+			}
+		})
+	}
+}
+
 // Update is the one daily command whatever the Config declares: without a
 // remote Source it still syncs the Scope.
 func TestCLIUpdateSyncsAScopeWithoutRemoteSources(t *testing.T) {
