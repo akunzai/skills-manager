@@ -2223,6 +2223,43 @@ func TestCLIDoctorNextActionsFollowTheFlagsNotThePath(t *testing.T) {
 	}
 }
 
+// A dangling symlink the user left on a declared Skill's Agent path is one
+// issue: the occupied path Doctor offers to replace, not also an Unmanaged
+// broken symlink it says it leaves alone.
+func TestCLIDoctorCountsAForeignDanglingSymlinkOnce(t *testing.T) {
+	project := projectScope(t)
+	source := filepath.Join(t.TempDir(), "mine")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: mine\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "mine", source, "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCLI(t, "sync", "-p"); err != nil {
+		t.Fatalf("sync -p: %v\n%s", err, out)
+	}
+	link := filepath.Join(project, ".claude", "skills", "mine")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone"), link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	out, _ := runCLI(t, "doctor", "-p")
+	if !strings.Contains(out, "occupied path for claude-code") || !strings.Contains(out, "Found 1 issue") {
+		t.Fatalf("doctor should report the occupied path as the one issue:\n%s", out)
+	}
+	if strings.Contains(out, "Unmanaged broken symlinks") {
+		t.Fatalf("doctor also reported it as an Unmanaged broken symlink:\n%s", out)
+	}
+}
+
 // Whatever --fix repaired must stop counting as an outstanding issue, or
 // `doctor --fix` reports failure and exits non-zero after a successful repair.
 func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
