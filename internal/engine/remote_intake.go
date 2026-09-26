@@ -3,6 +3,8 @@ package engine
 import (
 	"cmp"
 	"fmt"
+	neturl "net/url"
+	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
@@ -73,11 +75,25 @@ func (in *RemoteIntake) Declare(cfg *config.Config, skills map[string]string) er
 
 // storedRemoteURL is the URL Config records for a Source: none when it is the
 // one the Source key implies, which is what an unrecorded URL resolves to.
+// The two are compared normalized, so a URL spelled without .git, with a
+// trailing /, or with the host in another case is still the implied one.
 func storedRemoteURL(key, url string) string {
-	if url == models.ParseRepoSource(key).URL {
+	if normalizeRemoteURL(url) == normalizeRemoteURL(models.ParseRepoSource(key).URL) {
 		return ""
 	}
 	return url
+}
+
+// normalizeRemoteURL drops a trailing / and .git and lowercases the host. The
+// path keeps its case.
+func normalizeRemoteURL(raw string) string {
+	s := strings.TrimRight(raw, "/")
+	s = strings.TrimRight(strings.TrimSuffix(s, ".git"), "/")
+	if u, err := neturl.Parse(s); err == nil && u.Host != "" {
+		u.Host = strings.ToLower(u.Host)
+		return u.String()
+	}
+	return s
 }
 
 func declaredSubpaths(repo config.RemoteRepo) []string {
