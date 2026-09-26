@@ -2,12 +2,10 @@ package engine
 
 import (
 	"errors"
-	"fmt"
 	"os/exec"
 	"slices"
 	"strings"
 
-	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
@@ -192,28 +190,4 @@ func (c Cache) withSkillFiles(fn func(repoDir string) error) error {
 	return withSkillFiles(repoDir, func() error {
 		return fn(repoDir)
 	})
-}
-
-// PrepareRemoteSource refreshes one Source's Cache and discovers its Skills,
-// with each candidate's description. Add uses this before it knows which
-// Skills the user will declare; Add's --list shows the descriptions.
-func PrepareRemoteSource(key string, repo config.RemoteRepo, cacheDir, scope string) (string, DiscoveredSkills, DiscoveredSkillDescriptions, error) {
-	cache := NewCache(key, repo.URL, repo.Branch, cacheDir)
-	repoDir, err := cache.Refresh(true, declaredSubpaths(repo)...)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("refresh Source %s: %w", key, err)
-	}
-	discovered, descriptions, err := discoverRemoteSkills(cache, scope)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("discover Skills in %s: %w", key, err)
-	}
-	return repoDir, discovered, descriptions, nil
-}
-
-func declaredSubpaths(repo config.RemoteRepo) []string {
-	paths := make([]string, 0, len(repo.Skills))
-	for _, name := range sortedSkillKeys(repo.Skills) {
-		paths = append(paths, repo.Skills[name])
-	}
-	return paths
 }
