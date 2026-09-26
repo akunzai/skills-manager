@@ -156,24 +156,32 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 	})
 
 	inv := Inventory{items: result}
-	for _, item := range result {
+	for i := range result {
+		item := &result[i]
 		mode := kind[item.Name]
 		switch {
 		case !item.IsInstalled:
+			item.Status = models.SkillStatusMissing
 			inv.missing = append(inv.missing, item.Name)
 		case item.SourceType == "symlink":
+			item.Status = models.SkillStatusUntrackedLink
 			inv.untrackedLinks = append(inv.untrackedLinks, item.Name)
 		case item.SourceType == "untracked":
+			item.Status = models.SkillStatusUntracked
 			inv.untracked = append(inv.untracked, item.Name)
 		case item.SourceType == "local_symlink" && models.LocalSourceInsideSkillsDir(models.ResolveLocalSourcePath(item.Source, baseSkills), baseSkills) && mode&os.ModeSymlink == 0 && mode != 0:
+			item.Status = models.SkillStatusIllegalLocal
 			inv.illegalLocal = append(inv.illegalLocal, IllegalLocalSource{Name: item.Name, Source: item.Source})
 		case item.SourceType == "local_symlink" && mode.IsRegular():
+			item.Status = models.SkillStatusStub
 			inv.stubs = append(inv.stubs, item.Name)
 			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
 		case !item.IsValidSkill:
+			item.Status = models.SkillStatusInvalid
 			inv.invalid = append(inv.invalid, InvalidSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
 			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
 		default:
+			item.Status = models.SkillStatusPresent
 			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
 		}
 	}

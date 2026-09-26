@@ -1,8 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/akunzai/skills-manager/internal/config"
 )
 
 func TestStringRuneLen(t *testing.T) {
@@ -88,5 +94,65 @@ func TestAgentDisplayLabels(t *testing.T) {
 				t.Errorf("agentDisplayLabels(%#v) = %#v, want %#v", c.agents, got, c.want)
 			}
 		})
+	}
+}
+
+// ls words each entry the way Doctor classifies it: a text stub, an Untracked
+// link to nothing and a local Source inside the skills directory are not
+// "Invalid" or "Installed", and --json carries the same status.
+func TestCLILsStatusFollowsInventory(t *testing.T) {
+	project := projectScope(t)
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "nested", "SKILL.md"), []byte("# Nested\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "stub"), []byte("../src/stub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(project, "gone"), filepath.Join(skillsDir, "leftover")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "stub", filepath.Join(project, "src", "stub"), "")
+	config.AddLocalSymlinkEntry(cfg, "nested", ".agents/skills/nested", "")
+	if err := config.SaveConfig(cfg, filepath.Join(project, ".agents", "skills.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "ls", "-p")
+	if err != nil {
+		t.Fatalf("ls -p: %v\n%s", err, out)
+	}
+	for name, want := range map[string]string{"stub": "Stub (text file)", "leftover": "Broken link", "nested": "Source inside skills dir"} {
+		line := ""
+		for l := range strings.SplitSeq(out, "\n") {
+			if strings.HasPrefix(l, name+" ") {
+				line = l
+			}
+		}
+		if !strings.Contains(line, want) {
+			t.Fatalf("ls line for %s = %q; want %q\n%s", name, line, want, out)
+		}
+	}
+
+	resetSubcommandFlags()
+	out, err = runCLI(t, "ls", "-p", "--json")
+	if err != nil {
+		t.Fatalf("ls -p --json: %v\n%s", err, out)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(out), &items); err != nil {
+		t.Fatalf("ls --json: %v\n%s", err, out)
+	}
+	got := make(map[string]any)
+	for _, item := range items {
+		got[item["name"].(string)] = item["status"]
+	}
+	want := map[string]any{"stub": "stub", "leftover": "untracked-link", "nested": "illegal-local"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("statuses = %#v; want %#v", got, want)
 	}
 }

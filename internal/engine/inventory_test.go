@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 func TestLoadInventoryClassifiesOccupancy(t *testing.T) {
@@ -87,6 +88,21 @@ func TestLoadInventoryClassifiesOccupancy(t *testing.T) {
 		if slices.Contains(present, name) {
 			t.Fatalf("declaredPresent = %#v; %s must not appear", present, name)
 		}
+	}
+	// Each item carries the class it was listed under, so ls words it the
+	// way Doctor does.
+	statuses := make(map[string]models.SkillStatus)
+	for _, item := range inv.SkillItems() {
+		statuses[item.Name] = item.Status
+	}
+	wantStatuses := map[string]models.SkillStatus{
+		"present": models.SkillStatusPresent, "missing": models.SkillStatusMissing,
+		"broken": models.SkillStatusInvalid, "stub": models.SkillStatusStub,
+		"nested": models.SkillStatusIllegalLocal, "orphan": models.SkillStatusUntracked,
+		"leftover": models.SkillStatusUntrackedLink,
+	}
+	if !reflect.DeepEqual(statuses, wantStatuses) {
+		t.Fatalf("statuses = %#v; want %#v", statuses, wantStatuses)
 	}
 	for _, item := range inv.SkillItems() {
 		if item.Name == "orphan" && item.SourceType != "untracked" {
