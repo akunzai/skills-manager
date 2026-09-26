@@ -355,7 +355,7 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		if containsMessage(doctorFindings(outcome.Report), "skills add") {
 			t.Fatalf("untracked real directory must not suggest add: %#v", doctorFindings(outcome.Report))
 		}
-		if !containsMessage(doctorFindings(outcome.Report), "Not in Config; left as-is. A TTY prune can remove it; 'skills prune -p --yes' will not.") {
+		if !containsMessage(doctorFindings(outcome.Report), "Not in Config; left as-is. Declare it with 'skills adopt -p', or remove it with a TTY prune; 'skills prune -p --yes' will not.") {
 			t.Fatalf("untracked finding has no Project-scoped next action: %#v", doctorFindings(outcome.Report))
 		}
 		if want := []engine.DoctorWarning{{Kind: engine.DoctorFindingUntracked, Count: 1}}; !reflect.DeepEqual(outcome.Warnings, want) {
@@ -381,7 +381,7 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		if containsMessage(doctorFindings(outcome.Report), "skills add") {
 			t.Fatalf("untracked real directory must not suggest add: %#v", doctorFindings(outcome.Report))
 		}
-		if !containsMessage(doctorFindings(outcome.Report), "Not in Config; left as-is. A TTY prune can remove it; 'skills prune --yes' will not.") {
+		if !containsMessage(doctorFindings(outcome.Report), "Not in Config; left as-is. Declare it with 'skills adopt', or remove it with a TTY prune; 'skills prune --yes' will not.") {
 			t.Fatalf("untracked finding has no Global-scoped next action: %#v", doctorFindings(outcome.Report))
 		}
 		if containsMessage(doctorFindings(outcome.Report), "skills prune -p") {

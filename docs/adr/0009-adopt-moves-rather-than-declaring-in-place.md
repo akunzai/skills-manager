@@ -4,6 +4,8 @@
 
 The move exists because the skills directory is Sync's destination, never a Source. A local Source inside it is Illegal-local: Sync would be linking a directory onto itself, and rm or prune removing the link would remove the content. Moving keeps every byte, including a checkout's `.git`, and leaves each Skill with a Source outside the directory Sync writes. A git checkout moves even when a lock file records it, because declaring it remote would let Sync overwrite a working tree with its own history.
 
+A real directory found directly on an Agent directory takes the same path by first moving onto the skills directory, even when it then moves on to `skills-local`. The extra rename buys two things: the lock-file and move rules above apply to it unchanged, and an interruption after the move leaves an ordinary Untracked Skill that adopting again completes. Its Include and Exclude are saved to Config before that move, since afterwards nothing else records which Agents it was found under. A symlink the user placed there is not moved at all: its target is already outside the skills directory, so it is declared in place, as a local Source.
+
 Rejected:
 
 - **Declare in place as a local Source.** It is exactly Illegal-local; allowing it would reopen that rule for one command and make removal destructive.

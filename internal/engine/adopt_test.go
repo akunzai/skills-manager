@@ -275,6 +275,7 @@ func TestAdoptPlanWritesNothing(t *testing.T) {
 	f := newAdoptFixture(t)
 	f.untracked(t, "sample", "# Sample\n")
 	f.untracked(t, "mine", "# Mine\n")
+	f.onAgent(t, adoptOtherAgent, "theirs", "# Theirs\n")
 	f.lock(t, map[string]string{"sample": "sample/SKILL.md"})
 	before := treeSnapshot(t, f.root)
 
@@ -283,8 +284,8 @@ func TestAdoptPlanWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := plan.Names(); len(got) != 2 {
-		t.Fatalf("plan offers %v; want both Untracked Skills", got)
+	if got := plan.Names(); len(got) != 3 {
+		t.Fatalf("plan offers %v; want both Untracked Skills and the Agent directory's", got)
 	}
 	if after := treeSnapshot(t, f.root); !reflect.DeepEqual(before, after) {
 		t.Fatalf("planning changed the Scope:\nbefore %#v\nafter  %#v", before, after)
