@@ -1710,8 +1710,8 @@ func TestUpdateReportsSourceWhoseDeclaredSkillsDidNotChange(t *testing.T) {
 	if !slices.Contains(kinds, UpdateRepoUnchanged) || slices.Contains(kinds, UpdateRepoDone) {
 		t.Fatalf("event kinds = %v", kinds)
 	}
-	repoDir := NewCache("owner/repo", url, branch, cacheDir).dir()
-	if got := localRepoCommit(repoDir); got != head {
+	cache := NewCache("owner/repo", url, branch, cacheDir)
+	if got := cache.head(); got != head {
 		t.Fatalf("Cache commit = %q; want %q", got, head)
 	}
 

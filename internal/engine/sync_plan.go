@@ -80,11 +80,13 @@ type SyncPlanItem struct {
 	Drift AvailabilityDrift
 
 	// Remote Skills. CachePath is the Source's Cache working copy, the root
-	// the Skill's Subpath is resolved against; Freshness carries the Skill's
-	// own path inside it.
+	// the Skill's Subpath is resolved against, and LocalSHA the commit it had
+	// checked out when planned; Freshness carries the Skill's own path inside
+	// it.
 	Freshness SkillFreshness
 	CachePath string
 	LocalSHA  string
+	cache     Cache
 	// NeedsWrite is set when the Cache is not known to match the Scope copy.
 	NeedsWrite bool
 	// RenameTargetDeclared is set on a rename whose new name the Scope
@@ -189,10 +191,7 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 	for _, repository := range snapshot.Repositories {
 		plan.Sources = append(plan.Sources, repository.Source)
 		for _, skill := range repository.Skills {
-			item := planRemoteItem(
-				repository.Source, repository.CachePath, repository.LocalSHA,
-				skill, occupancy.Drift(skill.Name),
-			)
+			item := planRemoteItem(repository.Source, repository.cache, skill, occupancy.Drift(skill.Name))
 			if skill.Status == SkillRenamed {
 				item = planRename(cfg, skillsDir, item)
 			}
@@ -218,29 +217,31 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 // as the new name of a Rename. It is always Materialized: neither Drift nor a
 // missing Baseline blocks it, because Add asked before overwriting and a
 // Rename already protected the old copy. skill carries no Freshness status.
-func planDeclaredRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
-	item := baseRemoteItem(source, cachePath, localSHA, skill, drift)
+func planDeclaredRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	item := baseRemoteItem(source, cache, skill, drift)
 	item.NeedsWrite = true
 	return item
 }
 
-// baseRemoteItem is the part of a remote item every plan shares.
-func baseRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+// baseRemoteItem is the part of a remote item every plan shares. It asks
+// cache where it is and which commit it has checked out.
+func baseRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	return SyncPlanItem{
 		Name:      skill.Name,
 		Kind:      SyncItemRemote,
 		Source:    source,
 		Drift:     drift,
 		Freshness: skill,
-		CachePath: cachePath,
-		LocalSHA:  localSHA,
+		CachePath: cache.dir(),
+		LocalSHA:  cache.head(),
+		cache:     cache,
 	}
 }
 
 // planRemoteItem plans one declared remote Skill from its classified
 // Freshness: Sync reconciling an existing declaration.
-func planRemoteItem(source, cachePath, localSHA string, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
-	item := baseRemoteItem(source, cachePath, localSHA, skill, drift)
+func planRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	item := baseRemoteItem(source, cache, skill, drift)
 	item.NeedsWrite = skill.Status == SkillMissing || skill.Status == SkillCacheUpdateAvailable || skill.Status == SkillUnknownBaseline
 	switch skill.Status {
 	case SkillLocalDrift:

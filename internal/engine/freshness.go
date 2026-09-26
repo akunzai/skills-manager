@@ -57,6 +57,10 @@ type FreshnessRepository struct {
 	CachePath    string                `json:"cache_path"`
 	Error        string                `json:"error,omitempty"`
 	Skills       []SkillFreshness      `json:"skills"`
+
+	// cache is the Cache observed, which Scope observation asks what its head
+	// holds and covers.
+	cache Cache
 }
 
 type FreshnessSnapshot struct {
@@ -190,9 +194,10 @@ func InspectFreshness(cfg *config.Config, skillsDir, cacheDir string, options Fr
 	} else {
 		for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
 			repo := cfg.Remote[source]
-			cache := NewCache(source, repo.URL, repo.Branch, cacheDir).repo()
+			cache := NewCache(source, repo.URL, repo.Branch, cacheDir)
+			resolved := cache.repo()
 			snapshot.Repositories = append(snapshot.Repositories, FreshnessRepository{
-				Source: source, URL: cache.URL, Branch: cache.Branch, CachePath: cache.Dir, LocalSHA: localRepoCommit(cache.Dir),
+				Source: source, URL: resolved.URL, Branch: resolved.Branch, CachePath: resolved.Dir, LocalSHA: cache.head(), cache: cache,
 			})
 		}
 	}
@@ -212,14 +217,15 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 		source := snapshot.Repositories[i].Source
 		repoInfo := cfg.Remote[source]
 		cachePath := snapshot.Repositories[i].CachePath
+		cache := snapshot.Repositories[i].cache
 		// A Skill outside the sparse checkout may still have a directory on
 		// disk: a root Skill's root files, or SKILL.md files an interrupted
 		// add left behind. Either is missing from the Cache, not content.
-		sparse, sparseErr := readSparseState(cachePath)
+		coverage, coverageErr := cache.coverage()
 		for _, name := range sortedSkillKeys(repoInfo.Skills) {
 			applied, _ := baselines.Applied(name)
 			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cachePath, skillsDir, applied)
-			if snapshot.Repositories[i].LocalSHA != "" && sparseErr == nil && len(sparse.missing([]string{skill.Subpath})) > 0 {
+			if snapshot.Repositories[i].LocalSHA != "" && coverageErr == nil && len(coverage.missing([]string{skill.Subpath})) > 0 {
 				skill.Status = SkillUnverified
 			}
 			if snapshot.Repositories[i].LocalSHA == "" {
@@ -231,13 +237,13 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 				skill.Status = SkillUnknownBaseline
 				skill.BaselineRecorded = false
 			}
-			if skill.Status == SkillUnverified && snapshot.Repositories[i].LocalSHA != "" && !subpathAtHead(cachePath, skill.Subpath) {
+			if skill.Status == SkillUnverified && snapshot.Repositories[i].LocalSHA != "" && !cache.atHead(skill.Subpath).exists() {
 				skill.Status = SkillRemovedUpstream
 				skill.ScopeCopy = baselines.CompareScopeCopy(name, skill.ScopePath)
 			}
 			snapshot.Repositories[i].Skills = append(snapshot.Repositories[i].Skills, skill)
 		}
-		attachReplacements(snapshot.Repositories[i].Skills, cachePath, sparse, sparseErr)
+		attachReplacements(snapshot.Repositories[i].Skills, cachePath, coverage, coverageErr)
 	}
 	return snapshot, nil
 }
@@ -245,17 +251,17 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 // attachReplacements marks a removed Skill renamed when a Skill the sparse
 // checkout covers declares it replaces it. Everything read here is already on
 // disk, so Freshness stays offline (ADR 0007).
-func attachReplacements(skills []SkillFreshness, cachePath string, sparse sparseState, sparseErr error) {
+func attachReplacements(skills []SkillFreshness, cachePath string, coverage sparseState, coverageErr error) {
 	var removed []string
 	for _, skill := range skills {
 		if skill.Status == SkillRemovedUpstream {
 			removed = append(removed, skill.Name)
 		}
 	}
-	if len(removed) == 0 || sparseErr != nil {
+	if len(removed) == 0 || coverageErr != nil {
 		return
 	}
-	found := findReplacements(cachePath, removed, sparse.covers)
+	found := findReplacements(cachePath, removed, coverage.covers)
 	for i := range skills {
 		replacement, ok := found[skills[i].Name]
 		if !ok || skills[i].Status != SkillRemovedUpstream {
@@ -335,6 +341,7 @@ func freshnessFromCache(f cacheFacts) FreshnessRepository {
 		RemoteSHA:    f.remoteSHA,
 		CachePath:    f.dir,
 		Error:        f.err,
+		cache:        f.cache,
 	}
 }
 

@@ -21,7 +21,6 @@ type RemoteIntake struct {
 
 	spec  models.ParsedRepoSource // Branch is the one fetched
 	cache Cache
-	dir   string
 }
 
 // PrepareRemoteIntake refreshes spec's Source into its Cache and discovers its
@@ -32,7 +31,7 @@ type RemoteIntake struct {
 func PrepareRemoteIntake(cfg *config.Config, spec models.ParsedRepoSource, cacheDir string) (*RemoteIntake, error) {
 	spec.Branch = cmp.Or(spec.Branch, cfg.Remote[spec.SourceKey].Branch)
 	cache := NewCache(spec.SourceKey, spec.URL, spec.Branch, cacheDir)
-	dir, err := cache.Refresh(true)
+	_, err := cache.Refresh(true)
 	if err != nil {
 		return nil, fmt.Errorf("refresh Source %s: %w", spec.SourceKey, err)
 	}
@@ -40,7 +39,7 @@ func PrepareRemoteIntake(cfg *config.Config, spec models.ParsedRepoSource, cache
 	if err != nil {
 		return nil, fmt.Errorf("discover Skills in %s: %w", spec.SourceKey, err)
 	}
-	return &RemoteIntake{Discovered: discovered, Descriptions: descriptions, spec: spec, cache: cache, dir: dir}, nil
+	return &RemoteIntake{Discovered: discovered, Descriptions: descriptions, spec: spec, cache: cache}, nil
 }
 
 // Declare records skills (name to subpath) from this Source in cfg, with the

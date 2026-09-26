@@ -76,13 +76,13 @@ func DiffSkill(cfg *config.Config, name, skillsDir, cacheDir string) (*SkillDiff
 	subpath := repo.Skills[name]
 	cache := NewCache(source, repo.URL, repo.Branch, cacheDir)
 	cacheRepoDir := cache.dir()
-	head := localRepoCommit(cacheRepoDir)
+	head := cache.head()
 	if head == "" {
 		return nil, fmt.Errorf("Cache missing for Source %s; run 'skills diff --fetch %s' or 'skills update' first", source, name)
 	}
-	if missing, err := missingSparsePaths(cacheRepoDir, []string{subpath}); err != nil {
+	if coverage, err := cache.coverage(); err != nil {
 		return nil, err
-	} else if len(missing) > 0 && subpathAtHead(cacheRepoDir, subpath) {
+	} else if len(coverage.missing([]string{subpath})) > 0 && cache.atHead(subpath).exists() {
 		return nil, fmt.Errorf("Cache for Source %s does not cover %s; run 'skills diff --fetch %s' or 'skills update' first", source, name, name)
 	}
 

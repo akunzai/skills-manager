@@ -348,7 +348,7 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 	if item.RenameTargetDeclared {
 		return SyncDone
 	}
-	renamed := planDeclaredRemoteItem(item.Source, item.CachePath, item.LocalSHA, SkillFreshness{
+	renamed := planDeclaredRemoteItem(item.Source, item.cache, SkillFreshness{
 		Name:      skill.RenamedTo,
 		Source:    item.Source,
 		Subpath:   skill.RenamedSubpath,

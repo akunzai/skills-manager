@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"errors"
 	"os/exec"
 	"slices"
@@ -40,6 +41,58 @@ func (c Cache) Cover(paths ...string) error {
 	return ensureSparsePaths(c.dir(), paths)
 }
 
+// head is the commit this Cache has checked out, or "" when there is no
+// Cache. It reads local git state only.
+func (c Cache) head() string {
+	return localRepoCommit(c.dir())
+}
+
+// headEntry is what a Cache's head commit holds at one subpath: the object
+// ID, and whether it is a directory. The zero value is a subpath the commit
+// does not have, or a Cache that is not there.
+type headEntry struct {
+	id  string
+	dir bool
+}
+
+func (e headEntry) exists() bool {
+	return e.id != ""
+}
+
+// atHead reads subpath in the head commit. It reads trees only, which a
+// blobless clone always has, so it answers offline whatever the sparse
+// checkout covers and never downloads the file it names.
+func (c Cache) atHead(subpath string) headEntry {
+	subpath = cleanSparsePaths([]string{subpath})[0]
+	if subpath == "." {
+		id, _, err := runGit(c.dir(), "rev-parse", "--verify", "--quiet", "HEAD^{tree}")
+		if err != nil {
+			return headEntry{}
+		}
+		return headEntry{id: id, dir: true}
+	}
+	// Each entry is "<mode> <type> <id>\t<path>"; -z leaves the path unquoted.
+	stdout, _, err := runGit(c.dir(), "--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", subpath)
+	if err != nil {
+		return headEntry{}
+	}
+	for entry := range strings.SplitSeq(stdout, "\x00") {
+		meta, path, ok := strings.Cut(entry, "\t")
+		fields := strings.Fields(meta)
+		if ok && path == subpath && len(fields) == 3 {
+			return headEntry{id: fields[2], dir: fields[1] == "tree"}
+		}
+	}
+	return headEntry{}
+}
+
+// coverage is this Cache's sparse checkout, which says which subpaths are on
+// disk and which requested ones are missing. A Cache with no sparse checkout
+// covers every subpath. It reads local git state only.
+func (c Cache) coverage() (sparseState, error) {
+	return readSparseState(c.dir())
+}
+
 type cacheFacts struct {
 	source    string
 	url       string
@@ -49,32 +102,27 @@ type cacheFacts struct {
 	remoteSHA string
 	missing   []string
 	err       string
+	// cache is the Cache observed, on the default branch it resolved to.
+	cache Cache
 }
 
 // observe reports git facts for this Cache. Classification into RemoteStatus
 // is Freshness, not Cache.
 func (c Cache) observe(paths ...string) cacheFacts {
-	repo := c.repo()
-	facts := cacheFacts{source: c.key, url: repo.URL, branch: repo.Branch, dir: repo.Dir}
+	facts := cacheFacts{source: c.key}
 	defaultRemoteSHA := ""
 	if c.branch == "" && models.ParseRepoSource(c.key).Branch == "" {
-		resolvedBranch, resolvedSHA, err := getRemoteDefaultBranchCommit(c.key, repo.URL)
+		resolvedBranch, resolvedSHA, err := getRemoteDefaultBranchCommit(c.key, c.repo().URL)
 		if err != nil {
 			facts.err = err.Error()
 		} else {
-			repo = resolveCacheRepo(c.key, c.url, resolvedBranch, c.cacheDir)
-			facts.url = repo.URL
-			facts.branch = repo.Branch
-			facts.dir = repo.Dir
+			c.branch = resolvedBranch
 			defaultRemoteSHA = resolvedSHA
 		}
 	}
-	displayBranch := facts.branch
-	if displayBranch == "" {
-		displayBranch = "HEAD"
-	}
-	facts.branch = displayBranch
-	facts.localSHA = localRepoCommit(facts.dir)
+	repo := c.repo()
+	facts.url, facts.branch, facts.dir, facts.cache = repo.URL, cmp.Or(repo.Branch, "HEAD"), repo.Dir, c
+	facts.localSHA = c.head()
 	if facts.err != "" || facts.localSHA == "" {
 		return facts
 	}
@@ -90,12 +138,12 @@ func (c Cache) observe(paths ...string) cacheFacts {
 	if facts.localSHA != facts.remoteSHA {
 		return facts
 	}
-	missing, err := missingSparsePaths(facts.dir, paths)
+	coverage, err := c.coverage()
 	if err != nil {
 		facts.err = err.Error()
 		return facts
 	}
-	facts.missing = missing
+	facts.missing = coverage.missing(paths)
 	return facts
 }
 

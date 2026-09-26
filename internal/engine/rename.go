@@ -68,17 +68,6 @@ type Replacement struct {
 	Subpath string
 }
 
-// subpathAtHead reports whether a Skill subpath exists in the Cache's
-// checked-out commit. Trees are present in a blobless clone, so this needs no
-// network access whatever the sparse checkout covers.
-func subpathAtHead(repoDir, subpath string) bool {
-	if subpath == "." || subpath == "" {
-		return true
-	}
-	_, _, err := runGit(repoDir, "cat-file", "-e", "HEAD:"+filepath.ToSlash(filepath.Clean(subpath)))
-	return err == nil
-}
-
 // findReplacements walks the SKILL.md files checked out in repoDir and
 // returns, for each name in removed, the Skill that declares it replaces that
 // name. accept filters the candidate subpaths, so Freshness can ignore
@@ -137,10 +126,10 @@ func findReplacements(repoDir string, removed []string, accept func(subpath stri
 
 // removedSubpaths is the declared Skills whose subpath the Cache's commit no
 // longer has.
-func removedSubpaths(repoDir string, skills map[string]string) []string {
+func removedSubpaths(cache Cache, skills map[string]string) []string {
 	var removed []string
 	for _, name := range sortedSkillKeys(skills) {
-		if !subpathAtHead(repoDir, skills[name]) {
+		if !cache.atHead(skills[name]).exists() {
 			removed = append(removed, name)
 		}
 	}
@@ -152,8 +141,7 @@ func removedSubpaths(repoDir string, skills map[string]string) []string {
 // refresh: reading SKILL.md files outside the sparse checkout may download
 // them, which Sync must never do (ADR 0004). It returns what it covered.
 func coverReplacements(cache Cache, skills map[string]string) (map[string]Replacement, error) {
-	repoDir := cache.dir()
-	removed := removedSubpaths(repoDir, skills)
+	removed := removedSubpaths(cache, skills)
 	if len(removed) == 0 {
 		return nil, nil
 	}
