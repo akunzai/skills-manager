@@ -700,7 +700,7 @@ func TestApplyRemovePlanDropsConfigBeforeMaster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Skills) != 1 || !result.Skills[0].RemovedFromConfig || !result.Skills[0].RemovedMaster {
+	if len(result.Skills) != 1 || !result.Skills[0].RemovedFromConfig || !result.Skills[0].MasterExisted || !result.Skills[0].CopyRemoved {
 		t.Fatalf("result = %#v", result.Skills)
 	}
 	if len(result.Skills[0].Unlinked) == 0 {
@@ -742,7 +742,7 @@ func TestApplyRemovePlanSavesConfigWhenMasterMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Skills[0].RemovedFromConfig || result.Skills[0].RemovedMaster {
+	if !result.Skills[0].RemovedFromConfig || result.Skills[0].MasterExisted {
 		t.Fatalf("result = %#v", result.Skills[0])
 	}
 	loaded, err := config.LoadConfig(configPath)

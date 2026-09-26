@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,7 +16,6 @@ type RemoveItem struct {
 	// only kind with a Baseline to forget.
 	Remote       bool
 	MasterExists bool
-	MasterPath   string
 }
 
 // needsBaselines reports whether removing these Skills forgets a Baseline. A
@@ -32,14 +29,13 @@ type RemovePlan struct {
 	Skills []RemoveItem
 }
 
-// RemoveSkillResult is what ApplyRemovePlan did for one Skill.
+// RemoveSkillResult is what ApplyRemovePlan did for one Skill: whether Config
+// declared it, whether its Scope copy was there to remove, and what Retire
+// did to it.
 type RemoveSkillResult struct {
-	Name              string
+	RetiredSkill
 	RemovedFromConfig bool
-	Unlinked          []string
-	RemovedMaster     bool
-	MasterPath        string
-	MasterErr         error
+	MasterExisted     bool
 }
 
 // RemoveResult is the observable outcome of applying a RemovePlan.
@@ -53,14 +49,16 @@ type RemoveResult struct {
 	StateWarning string
 }
 
-func (r RemoveResult) Err() error {
-	var errs []error
+// NotFullyRemoved names the Skills Retire could not take fully out of the
+// Scope, in the order removed.
+func (r RemoveResult) NotFullyRemoved() []string {
+	var names []string
 	for _, s := range r.Skills {
-		if s.MasterErr != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", s.Name, s.MasterErr))
+		if s.Err() != nil {
+			names = append(names, s.Name)
 		}
 	}
-	return errors.Join(errs...)
+	return names
 }
 
 // BuildRemovePlan records whether each name is in Config and whether its
@@ -72,72 +70,41 @@ func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) Remov
 			continue
 		}
 		category, _, inConfig := config.FindSkillSource(cfg, name)
-		path := filepath.Join(skillsDir, name)
-		_, err := os.Lstat(path)
+		_, err := os.Lstat(filepath.Join(skillsDir, name))
 		plan.Skills = append(plan.Skills, RemoveItem{
 			Name:         name,
 			InConfig:     inConfig,
 			Remote:       category == "remote",
 			MasterExists: err == nil,
-			MasterPath:   path,
 		})
 	}
 	return plan
 }
 
-// ApplyRemovePlan drops each Skill from Config and saves, then unlinks
-// Availability and removes the master directory. Master removal failures are
-// recorded and joined; Config no longer declares those Skills.
+// ApplyRemovePlan drops each Skill from Config and Retires it. A Config that
+// cannot be saved is the error, with nothing on disk changed; everything
+// Retire could not remove is in the result.
 func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir string) (RemoveResult, error) {
-	result := RemoveResult{Skills: make([]RemoveSkillResult, 0, len(plan.Skills))}
-	for _, item := range plan.Skills {
-		step := RemoveSkillResult{Name: item.Name, MasterPath: item.MasterPath}
-		step.RemovedFromConfig = config.RemoveSkillEntry(cfg, item.Name)
-		result.Skills = append(result.Skills, step)
-	}
-	if err := config.SaveConfig(cfg, configPath); err != nil {
-		return result, err
-	}
-
-	availability := NewAvailability(cfg, skillsDir)
-	names := make([]string, 0, len(plan.Skills))
-	for _, item := range plan.Skills {
-		names = append(names, item.Name)
-	}
-	leftover := availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills(names).WithoutEmpty())
-	removedBySkill := make(map[string][]string)
-	for _, path := range leftover.Paths {
-		if path.Repair.Status == RepairSucceeded {
-			removedBySkill[path.Skill] = append(removedBySkill[path.Skill], path.Agent)
-		}
-	}
+	names := make([]string, len(plan.Skills))
+	removedFromConfig := make([]bool, len(plan.Skills))
 	for i, item := range plan.Skills {
-		result.Skills[i].Unlinked = removedBySkill[item.Name]
-
-		if _, err := os.Lstat(item.MasterPath); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			result.Skills[i].MasterErr = err
-			continue
-		}
-		if err := RemoveAll(item.MasterPath); err != nil {
-			result.Skills[i].MasterErr = err
-			continue
-		}
-		result.Skills[i].RemovedMaster = true
+		names[i] = item.Name
+		removedFromConfig[i] = config.RemoveSkillEntry(cfg, item.Name)
 	}
 	baselines := OpenBaselines(skillsDir)
+	retired, err := Retire(cfg, configPath, skillsDir, names, baselines)
+	if err != nil {
+		return RemoveResult{}, err
+	}
+	result := RemoveResult{Skills: make([]RemoveSkillResult, len(plan.Skills))}
+	for i, item := range plan.Skills {
+		result.Skills[i] = RemoveSkillResult{RetiredSkill: retired[i], RemovedFromConfig: removedFromConfig[i], MasterExisted: item.MasterExists}
+	}
 	switch baselines.Verdict(plan.needsBaselines()) {
 	case StateWarn:
 		result.StateWarning = baselines.Err().Error()
-		return result, result.Err()
 	case StateFail:
 		result.StateError = baselines.Err().Error()
-		return result, errors.Join(result.Err(), fmt.Errorf("removed Skills but did not forget their Baselines: %w", baselines.Err()))
 	}
-	if err := baselines.Forget(names...); err != nil {
-		return result, errors.Join(result.Err(), err)
-	}
-	return result, result.Err()
+	return result, nil
 }

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -245,6 +246,56 @@ func TestCLIRmOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
 				t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
 			}
 		})
+	}
+}
+
+// An Availability link rm cannot remove is not silently left for doctor to
+// find: rm names it, reports the Skill not fully removed, and exits 2.
+func TestCLIRmReportsAnAvailabilityLinkItCouldNotRemove(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("a read-only directory does not stop this user removing its entries")
+	}
+	resetRootCmdFlags()
+	isolateHome(t)
+	project := t.TempDir()
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	writeCLILocalSkill(t, filepath.Dir(skillsDir), "sample")
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddLocalSymlinkEntry(cfg, "sample", filepath.Join(filepath.Dir(skillsDir), "local", "sample"), "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("sync: %v\n%s", err, out)
+	}
+	agentDir := filepath.Join(project, ".claude", "skills")
+	link := filepath.Join(agentDir, "sample")
+	if !isSymlink(link) {
+		t.Fatal("sync did not link the Skill for Claude Code")
+	}
+	if err := os.Chmod(agentDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(agentDir, 0o755) })
+
+	out, err := runCLI(t, "rm", "sample", "-y", "--config", configFile, "--skills-dir", skillsDir)
+
+	if exit := exitCodeOf(err); exit != 2 {
+		t.Fatalf("rm error = %v (exit %d); want exit 2\n%s", err, exit, out)
+	}
+	if !strings.Contains(out, "Failed to unlink from claude-code: "+link) {
+		t.Fatalf("output does not name the link rm could not remove:\n%s", out)
+	}
+	if strings.Contains(out, "Skill removal complete") || !strings.Contains(err.Error(), "sample") {
+		t.Fatalf("rm must report sample not fully removed: err=%v\n%s", err, out)
+	}
+	if !isSymlink(link) {
+		t.Fatal("the link was removed from a read-only directory")
+	}
+	if _, statErr := os.Lstat(filepath.Join(skillsDir, "sample")); !os.IsNotExist(statErr) {
+		t.Fatal("a link rm could not remove must not stop the Scope copy going")
 	}
 }
 
