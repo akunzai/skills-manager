@@ -119,3 +119,7 @@ _Avoid_: health check (diagnosis only), fixer (repair only)
 **Add**:
 Declaring selected Skills from one Source in a Scope's Config, then Materializing them and applying Availability.
 _Avoid_: install (when you mean the whole Add), import, register
+
+**Adopt**:
+Declaring Untracked Skills on a Scope skills directory in its Config without losing what is on disk, the inverse of prune. A Skill an installer lock file records is declared from that remote Source where it stands, with a Baseline only when its copy matches the Cache; any other Skill moves beside the skills directory and is declared as a local Source.
+_Avoid_: import, register, claim, take over

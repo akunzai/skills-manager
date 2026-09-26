@@ -33,6 +33,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Self-update notice: `docs/adr/0006-self-update-notice-is-tty-only.md`
 - Upstream renames: `docs/adr/0007-renames-are-declared-by-the-publisher.md`
 - Rejected deepenings: `docs/adr/0008-deepen-only-where-the-rule-lives.md`
+- Adopt moves unknown origins: `docs/adr/0009-adopt-moves-rather-than-declaring-in-place.md`
 - Agent skill & guide: `skills/skills-manager/SKILL.md`
 - Gold-standard CLI test: `internal/cli/cli_test.go`
 - Gold-standard engine test: `internal/engine/sync_plan_test.go`

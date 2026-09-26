@@ -142,6 +142,7 @@ Universal agents that read the central skills directory directly do not need lin
 | Refresh remote Sources, then sync the Scope | `skills update` |
 | Diagnose drift | `skills doctor` |
 | Repair diagnosed health issues | `skills doctor --fix` |
+| Declare untracked skills, keeping their content | `skills adopt` |
 | Remove undeclared managed items | `skills prune` |
 | Remove a skill | `skills rm <skill>` |
 | Print or install AI agent guide | `skills guide [--install]` |
