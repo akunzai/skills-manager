@@ -45,7 +45,6 @@ func newRetireFixture(t *testing.T) retireFixture {
 	if err := store.Save(ScopeState{Skills: map[string]AppliedSkillState{"sample": {Source: "owner/repo"}}}); err != nil {
 		t.Fatal(err)
 	}
-	config.RemoveSkillEntry(f.cfg, "sample")
 	return f
 }
 
@@ -77,6 +76,7 @@ func TestRetireRemovesLinksCopyAndBaseline(t *testing.T) {
 	want := []RetiredSkill{{
 		Name:        "sample",
 		Unlinked:    []ManagedAgentPath{{Agent: "claude-code", Skill: "sample", Path: f.link}},
+		Undeclared:  true,
 		CopyPath:    f.copyPath,
 		CopyRemoved: true,
 	}}
@@ -189,4 +189,82 @@ func TestRetireLeavesAnUnreadableScopeStateAlone(t *testing.T) {
 	if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
 		t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
 	}
+}
+
+// Retire removes what Materialize wrote for a Skill's kind. A local Skill's
+// Scope path is only ever a link, so a real directory there is the user's:
+// an Illegal-local Source, or content Config never declared.
+func TestRetireRemovesOnlyWhatMaterializeWroteForTheKind(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		declare func(cfg *config.Config, skillsDir string)
+		plant   func(t *testing.T, path string)
+		kept    bool
+	}{
+		{"command Skill directory", func(cfg *config.Config, _ string) {
+			config.AddLocalCommandEntry(cfg, "sample", "true", "", "")
+		}, plantDirectory, false},
+		{"local Skill link", func(cfg *config.Config, skillsDir string) {
+			config.AddLocalSymlinkEntry(cfg, "sample", filepath.Join(filepath.Dir(skillsDir), "source"), "")
+		}, func(t *testing.T, path string) {
+			if err := os.Symlink(filepath.Join(filepath.Dir(filepath.Dir(path)), "source"), path); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+		}, false},
+		{"Illegal-local Source", func(cfg *config.Config, _ string) {
+			config.AddLocalSymlinkEntry(cfg, "sample", "./sample", "")
+		}, plantDirectory, true},
+		{"Untracked directory", func(*config.Config, string) {}, plantDirectory, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			project := t.TempDir()
+			configPath := filepath.Join(project, ".agents", "skills.json")
+			skillsDir := filepath.Join(project, ".agents", "skills")
+			path := filepath.Join(skillsDir, "sample")
+			if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.DefaultConfig()
+			tc.declare(cfg, skillsDir)
+			tc.plant(t, path)
+
+			retired, err := Retire(cfg, configPath, skillsDir, []string{"sample"}, OpenBaselines(skillsDir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := retired[0]; got.CopyKept != tc.kept || got.CopyRemoved == tc.kept || got.Err() != nil {
+				t.Fatalf("retired = %#v; want kept = %v", got, tc.kept)
+			}
+			if _, err := os.Lstat(path); (err == nil) != tc.kept {
+				t.Fatalf("Scope path present = %v; want %v", err == nil, tc.kept)
+			}
+		})
+	}
+}
+
+// A Rename whose new name another Source already declares leaves the old
+// Source with no Skills; Retire undeclares through the step that drops it.
+func TestRetireDropsASourceItLeavesEmpty(t *testing.T) {
+	project := t.TempDir()
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/old", "sample", "sample", "git", "https://example.test/old.git")
+	config.AddRemoteSkillEntry(cfg, "owner/other", "kept", "kept", "git", "https://example.test/other.git")
+
+	if _, err := Retire(cfg, configPath, skillsDir, []string{"sample"}, OpenBaselines(skillsDir)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Remote["owner/old"]; ok {
+		t.Fatalf("Config keeps an empty Source: %#v", loaded.Remote)
+	}
+}
+
+func plantDirectory(t *testing.T, path string) {
+	t.Helper()
+	mustWriteScopeStateTestFile(t, filepath.Join(path, "SKILL.md"), []byte("# mine\n"))
 }

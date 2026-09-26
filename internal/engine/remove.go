@@ -16,6 +16,10 @@ type RemoveItem struct {
 	// only kind with a Baseline to forget.
 	Remote       bool
 	MasterExists bool
+	// UntrackedDirectory is a real directory on the Scope skills directory
+	// that Config does not declare. Retire keeps it; rm removes it only once
+	// the user has confirmed.
+	UntrackedDirectory bool
 }
 
 // needsBaselines reports whether removing these Skills forgets a Baseline. A
@@ -27,6 +31,18 @@ func (p RemovePlan) needsBaselines() bool {
 // RemovePlan is the Skills rm will drop from Config then from disk.
 type RemovePlan struct {
 	Skills []RemoveItem
+}
+
+// UntrackedDirectories names the real directories Config does not declare
+// that applying the plan would remove, which the user must confirm first.
+func (p RemovePlan) UntrackedDirectories() []string {
+	var names []string
+	for _, item := range p.Skills {
+		if item.UntrackedDirectory {
+			names = append(names, item.Name)
+		}
+	}
+	return names
 }
 
 // RemoveSkillResult is what ApplyRemovePlan did for one Skill: whether Config
@@ -70,26 +86,26 @@ func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) Remov
 			continue
 		}
 		kind, _, inConfig := config.FindSkillSource(cfg, name)
-		_, err := os.Lstat(filepath.Join(skillsDir, name))
+		info, err := os.Lstat(filepath.Join(skillsDir, name))
 		plan.Skills = append(plan.Skills, RemoveItem{
-			Name:         name,
-			InConfig:     inConfig,
-			Remote:       kind == config.SkillRemote,
-			MasterExists: err == nil,
+			Name:               name,
+			InConfig:           inConfig,
+			Remote:             kind == config.SkillRemote,
+			MasterExists:       err == nil,
+			UntrackedDirectory: err == nil && !inConfig && info.IsDir(),
 		})
 	}
 	return plan
 }
 
-// ApplyRemovePlan drops each Skill from Config and Retires it. A Config that
-// cannot be saved is the error, with nothing on disk changed; everything
-// Retire could not remove is in the result.
+// ApplyRemovePlan Retires each Skill, then removes the Untracked directories
+// among them, which the caller has had the user confirm. A Config that cannot
+// be saved is the error, with nothing on disk changed; everything Retire could
+// not remove is in the result.
 func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir string) (RemoveResult, error) {
 	names := make([]string, len(plan.Skills))
-	removedFromConfig := make([]bool, len(plan.Skills))
 	for i, item := range plan.Skills {
 		names[i] = item.Name
-		removedFromConfig[i] = config.RemoveSkillEntry(cfg, item.Name)
 	}
 	baselines := OpenBaselines(skillsDir)
 	retired, err := Retire(cfg, configPath, skillsDir, names, baselines)
@@ -98,7 +114,13 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 	}
 	result := RemoveResult{Skills: make([]RemoveSkillResult, len(plan.Skills))}
 	for i, item := range plan.Skills {
-		result.Skills[i] = RemoveSkillResult{RetiredSkill: retired[i], RemovedFromConfig: removedFromConfig[i], MasterExisted: item.MasterExists}
+		skill := retired[i]
+		if item.UntrackedDirectory && skill.CopyKept {
+			skill.CopyKept = false
+			skill.CopyErr = RemoveAll(skill.CopyPath)
+			skill.CopyRemoved = skill.CopyErr == nil
+		}
+		result.Skills[i] = RemoveSkillResult{RetiredSkill: skill, RemovedFromConfig: skill.Undeclared, MasterExisted: item.MasterExists}
 	}
 	switch baselines.Verdict(plan.needsBaselines()) {
 	case StateWarn:
