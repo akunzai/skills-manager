@@ -81,12 +81,16 @@ Every declared Skill of one Scope observed once, with the action each takes and 
 _Avoid_: diff, changeset, transaction. An Add of selected Skills from one Source is not a Sync plan.
 
 **Rename**:
-A Source's declaration, through `metadata.replaces` in a Skill's `SKILL.md`, that the Skill takes the place of a Skill it no longer has. Update covers the new Skill in the Cache; Sync moves the Scope's declaration to it and removes the old copy.
+A Source's declaration, through `metadata.replaces` in a Skill's `SKILL.md`, that the Skill takes the place of a Skill it no longer has. Update covers the new Skill in the Cache; Sync moves the Scope's declaration to it and Retires the old Skill.
 _Avoid_: move, alias, migration (when you mean the declaration)
 
 **Materialize**:
 Putting one Skill from its Source onto the Scope skills directory (copy, symlink, or command).
 _Avoid_: install (when you mean the disk write only), checkout, restore
+
+**Retire**:
+Taking a Skill that Config no longer declares out of the Scope by removing its Availability links, its Scope copy, and its Baseline, always after Config is saved. It is the inverse of Materialize. rm and a Rename retire Skills; prune does not, because it removes Untracked content without changing Config.
+_Avoid_: uninstall, delete, clean up
 
 **Cache**:
 One remote Source's sparse-partial-clone working copy, from which that Source's Skills are Materialized. Every Scope shares the same Cache for a given Source.
