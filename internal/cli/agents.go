@@ -2,8 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"io"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -28,7 +27,7 @@ func newAgentsCmd() *cobra.Command {
 				return printAllAvailability(cmd, cfg)
 			}
 			skill := args[0]
-			source, installed, err := configuredSkillSource(cfg, skill, skillsDir)
+			source, err := configuredSkillSource(cfg, skill)
 			if err != nil {
 				return err
 			}
@@ -65,30 +64,56 @@ func newAgentsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Past here every failure is a runtime problem, not misuse.
+			cmd.SilenceUsage = true
 			if err := config.SaveConfig(cfg, configPath); err != nil {
 				return err
 			}
-			if installed {
-				if _, err := availability.Apply(skill); err != nil {
-					return fmt.Errorf("saved policy but failed to apply availability for %s: %w", skill, err)
-				}
-			}
+			outcomes := availability.Reconcile(skill)
 			fmt.Fprintf(cmd.OutOrStdout(), "Updated availability for %s.\n", skill)
-			return printSkillAvailability(cmd, cfg, skill, source, skillsDir)
+			if err := printSkillAvailability(cmd, cfg, skill, source, skillsDir); err != nil {
+				return err
+			}
+			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagOf(scope))
 		},
 	}
 }
 
-func configuredSkillSource(cfg *config.Config, skill, skillsDir string) (source string, installed bool, err error) {
+func configuredSkillSource(cfg *config.Config, skill string) (string, error) {
 	category, source, found := config.FindSkillSource(cfg, skill)
 	if !found {
-		return "", false, fmt.Errorf("skill %q is not configured", skill)
+		return "", fmt.Errorf("skill %q is not configured", skill)
 	}
 	if category == "local" {
 		source = "local"
 	}
-	_, statErr := os.Lstat(filepath.Join(skillsDir, skill))
-	return source, statErr == nil, nil
+	return source, nil
+}
+
+// reportReconciled says how applying Availability after a policy change went,
+// in Sync's words: each Skill that failed, the copies once, and Doctor for a
+// path Availability refuses. The policy is saved either way; a Skill left
+// unapplied is work that failed (ADR-0002).
+func reportReconciled(out io.Writer, outcomes []engine.AvailabilityOutcome, scopeFlag string) error {
+	copied, failed, refused := 0, 0, false
+	for _, outcome := range outcomes {
+		copied += len(outcome.Copied)
+		if outcome.Err != nil {
+			failed++
+			refused = refused || outcome.Refused
+			fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, outcome.Skill, outcome.Err, colorReset)
+		}
+	}
+	if copied > 0 {
+		fmt.Fprintln(out, "\n"+copiedAvailabilityNotice(copied, "", scopeFlag))
+	}
+	if refused {
+		fmt.Fprintf(out, "Next: run 'skills doctor%s --fix'.\n", scopeFlag)
+	}
+	if failed > 0 {
+		return exitError{message: "Availability not applied for " + countOf(failed, "skill"), code: 2}
+	}
+	return nil
 }
 
 func printAllAvailability(cmd *cobra.Command, cfg *config.Config) error {

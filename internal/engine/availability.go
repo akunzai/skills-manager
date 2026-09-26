@@ -400,6 +400,39 @@ func (a *Availability) Apply(skill string) ([]string, error) {
 	return a.state(skill).apply()
 }
 
+// AvailabilityOutcome is how applying one Skill's Availability ended. Copied
+// is the Agents that hold a copy rather than a link (ADR-0003). Refused marks
+// a failure on a path Availability does not manage or cannot inspect, which
+// Doctor resolves.
+type AvailabilityOutcome struct {
+	Skill   string
+	Copied  []string
+	Err     error
+	Refused bool
+}
+
+// Reconcile applies declared Availability after a policy change: to each
+// named Skill, or to every declared Skill when none is named, skipping any
+// not present on the Scope skills directory, since Sync applies a Skill's
+// Availability when it Materializes it. One Skill failing does not stop the
+// rest.
+func (a *Availability) Reconcile(skills ...string) []AvailabilityOutcome {
+	if len(skills) == 0 {
+		skills = slices.Sorted(maps.Keys(a.declaredSkills()))
+	}
+	var outcomes []AvailabilityOutcome
+	for _, skill := range skills {
+		if _, err := os.Lstat(filepath.Join(a.skillsDir, skill)); err != nil {
+			continue
+		}
+		state := a.state(skill)
+		refused := state.drift().Refused()
+		copied, err := state.apply()
+		outcomes = append(outcomes, AvailabilityOutcome{Skill: skill, Copied: copied, Err: err, Refused: err != nil && refused})
+	}
+	return outcomes
+}
+
 // ForeignAvailabilityPath is an existing Agent path that does not belong to
 // this Scope. Target is populated for symlinks so a repair prompt can show
 // exactly what would be replaced.
