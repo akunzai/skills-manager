@@ -67,6 +67,8 @@ herdr pane split --current --direction right --cwd "$PWD" --no-focus
 # read the new id from .result.pane.pane_id
 herdr pane run <pane> "cd <scratch> && clear"
 herdr pane run <pane> "./skills add --symlink ./src --config ./scope/skills.json --skills-dir ./scope/skills --cache-dir ./scope/cache"
+herdr pane wait-output <pane> --source visible --match "Choose a scope" --timeout 20000
+herdr pane send-keys <pane> enter
 herdr pane wait-output <pane> --source visible --match "Space to toggle" --timeout 20000
 herdr pane send-text <pane> " "
 herdr pane send-keys <pane> down
@@ -92,7 +94,7 @@ Four things this repo has already been caught by:
 - **`Space` goes through `pane send-text " "`.** `pane send-keys <pane>
   space` returns success but does not toggle the checkbox.
 - **Wait for each prompt, not for the final line.** `skills add` asks
-  three questions in sequence — skill selection, Scope, Agent
+  three questions in sequence — Scope, skill selection, Agent
   availability. Waiting for `Added` alone times out while an unanswered
   prompt sits on screen.
 

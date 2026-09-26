@@ -91,7 +91,7 @@ func TestResolveSkillsToAddAllFlag(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"one": {"skills/one"}, "two": {"skills/two"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, true, nil, &fakeAddPrompter{}, false)
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, true, nil, &fakeAddPrompter{}, false, t.TempDir())
 	if err != nil || cancelled {
 		t.Fatalf("resolveSkillsToAdd() = %v, %v, %v", got, cancelled, err)
 	}
@@ -116,7 +116,7 @@ func TestResolveSkillsToAddFlagsRejectUnresolvedDuplicatesWithoutTerminal(t *tes
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, &fakeAddPrompter{}, false)
+			_, _, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, &fakeAddPrompter{}, false, t.TempDir())
 			if err == nil || !strings.Contains(err.Error(), "requires a Source path") {
 				t.Fatalf("error = %v; want unresolved duplicate error", err)
 			}
@@ -141,7 +141,7 @@ func TestResolveSkillsToAddFlagsPromptForDivergentCandidates(t *testing.T) {
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true)
+			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, t.TempDir())
 			if err != nil || cancelled || got["duplicate"] != "skills/duplicate" {
 				t.Fatalf("got=%v cancelled=%v err=%v; want selected Source path", got, cancelled, err)
 			}
@@ -153,7 +153,7 @@ func TestResolveSkillsToAddSkillFlagExactAndCaseInsensitiveMatch(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"Api": {"skills/api"}, "lint": {"skills/lint"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "api"}, &fakeAddPrompter{}, false)
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "api"}, &fakeAddPrompter{}, false, t.TempDir())
 	if err != nil || cancelled {
 		t.Fatalf("resolveSkillsToAdd() = %v, %v, %v", got, cancelled, err)
 	}
@@ -166,7 +166,7 @@ func TestResolveSkillsToAddSkillFlagUnmatchedFailsAtomically(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"lint": {"skills/lint"}, "api": {"skills/api"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "ghost"}, &fakeAddPrompter{}, false)
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "ghost"}, &fakeAddPrompter{}, false, t.TempDir())
 	if err == nil || cancelled || got != nil || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("got=%v cancelled=%v err=%v; want atomic not-found error", got, cancelled, err)
 	}
@@ -227,13 +227,60 @@ func TestNewRemoteIntakeAppliesTreeURLScopeBeforeDiscovery(t *testing.T) {
 
 	cmd := testCmd()
 	cmd.SetErr(new(bytes.Buffer))
-	intake, err := newRemoteIntake(cmd, "https://github.com/owner/repo/tree/main/skills", origin, "", "", t.TempDir())
+	intake, err := newRemoteIntake(cmd, filepath.Join(t.TempDir(), "skills.json"), "https://github.com/owner/repo/tree/main/skills", origin, "", "", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := engine.DiscoveredSkills{"one": {"skills/one"}}
 	if !reflect.DeepEqual(intake.discovered, want) {
 		t.Fatalf("discovered = %v, want scoped tree result %v", intake.discovered, want)
+	}
+}
+
+// The Project declares the Source on dev and Global does not declare it at
+// all. Choosing the Project must read dev: reading the Global Config's
+// default branch would Materialize from a Cache the Project's Config does not
+// name.
+func TestAddReadsARemoteSourceOnTheChosenScopesBranch(t *testing.T) {
+	scope := newAddRunScope(t)
+	origin := filepath.Join(t.TempDir(), "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	cliRunGit(t, origin, "switch", "-c", "dev")
+	writeCLIGitSkill(t, origin, "dev-only")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "dev-only", "dev-only", "git", origin)
+	repo := cfg.Remote["owner/repo"]
+	repo.Branch = "dev"
+	cfg.Remote["owner/repo"] = repo
+	if err := config.SaveConfig(cfg, scope.projectConfig); err != nil {
+		t.Fatal(err)
+	}
+	cliRunGit(t, origin, "switch", "-")
+
+	prompter := &fakeAddPrompter{interactive: true, skills: []string{"sample"}, project: true}
+	useAddPrompter(t, prompter)
+	cmd := testCmd()
+	cmd.SetErr(new(bytes.Buffer))
+	target, err := resolveAddScope(cmd, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intake, err := newRemoteIntake(cmd, target.ConfigPath, "owner/repo", origin, "", "", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := intake.discovered["dev-only"]; !ok {
+		t.Fatalf("discovered = %v; want the dev branch the Project declares", intake.discovered)
+	}
+	if err := intake.run(cmd, addRequest{scope: target}); err != nil {
+		t.Fatalf("run: %v\n%s", err, cmd.OutOrStdout())
+	}
+	got, err := config.LoadConfig(scope.projectConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo := got.Remote["owner/repo"]; repo.Branch != "dev" || repo.Skills["sample"] != "sample" {
+		t.Fatalf("Project declares %#v; want sample added on dev", repo)
 	}
 }
 
@@ -277,10 +324,16 @@ func (s addRunScope) run(t *testing.T, prompter *fakeAddPrompter, req addRequest
 	t.Helper()
 	useAddPrompter(t, prompter)
 	cmd := testCmd()
+	scope, err := resolveAddScope(cmd, req.yes)
+	if err != nil {
+		err = endAdd(cmd.OutOrStdout(), err)
+		return cmd.OutOrStdout().(*bytes.Buffer).String(), err
+	}
 	intake, err := newLocalIntake(cmd, s.source, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.scope = scope
 	err = intake.run(cmd, req)
 	return cmd.OutOrStdout().(*bytes.Buffer).String(), err
 }
@@ -307,6 +360,8 @@ func (s addRunScope) plantConflict(t *testing.T) {
 	}
 }
 
+// Add asks the Scope before it offers Skills: the Scope's Config decides
+// which branch a Source is read from, and which Skills are already there.
 func TestAddRunAsksScopeAndAvailabilityThenAdds(t *testing.T) {
 	t.Run("Project scope", func(t *testing.T) {
 		scope := newAddRunScope(t)
@@ -315,7 +370,7 @@ func TestAddRunAsksScopeAndAvailabilityThenAdds(t *testing.T) {
 		if out, err := scope.run(t, prompter, addRequest{}); err != nil {
 			t.Fatalf("run: %v\n%s", err, out)
 		}
-		if got, want := prompter.asked, []string{"skills", "scope", "availability"}; !reflect.DeepEqual(got, want) {
+		if got, want := prompter.asked, []string{"scope", "skills", "availability"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("asked %v; want %v", got, want)
 		}
 		cfg, err := config.LoadConfig(scope.projectConfig)

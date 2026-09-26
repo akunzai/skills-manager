@@ -55,7 +55,7 @@ func listLocalSkills(cmd *cobra.Command, localPath, selectionPath string, jsonOu
 }
 
 func listRemoteSkills(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string, jsonOutput bool) error {
-	intake, key, err := fetchRemoteIntake(cmd, rawSource, flagURL, flagBranch, flagPath, cacheDir)
+	intake, key, err := fetchRemoteIntake(cmd, ResolveScope().ConfigPath, rawSource, flagURL, flagBranch, flagPath, cacheDir)
 	if err != nil {
 		return err
 	}

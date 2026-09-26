@@ -34,6 +34,9 @@ type addIntake struct {
 }
 
 type addRequest struct {
+	// scope is where the Skills are declared, settled before the Source was
+	// read (resolveAddScope).
+	scope  Scope
 	all    bool
 	skills []string
 	yes    bool
@@ -52,6 +55,7 @@ func resolveSkillsToAdd(
 	flagSkills []string,
 	prompter addPrompter,
 	interactive bool,
+	skillsDir string,
 ) (skillsToAdd map[string]string, noneChosen bool, err error) {
 	out := cmd.OutOrStdout()
 	labels := intake.labels
@@ -105,12 +109,11 @@ func resolveSkillsToAdd(
 			if shouldGroup {
 				groups, shouldGroup = groupDiscoveredSkills(displayPaths)
 			}
-			selectionDirs := selectionSkillsDirs(cmd)
 
 			var flat []tui.SelectOption
 			if shouldGroup {
 				for _, options := range groups {
-					markInstalledSkills(options, selectionDirs)
+					markInstalledSkills(options, skillsDir)
 				}
 			} else {
 				groups = nil
@@ -123,7 +126,7 @@ func resolveSkillsToAdd(
 					}
 					options = append(options, tui.SelectOption{Key: skName, Title: skName, Extra: extra})
 				}
-				markInstalledSkills(options, selectionDirs)
+				markInstalledSkills(options, skillsDir)
 				slices.SortFunc(options, func(a, b tui.SelectOption) int {
 					return cmp.Compare(a.Key, b.Key)
 				})
@@ -147,9 +150,14 @@ func resolveSkillsToAdd(
 // any question is the user's choice rather than a failure, so it ends here,
 // before anything is written, and succeeds (ADR-0002).
 func (intake *addIntake) run(cmd *cobra.Command, req addRequest) error {
-	err := intake.add(cmd, req)
+	return endAdd(cmd.OutOrStdout(), intake.add(cmd, req))
+}
+
+// endAdd is how Add ends when err is the user backing out of a question,
+// the Scope asked before the Source is read included: a success (ADR-0002).
+func endAdd(out io.Writer, err error) error {
 	if errors.Is(err, errAddCancelled) {
-		fmt.Fprintf(cmd.OutOrStdout(), "%sOperation cancelled.%s\n", colorYellow, colorReset)
+		fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
 		return nil
 	}
 	return err
@@ -163,7 +171,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	prompter := newAddPrompter(cmd)
 	interactive := prompter.Interactive() && !req.yes
 
-	skillsToAdd, noneChosen, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, prompter, interactive)
+	skillsToAdd, noneChosen, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, prompter, interactive, req.scope.SkillsDir)
 	if err != nil {
 		return err
 	}
@@ -174,7 +182,8 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 		return fmt.Errorf("no matching skills to add")
 	}
 
-	scope, cfg, agents, err := prepareAddTarget(cmd, prompter, interactive, req.agents)
+	scope := req.scope
+	cfg, agents, err := prepareAddTarget(scope, req.agents)
 	if err != nil {
 		return err
 	}
