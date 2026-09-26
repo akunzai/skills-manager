@@ -14,6 +14,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// rmIsTerminal and rmConfirm are seams over the terminal so a test can
+// answer rm's confirmation.
+var (
+	rmIsTerminal = tui.IsTerminal
+	rmConfirm    = func(prompt string) (bool, error) { return tui.PromptConfirm(prompt, false) }
+)
+
 func newRmCmd() *cobra.Command {
 	var (
 		flagYes bool
@@ -81,6 +88,26 @@ func newRmCmd() *cobra.Command {
 			}
 
 			plan := engine.BuildRemovePlan(cfg, skillsDir, skillsToRemove)
+			// A real directory Config does not declare is content Sync never
+			// wrote, so it goes only once the user says so, and before
+			// anything else is removed.
+			if untracked := plan.UntrackedDirectories(); len(untracked) > 0 && !flagYes {
+				subject := fmt.Sprintf("%d untracked directories", len(untracked))
+				if len(untracked) == 1 {
+					subject = "1 untracked directory"
+				}
+				if !rmIsTerminal() {
+					return fmt.Errorf("refusing to remove %s without a terminal; rerun with --yes", subject)
+				}
+				confirmed, err := rmConfirm(fmt.Sprintf("Remove %s Config does not declare (%s)?", subject, strings.Join(untracked, ", ")))
+				if err != nil {
+					return err
+				}
+				if !confirmed {
+					fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
+					return nil
+				}
+			}
 			result, err := engine.ApplyRemovePlan(plan, cfg, configPath, skillsDir)
 			if err != nil {
 				return err
@@ -127,6 +154,9 @@ func printRemoveResult(out io.Writer, result engine.RemoveResult) {
 		}
 		if s.CopyRemoved && s.MasterExisted {
 			fmt.Fprintf(out, "  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(s.CopyPath), colorReset)
+		}
+		if s.CopyKept {
+			fmt.Fprintf(out, "  %sLeft %s in place: a local Skill only links to its Source, and this is a directory.%s\n", colorYellow, models.ToTildePath(s.CopyPath), colorReset)
 		}
 		if s.CopyErr != nil {
 			fmt.Fprintf(out, "  %sFailed to remove master directory: %s: %s%s\n", colorRed, models.ToTildePath(s.CopyPath), pathCause(s.CopyErr), colorReset)

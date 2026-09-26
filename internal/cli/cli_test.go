@@ -2995,6 +2995,91 @@ func TestCLIDoctorIllegalLocalSourceDoesNotRecommendRm(t *testing.T) {
 	}
 }
 
+// An Illegal-local Skill's Scope path is its own Source, so rm drops the
+// declaration and keeps the directory rather than deleting the user's work.
+func TestCLIRmKeepsAnIllegalLocalSource(t *testing.T) {
+	project := projectScope(t)
+	dest := filepath.Join(project, ".agents", "skills", "mine")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, "SKILL.md"), []byte("# Mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "mine", ".agents/skills/mine", "")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	if err := config.SaveConfig(cfg, configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "rm", "-p", "mine", "--yes")
+	if err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "SKILL.md")); err != nil {
+		t.Fatalf("rm deleted the Skill's own Source: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Left ") || strings.Contains(out, "Removed master directory") {
+		t.Fatalf("rm did not say it kept the directory:\n%s", out)
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, declared := config.FindSkillSource(loaded, "mine"); declared {
+		t.Fatal("rm left the Skill declared")
+	}
+}
+
+// A real directory Config does not declare is content Sync never wrote, so
+// rm removes it only once the user confirms, and never without a terminal
+// unless --yes says so.
+func TestCLIRmConfirmsAnUntrackedDirectory(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		terminal bool
+		answer   bool
+		yes      bool
+		wantErr  bool
+		removed  bool
+	}{
+		{name: "no terminal", wantErr: true},
+		{name: "declined", terminal: true},
+		{name: "confirmed", terminal: true, answer: true, removed: true},
+		{name: "--yes", yes: true, removed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			project := projectScope(t)
+			resetSubcommandFlags()
+			t.Cleanup(resetSubcommandFlags)
+			loose := filepath.Join(project, ".agents", "skills", "loose")
+			if err := os.MkdirAll(loose, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(loose, "SKILL.md"), []byte("# Loose\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			oldTerminal, oldConfirm := rmIsTerminal, rmConfirm
+			rmIsTerminal = func() bool { return tc.terminal }
+			rmConfirm = func(string) (bool, error) { return tc.answer, nil }
+			t.Cleanup(func() { rmIsTerminal, rmConfirm = oldTerminal, oldConfirm })
+
+			args := []string{"rm", "-p", "loose"}
+			if tc.yes {
+				args = append(args, "--yes")
+			}
+			out, err := runCLI(t, args...)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("rm = %v; want error %v\n%s", err, tc.wantErr, out)
+			}
+			if _, statErr := os.Stat(loose); (statErr != nil) != tc.removed {
+				t.Fatalf("directory removed = %v; want %v\n%s", statErr != nil, tc.removed, out)
+			}
+		})
+	}
+}
+
 func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
 	resetRootCmdFlags()
 	home := isolateHome(t)

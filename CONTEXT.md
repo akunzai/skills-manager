@@ -93,7 +93,7 @@ How Config declares a Skill: remote, from a Source whose Cache it is Materialize
 _Avoid_: source type, category
 
 **Retire**:
-Taking a Skill that Config no longer declares out of the Scope by removing its Availability links, its Scope copy, and its Baseline, always after Config is saved. It is the inverse of Materialize. rm and a Rename retire Skills; prune does not, because it removes Untracked content without changing Config.
+Taking a Skill out of the Scope: undeclaring it and saving Config, then removing its Availability links, what Materialize wrote on the Scope skills directory for its Skill kind, and its Baseline. It is the inverse of Materialize, so a local Skill's directory, which Materialize only ever links to, is kept. rm and a Rename retire Skills; prune does not, because it removes Untracked content without changing Config. rm removes an Untracked directory it is named for only once the user confirms.
 _Avoid_: uninstall, delete, clean up
 
 **Cache**:

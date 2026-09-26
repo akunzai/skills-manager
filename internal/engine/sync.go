@@ -352,17 +352,17 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 	if plan.configPath == "" {
 		return fail(errors.New("no Config path to record the rename in"))
 	}
-	repo := plan.cfg.Remote[item.Source]
-	delete(repo.Skills, old)
+	// Declare the new name and carry the old one's override over; Retire
+	// then undeclares the old name, dropping a Source it leaves empty.
 	if !item.RenameTargetDeclared {
+		repo := plan.cfg.Remote[item.Source]
 		repo.Skills[skill.RenamedTo] = skill.RenamedSubpath
-	}
-	plan.cfg.Remote[item.Source] = repo
-	if override, ok := plan.cfg.Settings.Availability[old]; ok {
-		if _, taken := plan.cfg.Settings.Availability[skill.RenamedTo]; !taken && !item.RenameTargetDeclared {
-			plan.cfg.Settings.Availability[skill.RenamedTo] = override
+		plan.cfg.Remote[item.Source] = repo
+		if override, ok := plan.cfg.Settings.Availability[old]; ok {
+			if _, taken := plan.cfg.Settings.Availability[skill.RenamedTo]; !taken {
+				plan.cfg.Settings.Availability[skill.RenamedTo] = override
+			}
 		}
-		delete(plan.cfg.Settings.Availability, old)
 	}
 	retired, err := Retire(plan.cfg, plan.configPath, plan.skillsDir, []string{old}, baselines)
 	if err != nil {
