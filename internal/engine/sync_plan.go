@@ -223,8 +223,16 @@ func planDeclaredRemoteItem(source string, cache Cache, skill SkillFreshness, dr
 	return item
 }
 
-// baseRemoteItem is the part of a remote item every plan shares. It asks
-// cache where it is and which commit it has checked out.
+// planRecordedRemoteItem plans a remote Skill whose copy on the Scope skills
+// directory already matches the Cache, as Adopt finds one: applying it writes
+// nothing and records the Baseline.
+func planRecordedRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	return baseRemoteItem(source, cache, skill, drift)
+}
+
+// baseRemoteItem is the part of a remote item every plan shares; only the
+// plan* functions above and below call it. It asks cache where it is and
+// which commit it has checked out.
 func baseRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	return SyncPlanItem{
 		Name:      skill.Name,

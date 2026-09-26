@@ -266,17 +266,11 @@ func observeAgentCopy(path UnmanagedAgentPath, skillsDir string) (AgentCopy, boo
 	c := AgentCopy{Agent: path.Agent, Path: path.Path, Symlink: path.Symlink}
 	content := path.Path
 	if path.Symlink {
-		target, err := os.Readlink(path.Path)
+		target, err := linkTarget(path.Path)
 		if err != nil {
 			return c, false
 		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(path.Path), target)
-		}
-		if abs, err := filepath.Abs(target); err == nil {
-			target = abs
-		}
-		c.Target = filepath.Clean(target)
+		c.Target = target
 		info, err := os.Stat(c.Target)
 		if err != nil {
 			c.Problem = fmt.Sprintf("its target %s does not exist", models.ToTildePath(c.Target))
@@ -809,7 +803,7 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 		return a.outcome
 	default:
 		a.neededBaseline = true
-		item := baseRemoteItem(remote.intake.spec.SourceKey, remote.intake.cache, SkillFreshness{
+		item := planRecordedRemoteItem(remote.intake.spec.SourceKey, remote.intake.cache, SkillFreshness{
 			Name:      name,
 			Source:    remote.intake.spec.SourceKey,
 			Subpath:   remote.subpath,
@@ -868,6 +862,23 @@ func cloneConfig(cfg *config.Config) *config.Config {
 	return &c
 }
 
+// linkTarget is the absolute, cleaned directory the symlink at path names.
+// Observing a copy and checking it again before apply both use it, so the
+// two can never disagree about where a user symlink points.
+func linkTarget(path string) (string, error) {
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	return filepath.Clean(target), nil
+}
+
 // changed says how a copy on an Agent directory is no longer what the plan
 // observed, or "" when it still is.
 func (c AgentCopy) changed() string {
@@ -878,17 +889,11 @@ func (c AgentCopy) changed() string {
 	case c.Symlink && info.Mode()&os.ModeSymlink == 0, !c.Symlink && !info.IsDir():
 		return fmt.Sprintf("%s changed since the plan", models.ToTildePath(c.Path))
 	case c.Symlink:
-		target, err := os.Readlink(c.Path)
+		target, err := linkTarget(c.Path)
 		if err != nil {
 			return err.Error()
 		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(c.Path), target)
-		}
-		if abs, err := filepath.Abs(target); err == nil {
-			target = abs
-		}
-		if filepath.Clean(target) != c.Target {
+		if target != c.Target {
 			return fmt.Sprintf("%s changed since the plan", models.ToTildePath(c.Path))
 		}
 	}
