@@ -10,7 +10,7 @@ The release pipeline is automated via GitHub Actions (`.github/workflows/release
 3. Generating categorized release notes.
 4. Signing a build provenance attestation for every archive listed in `checksums.txt`.
 
-The tests run again before GoReleaser, and release assets are uploaded before the release is published, so the repository's immutable-releases setting holds: a published tag and its assets cannot change. A bad release is fixed by a new patch version, never by re-tagging.
+The tests run again first, and GoReleaser then waits until a required reviewer approves the `release` environment. Release assets are uploaded before the release is published, so the repository's immutable-releases setting holds: a published tag and its assets cannot change. A bad release is fixed by a new patch version, never by re-tagging.
 
 ## Release Notes Categorization
 
@@ -108,8 +108,8 @@ git push origin main
 git push origin vX.Y.Z
 ```
 
-### 6. Verification
-1. Check GitHub Actions run under the Actions tab.
+### 6. Approve and Verify
+1. Once the `test` job passes, the `goreleaser` job waits on the `release` environment. Review the run and approve it (`Review deployments` on the run page, or `gh run view <run-id> --web`). Nothing is published until then; rejecting leaves the tag without a release.
 2. Confirm the release is published at `https://github.com/akunzai/skills-manager/releases`.
 3. Verify self-update detects the new release:
    ```bash
