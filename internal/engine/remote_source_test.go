@@ -9,60 +9,6 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 )
 
-func TestPrepareRemoteSourceRefreshesCacheAndDiscoversSkills(t *testing.T) {
-	origin := filepath.Join(t.TempDir(), "origin")
-	writeLocalGitSkill(t, origin, "sample")
-
-	repoDir, discovered, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repoDir == "" || !reflect.DeepEqual(discovered, DiscoveredSkills{"sample": {"sample"}}) {
-		t.Fatalf("repoDir = %q, discovered = %#v", repoDir, discovered)
-	}
-}
-
-// PrepareRemoteSource returns each candidate's description, which Add's
-// --list shows for a remote Source, captured while the Cache's transient
-// SKILL.md-only checkout (ADR-0004) still holds the file.
-func TestPrepareRemoteSourceCapturesEachCandidatesDescription(t *testing.T) {
-	origin := filepath.Join(t.TempDir(), "origin")
-	dir := filepath.Join(origin, "sample")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	content := "---\nname: sample\ndescription: Remote sample skill.\n---\n"
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"init"},
-		{"config", "user.email", "test@example.com"},
-		{"config", "user.name", "test"},
-		{"add", "."},
-		{"commit", "-m", "init"},
-	} {
-		if _, stderr, err := runGit(origin, args...); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, stderr)
-		}
-	}
-
-	repoDir, discovered, descriptions, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin}, t.TempDir(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repoDir == "" {
-		t.Fatal("expected a Cache directory")
-	}
-	want := DiscoveredSkills{"sample": {"sample"}}
-	if !reflect.DeepEqual(discovered, want) {
-		t.Fatalf("discovered = %#v; want %#v", discovered, want)
-	}
-	if got := descriptions["sample"]; got != "Remote sample skill." {
-		t.Fatalf("description = %q; want %q", got, "Remote sample skill.")
-	}
-}
-
 func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
@@ -89,52 +35,5 @@ func TestPlanSyncReportsUnusableCacheWithoutFetching(t *testing.T) {
 	}
 	if want := []string{SyncRepoStart, SyncItemStart, SyncFetchFailed, SyncItemDone}; !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("event kinds = %#v, want %#v", kinds, want)
-	}
-}
-
-// Add discovers every Skill from its SKILL.md alone, compares duplicate
-// candidates by committed tree, and leaves the Cache's cone as it was.
-func TestPrepareRemoteSourceDiscoversFromSkillMDOnly(t *testing.T) {
-	t.Parallel()
-	_, url := writeSparseOrigin(t)
-	repoDir, discovered, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := DiscoveredSkills{"alpha": {"skills/alpha"}, "beta": {"skills/beta"}}
-	if !reflect.DeepEqual(discovered, want) {
-		t.Fatalf("discovered = %#v; want %#v", discovered, want)
-	}
-	assertCachePaths(t, repoDir, []string{"README.md"}, []string{"skills", "mirror", "fixtures"})
-}
-
-func TestPrepareRemoteSourceKeepsDivergentMirrorsApart(t *testing.T) {
-	t.Parallel()
-	origin, url := writeSparseOrigin(t)
-	if err := os.WriteFile(filepath.Join(origin, "mirror", "alpha", "notes.txt"), []byte("diverged\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mustGit(t, origin, "commit", "-am", "diverge")
-	_, discovered, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := discovered["alpha"]; !reflect.DeepEqual(got, []string{"mirror/alpha", "skills/alpha"}) {
-		t.Fatalf("alpha candidates = %#v", got)
-	}
-}
-
-func TestPrepareRemoteSourceScopedToDirectoryWithoutSkills(t *testing.T) {
-	t.Parallel()
-	_, url := writeSparseOrigin(t)
-	_, discovered, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "fixtures")
-	if err != nil {
-		t.Fatalf("a committed directory without Skills is not an error: %v", err)
-	}
-	if len(discovered) != 0 {
-		t.Fatalf("discovered = %#v", discovered)
-	}
-	if _, _, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, t.TempDir(), "absent"); err == nil {
-		t.Fatal("a directory the commit does not have must still fail")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 func TestClassifyAddKind(t *testing.T) {
@@ -96,7 +97,7 @@ func TestBuildAddPlanDetectsRemoteConflicts(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "original/repo", "my-skill", "subpath", "github", "")
 
-	source := NewRemoteAddSource("new/repo", "github", "", "/tmp/cache")
+	source := NewRemoteAddSource(&RemoteIntake{spec: models.ParsedRepoSource{SourceKey: "new/repo"}})
 	plan := BuildAddPlan(cfg, "/tmp/skills.json", "/tmp/skills", source, map[string]string{"my-skill": "subpath"}, AddAvailabilityIntent{})
 
 	if len(plan.Conflicts) != 1 {
@@ -175,12 +176,9 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 
 	cfg := config.DefaultConfig()
-	repoDir, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(origin, "", ""), cacheDir)
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
-		NewRemoteAddSource("owner/repo", "git", origin, repoDir),
+		NewRemoteAddSource(intake),
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
 		t.Fatal(err)
@@ -218,15 +216,12 @@ func TestApplyAddPlanOverwritesALocallyEditedCopy(t *testing.T) {
 	configPath := filepath.Join(project, ".agents", "skills.json")
 	origin := filepath.Join(project, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	repoDir, err := NewCache("owner/repo", origin, "", filepath.Join(project, "cache")).Refresh(false)
-	if err != nil {
-		t.Fatal(err)
-	}
 	cfg := config.DefaultConfig()
+	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(origin, "", ""), filepath.Join(project, "cache"))
 	add := func() AddResult {
 		t.Helper()
 		plan := BuildAddPlan(cfg, configPath, skillsDir,
-			NewRemoteAddSource("owner/repo", "git", origin, repoDir),
+			NewRemoteAddSource(intake),
 			map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 		result, err := ApplyAddPlan(plan, cfg, nil)
 		if err != nil {
@@ -262,7 +257,7 @@ func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	plan := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
-		NewRemoteAddSource("owner/repo", "git", "", repoDir),
+		NewRemoteAddSource(mustPrepareRemoteIntake(t, cfg, remoteSpec(commitOrigin(t, repoDir), "", ""), filepath.Join(project, "cache"))),
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
@@ -302,7 +297,7 @@ func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
 	configPath := filepath.Join(project, ".agents", "skills.json")
 	cfg := config.DefaultConfig()
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
-		NewRemoteAddSource("owner/repo", "git", "", repoDir),
+		NewRemoteAddSource(mustPrepareRemoteIntake(t, cfg, remoteSpec(commitOrigin(t, repoDir), "", ""), filepath.Join(project, "cache"))),
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
@@ -338,7 +333,7 @@ func TestApplyAddPlanContinuesPastAFailedSkill(t *testing.T) {
 	configPath := filepath.Join(project, ".agents", "skills.json")
 	cfg := config.DefaultConfig()
 	plan := BuildAddPlan(cfg, configPath, skillsDir,
-		NewRemoteAddSource("owner/repo", "git", "", repoDir),
+		NewRemoteAddSource(mustPrepareRemoteIntake(t, cfg, remoteSpec(commitOrigin(t, repoDir), "", ""), filepath.Join(project, "cache"))),
 		map[string]string{"bad": "missing", "good": "good"}, AddAvailabilityIntent{})
 	var progress []string
 	result, err := ApplyAddPlan(plan, cfg, func(ev AddSkillEvent) {
@@ -446,56 +441,14 @@ func TestApplyAddPlanAvailabilityIntent(t *testing.T) {
 	})
 }
 
-func TestApplyAddPlanChecksOutSelectedSkillsInSparseCache(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	_, url := writeSparseOrigin(t)
-	project := t.TempDir()
-	repoDir, _, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: url}, filepath.Join(project, "cache"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	skillsDir := filepath.Join(project, ".agents", "skills")
-	cfg := config.DefaultConfig()
-	plan := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
-		NewRemoteAddSource("owner/repo", "git", url, repoDir),
-		map[string]string{"alpha": "skills/alpha"}, AddAvailabilityIntent{})
-	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(skillsDir, "alpha", "notes.txt")); err != nil {
-		t.Fatalf("selected Skill was not Materialized in full: %v", err)
-	}
-	assertCachePaths(t, repoDir, []string{"skills/alpha/notes.txt"}, []string{"skills/beta", "fixtures"})
-}
-
-// Discovery narrows an earlier release's full Cache before the user picks, so
-// add must put back what this Scope already declares from the Source.
-func TestApplyAddPlanKeepsDeclaredSkillsInConvertedCache(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	origin := filepath.Join(t.TempDir(), "origin")
-	writeLocalGitSkill(t, origin, "alpha")
-	writeLocalGitSkill(t, origin, "beta")
-	branch := mustGit(t, origin, "symbolic-ref", "--short", "HEAD")
-	project := t.TempDir()
-	cacheDir := filepath.Join(project, "cache")
-	cache := resolveCacheRepo("owner/repo", origin, branch, cacheDir)
-	if err := os.MkdirAll(filepath.Dir(cache.Dir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	mustGit(t, "", "clone", origin, cache.Dir)
-
-	cfg := config.DefaultConfig()
-	config.AddRemoteSkillEntry(cfg, "owner/repo", "alpha", "alpha", "git", origin)
-	repoDir, _, _, err := PrepareRemoteSource("owner/repo", config.RemoteRepo{URL: origin, Branch: branch}, cacheDir, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	skillsDir := filepath.Join(project, ".agents", "skills")
-	plan := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
-		NewRemoteAddSource("owner/repo", "git", origin, repoDir),
-		map[string]string{"beta": "beta"}, AddAvailabilityIntent{})
-	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
-		t.Fatal(err)
-	}
-	assertCachePaths(t, repoDir, []string{"alpha/SKILL.md", "beta/SKILL.md"}, nil)
+// commitOrigin commits everything under dir as a new repository, for a
+// fixture written as plain files, and returns dir.
+func commitOrigin(t *testing.T, dir string) string {
+	t.Helper()
+	mustGit(t, dir, "init")
+	mustGit(t, dir, "config", "user.email", "test@example.com")
+	mustGit(t, dir, "config", "user.name", "test")
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-m", "init")
+	return dir
 }

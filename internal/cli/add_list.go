@@ -8,10 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
-	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/spf13/cobra"
 )
 
@@ -57,39 +55,11 @@ func listLocalSkills(cmd *cobra.Command, localPath, selectionPath string, jsonOu
 }
 
 func listRemoteSkills(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string, jsonOutput bool) error {
-	parsed := models.ParseRepoSource(rawSource)
-	cloneURL := flagURL
-	if cloneURL == "" {
-		cloneURL = parsed.URL
-	}
-	branch := flagBranch
-	if branch == "" {
-		branch = parsed.Branch
-	}
-	cfg, err := config.LoadConfig(ResolveScope().ConfigPath)
+	intake, key, err := fetchRemoteIntake(cmd, rawSource, flagURL, flagBranch, flagPath, cacheDir)
 	if err != nil {
 		return err
 	}
-	if branch, err = engine.AddBranch(cfg, parsed.SourceKey, branch); err != nil {
-		return err
-	}
-	selectionPath := flagPath
-	if selectionPath == "" {
-		selectionPath = parsed.Subpath
-	}
-
-	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
-	region.Start(presentation.Job{Name: parsed.SourceKey, Label: "Fetching " + parsed.SourceKey})
-	_, discovered, descriptions, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir, selectionPath)
-	if err != nil {
-		region.Fail(parsed.SourceKey)
-		region.Stop()
-		return err
-	}
-	region.Done(parsed.SourceKey)
-	region.Stop()
-
-	return printAddList(cmd, parsed.SourceKey, discovered, descriptions, jsonOutput)
+	return printAddList(cmd, key, intake.Discovered, intake.Descriptions, jsonOutput)
 }
 
 // printAddList flattens discovered into a stable, name-then-path-sorted row

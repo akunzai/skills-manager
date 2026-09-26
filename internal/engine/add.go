@@ -23,15 +23,12 @@ const (
 // AddSource describes where a Skill is obtained and how it should be configured.
 type AddSource struct {
 	Kind        AddSourceKind
-	Key         string // repository source key, local directory path, or command
-	RepoDir     string // cached git repository directory
-	RepoType    string // "github", "gitlab", "git"
-	URL         string // remote clone URL
-	Branch      string // branch or tag to declare; empty follows the default branch
-	LocalPath   string // absolute path to local skill directory
-	Command     string // installer command
-	Check       string // command pre-check
-	Description string // description of the skill
+	Key         string        // repository source key, local directory path, or command
+	Remote      *RemoteIntake // the prepared remote Source
+	LocalPath   string        // absolute path to local skill directory
+	Command     string        // installer command
+	Check       string        // command pre-check
+	Description string        // description of the skill
 }
 
 // AddSourceSpec is the already-parsed CLI facts used to classify an Add Source.
@@ -76,7 +73,7 @@ func isLocalPath(raw string) bool {
 	return false
 }
 
-// AddBranch is the branch Add fetches and declares for a remote Source. A
+// AddBranch is the branch a remote Source is declared on in cfg. A
 // Source already declared keeps its branch: asking for a different one is
 // refused rather than silently re-pointing the Skills already declared from
 // it, and asking for none follows the declared one.
@@ -95,13 +92,11 @@ func AddBranch(cfg *config.Config, key, requested string) (string, error) {
 	return "", fmt.Errorf("Source %s is already declared on %s; remove its Skills with 'skills rm' before adding it on %q", key, current, requested)
 }
 
-func NewRemoteAddSource(key, repoType, url, repoDir string) AddSource {
+func NewRemoteAddSource(intake *RemoteIntake) AddSource {
 	return AddSource{
-		Kind:     AddSourceRemote,
-		Key:      key,
-		RepoType: repoType,
-		URL:      url,
-		RepoDir:  repoDir,
+		Kind:   AddSourceRemote,
+		Key:    intake.spec.SourceKey,
+		Remote: intake,
 	}
 }
 
@@ -294,7 +289,8 @@ type AddResult struct {
 	StateWarning string
 }
 
-// ApplyAddPlan records all selected Skills in Config, saves Config,
+// ApplyAddPlan records all selected Skills in Config (a remote Source's
+// through its RemoteIntake), saves Config,
 // Materializes each Skill, and applies Availability. It returns an error only
 // when it fails before any Skill is applied; after that, each Skill's outcome
 // is in the result and one that fails does not stop the rest.
@@ -322,27 +318,14 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	}
 
 	if plan.Source.Kind == AddSourceRemote {
-		// Discovery refreshed the Cache without knowing this Scope's Config,
-		// so the Skills it already declares from the Source go back in too.
-		subpaths := declaredSubpaths(cfg.Remote[plan.Source.Key])
-		for _, name := range names {
-			subpaths = append(subpaths, plan.Skills[name])
-		}
-		if err := ensureSparsePaths(plan.Source.RepoDir, subpaths); err != nil {
-			return AddResult{}, fmt.Errorf("fetch selected Skills into the Cache: %w", err)
+		if err := plan.Source.Remote.Declare(cfg, plan.Skills); err != nil {
+			return AddResult{}, err
 		}
 	}
 
 	for _, name := range names {
 		subpath := plan.Skills[name]
 		switch plan.Source.Kind {
-		case AddSourceRemote:
-			config.AddRemoteSkillEntry(cfg, plan.Source.Key, name, subpath, plan.Source.RepoType, plan.Source.URL)
-			if plan.Source.Branch != "" {
-				repo := cfg.Remote[plan.Source.Key]
-				repo.Branch = plan.Source.Branch
-				cfg.Remote[plan.Source.Key] = repo
-			}
 		case AddSourceSymlink:
 			config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(resolvedLocal(subpath), plan.SkillsDir), plan.Source.Description)
 		case AddSourceCommand:
@@ -390,7 +373,8 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		var item SyncPlanItem
 		switch plan.Source.Kind {
 		case AddSourceRemote:
-			item = planDeclaredRemoteItem(plan.Source.Key, plan.Source.RepoDir, localRepoCommit(plan.Source.RepoDir), SkillFreshness{
+			repoDir := plan.Source.Remote.dir
+			item = planDeclaredRemoteItem(plan.Source.Key, repoDir, localRepoCommit(repoDir), SkillFreshness{
 				Name:      name,
 				Source:    plan.Source.Key,
 				Subpath:   subpath,

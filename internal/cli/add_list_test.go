@@ -233,6 +233,32 @@ func TestCLIAddListRemoteSourceFetchesCacheOnly(t *testing.T) {
 	}
 }
 
+// --list declares nothing, so a branch other than the one the Scope declares
+// for the Source is listed rather than refused.
+func TestCLIAddListListsAnotherBranchOfADeclaredSource(t *testing.T) {
+	resetRootCmdFlags()
+	t.Cleanup(resetRootCmdFlags)
+	home := isolateHome(t)
+	scope := []string{"--config", filepath.Join(home, ".agents", "skills.json"), "--skills-dir", filepath.Join(home, ".agents", "skills"), "--cache-dir", filepath.Join(home, ".agents", "cache")}
+
+	origin := filepath.Join(home, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	defaultBranch := cliRunGit(t, origin, "symbolic-ref", "--short", "HEAD")
+	cliRunGit(t, origin, "switch", "-c", "dev")
+	if out, err := runCLI(t, append([]string{"add", "owner/repo", "--url", origin, "--branch", "dev", "--skill", "sample", "-y"}, scope...)...); err != nil {
+		t.Fatalf("seed add: %v\n%s", err, out)
+	}
+
+	resetSubcommandFlags()
+	out, err := runCLI(t, append([]string{"add", "owner/repo", "--url", origin, "--branch", defaultBranch, "--list"}, scope...)...)
+	if err != nil {
+		t.Fatalf("add --list on another branch: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "sample") {
+		t.Fatalf("expected sample listed from %s, got:\n%s", defaultBranch, out)
+	}
+}
+
 // TestCLIAddListDoesNotMutateExistingConfigOrScope seeds Config and the Scope
 // skills directory with an unrelated Skill, then asserts a byte-identical
 // snapshot of the whole isolated home (except the Cache, which --list is

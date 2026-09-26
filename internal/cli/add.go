@@ -195,54 +195,46 @@ func newCommandIntake(skillName, command, check, description string) *addIntake 
 	}
 }
 
-func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
-	parsed := models.ParseRepoSource(rawSource)
-	cloneURL := flagURL
-	if cloneURL == "" {
-		cloneURL = parsed.URL
-	}
-	branch := flagBranch
-	if branch == "" {
-		branch = parsed.Branch
-	}
+// fetchRemoteIntake parses a remote Source argument and its flags, then
+// prepares it through Remote intake under a progress region. It returns the
+// Source key for display.
+func fetchRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*engine.RemoteIntake, string, error) {
+	spec := models.ParseRepoSource(rawSource)
+	spec.URL = cmp.Or(flagURL, spec.URL)
+	spec.Branch = cmp.Or(flagBranch, spec.Branch)
+	spec.Subpath = cmp.Or(flagPath, spec.Subpath)
 	cfg, err := config.LoadConfig(ResolveScope().ConfigPath)
 	if err != nil {
-		return nil, err
-	}
-	if branch, err = engine.AddBranch(cfg, parsed.SourceKey, branch); err != nil {
-		return nil, err
-	}
-	selectionPath := flagPath
-	if selectionPath == "" {
-		selectionPath = parsed.Subpath
+		return nil, "", err
 	}
 
 	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
-	region.Start(presentation.Job{Name: parsed.SourceKey, Label: "Fetching " + parsed.SourceKey})
-	repoDir, discovered, _, err := engine.PrepareRemoteSource(parsed.SourceKey, config.RemoteRepo{URL: cloneURL, Branch: branch}, cacheDir, selectionPath)
+	region.Start(presentation.Job{Name: spec.SourceKey, Label: "Fetching " + spec.SourceKey})
+	intake, err := engine.PrepareRemoteIntake(cfg, spec, cacheDir)
 	if err != nil {
-		region.Fail(parsed.SourceKey)
+		region.Fail(spec.SourceKey)
 		region.Stop()
-		return nil, err
+		return nil, "", err
 	}
-	region.Done(parsed.SourceKey)
+	region.Done(spec.SourceKey)
 	region.Stop()
-	discovered, err = discoveryResult(discovered, nil, parsed.SourceKey)
+	return intake, spec.SourceKey, nil
+}
+
+func newRemoteIntake(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
+	intake, key, err := fetchRemoteIntake(cmd, rawSource, flagURL, flagBranch, flagPath, cacheDir)
 	if err != nil {
 		return nil, err
 	}
-
-	var storedURL string
-	if flagURL != "" || parsed.RepoType != "github" || !strings.HasPrefix(cloneURL, "https://github.com/") {
-		storedURL = cloneURL
+	discovered, err := discoveryResult(intake.Discovered, nil, key)
+	if err != nil {
+		return nil, err
 	}
-	source := engine.NewRemoteAddSource(parsed.SourceKey, parsed.RepoType, storedURL, repoDir)
-	source.Branch = branch
 	return &addIntake{
-		source:     source,
+		source:     engine.NewRemoteAddSource(intake),
 		discovered: discovered,
 		labels: sourceLabels{
-			displayName:  parsed.SourceKey,
+			displayName:  key,
 			resourceNoun: "Repository",
 		},
 		progressLine: func(name, subpath string) string {

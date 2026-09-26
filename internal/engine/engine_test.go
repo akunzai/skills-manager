@@ -1625,8 +1625,8 @@ func TestAddPlanSymlinkDeclaresAndMaterializes(t *testing.T) {
 
 func TestAddPlanRemoteDeclaresAndMaterializes(t *testing.T) {
 	project := t.TempDir()
-	repoDir := filepath.Join(project, "cache")
-	writeLocalGitSkill(t, repoDir, "sample")
+	origin := filepath.Join(project, "origin")
+	writeLocalGitSkill(t, origin, "sample")
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	configPath := filepath.Join(project, ".agents", "skills.json")
 	cfg := config.DefaultConfig()
@@ -1634,7 +1634,8 @@ func TestAddPlanRemoteDeclaresAndMaterializes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource("owner/repo", "github", "", repoDir), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(origin, "", ""), filepath.Join(project, "cache"))
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
