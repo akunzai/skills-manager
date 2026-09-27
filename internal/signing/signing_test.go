@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sigstore/sigstore-go/pkg/root"
 )
 
 // nvidiaSigned is the time the NVIDIA fixture is checked at, inside its
@@ -183,4 +185,76 @@ func selfSignedCA(t *testing.T) *x509.Certificate {
 		t.Fatal(err)
 	}
 	return cert
+}
+
+var agentSkillsSigner = Signer{
+	Identity: "https://github.com/akunzai/agent-skills/.github/workflows/sign-skills.yml@refs/heads/main",
+	Issuer:   "https://token.actions.githubusercontent.com",
+}
+
+// keylessSkill copies the Sigstore keyless fixture Skill somewhere a test may
+// change it.
+func keylessSkill(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "mise")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("testdata", "agent-skills", "mise"))); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func keylessTrust(t *testing.T, signer *Signer) Trust {
+	t.Helper()
+	trusted, err := root.NewTrustedRootFromPath(filepath.Join("testdata", "agent-skills", "trusted_root.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Trust{TrustedRoot: trusted, Sigstore: signer}
+}
+
+func TestVerifyKeylessPinnedSigner(t *testing.T) {
+	signer := agentSkillsSigner
+	result, err := Verify(keylessSkill(t), keylessTrust(t, &signer))
+	if err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if !result.Signed || result.Signer != agentSkillsSigner {
+		t.Fatalf("Verify() = %+v, want signed by %+v", result, agentSkillsSigner)
+	}
+}
+
+func TestVerifyKeylessReportsTheSignerWhenNoneIsPinned(t *testing.T) {
+	result, err := Verify(keylessSkill(t), keylessTrust(t, nil))
+	if err != nil || result.Signer != agentSkillsSigner {
+		t.Fatalf("Verify() = %+v, %v; want the observed signer %+v", result, err, agentSkillsSigner)
+	}
+}
+
+func TestVerifyKeylessRejectsAnotherSigner(t *testing.T) {
+	other := Signer{Identity: "https://github.com/someone/else/.github/workflows/sign.yml@refs/heads/main", Issuer: agentSkillsSigner.Issuer}
+	if _, err := Verify(keylessSkill(t), keylessTrust(t, &other)); err == nil {
+		t.Fatal("Verify() error = nil, want a signer mismatch")
+	}
+}
+
+func TestVerifyKeylessRejectsChangedFile(t *testing.T) {
+	dir := keylessSkill(t)
+	appendFile(t, filepath.Join(dir, "SKILL.md"), "tampered\n")
+	_, err := Verify(dir, keylessTrust(t, nil))
+	if err == nil || !strings.Contains(err.Error(), "SKILL.md changed after signing") {
+		t.Fatalf("Verify() error = %v, want a changed file", err)
+	}
+}
+
+func TestVerifyKeylessNeedsATrustRoot(t *testing.T) {
+	if _, err := Verify(keylessSkill(t), Trust{}); !errors.Is(err, ErrNoTrustRoot) {
+		t.Fatalf("Verify() error = %v, want ErrNoTrustRoot", err)
+	}
+}
+
+func TestVerifyKeylessUnderACertificateChainPolicy(t *testing.T) {
+	_, err := Verify(keylessSkill(t), nvidiaTrust(t))
+	if err == nil || !strings.Contains(err.Error(), "trusts a certificate chain") {
+		t.Fatalf("Verify() error = %v, want a mode mismatch", err)
+	}
 }
