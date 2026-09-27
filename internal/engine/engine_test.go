@@ -416,8 +416,8 @@ func TestInventoryClassifiesConfigVsSkillsDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName := make(map[string]models.SkillItem, len(items.SkillItems()))
-	for _, item := range items.SkillItems() {
+	byName := make(map[string]models.SkillItem, len(items.SkillItems(nil)))
+	for _, item := range items.SkillItems(nil) {
 		byName[item.Name] = item
 	}
 
@@ -473,7 +473,7 @@ func TestInventoryIgnoresAgentDirEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := items.SkillItems()
+	got := items.SkillItems(nil)
 	if len(got) != 1 || got[0].Name != "sample" {
 		t.Fatalf("items = %#v", got)
 	}

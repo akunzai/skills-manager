@@ -692,26 +692,31 @@ func ParseRepoSource(raw string) ParsedRepoSource {
 	}
 }
 
+// SkillItem is one Skill as Inventory classified it against a Scope's Config
+// and skills directory. It is an engine row, not a wire format: a frontend
+// that needs JSON (ls --json) defines its own typed DTO and picks its own
+// presentation, such as a tilde path or a Scope label (ADR-0008).
 type SkillItem struct {
-	Name          string   `json:"name"`
-	SourceType    string   `json:"sourceType"` // "github", "gitlab", "git", "local_symlink", "local_command", "symlink", "untracked"
-	Source        string   `json:"source"`
-	Subpath       string   `json:"subpath,omitempty"`
-	InstalledPath string   `json:"path,omitempty"`
-	IsInstalled   bool     `json:"installed"`
-	IsValidSkill  bool     `json:"valid"`
-	Agents        []string `json:"agents"`
-	Description   string   `json:"description,omitempty"`
-	Scope         string   `json:"scope,omitempty"`
+	Name       string
+	SourceType string // "github", "gitlab", "git", "local_symlink", "local_command", "symlink", "untracked"
+	Source     string
+	Subpath    string
+	// InstalledPath is always set: the Skill's path on the skills directory
+	// if it is on disk, otherwise the path it would take there.
+	InstalledPath string
+	IsInstalled   bool
+	IsValidSkill  bool
+	Agents        []string
+	Description   string
 	// Status is how the Skill's entry on the Scope skills directory was
 	// classified, one of the SkillStatus values.
-	Status SkillStatus `json:"status"`
+	Status SkillStatus
 	// Signed is whether a remote Skill's copy verified against a signature
 	// when Sync last applied it.
-	Signed bool `json:"signed"`
+	Signed bool
 	// Unverified is whether a remote Skill's copy was applied as Trusted
 	// content although its signature does not verify.
-	Unverified bool `json:"unverified"`
+	Unverified bool
 }
 
 // SkillStatus is how Inventory classifies one Skill against the Scope skills
