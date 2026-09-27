@@ -65,6 +65,7 @@ excluded and keep their copies.`,
 
 func runAdopt(cmd *cobra.Command, names []string, options adoptOptions) error {
 	out := cmd.OutOrStdout()
+	p := newPrompter(cmd)
 	scope := ResolveScope()
 	cfg, err := config.LoadConfig(scope.ConfigPath)
 	if err != nil {
@@ -103,11 +104,11 @@ func runAdopt(cmd *cobra.Command, names []string, options adoptOptions) error {
 		fmt.Fprintf(out, "Skipped %s.\n", countOf(len(plan.Items), "skill"))
 		fmt.Fprintf(out, "Next: name the skills to adopt, or pass --all.\n")
 		return exitError{message: "skills were left as they are", code: 1}
-	case !options.yes && !tui.IsTerminal():
+	case !options.yes && !p.Interactive():
 		printAdoptPlan(out, plan, scope.SkillsDir)
 		return fmt.Errorf("refusing to adopt without a terminal; rerun with --yes or --dry-run")
 	case !chosen:
-		selected, err := promptAdoptPlan(plan, scope.SkillsDir)
+		selected, err := promptAdoptPlan(p, plan, scope.SkillsDir)
 		if err != nil {
 			return err
 		}
@@ -122,7 +123,7 @@ func runAdopt(cmd *cobra.Command, names []string, options adoptOptions) error {
 		plan = plan.SelectKeys(selected)
 	case !options.yes:
 		printAdoptPlan(out, plan, scope.SkillsDir)
-		ok, err := tui.PromptConfirm(fmt.Sprintf("Adopt %s?", countOf(len(plan.Items), "skill")), false)
+		ok, err := p.Confirm(fmt.Sprintf("Adopt %s?", countOf(len(plan.Items), "skill")), false)
 		if err != nil {
 			return err
 		}
@@ -251,7 +252,7 @@ func printInstallerWarning(out io.Writer, names []string, skillsDir string) {
 		colorYellow, strings.Join(names, ", "), objectPronoun(len(names)), models.ToTildePath(skillsDir), colorReset)
 }
 
-func promptAdoptPlan(plan engine.AdoptPlan, skillsDir string) ([]string, error) {
+func promptAdoptPlan(p prompter, plan engine.AdoptPlan, skillsDir string) ([]string, error) {
 	groups := tui.GroupedItems{}
 	for _, item := range plan.Items {
 		group := adoptScopeGroup
@@ -260,7 +261,7 @@ func promptAdoptPlan(plan engine.AdoptPlan, skillsDir string) ([]string, error) 
 		}
 		groups[group] = append(groups[group], tui.SelectOption{Key: item.Key(), Title: adoptLabel(item), Extra: adoptAction(item, skillsDir)})
 	}
-	return tui.PromptOrderedGroupedMultiSelect("Select skills to adopt:", groups, []string{adoptScopeGroup, adoptAgentGroup})
+	return p.GroupedMultiSelect("Select skills to adopt:", groups, []string{adoptScopeGroup, adoptAgentGroup})
 }
 
 // adoptExitCodes is ADR-0002's code for each state adopt reports: 0 adopted,

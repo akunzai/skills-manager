@@ -15,11 +15,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var syncIsTerminal = tui.IsTerminal
-
-var syncPromptUnknown = func(out io.Writer, skills []engine.SkillFreshness) (bool, error) {
+// promptSyncUnknown asks whether to overwrite Project Skills without a local
+// baseline, looping back after "Show details" until the person picks
+// overwrite or cancel.
+func promptSyncUnknown(p prompter, out io.Writer, skills []engine.SkillFreshness) (bool, error) {
 	for {
-		choice, err := tui.PromptSelect("Replace Project Skills without a local baseline?", []tui.SelectOption{
+		choice, err := p.Select("Replace Project Skills without a local baseline?", []tui.SelectOption{
 			{Key: "overwrite", Title: "Overwrite"},
 			{Key: "details", Title: "Show details"},
 			{Key: "cancel", Title: "Cancel"},
@@ -97,9 +98,10 @@ completed.`,
 // answers whether --force would lift what is left under the decision applied.
 // Sync and update both reconcile a Scope through it.
 func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.SyncPlan, decision engine.SyncDecision) (*engine.SyncReport, error) {
-	if !decision.Force && syncIsTerminal() {
+	p := newPrompter(cmd)
+	if !decision.Force && p.Interactive() {
 		if unknown := plan.Unknown(); len(unknown) > 0 {
-			allowUnknown, promptErr := syncPromptUnknown(out, unknown)
+			allowUnknown, promptErr := promptSyncUnknown(p, out, unknown)
 			if promptErr != nil {
 				return nil, promptErr
 			}

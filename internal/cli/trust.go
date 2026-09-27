@@ -7,15 +7,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
-	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
-)
-
-// trustIsTerminal and trustConfirm are seams over the terminal so a test can
-// answer trust's confirmation.
-var (
-	trustIsTerminal = tui.IsTerminal
-	trustConfirm    = func(prompt string) (bool, error) { return tui.PromptConfirm(prompt, false) }
 )
 
 func newTrustCmd() *cobra.Command {
@@ -34,6 +26,7 @@ skill applied this way as unverified.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
+			p := newPrompter(cmd)
 			scope := ResolveScope()
 			flags := scopeFlagsOf(scope)
 			cfg, err := config.LoadConfig(scope.ConfigPath)
@@ -72,10 +65,10 @@ skill applied this way as unverified.`,
 				trustable = append(trustable, item)
 			}
 			if len(trustable) > 0 && !flagYes {
-				if !trustIsTerminal() {
+				if !p.Interactive() {
 					return fmt.Errorf("refusing to trust unverified content without a terminal; rerun with --yes")
 				}
-				confirmed, err := trustConfirm(fmt.Sprintf("Trust this content of %s although its signature does not verify?", countOf(len(trustable), "skill")))
+				confirmed, err := p.Confirm(fmt.Sprintf("Trust this content of %s although its signature does not verify?", countOf(len(trustable), "skill")), false)
 				if err != nil {
 					return err
 				}

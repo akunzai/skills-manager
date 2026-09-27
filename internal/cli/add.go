@@ -261,8 +261,9 @@ func newAddCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
-			if len(args) == 0 && flagSymlink == "" && flagCommand == "" && tui.IsTerminal() && !flagYes {
-				source, err := tui.PromptInput("Source repository or local path")
+			p := newPrompter(cmd)
+			if len(args) == 0 && flagSymlink == "" && flagCommand == "" && p.Interactive() && !flagYes {
+				source, err := p.Input("Source repository or local path")
 				if err != nil {
 					return err
 				}

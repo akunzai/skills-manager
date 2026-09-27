@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1785,16 +1784,16 @@ func TestCLISyncInteractiveUnknownBaselineDeclineLeavesItBlocked(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			prompted := false
-			oldTerminal, oldPrompt := syncIsTerminal, syncPromptUnknown
-			syncIsTerminal = func() bool { return true }
-			syncPromptUnknown = func(io.Writer, []engine.SkillFreshness) (bool, error) { prompted = true; return false, nil }
-			t.Cleanup(func() { syncIsTerminal, syncPromptUnknown = oldTerminal, oldPrompt })
+			fp := &fakePrompter{interactive: true}
+			if tc.prompted {
+				fp.answers = []fakeAnswer{selectAnswer("Replace Project Skills without a local baseline?", "cancel")}
+			}
+			useFakePrompter(t, fp)
 			out, err := runCLI(t, append(tc.args, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)...)
 			if err == nil || ExitCode(err) != 1 {
 				t.Fatalf("error = %v (exit %d); want exit 1\n%s", err, ExitCode(err), out)
 			}
-			if prompted != tc.prompted {
+			if prompted := len(fp.asked) > 0; prompted != tc.prompted {
 				t.Fatalf("prompted = %v; want %v\n%s", prompted, tc.prompted, out)
 			}
 			want := []string{"Skipped sample: unknown_baseline", "Sync did not converge. 1 blocked skill."}
@@ -2471,24 +2470,17 @@ func TestCLIDoctorFixReplacesConfirmedForeignAvailabilityPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldTerminal, oldConfirm := doctorIsTerminal, doctorConfirm
-	doctorIsTerminal = func() bool { return true }
-	var prompt string
-	doctorConfirm = func(message string, defaultYes bool) (bool, error) {
-		prompt = message
-		if defaultYes {
-			t.Fatal("replacement confirmation must default to No")
-		}
-		return true, nil
-	}
-	t.Cleanup(func() { doctorIsTerminal, doctorConfirm = oldTerminal, oldConfirm })
+	fp := &fakePrompter{interactive: true, answers: []fakeAnswer{
+		confirmAnswer("Replace these paths with managed Availability?", true),
+	}}
+	useFakePrompter(t, fp)
 
 	out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir)
 	if err != nil {
 		t.Fatalf("doctor --fix: %v\n%s", err, out)
 	}
-	if prompt != "Replace these paths with managed Availability?" {
-		t.Fatalf("replacement prompt = %q", prompt)
+	if len(fp.confirmDefaults) != 1 || fp.confirmDefaults[0] {
+		t.Fatalf("replacement confirmation must default to No: %v", fp.confirmDefaults)
 	}
 	for _, want := range []string{"~/.claude/skills/sample", "~/terminal-browser/sample", "symlink"} {
 		if !strings.Contains(out, want) {
@@ -3143,6 +3135,48 @@ func TestCLIRmKeepsAnIllegalLocalSource(t *testing.T) {
 	}
 }
 
+// Called with no names and no --yes, rm offers every declared skill through
+// its interactive picker and removes only what was selected.
+func TestCLIRmInteractivePickerSelectsChosenSkills(t *testing.T) {
+	project := projectScope(t)
+	for _, name := range []string{"mine", "other"} {
+		dest := filepath.Join(project, ".agents", "skills", name)
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dest, "SKILL.md"), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "mine", ".agents/skills/mine", "")
+	config.AddLocalSymlinkEntry(cfg, "other", ".agents/skills/other", "")
+	configPath := filepath.Join(project, ".agents", "skills.json")
+	if err := config.SaveConfig(cfg, configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	fp := &fakePrompter{interactive: true, answers: []fakeAnswer{
+		groupedMultiSelectAnswer("Select skills to remove:", []string{"mine"}),
+	}}
+	useFakePrompter(t, fp)
+
+	out, err := runCLI(t, "rm", "-p")
+	if err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	loaded, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, declared := config.FindSkillSource(loaded, "mine"); declared {
+		t.Fatal("rm did not remove the selected skill from Config")
+	}
+	if _, _, declared := config.FindSkillSource(loaded, "other"); !declared {
+		t.Fatal("rm removed a skill the picker did not select")
+	}
+}
+
 // A real directory Config does not declare is content Sync never wrote, so
 // rm removes it only once the user confirms, and never without a terminal
 // unless --yes says so.
@@ -3171,10 +3205,11 @@ func TestCLIRmConfirmsAnUntrackedDirectory(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(loose, "SKILL.md"), []byte("# Loose\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			oldTerminal, oldConfirm := rmIsTerminal, rmConfirm
-			rmIsTerminal = func() bool { return tc.terminal }
-			rmConfirm = func(string) (bool, error) { return tc.answer, nil }
-			t.Cleanup(func() { rmIsTerminal, rmConfirm = oldTerminal, oldConfirm })
+			fp := &fakePrompter{interactive: tc.terminal}
+			if tc.terminal && !tc.yes {
+				fp.answers = []fakeAnswer{confirmAnswer("Config does not declare", tc.answer)}
+			}
+			useFakePrompter(t, fp)
 
 			args := []string{"rm", "-p", "loose"}
 			if tc.yes {
@@ -3225,6 +3260,48 @@ func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(source, "SKILL.md")); err != nil {
 		t.Fatalf("Source outside the skills directory must survive: %v", err)
+	}
+}
+
+// Selecting a master skill in the interactive picker takes its managed link
+// with it (DependsOn), even though only the master's own key was chosen.
+func TestCLIPruneInteractivePickerSelectsMasterWithLinks(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	orphan := filepath.Join(skillsDir, "orphan")
+	if err := os.MkdirAll(orphan, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphan, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	plantManagedAgentLink(t, skillsDir, "orphan", "augment")
+	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	fp := &fakePrompter{interactive: true, answers: []fakeAnswer{
+		groupedMultiSelectAnswer("Select items to prune:", []string{pruneMasterKey("orphan")}),
+	}}
+	useFakePrompter(t, fp)
+
+	out, err := runCLI(t, "prune", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("prune: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Removed master skill: orphan") {
+		t.Fatalf("selecting the master should remove it:\n%s", out)
+	}
+	if !strings.Contains(out, "Removed managed link:") {
+		t.Fatalf("selecting a master should take its managed link with it:\n%s", out)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatal("selected master directory should be removed")
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "orphan")); !os.IsNotExist(err) {
+		t.Fatal("the master's managed link should be removed too")
 	}
 }
 
