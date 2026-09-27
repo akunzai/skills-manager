@@ -36,7 +36,7 @@ could not be completed.`,
 			// Past argument parsing, every failure is a runtime problem.
 			cmd.SilenceUsage = true
 			name := args[0]
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
@@ -48,9 +48,9 @@ could not be completed.`,
 			}
 			d, err := engine.DiffSkill(cfg, name, scope.SkillsDir, scope.CacheDir)
 			if err != nil {
-				return withScopeFlags(err, scopeFlagsOf(scope))
+				return withScopeFlags(err, scopeFlagsOf(cmd, scope))
 			}
-			printSkillDiff(cmd.OutOrStdout(), d, flagStat, scopeFlagsOf(scope))
+			printSkillDiff(cmd.OutOrStdout(), d, flagStat, scopeFlagsOf(cmd, scope))
 			if !d.Empty() {
 				return exitError{message: fmt.Sprintf("%s differs from its Baseline or Cache", name), code: 1}
 			}

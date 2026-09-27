@@ -12,7 +12,6 @@ import (
 )
 
 func TestCLILsShowsWhetherTheAppliedCopyWasSigned(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -52,7 +51,6 @@ func TestCLILsShowsWhetherTheAppliedCopyWasSigned(t *testing.T) {
 		t.Fatalf("signed = %v, want signed-one true and plain false", got)
 	}
 
-	resetRootCmdFlags()
 	table, err := runCLI(t, "ls", "--config", configFile, "--skills-dir", skillsDir)
 	if err != nil {
 		t.Fatalf("ls: %v\n%s", err, table)
@@ -73,7 +71,6 @@ func TestCLILsShowsWhetherTheAppliedCopyWasSigned(t *testing.T) {
 }
 
 func TestCLIAddRefusesTrustCertForALocalSource(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	local := writeCLILocalSkill(t, home, "mine")
 	_, err := runCLI(t, "add", "--symlink", local, "--trust-cert", filepath.Join(home, "root.pem"), "--yes", "--global")

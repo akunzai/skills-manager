@@ -46,8 +46,6 @@ func diskSnapshot(t *testing.T, root string) map[string]string {
 }
 
 func TestCLIDiffExitCodesAndReadOnly(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -71,16 +69,13 @@ func TestCLIDiffExitCodesAndReadOnly(t *testing.T) {
 		// The uncached Source keeps Sync at 1; sample is applied either way.
 		t.Fatalf("sync: %v\n%s", err, out)
 	}
-	resetSubcommandFlags()
 
 	stateDir := filepath.Join(home, ".local", "state")
 	diff := func(args ...string) (string, int) {
 		t.Helper()
-		t.Cleanup(resetSubcommandFlags)
 		scope, state := diskSnapshot(t, skillsDir), diskSnapshot(t, stateDir)
 		configBefore, _ := os.ReadFile(configFile)
 		out, err := runCLI(t, append(append([]string{"diff"}, args...), paths...)...)
-		resetSubcommandFlags()
 		configAfter, _ := os.ReadFile(configFile)
 		if !reflect.DeepEqual(scope, diskSnapshot(t, skillsDir)) || !reflect.DeepEqual(state, diskSnapshot(t, stateDir)) || string(configBefore) != string(configAfter) {
 			t.Fatalf("diff %v changed the Scope, its state, or its Config:\n%s", args, out)
@@ -131,8 +126,6 @@ func TestCLIDiffExitCodesAndReadOnly(t *testing.T) {
 }
 
 func TestCLIDiffWithoutABaselineSaysWhy(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")

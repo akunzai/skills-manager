@@ -22,7 +22,7 @@ func newOutdatedCmd() *cobra.Command {
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
@@ -46,7 +46,7 @@ func newOutdatedCmd() *cobra.Command {
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), string(data))
 			} else {
-				printOutdatedReport(cmd, report, scopeFlagsOf(scope))
+				printOutdatedReport(cmd, report, scopeFlagsOf(cmd, scope))
 			}
 			if !report.Fresh() {
 				return exitError{message: "remote Source, Cache, or Scope is not current", code: 1}

@@ -19,7 +19,7 @@ func newInitCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
-			configPath := ResolveScope().ConfigPath
+			configPath := ResolveScope(cmd).ConfigPath
 
 			if _, err := os.Stat(configPath); err == nil && !flagForce {
 				return fmt.Errorf("config file already exists at %s (use --force to overwrite)", models.ToTildePath(configPath))
@@ -45,7 +45,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print skills manager version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "skills-manager %s\n", RootCmd.Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "skills-manager %s\n", cmd.Root().Version)
 		},
 	}
 }

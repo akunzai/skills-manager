@@ -32,7 +32,7 @@ func newDoctorCmd() *cobra.Command {
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
 			p := newPrompter(cmd)
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 
 			cfg, err := config.LoadConfig(configPath)
@@ -47,7 +47,7 @@ func newDoctorCmd() *cobra.Command {
 				}
 			}
 			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix, approve)
-			printHealthReport(out, doctorFindings(outcome.Report, scopeFlagsOf(scope)))
+			printHealthReport(out, doctorFindings(outcome.Report, scopeFlagsOf(cmd, scope)))
 			if runErr != nil {
 				return runErr
 			}

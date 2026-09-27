@@ -228,7 +228,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	if err != nil {
 		return err
 	}
-	return reportAddOutcome(out, result, filepath.Base(configPath), scopeFlagsOf(scope))
+	return reportAddOutcome(out, result, filepath.Base(configPath), scopeFlagsOf(cmd, scope))
 }
 
 // reportAddOutcome says why any Skill could not be applied, in Sync's words,

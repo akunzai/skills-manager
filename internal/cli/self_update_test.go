@@ -19,8 +19,6 @@ func init() {
 // the executable resolved under a Homebrew Cellar directory, self-update
 // downloads nothing, prints the brew command, and exits non-zero.
 func TestSelfUpdateRefusesUnderHomebrew(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	stubSelfUpdateExecutablePath(t, "/opt/homebrew/Cellar/skills-manager/0.18.0/bin/skills")
 	stubSelfUpdateCheckMustNotBeCalled(t)
 
@@ -39,8 +37,6 @@ func TestSelfUpdateRefusesUnderHomebrew(t *testing.T) {
 // TestSelfUpdateRefusesUnderScoop covers the Scoop half of the same
 // acceptance criterion.
 func TestSelfUpdateRefusesUnderScoop(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	stubSelfUpdateExecutablePath(t, `C:\Users\alice\scoop\apps\skills-manager\current\skills.exe`)
 	stubSelfUpdateGOOS(t, "windows")
 	stubSelfUpdateCheckMustNotBeCalled(t)
@@ -59,8 +55,6 @@ func TestSelfUpdateRefusesUnderScoop(t *testing.T) {
 
 // TestSelfUpdateRefusalIsJSON covers the --json shape of the same refusal.
 func TestSelfUpdateRefusalIsJSON(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	stubSelfUpdateExecutablePath(t, "/opt/homebrew/Cellar/skills-manager/0.18.0/bin/skills")
 	stubSelfUpdateCheckMustNotBeCalled(t)
 
@@ -84,8 +78,6 @@ func TestSelfUpdateRefusalIsJSON(t *testing.T) {
 // acceptance criterion that --check still reports availability and names
 // the package-manager command, unlike a plain self-update.
 func TestSelfUpdateCheckStillReachesNetworkUnderPackageManager(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	stubSelfUpdateExecutablePath(t, "/opt/homebrew/Cellar/skills-manager/0.18.0/bin/skills")
 	checked := false
 	stubSelfUpdateCheck(t, func(string) (*updater.SelfUpdateInfo, error) {
@@ -116,8 +108,6 @@ func TestSelfUpdateCheckStillReachesNetworkUnderPackageManager(t *testing.T) {
 // TestSelfUpdateUnaffectedElsewhere covers the acceptance criterion that
 // installs anywhere else behave exactly as today.
 func TestSelfUpdateUnaffectedElsewhere(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	stubSelfUpdateExecutablePath(t, "/home/alice/.local/bin/skills")
 	checked := false
 	stubSelfUpdateCheck(t, func(string) (*updater.SelfUpdateInfo, error) {
@@ -184,8 +174,6 @@ func TestSelfUpdateCheckWithAPinnedVersion(t *testing.T) {
 		{"running release", "0.19.0", false, "skills is already on v0.19.0."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resetSubcommandFlags()
-			t.Cleanup(resetSubcommandFlags)
 			stubSelfUpdateCheck(t, func(string) (*updater.SelfUpdateInfo, error) {
 				return &updater.SelfUpdateInfo{CurrentVersion: "0.19.0", LatestVersion: tc.latest, LatestTag: "v" + tc.latest, UpdateAvailable: tc.update}, nil
 			})

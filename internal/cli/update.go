@@ -33,7 +33,7 @@ completed.`,
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			configPath, cacheDir := scope.ConfigPath, scope.CacheDir
 
 			cfg, err := config.LoadConfig(configPath)
@@ -76,7 +76,7 @@ completed.`,
 				// A converged plan needed no Baseline, so an unreadable Scope
 				// state is at most a warning (ADR-0002).
 				if plan.StateVerdict() == engine.StateWarn {
-					printScopeStateWarning(out, plan.StateError, scopeFlagsOf(scope))
+					printScopeStateWarning(out, plan.StateError, scopeFlagsOf(cmd, scope))
 				}
 				summary := newUpdateSyncJSON(planned, nil)
 				switch {
@@ -92,7 +92,7 @@ completed.`,
 					return updateErr
 				}
 				if flagDryRun && refreshed > 0 {
-					fmt.Fprintf(out, "Next: run 'skills update%s'.\n", scopeFlagsOf(scope))
+					fmt.Fprintf(out, "Next: run 'skills update%s'.\n", scopeFlagsOf(cmd, scope))
 					return exitError{message: "Scope does not match its Config", code: 1}
 				}
 				return nil
@@ -104,7 +104,7 @@ completed.`,
 			outcome := planned
 			var report *engine.SyncReport
 			if flagDryRun {
-				printSyncPlan(out, plan, decision, scopeFlagsOf(scope))
+				printSyncPlan(out, plan, decision, scopeFlagsOf(cmd, scope))
 			} else {
 				var applyErr error
 				if flagJSON {
@@ -119,7 +119,7 @@ completed.`,
 				}
 				outcome = report.Summary()
 			}
-			syncErr := reportSyncOutcome(out, outcome, flagDryRun, "update", scopeFlagsOf(scope))
+			syncErr := reportSyncOutcome(out, outcome, flagDryRun, "update", scopeFlagsOf(cmd, scope))
 			if flagJSON {
 				printUpdateJSON(cmd.OutOrStdout(), result, newUpdateSyncJSON(outcome, report))
 			}

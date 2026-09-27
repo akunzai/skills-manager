@@ -2,10 +2,6 @@
 
 Key development insights, architectural gotchas, and environment nuances discovered during the development of `skills-manager`.
 
-## CLI & Testing
-
-- **`[cobra/flag-isolation]`**: In Cobra test suites, both persistent flags and subcommand closure targets leak across `RootCmd.Execute()` calls within the same process. Test cases must call `resetRootCmdFlags()` (`cli_test.go`), which walks commands to restore default values and clear `f.Changed`.
-
 ## Terminal & UI
 
 - **`[tty/raw-escape-sequences]`**: In raw terminal mode, multi-byte ANSI escape sequences (e.g. arrow keys `\x1b[A`, `Home` `\x1b[H`) arrive in packets. Rather than reading single bytes sequentially, read into a buffer (e.g. `os.File.Read(buf)` with length check) and inspect byte patterns to reliably distinguish standalone `Esc` keypresses from navigation escapes without timing jitter.

@@ -60,7 +60,7 @@ completed.`,
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			configPath, skillsDir, cacheDir := scope.ConfigPath, scope.SkillsDir, scope.CacheDir
 
 			cfg, err := config.LoadConfig(configPath)
@@ -75,15 +75,15 @@ completed.`,
 			decision := engine.SyncDecision{Force: flagForce}
 
 			if flagDryRun {
-				printSyncPlan(out, plan, decision, scopeFlagsOf(scope))
-				return reportSyncOutcome(out, plan.Summary(decision), true, "sync", scopeFlagsOf(scope))
+				printSyncPlan(out, plan, decision, scopeFlagsOf(cmd, scope))
+				return reportSyncOutcome(out, plan.Summary(decision), true, "sync", scopeFlagsOf(cmd, scope))
 			}
 
 			report, err := applySyncPlan(cmd, out, scope, plan, decision)
 			if err != nil {
 				return err
 			}
-			return reportSyncOutcome(out, report.Summary(), false, "sync", scopeFlagsOf(scope))
+			return reportSyncOutcome(out, report.Summary(), false, "sync", scopeFlagsOf(cmd, scope))
 		},
 	}
 
@@ -119,15 +119,15 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 	if n := len(plan.Items); n > 0 {
 		region = presentation.StartRegion(cmd.ErrOrStderr(), "Syncing "+countOf(n, "Skill"), n)
 	}
-	report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev, scopeFlagsOf(scope)) })
+	report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev, scopeFlagsOf(cmd, scope)) })
 	region.Stop()
 	for _, ev := range report.Events {
 		if ev.Kind == engine.SyncStateUnreadable {
-			printScopeStateWarning(out, ev.Err, scopeFlagsOf(scope))
+			printScopeStateWarning(out, ev.Err, scopeFlagsOf(cmd, scope))
 		}
 	}
 	printMaterialized(out, report)
-	printCopiedAvailability(out, report, scopeFlagsOf(scope))
+	printCopiedAvailability(out, report, scopeFlagsOf(cmd, scope))
 	return report, err
 }
 

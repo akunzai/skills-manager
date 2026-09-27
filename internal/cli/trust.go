@@ -27,8 +27,8 @@ skill applied this way as unverified.`,
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
 			p := newPrompter(cmd)
-			scope := ResolveScope()
-			flags := scopeFlagsOf(scope)
+			scope := ResolveScope(cmd)
+			flags := scopeFlagsOf(cmd, scope)
 			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err

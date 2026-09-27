@@ -25,17 +25,17 @@ func init() {
 }
 
 func TestSelfUpdateNoticePrintsOnTTY(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	stubSelfUpdateNotice(t, true, func() (*updater.SelfUpdateInfo, error) {
 		return &updater.SelfUpdateInfo{LatestVersion: "0.13.0", UpdateAvailable: true}, nil
 	})
 
 	var stdout, stderr bytes.Buffer
-	RootCmd.SetOut(&stdout)
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"version"})
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("version: %v", err)
 	}
 	wantOut := fmt.Sprintf("skills-manager %s\n", updater.Version)
@@ -48,8 +48,11 @@ func TestSelfUpdateNoticePrintsOnTTY(t *testing.T) {
 	}
 
 	stderr.Reset()
-	RootCmd.SetArgs([]string{"version"})
-	if err := RootCmd.Execute(); err != nil {
+	cmd = newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("second version: %v", err)
 	}
 	if stderr.String() != "" {
@@ -58,7 +61,6 @@ func TestSelfUpdateNoticePrintsOnTTY(t *testing.T) {
 }
 
 func TestSelfUpdateNoticeSkipsJSON(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	checked := false
 	stubSelfUpdateNotice(t, true, func() (*updater.SelfUpdateInfo, error) {
@@ -68,10 +70,11 @@ func TestSelfUpdateNoticeSkipsJSON(t *testing.T) {
 
 	configFile, skillsDir := homeAgents(t, home)
 	var stdout, stderr bytes.Buffer
-	RootCmd.SetOut(&stdout)
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"ls", "--json", "--config", configFile, "--skills-dir", skillsDir})
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"ls", "--json", "--config", configFile, "--skills-dir", skillsDir})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("ls --json: %v", err)
 	}
 	if checked {
@@ -83,7 +86,6 @@ func TestSelfUpdateNoticeSkipsJSON(t *testing.T) {
 }
 
 func TestSelfUpdateNoticeSkipsSelfUpdateCommand(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	checked := false
 	stubSelfUpdateNotice(t, true, func() (*updater.SelfUpdateInfo, error) {
@@ -91,7 +93,7 @@ func TestSelfUpdateNoticeSkipsSelfUpdateCommand(t *testing.T) {
 		return &updater.SelfUpdateInfo{LatestVersion: "0.13.0", UpdateAvailable: true}, nil
 	})
 
-	cmd, _, err := RootCmd.Find([]string{"self-update"})
+	cmd, _, err := newRootCmd().Find([]string{"self-update"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +104,6 @@ func TestSelfUpdateNoticeSkipsSelfUpdateCommand(t *testing.T) {
 }
 
 func TestSelfUpdateNoticeSkipsEnv(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	t.Setenv(updater.SkipSelfUpdateCheckEnv, "1")
 	checked := false
@@ -112,10 +113,11 @@ func TestSelfUpdateNoticeSkipsEnv(t *testing.T) {
 	})
 
 	var stderr bytes.Buffer
-	RootCmd.SetOut(&bytes.Buffer{})
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"version"})
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("version: %v", err)
 	}
 	if checked {
@@ -127,7 +129,6 @@ func TestSelfUpdateNoticeSkipsEnv(t *testing.T) {
 }
 
 func TestSelfUpdateNoticeSkipsNonTTY(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	checked := false
 	stubSelfUpdateNotice(t, false, func() (*updater.SelfUpdateInfo, error) {
@@ -136,10 +137,11 @@ func TestSelfUpdateNoticeSkipsNonTTY(t *testing.T) {
 	})
 
 	var stderr bytes.Buffer
-	RootCmd.SetOut(&bytes.Buffer{})
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"version"})
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("version: %v", err)
 	}
 	if checked {
@@ -151,17 +153,17 @@ func TestSelfUpdateNoticeSkipsNonTTY(t *testing.T) {
 }
 
 func TestSelfUpdateNoticeCheckFailureLeavesCommandOk(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	stubSelfUpdateNotice(t, true, func() (*updater.SelfUpdateInfo, error) {
 		return nil, errors.New("github down")
 	})
 
 	var stdout, stderr bytes.Buffer
-	RootCmd.SetOut(&stdout)
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"version"})
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("version failed after notice check error: %v", err)
 	}
 	if stdout.String() != fmt.Sprintf("skills-manager %s\n", updater.Version) {
@@ -175,8 +177,11 @@ func TestSelfUpdateNoticeCheckFailureLeavesCommandOk(t *testing.T) {
 		return &updater.SelfUpdateInfo{LatestVersion: "0.13.0", UpdateAvailable: true}, nil
 	})
 	stderr.Reset()
-	RootCmd.SetArgs([]string{"version"})
-	if err := RootCmd.Execute(); err != nil {
+	cmd = newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("second version: %v", err)
 	}
 	if stderr.String() != "" {
@@ -185,17 +190,17 @@ func TestSelfUpdateNoticeCheckFailureLeavesCommandOk(t *testing.T) {
 }
 
 func TestSelfUpdateNoticeSilentWhenCurrent(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	stubSelfUpdateNotice(t, true, func() (*updater.SelfUpdateInfo, error) {
 		return &updater.SelfUpdateInfo{LatestVersion: updater.Version, UpdateAvailable: false}, nil
 	})
 
 	var stderr bytes.Buffer
-	RootCmd.SetOut(&bytes.Buffer{})
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"version"})
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("version: %v", err)
 	}
 	if stderr.String() != "" {
@@ -204,7 +209,6 @@ func TestSelfUpdateNoticeSilentWhenCurrent(t *testing.T) {
 }
 
 func TestSelfUpdateNoticeAfterFailedCommand(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	stubSelfUpdateNotice(t, true, func() (*updater.SelfUpdateInfo, error) {
 		return &updater.SelfUpdateInfo{LatestVersion: "0.13.0", UpdateAvailable: true}, nil
@@ -212,10 +216,11 @@ func TestSelfUpdateNoticeAfterFailedCommand(t *testing.T) {
 	configFile, _ := homeAgents(t, home)
 
 	var stderr bytes.Buffer
-	RootCmd.SetOut(&bytes.Buffer{})
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"init", "--config", configFile})
-	if err := Execute(); err == nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"init", "--config", configFile})
+	if err := execute(cmd); err == nil {
 		t.Fatal("expected init to fail when config exists")
 	}
 	wantErr := updater.NoticeLine("0.13.0", "skills self-update") + "\n"
@@ -225,7 +230,6 @@ func TestSelfUpdateNoticeAfterFailedCommand(t *testing.T) {
 }
 
 func TestSelfUpdateNoticeNamesPackageManagerCommand(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	stubSelfUpdateNotice(t, true, func() (*updater.SelfUpdateInfo, error) {
 		return &updater.SelfUpdateInfo{LatestVersion: "0.13.0", UpdateAvailable: true}, nil
@@ -233,10 +237,11 @@ func TestSelfUpdateNoticeNamesPackageManagerCommand(t *testing.T) {
 	stubSelfUpdateNoticeExecutablePath(t, "/opt/homebrew/Cellar/skills-manager/0.18.0/bin/skills")
 
 	var stderr bytes.Buffer
-	RootCmd.SetOut(&bytes.Buffer{})
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs([]string{"version"})
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("version: %v", err)
 	}
 	want := updater.NoticeLine("0.13.0", updater.HomebrewUpgradeCommand) + "\n"

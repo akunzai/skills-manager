@@ -23,7 +23,7 @@ func newConfigCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
@@ -60,7 +60,7 @@ func newConfigGetCmd() *cobra.Command {
 			// Only an unknown key is misuse; every other failure is a runtime
 			// problem a usage dump would mislead about.
 			cmd.SilenceUsage = true
-			configPath := ResolveScope().ConfigPath
+			configPath := ResolveScope(cmd).ConfigPath
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
 				return err
@@ -94,7 +94,7 @@ func newConfigSetCmd() *cobra.Command {
 			// Only a missing value or an unknown key is misuse; every other
 			// failure is a runtime problem a usage dump would mislead about.
 			cmd.SilenceUsage = true
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
@@ -124,7 +124,7 @@ func newConfigSetCmd() *cobra.Command {
 			// follows it.
 			outcomes := availability.Reconcile()
 			fmt.Fprintf(cmd.OutOrStdout(), "Set %s in %s.\n", args[0], models.ToTildePath(configPath))
-			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagsOf(scope))
+			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagsOf(cmd, scope))
 		},
 	}
 }
@@ -136,7 +136,7 @@ func newConfigEditCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			configPath := ResolveScope().ConfigPath
+			configPath := ResolveScope(cmd).ConfigPath
 			if _, err := os.Stat(configPath); os.IsNotExist(err) {
 				if err := config.SaveConfig(config.DefaultConfig(), configPath); err != nil {
 					return err

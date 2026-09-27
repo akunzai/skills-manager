@@ -11,13 +11,12 @@ import (
 )
 
 func TestGuideCmd_Stdout(t *testing.T) {
-	resetRootCmdFlags()
-
 	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"guide"})
+	cmd := newRootCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"guide"})
 
-	if err := RootCmd.Execute(); err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("guide command failed: %v", err)
 	}
 
@@ -34,20 +33,17 @@ func TestGuideCmd_Stdout(t *testing.T) {
 }
 
 func TestGuideCmd_InstallProject(t *testing.T) {
-	resetRootCmdFlags()
-	flagGlobal = false
-	_ = RootCmd.PersistentFlags().Set("global", "false")
-
 	tmpProjectDir := t.TempDir()
 	oldWd, _ := os.Getwd()
 	_ = os.Chdir(tmpProjectDir)
 	defer func() { _ = os.Chdir(oldWd) }()
 
 	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"guide", "--install", "-p"})
+	cmd := newRootCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"guide", "--install", "-p"})
 
-	if err := RootCmd.Execute(); err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("guide --install -p failed: %v", err)
 	}
 
@@ -80,14 +76,14 @@ func TestGuideCmd_InstallProject(t *testing.T) {
 }
 
 func TestGuideCmd_InstallGlobal(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 
 	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"guide", "--install"})
+	cmd := newRootCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"guide", "--install"})
 
-	if err := RootCmd.Execute(); err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("guide --install failed: %v", err)
 	}
 

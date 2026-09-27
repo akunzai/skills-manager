@@ -48,7 +48,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		return fmt.Errorf("--skills-only and --links-only cannot be used together")
 	}
 	p := newPrompter(cmd)
-	scope := ResolveScope()
+	scope := ResolveScope(cmd)
 	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
@@ -66,7 +66,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 	stateWarning := plan.StateWarning
 	finish := func(err error) error {
 		if stateWarning != "" {
-			printScopeStateWarning(cmd.OutOrStdout(), stateWarning, scopeFlagsOf(scope))
+			printScopeStateWarning(cmd.OutOrStdout(), stateWarning, scopeFlagsOf(cmd, scope))
 		}
 		return err
 	}
