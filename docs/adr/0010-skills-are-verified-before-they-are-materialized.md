@@ -1,0 +1,17 @@
+# Skills are verified before they are Materialized
+
+A remote Source may sign each Skill with a detached OpenSSF Model Signing (OMS) signature, `skill.oms.sig` at the Skill's root: a Sigstore bundle whose DSSE envelope carries an in-toto statement listing every signed file's digest and the paths the signer ignored. Sync verifies a Skill's Cache copy against it while planning, so the verdict is part of the Sync plan the user previews. A copy that does not verify is a `signature` block: it is not Materialized, the copy already on the Scope skills directory stays, and the command exits `1` (ADR-0002) naming why. `--force` does not lift it; `--force` overwrites local edits, never an unverified Source.
+
+Verification is strict, as `model_signing verify` is without `--ignore-unsigned-files`: every file not in the predicate's own `ignore_paths` must be listed and match, and a symlink fails. Two trust modes exist per Source. Sigstore keyless checks the Fulcio certificate, the Rekor entry, and an exact identity and issuer. A certificate chain checks the signing certificate against a PEM trust anchor the Source names with `--trust-cert`, which is how NVIDIA/skills signs.
+
+The Signer is recorded in Config, not the Scope state. The first keyless Signer seen for a Source, by Add or by Sync, is written to `signature.sigstore`, where a team reviews and shares it; after that a different Signer is refused. Sync writing Config for this follows ADR-0007: it happens only when applying a plan, and only for a Source with no Signer pinned. A certificate chain cannot be discovered, so it is always declared. The Baseline records whether each applied copy was signed, and a Skill once signed that arrives unsigned is refused whatever the Source requires, so stripping a signature is not a way around it. Otherwise an unsigned Skill is Materialized and marked, unless its Source sets `require`.
+
+Keyless verification needs the Sigstore trust root. Add and Update, which already reach the network, fetch it through TUF into the Cache directory (`.sigstore/trusted_root.json`) whenever a Skill they just fetched is signed; Sync reads that file and nothing else, so ADR-0004's offline rule holds. A missing trust root blocks a signed Skill with `update` as the next action.
+
+Rejected:
+
+- **Verifying at Materialize time only.** The block would not appear in the Sync plan's preview, and Add would declare a Skill before learning it cannot be written.
+- **Git-native verification** (`git verify-commit` in the Cache). A commit merged in GitHub's web UI is signed by GitHub, not the publisher; a copied Skill cannot be verified again; and verification would have to live in the Cache module (ADR-0005).
+- **Verifying integrity without a Signer.** Any Sigstore identity can sign anything, so "signed, Signer not recorded" would read as trust it does not carry.
+- **Sync using TUF with a forced cache.** Reading one serialized trust root file is simpler and is offline by construction.
+- **A built-in list of trusted publishers.** Trust is declared per Source, never compiled in.

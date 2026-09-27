@@ -189,6 +189,17 @@ When upgrading from a legacy branchless Cache layout, `skills doctor --fix` remo
 
 See [`skills.schema.json`](skills.schema.json) for every field.
 
+## Signed skills
+
+A Source can sign each Skill with an [OpenSSF Model Signing](https://github.com/sigstore/model-transparency) signature, `skill.oms.sig`, as [NVIDIA/skills](https://github.com/NVIDIA/skills) and [akunzai/agent-skills](https://github.com/akunzai/agent-skills) do. Skills Manager verifies it before Materializing: every file must match what was signed, and nothing unsigned may be added.
+
+- **Sigstore keyless** signatures need nothing up front. The first signer seen for a Source is recorded in `skills.json` under `signature.sigstore`; review it there, and a later Skill signed by anyone else is refused.
+- **Certificate chains** need their trust anchor named once: `skills add NVIDIA/skills --trust-cert nv-agent-root-cert.pem`.
+- A Skill that fails verification is not written. The copy already in the Scope stays, and the command exits `1` naming why. Right after a publisher merges, a signature can be stale for a few minutes; run `skills update` again later.
+- An unsigned Skill is still installed and `skills ls` marks it `unsigned`. Set `"signature": {"require": true}` on a Source to refuse unsigned Skills from it. A Skill that was signed is always refused if it arrives unsigned.
+
+`skills update` fetches the Sigstore trust root next to the Cache, so `skills sync` verifies offline.
+
 ## More
 
 - Run `skills <command> --help` for flags and examples.

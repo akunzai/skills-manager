@@ -69,7 +69,7 @@ Everything on a Scope's Agent directories, observed once and classified under on
 _Avoid_: agent state, agent scan
 
 **Sync**:
-Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability. Sync writes Config only to apply a Rename.
+Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability. Sync writes Config only to apply a Rename or to record a Source's first Signer.
 _Avoid_: restore, install (when you mean the whole declared state)
 
 **Baseline**:
@@ -83,6 +83,10 @@ _Avoid_: diff, changeset, transaction. An Add of selected Skills from one Source
 **Rename**:
 A Source's declaration, through `metadata.replaces` in a Skill's `SKILL.md`, that the Skill takes the place of a Skill it no longer has. Update covers the new Skill in the Cache; Sync moves the Scope's declaration to it and Retires the old Skill.
 _Avoid_: move, alias, migration (when you mean the declaration)
+
+**Signer**:
+Who signed a remote Skill's `skill.oms.sig`: a Sigstore keyless identity and issuer, or a certificate chaining to a trust anchor the Source names. A Source's Signer is recorded in Config the first time a signed Skill of it is seen; a Skill signed by anyone else, or once signed and now unsigned, is not Materialized.
+_Avoid_: publisher key, author, owner
 
 **Materialize**:
 Putting one Skill from its Source onto the Scope skills directory (copy, symlink, or command).

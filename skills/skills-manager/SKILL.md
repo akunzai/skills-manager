@@ -39,13 +39,14 @@ When calling `skills` in automated scripts or tool calls:
 - **Resolve ambiguous repository paths**: If a repository contains duplicate skill names across subdirectories, pass `--path <subpath>` or append the path (e.g. `owner/repo/skills`).
 - **Inspect with `--json`**: `skills ls --json` outputs structured inventory; `skills add <source> --list --json` previews a Source's Skills the same way, before choosing `--skill` names.
 - **Non-interactive Source Replacement**: When overwriting or migrating an existing skill (e.g. from a remote Git repository to a local CLI command), pass `-y` to automatically accept the replacement plan.
+- **Never bypass a signature block**: A `signature:` reason on a skipped Skill means its `skill.oms.sig` did not verify, so it was not written. Report it; do not edit `signature` in `skills.json`, delete the signature, or re-add the Source to get past it. If the reason names `skills update`, run that and retry.
 - **Self-update only on request**: Run `skills self-update` only when the human explicitly asks. A TTY notice that a newer release exists is not a request. A Homebrew or Scoop install refuses self-update and names that package manager's upgrade command instead.
 
 ## Configuration Structure (`skills.json`)
 
 `skills.json` maintains three top-level sections:
 - `settings`: Agent availability policies (`defaultAgents`, `availability` per-skill overrides).
-- `remote`: Map of Git repositories (`<owner>/<repo>`), each with its `type` ("github", "gitlab", "git") and `skills` map (`<skill-name>: <subpath>`).
+- `remote`: Map of Git repositories (`<owner>/<repo>`), each with its `type` ("github", "gitlab", "git") and `skills` map (`<skill-name>: <subpath>`), and an optional `signature` (`sigstore` signer recorded on first sight, or `certificateChain` from `add --trust-cert`, plus `require`).
 - `local`: Map of local skills (`<skill-name>`), with `type: "symlink"` (`source` path) or `type: "command"` (`command`, optional `check` command).
 
 ---
