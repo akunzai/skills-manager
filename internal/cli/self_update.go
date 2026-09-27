@@ -14,7 +14,7 @@ import (
 var (
 	// selfUpdateExecutablePath and selfUpdateGOOS are seams over
 	// updater.GetCurrentExecutablePath and runtime.GOOS so tests can
-	// simulate a Homebrew or Scoop install without a real one.
+	// simulate a Homebrew, Scoop, or mise install without a real one.
 	selfUpdateExecutablePath = updater.GetCurrentExecutablePath
 	selfUpdateGOOS           = runtime.GOOS
 	// selfUpdateCheck is a seam over updater.CheckSelfUpdate so a test can
@@ -40,9 +40,9 @@ func newSelfUpdateCmd() *cobra.Command {
 On an interactive terminal, other commands mention a newer release at most once a day.
 Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talks to GitHub.
 
-A Homebrew or Scoop install refuses to replace itself and names that package
-manager's upgrade command instead; --check still reaches GitHub and reports
-the same command.`,
+A Homebrew, Scoop, or mise install refuses to replace itself and names that
+package manager's upgrade command instead; --check still reaches GitHub and
+reports the same command.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
@@ -52,8 +52,9 @@ the same command.`,
 			pkgMgr := updater.ClassifyExecutablePath(selfUpdateExecutablePath(), selfUpdateGOOS)
 			if pkgMgr != nil && !flagCheck {
 				// Homebrew's acceptance policy forbids a formula updating
-				// itself, and a Scoop manifest owns the binary the same way,
-				// so refuse before any network call: no check, no download.
+				// itself, a Scoop manifest owns the binary the same way, and
+				// mise tracks its own installs, so refuse before any network
+				// call: no check, no download.
 				return reportPackageManagerManagedInstall(out, pkgMgr, flagJSON)
 			}
 

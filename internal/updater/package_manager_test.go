@@ -99,6 +99,42 @@ func TestClassifyExecutablePath(t *testing.T) {
 			goos: "windows",
 		},
 		{
+			name:        "mise github backend install",
+			path:        "/home/alice/.local/share/mise/installs/github-akunzai-skills-manager/0.20.0/skills",
+			goos:        "linux",
+			wantName:    "mise",
+			wantCommand: "mise upgrade github:akunzai/skills-manager",
+		},
+		{
+			name:        "mise ubi backend install",
+			path:        "/Users/alice/.local/share/mise/installs/ubi-akunzai-skills-manager/0.21.0/skills",
+			goos:        "darwin",
+			wantName:    "mise",
+			wantCommand: "mise upgrade github:akunzai/skills-manager",
+		},
+		{
+			name:        "mise segments matched case-insensitively on Windows",
+			path:        `C:\Users\alice\AppData\Local\Mise\Installs\github-akunzai-skills-manager\0.20.0\skills.exe`,
+			goos:        "windows",
+			wantName:    "mise",
+			wantCommand: "mise upgrade github:akunzai/skills-manager",
+		},
+		{
+			name: "differently-cased mise path is not matched off Windows",
+			path: "/home/alice/Mise/Installs/github-akunzai-skills-manager/0.20.0/skills",
+			goos: "linux",
+		},
+		{
+			name: "installs segment without a preceding mise segment",
+			path: "/home/alice/tools/installs/github-akunzai-skills-manager/0.20.0/skills",
+			goos: "linux",
+		},
+		{
+			name: "mise shims directory has no installs segment",
+			path: "/home/alice/.local/share/mise/shims/skills",
+			goos: "linux",
+		},
+		{
 			name: "empty path",
 			path: "",
 			goos: "linux",
