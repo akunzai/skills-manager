@@ -171,7 +171,7 @@ func (s *signatures) check(item *SyncPlanItem) {
 
 func (s *signatures) block(item *SyncPlanItem, reason, next string) {
 	item.Block = SyncBlockSignature
-	item.BlockReason = "signature: " + reason
+	item.BlockReason = reason
 	item.BlockNext = next
 	item.Signed = false
 	item.RecordSigner = nil
