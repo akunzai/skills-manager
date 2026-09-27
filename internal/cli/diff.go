@@ -50,7 +50,7 @@ could not be completed.`,
 			if err != nil {
 				return withScopeFlags(err, scopeFlagsOf(cmd, scope))
 			}
-			printSkillDiff(cmd.OutOrStdout(), d, flagStat, scopeFlagsOf(cmd, scope))
+			printSkillDiff(cmd.OutOrStdout(), d, flagStat, flagFetch, scopeFlagsOf(cmd, scope))
 			if !d.Empty() {
 				return exitError{message: fmt.Sprintf("%s differs from its Baseline or Cache", name), code: 1}
 			}
@@ -82,7 +82,16 @@ func fetchSkillSource(cmd *cobra.Command, cfg *config.Config, name, cacheDir str
 	return nil
 }
 
-func printSkillDiff(out io.Writer, d *engine.SkillDiff, stat bool, scopeFlag string) {
+// printSkillDiff prints both sections. An empty Upstream read without
+// --fetch may only mean the Cache is behind its Source, so it says how to
+// refresh it; after --fetch the Cache is as current as update would make it.
+func printSkillDiff(out io.Writer, d *engine.SkillDiff, stat, fetched bool, scopeFlag string) {
+	printUpstream := func() {
+		printFileDiffs(out, d.Upstream, stat)
+		if len(d.Upstream) == 0 && !fetched {
+			fmt.Fprintf(out, "Next: run 'skills diff --fetch %s%s' to compare with the latest Source.\n", d.Skill, scopeFlag)
+		}
+	}
 	head := shortCommit(d.CacheCommit)
 	if d.BaselineCommit == "" {
 		fmt.Fprintf(out, "%sUpstream%s  Scope copy %s %s %s\n", colorBold, colorReset, arrow, d.Source, head)
@@ -95,11 +104,11 @@ func printSkillDiff(out io.Writer, d *engine.SkillDiff, stat bool, scopeFlag str
 		default:
 			fmt.Fprintf(out, "%sNo Baseline is recorded for %s, so upstream and local changes cannot be told apart.%s\n", colorDim, d.Skill, colorReset)
 		}
-		printFileDiffs(out, d.Upstream, stat)
+		printUpstream()
 		return
 	}
 	fmt.Fprintf(out, "%sUpstream%s  %s %s %s %s\n", colorBold, colorReset, d.Source, shortCommit(d.BaselineCommit), arrow, head)
-	printFileDiffs(out, d.Upstream, stat)
+	printUpstream()
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "%sLocal%s  Baseline %s %s\n", colorBold, colorReset, arrow, models.ToTildePath(d.ScopePath))
 	printFileDiffs(out, d.Local, stat)
