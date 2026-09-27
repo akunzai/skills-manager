@@ -45,7 +45,7 @@ func newRmCmd() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					allSkills := inv.SkillItems()
+					allSkills := inv.SkillItems(nil)
 					if len(allSkills) == 0 {
 						fmt.Fprintf(out, "%sNo skills installed or configured to remove.%s\n", colorYellow, colorReset)
 						return nil

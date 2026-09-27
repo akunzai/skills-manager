@@ -24,6 +24,7 @@ type Inventory struct {
 	illegalLocal   []IllegalLocalSource
 	present        []presentSkill
 	items          []models.SkillItem
+	skillsDir      string
 }
 
 type presentSkill struct {
@@ -48,9 +49,47 @@ func (inv Inventory) Stubs() []string { return slices.Clone(inv.stubs) }
 
 func (inv Inventory) IllegalLocal() []IllegalLocalSource { return slices.Clone(inv.illegalLocal) }
 
-// SkillItems projects classified occupancy into the JSON DTO. Callers that
-// decide from occupancy use the typed queries instead of SourceType.
-func (inv Inventory) SkillItems() []models.SkillItem { return slices.Clone(inv.items) }
+// SkillItems projects classified occupancy into the engine row a frontend
+// builds its own presentation from. Callers that decide from occupancy use
+// the typed queries instead of SourceType. baselines fills Signed and
+// Unverified, the same rule ls has always used: both are true only for an
+// installed Skill, since only Sync's Apply records a Baseline. A nil
+// baselines leaves them false, as when the caller has no Scope state to
+// compare against.
+func (inv Inventory) SkillItems(baselines *Baselines) []models.SkillItem {
+	items := slices.Clone(inv.items)
+	if baselines == nil {
+		return items
+	}
+	for i := range items {
+		applied, _ := baselines.Applied(items[i].Name)
+		items[i].Signed = items[i].IsInstalled && applied.Signed
+		items[i].Unverified = items[i].IsInstalled && applied.Unverified != ""
+	}
+	return items
+}
+
+// AvailableTo is the Skills one Agent sees: every installed Skill for an
+// Automatically available Agent, since it reads the skills directory
+// directly and needs no per-Skill Availability, and otherwise the Skills
+// whose Availability names it.
+func (inv Inventory) AvailableTo(agent string) []models.SkillItem {
+	filterAgent := models.NormalizeAgentName(agent)
+	agents := models.ForSkillsDir(inv.skillsDir)
+	seesEveryInstalled := agents.IsAutomatic(filterAgent)
+	var out []models.SkillItem
+	for _, item := range inv.items {
+		switch {
+		case seesEveryInstalled:
+			if item.IsInstalled {
+				out = append(out, item)
+			}
+		case slices.ContainsFunc(item.Agents, func(a string) bool { return models.NormalizeAgentName(a) == filterAgent }):
+			out = append(out, item)
+		}
+	}
+	return out
+}
 
 func (inv Inventory) declaredPresent() []presentSkill { return inv.present }
 
@@ -150,6 +189,11 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 		if item.Agents == nil {
 			item.Agents = []string{}
 		}
+		// A Skill not on disk still gets the path it would take there, so a
+		// frontend never has to fall back to it itself.
+		if item.InstalledPath == "" {
+			item.InstalledPath = filepath.Join(baseSkills, item.Name)
+		}
 		result = append(result, *item)
 	}
 
@@ -160,7 +204,7 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 		)
 	})
 
-	inv := Inventory{items: result}
+	inv := Inventory{items: result, skillsDir: baseSkills}
 	for i := range result {
 		item := &result[i]
 		mode := kind[item.Name]

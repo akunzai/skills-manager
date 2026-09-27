@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 func TestStringRuneLen(t *testing.T) {
@@ -154,5 +156,65 @@ func TestCLILsStatusFollowsInventory(t *testing.T) {
 	want := map[string]any{"stub": "stub", "leftover": "untracked-link", "nested": "illegal-local"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("statuses = %#v; want %#v", got, want)
+	}
+}
+
+// ls --json used to build its rows from a map[string]any, whose string keys
+// encoding/json sorts alphabetically. models.SkillItem is now an engine row
+// with no JSON tags (ADR-0008), so ls builds its own typed lsJSONItem, and
+// this pins its output byte for byte: the same key order, indentation, and
+// an always-present empty "subpath" a map produced but a tagged struct
+// field would drop under omitempty.
+func TestCLILsJSONExactContract(t *testing.T) {
+	resetRootCmdFlags()
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	source := filepath.Join(home, "sample-source")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(skillsDir, "sample")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude"}
+	config.AddLocalSymlinkEntry(cfg, "sample", source, "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "ls", "--json", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls --json: %v\n%s", err, out)
+	}
+
+	want := fmt.Sprintf(`[
+  {
+    "agents": [
+      "claude-code"
+    ],
+    "installed": true,
+    "name": "sample",
+    "path": %q,
+    "scope": "global",
+    "signed": false,
+    "source": %q,
+    "sourceType": "local_symlink",
+    "status": "present",
+    "subpath": "",
+    "unverified": false,
+    "valid": true
+  }
+]
+`, models.ToTildePath(filepath.Join(skillsDir, "sample")), models.ToTildePath(source))
+	if out != want {
+		t.Fatalf("ls --json =\n%s\nwant\n%s", out, want)
 	}
 }

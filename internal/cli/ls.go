@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -16,6 +15,27 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+// lsJSONItem is ls --json's per-Skill row, a typed DTO the CLI owns so
+// models.SkillItem can stay an engine row (ADR-0008). Fields are ordered
+// alphabetically by JSON key, matching the key order encoding/json emitted
+// for the map[string]any this struct replaced, so the JSON contract stays
+// byte for byte identical: a struct marshals in field declaration order,
+// where a map's string keys were already sorted.
+type lsJSONItem struct {
+	Agents     []string           `json:"agents"`
+	Installed  bool               `json:"installed"`
+	Name       string             `json:"name"`
+	Path       string             `json:"path"`
+	Scope      string             `json:"scope"`
+	Signed     bool               `json:"signed"`
+	Source     string             `json:"source"`
+	SourceType string             `json:"sourceType"`
+	Status     models.SkillStatus `json:"status"`
+	Subpath    string             `json:"subpath"`
+	Unverified bool               `json:"unverified"`
+	Valid      bool               `json:"valid"`
+}
 
 func stringRuneLen(s string) int {
 	return len([]rune(s))
@@ -91,35 +111,37 @@ func newLsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			skills := inv.SkillItems()
 			// Only a remote Skill has a Baseline, and it records whether the
 			// applied copy was signed.
-			baselines := engine.OpenBaselines(skillsDir)
-			for i := range skills {
-				applied, _ := baselines.Applied(skills[i].Name)
-				skills[i].Signed = skills[i].IsInstalled && applied.Signed
-				skills[i].Unverified = skills[i].IsInstalled && applied.Unverified != ""
-			}
+			skills := inv.SkillItems(engine.OpenBaselines(skillsDir))
 
 			if flagAgent != "" {
 				filterAgent := models.NormalizeAgentName(flagAgent)
-				agents := models.ForSkillsDir(skillsDir)
-				showAll := agents.IsAutomatic(filterAgent) || filterAgent == "agents" || filterAgent == "all" || filterAgent == "universal"
-				filtered := make([]models.SkillItem, 0)
-				for _, s := range skills {
-					if showAll {
+				// These three aliases mean "every installed Skill" and are not
+				// Agent names, so they never reach AvailableTo; a real
+				// Automatically available Agent (e.g. gemini) gets the same
+				// answer from there instead.
+				if filterAgent == "agents" || filterAgent == "all" || filterAgent == "universal" {
+					filtered := make([]models.SkillItem, 0)
+					for _, s := range skills {
 						if s.IsInstalled {
 							filtered = append(filtered, s)
 						}
-					} else {
-						for _, a := range s.Agents {
-							if models.NormalizeAgentName(a) == filterAgent {
-								filtered = append(filtered, s)
-							}
+					}
+					skills = filtered
+				} else {
+					visible := make(map[string]bool)
+					for _, s := range inv.AvailableTo(filterAgent) {
+						visible[s.Name] = true
+					}
+					filtered := make([]models.SkillItem, 0)
+					for _, s := range skills {
+						if visible[s.Name] {
+							filtered = append(filtered, s)
 						}
 					}
+					skills = filtered
 				}
-				skills = filtered
 			}
 
 			if flagSource != "" {
@@ -134,32 +156,28 @@ func newLsCmd() *cobra.Command {
 			}
 
 			if flagJSON {
-				outList := make([]map[string]any, 0, len(skills))
+				// Intentionally IsProject alone: --skills-dir pointed somewhere
+				// nonstandard, with neither --project nor --global given, does
+				// not by itself mean Project Scope.
+				scopeLabel := "global"
+				if resolvedScope.IsProject {
+					scopeLabel = "project"
+				}
+				outList := make([]lsJSONItem, 0, len(skills))
 				for _, s := range skills {
-					installedP := s.InstalledPath
-					if installedP == "" {
-						installedP = filepath.Join(skillsDir, s.Name)
-					}
-					// Intentionally IsProject alone: --skills-dir pointed
-					// somewhere nonstandard, with neither --project nor
-					// --global given, does not by itself mean Project Scope.
-					scopeLabel := "global"
-					if resolvedScope.IsProject {
-						scopeLabel = "project"
-					}
-					outList = append(outList, map[string]any{
-						"name":       s.Name,
-						"path":       models.ToTildePath(installedP),
-						"scope":      scopeLabel,
-						"agents":     s.Agents,
-						"source":     models.ToTildePath(s.Source),
-						"sourceType": s.SourceType,
-						"subpath":    s.Subpath,
-						"installed":  s.IsInstalled,
-						"valid":      s.IsValidSkill,
-						"status":     s.Status,
-						"signed":     s.Signed,
-						"unverified": s.Unverified,
+					outList = append(outList, lsJSONItem{
+						Name:       s.Name,
+						Path:       models.ToTildePath(s.InstalledPath),
+						Scope:      scopeLabel,
+						Agents:     s.Agents,
+						Source:     models.ToTildePath(s.Source),
+						SourceType: s.SourceType,
+						Subpath:    s.Subpath,
+						Installed:  s.IsInstalled,
+						Valid:      s.IsValidSkill,
+						Status:     s.Status,
+						Signed:     s.Signed,
+						Unverified: s.Unverified,
 					})
 				}
 				data, _ := json.MarshalIndent(outList, "", "  ")

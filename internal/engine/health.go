@@ -317,7 +317,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	}
 	// A declared Skill that is not present has no desired paths to observe,
 	// only Unexpected ones, which --fix removes rather than Apply.
-	for _, item := range inv.SkillItems() {
+	for _, item := range inv.SkillItems(nil) {
 		paths, ok := unexpected[item.Name]
 		if !ok {
 			continue
