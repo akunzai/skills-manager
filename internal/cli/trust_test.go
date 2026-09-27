@@ -56,9 +56,7 @@ func trustedTree(t *testing.T, configFile string) string {
 
 func TestCLITrustLetsSyncApplyUnverifiedContent(t *testing.T) {
 	scope, configFile := unverifiableScope(t)
-	oldTerminal := trustIsTerminal
-	trustIsTerminal = func() bool { return false }
-	t.Cleanup(func() { trustIsTerminal = oldTerminal })
+	useFakePrompter(t, &fakePrompter{interactive: false})
 	run := func(args ...string) (string, error) {
 		resetRootCmdFlags()
 		return runCLI(t, append(args, scope...)...)
@@ -121,16 +119,15 @@ func TestCLITrustRefusesASkillItsSignatureDoesNotBlock(t *testing.T) {
 func TestCLITrustAsksOnATerminal(t *testing.T) {
 	for _, answer := range []bool{false, true} {
 		scope, configFile := unverifiableScope(t)
-		oldTerminal, oldConfirm := trustIsTerminal, trustConfirm
-		var asked string
-		trustIsTerminal = func() bool { return true }
-		trustConfirm = func(prompt string) (bool, error) { asked = prompt; return answer, nil }
-		t.Cleanup(func() { trustIsTerminal, trustConfirm = oldTerminal, oldConfirm })
+		fp := &fakePrompter{interactive: true, answers: []fakeAnswer{
+			confirmAnswer("although its signature does not verify", answer),
+		}}
+		useFakePrompter(t, fp)
 
 		out, err := runCLI(t, append([]string{"trust", "sample"}, scope...)...)
 
-		if err != nil || asked == "" {
-			t.Fatalf("trust on a terminal = %v, asked %q:\n%s", err, asked, out)
+		if err != nil || len(fp.asked) == 0 {
+			t.Fatalf("trust on a terminal = %v, asked %v:\n%s", err, fp.asked, out)
 		}
 		if !strings.Contains(out, "certificate chain") {
 			t.Fatalf("trust should show why the signature fails before asking:\n%s", out)

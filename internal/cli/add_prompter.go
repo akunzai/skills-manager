@@ -34,24 +34,25 @@ type addPrompter interface {
 }
 
 var newAddPrompter = func(cmd *cobra.Command) addPrompter {
-	return terminalAddPrompter{out: cmd.OutOrStdout()}
+	return terminalAddPrompter{out: cmd.OutOrStdout(), p: newPrompter(cmd)}
 }
 
-// terminalAddPrompter asks through the tui package, translating each
-// prompt's own cancel signal (nil, "") into errAddCancelled.
+// terminalAddPrompter asks through prompter, translating each prompt's own
+// cancel signal (nil, "") into errAddCancelled.
 type terminalAddPrompter struct {
 	out io.Writer
+	p   prompter
 }
 
-func (terminalAddPrompter) Interactive() bool { return tui.IsTerminal() }
+func (t terminalAddPrompter) Interactive() bool { return t.p.Interactive() }
 
-func (terminalAddPrompter) SelectSkills(title string, groups tui.GroupedItems, flat []tui.SelectOption) ([]string, error) {
+func (t terminalAddPrompter) SelectSkills(title string, groups tui.GroupedItems, flat []tui.SelectOption) ([]string, error) {
 	var chosen []string
 	var err error
 	if groups != nil {
-		chosen, err = tui.PromptGroupedMultiSelect(title, groups)
+		chosen, err = t.p.GroupedMultiSelect(title, groups, nil)
 	} else {
-		chosen, err = tui.PromptMultiSelect(title, flat)
+		chosen, err = t.p.MultiSelect(title, flat)
 	}
 	if err != nil {
 		return nil, err
@@ -62,13 +63,13 @@ func (terminalAddPrompter) SelectSkills(title string, groups tui.GroupedItems, f
 	return chosen, nil
 }
 
-func (terminalAddPrompter) SelectSourcePath(skill string, paths []string) (string, error) {
+func (t terminalAddPrompter) SelectSourcePath(skill string, paths []string) (string, error) {
 	options := make([]tui.SelectOption, 0, len(paths)+1)
 	options = append(options, tui.SelectOption{Title: "Select a Source path"})
 	for _, candidate := range paths {
 		options = append(options, tui.SelectOption{Key: candidate, Title: candidate})
 	}
-	chosen, err := tui.PromptSelect(fmt.Sprintf("Select a Source path for %s:", skill), options, -1)
+	chosen, err := t.p.Select(fmt.Sprintf("Select a Source path for %s:", skill), options, -1)
 	if err != nil {
 		return "", err
 	}
@@ -78,8 +79,8 @@ func (terminalAddPrompter) SelectSourcePath(skill string, paths []string) (strin
 	return chosen, nil
 }
 
-func (terminalAddPrompter) SelectScope() (bool, error) {
-	choice, err := tui.PromptSelect("Choose a scope:", []tui.SelectOption{
+func (t terminalAddPrompter) SelectScope() (bool, error) {
+	choice, err := t.p.Select("Choose a scope:", []tui.SelectOption{
 		{Key: "global", Title: "Global"},
 		{Key: "project", Title: "Project"},
 	}, 0)
@@ -92,8 +93,8 @@ func (terminalAddPrompter) SelectScope() (bool, error) {
 	return choice == "project", nil
 }
 
-func (terminalAddPrompter) SelectAvailability() (bool, error) {
-	choice, err := tui.PromptSelect("Agent availability:", []tui.SelectOption{
+func (t terminalAddPrompter) SelectAvailability() (bool, error) {
+	choice, err := t.p.Select("Agent availability:", []tui.SelectOption{
 		{Key: "defaults", Title: "Follow defaults (recommended)"},
 		{Key: "custom", Title: "Customize"},
 	}, 0)
@@ -106,8 +107,8 @@ func (terminalAddPrompter) SelectAvailability() (bool, error) {
 	return choice == "custom", nil
 }
 
-func (terminalAddPrompter) SelectAgents(options []tui.SelectOption) ([]string, error) {
-	selected, err := tui.PromptMultiSelect("Select agents where these skills should be available:", options)
+func (t terminalAddPrompter) SelectAgents(options []tui.SelectOption) ([]string, error) {
+	selected, err := t.p.MultiSelect("Select agents where these skills should be available:", options)
 	if err != nil {
 		return nil, err
 	}
@@ -117,13 +118,13 @@ func (terminalAddPrompter) SelectAgents(options []tui.SelectOption) ([]string, e
 	return selected, nil
 }
 
-func (p terminalAddPrompter) ConfirmOverwrite(conflicts []engine.AddConflict) error {
-	fmt.Fprintf(p.out, "\n%sWarning: The following %d skill(s) already exist and will be overwritten:%s\n", colorYellow, len(conflicts), colorReset)
+func (t terminalAddPrompter) ConfirmOverwrite(conflicts []engine.AddConflict) error {
+	fmt.Fprintf(t.out, "\n%sWarning: The following %d skill(s) already exist and will be overwritten:%s\n", colorYellow, len(conflicts), colorReset)
 	for _, c := range conflicts {
-		fmt.Fprintf(p.out, "  • %s%s%s: %s -> %s\n", colorBold, c.Skill, colorReset, c.CurrentSrc, c.ProposedSrc)
+		fmt.Fprintf(t.out, "  • %s%s%s: %s -> %s\n", colorBold, c.Skill, colorReset, c.CurrentSrc, c.ProposedSrc)
 	}
-	fmt.Fprintln(p.out)
-	confirmed, err := tui.PromptConfirm("Do you want to proceed with overwriting these skills?", false)
+	fmt.Fprintln(t.out)
+	confirmed, err := t.p.Confirm("Do you want to proceed with overwriting these skills?", false)
 	if err != nil {
 		return err
 	}

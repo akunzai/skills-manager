@@ -47,6 +47,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		cmd.SilenceUsage = false
 		return fmt.Errorf("--skills-only and --links-only cannot be used together")
 	}
+	p := newPrompter(cmd)
 	scope := ResolveScope()
 	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 	cfg, err := config.LoadConfig(configPath)
@@ -83,11 +84,11 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 	}
 	var skippedReal []string
 	if !options.yes {
-		if !tui.IsTerminal() {
+		if !p.Interactive() {
 			printPrunePlan(cmd, plan)
 			return fmt.Errorf("refusing to prune without a terminal; rerun with --yes or --dry-run")
 		}
-		selected, err := promptPrunePlan(plan)
+		selected, err := promptPrunePlan(p, plan)
 		if err != nil {
 			return err
 		}
@@ -230,7 +231,7 @@ func printPruneSummary(cmd *cobra.Command, result engine.PruneResult) {
 	}
 }
 
-func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
+func promptPrunePlan(p prompter, plan engine.PrunePlan) ([]string, error) {
 	groups := make(tui.GroupedItems)
 	masterKeys := make(map[string]string, len(plan.AllUntracked()))
 	for _, skill := range plan.AllUntracked() {
@@ -277,7 +278,7 @@ func promptPrunePlan(plan engine.PrunePlan) ([]string, error) {
 			Selected: true,
 		})
 	}
-	return tui.PromptOrderedGroupedMultiSelect("Select items to prune:", groups, []string{pruneMasterGroup})
+	return p.GroupedMultiSelect("Select items to prune:", groups, []string{pruneMasterGroup})
 }
 
 // pruneSelection turns the prompt's selected keys back into the items they

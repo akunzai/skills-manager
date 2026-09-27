@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1785,16 +1784,16 @@ func TestCLISyncInteractiveUnknownBaselineDeclineLeavesItBlocked(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			prompted := false
-			oldTerminal, oldPrompt := syncIsTerminal, syncPromptUnknown
-			syncIsTerminal = func() bool { return true }
-			syncPromptUnknown = func(io.Writer, []engine.SkillFreshness) (bool, error) { prompted = true; return false, nil }
-			t.Cleanup(func() { syncIsTerminal, syncPromptUnknown = oldTerminal, oldPrompt })
+			fp := &fakePrompter{interactive: true}
+			if tc.prompted {
+				fp.answers = []fakeAnswer{selectAnswer("Replace Project Skills without a local baseline?", "cancel")}
+			}
+			useFakePrompter(t, fp)
 			out, err := runCLI(t, append(tc.args, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)...)
 			if err == nil || ExitCode(err) != 1 {
 				t.Fatalf("error = %v (exit %d); want exit 1\n%s", err, ExitCode(err), out)
 			}
-			if prompted != tc.prompted {
+			if prompted := len(fp.asked) > 0; prompted != tc.prompted {
 				t.Fatalf("prompted = %v; want %v\n%s", prompted, tc.prompted, out)
 			}
 			want := []string{"Skipped sample: unknown_baseline", "Sync did not converge. 1 blocked skill."}
@@ -2471,24 +2470,17 @@ func TestCLIDoctorFixReplacesConfirmedForeignAvailabilityPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldTerminal, oldConfirm := doctorIsTerminal, doctorConfirm
-	doctorIsTerminal = func() bool { return true }
-	var prompt string
-	doctorConfirm = func(message string, defaultYes bool) (bool, error) {
-		prompt = message
-		if defaultYes {
-			t.Fatal("replacement confirmation must default to No")
-		}
-		return true, nil
-	}
-	t.Cleanup(func() { doctorIsTerminal, doctorConfirm = oldTerminal, oldConfirm })
+	fp := &fakePrompter{interactive: true, answers: []fakeAnswer{
+		confirmAnswer("Replace these paths with managed Availability?", true),
+	}}
+	useFakePrompter(t, fp)
 
 	out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir)
 	if err != nil {
 		t.Fatalf("doctor --fix: %v\n%s", err, out)
 	}
-	if prompt != "Replace these paths with managed Availability?" {
-		t.Fatalf("replacement prompt = %q", prompt)
+	if len(fp.confirmDefaults) != 1 || fp.confirmDefaults[0] {
+		t.Fatalf("replacement confirmation must default to No: %v", fp.confirmDefaults)
 	}
 	for _, want := range []string{"~/.claude/skills/sample", "~/terminal-browser/sample", "symlink"} {
 		if !strings.Contains(out, want) {
@@ -3171,10 +3163,11 @@ func TestCLIRmConfirmsAnUntrackedDirectory(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(loose, "SKILL.md"), []byte("# Loose\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			oldTerminal, oldConfirm := rmIsTerminal, rmConfirm
-			rmIsTerminal = func() bool { return tc.terminal }
-			rmConfirm = func(string) (bool, error) { return tc.answer, nil }
-			t.Cleanup(func() { rmIsTerminal, rmConfirm = oldTerminal, oldConfirm })
+			fp := &fakePrompter{interactive: tc.terminal}
+			if tc.terminal && !tc.yes {
+				fp.answers = []fakeAnswer{confirmAnswer("Config does not declare", tc.answer)}
+			}
+			useFakePrompter(t, fp)
 
 			args := []string{"rm", "-p", "loose"}
 			if tc.yes {

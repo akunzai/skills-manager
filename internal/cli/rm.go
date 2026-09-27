@@ -14,13 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// rmIsTerminal and rmConfirm are seams over the terminal so a test can
-// answer rm's confirmation.
-var (
-	rmIsTerminal = tui.IsTerminal
-	rmConfirm    = func(prompt string) (bool, error) { return tui.PromptConfirm(prompt, false) }
-)
-
 func newRmCmd() *cobra.Command {
 	var (
 		flagYes bool
@@ -35,6 +28,7 @@ func newRmCmd() *cobra.Command {
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
+			p := newPrompter(cmd)
 			scope := ResolveScope()
 			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 
@@ -46,7 +40,7 @@ func newRmCmd() *cobra.Command {
 			skillsToRemove := args
 
 			if len(skillsToRemove) == 0 {
-				if tui.IsTerminal() && !flagYes {
+				if p.Interactive() && !flagYes {
 					inv, err := engine.LoadInventory(cfg, skillsDir)
 					if err != nil {
 						return err
@@ -68,7 +62,7 @@ func newRmCmd() *cobra.Command {
 						})
 					}
 
-					chosen, err := tui.PromptGroupedMultiSelect("Select skills to remove:", groups)
+					chosen, err := p.GroupedMultiSelect("Select skills to remove:", groups, nil)
 					if err != nil {
 						return err
 					}
@@ -101,10 +95,10 @@ func newRmCmd() *cobra.Command {
 				if len(untracked) == 1 {
 					subject = "1 untracked directory"
 				}
-				if !rmIsTerminal() {
+				if !p.Interactive() {
 					return fmt.Errorf("refusing to remove %s without a terminal; rerun with --yes", subject)
 				}
-				confirmed, err := rmConfirm(fmt.Sprintf("Remove %s Config does not declare (%s)?", subject, strings.Join(untracked, ", ")))
+				confirmed, err := p.Confirm(fmt.Sprintf("Remove %s Config does not declare (%s)?", subject, strings.Join(untracked, ", ")), false)
 				if err != nil {
 					return err
 				}
