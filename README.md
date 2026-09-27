@@ -14,22 +14,7 @@ Skills Manager installs skills once, records the result in `skills.json`, and ke
 
 ## Install
 
-macOS and Linux, with [Homebrew](https://brew.sh):
-
-```sh
-brew install akunzai/tap/skills-manager
-```
-
-Windows, with [Scoop](https://scoop.sh):
-
-```powershell
-scoop bucket add akunzai https://github.com/akunzai/scoop-bucket
-scoop install akunzai/skills-manager
-```
-
-Either package manager also handles upgrades: `brew upgrade akunzai/tap/skills-manager` or `scoop update skills-manager`.
-
-Without a package manager, macOS and Linux:
+macOS and Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/akunzai/skills-manager/main/install.sh | bash
@@ -41,7 +26,20 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/akunzai/skills-manager/main/install.ps1 | iex
 ```
 
-To replace this CLI with a newer release later: `skills self-update`. On a terminal, skills mentions a newer release at most once a day. A Homebrew or Scoop install refuses to replace itself and names that package manager's upgrade command instead.
+To replace this CLI with a newer release later: `skills self-update`. On a terminal, skills mentions a newer release at most once a day.
+
+If you already manage tools with a package manager and trust its third-party sources, the same releases are published to a [Homebrew](https://brew.sh) tap and a [Scoop](https://scoop.sh) bucket:
+
+```sh
+brew install akunzai/tap/skills-manager
+```
+
+```powershell
+scoop bucket add akunzai https://github.com/akunzai/scoop-bucket
+scoop install akunzai/skills-manager
+```
+
+Upgrade those with `brew upgrade akunzai/tap/skills-manager` or `scoop update skills-manager`; `skills self-update` refuses to replace a package-managed install and names that command instead.
 
 The installers and `skills self-update` check each download against the release's `checksums.txt`. Every release archive also carries a build provenance attestation: `gh attestation verify skills_<os>_<arch>.tar.gz --repo akunzai/skills-manager`.
 
