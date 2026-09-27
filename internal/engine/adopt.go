@@ -198,11 +198,8 @@ func BuildAdoptPlan(cfg *config.Config, scope models.Scope, options AdoptOptions
 			plan.LockError = err.Error()
 		}
 	}
-	for _, name := range slices.Sorted(slices.Values(inv.Untracked())) {
+	for _, name := range slices.Sorted(slices.Values(inv.UntrackedDirectories())) {
 		dir := filepath.Join(skillsDir, name)
-		if !isRealDir(dir) {
-			continue
-		}
 		if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
 			plan.NotSkills = append(plan.NotSkills, name)
 			continue

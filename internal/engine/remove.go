@@ -17,8 +17,8 @@ type RemoveItem struct {
 	Remote       bool
 	MasterExists bool
 	// UntrackedDirectory is a real directory on the Scope skills directory
-	// that Config does not declare. Retire keeps it; rm removes it only once
-	// the user has confirmed.
+	// that Config does not declare. Retire keeps it; applying the plan removes
+	// it only once ApproveUntrackedDirectories has approved it.
 	UntrackedDirectory bool
 }
 
@@ -31,6 +31,17 @@ func (p RemovePlan) needsBaselines() bool {
 // RemovePlan is the Skills rm will drop from Config then from disk.
 type RemovePlan struct {
 	Skills []RemoveItem
+	// approved says the user agreed to remove the plan's untracked
+	// directories. They are the user's own content, so only
+	// ApproveUntrackedDirectories sets it.
+	approved bool
+}
+
+// ApproveUntrackedDirectories is the plan with its untracked directories
+// approved for removal, once the user has agreed.
+func (p RemovePlan) ApproveUntrackedDirectories() RemovePlan {
+	p.approved = true
+	return p
 }
 
 // UntrackedDirectories names the real directories Config does not declare
@@ -52,6 +63,8 @@ type RemoveSkillResult struct {
 	RetiredSkill
 	RemovedFromConfig bool
 	MasterExisted     bool
+	// DirectoryKept is why an untracked directory named for removal stayed.
+	DirectoryKept string
 }
 
 // RemoveResult is the observable outcome of applying a RemovePlan.
@@ -77,29 +90,35 @@ func (r RemoveResult) NotFullyRemoved() []string {
 	return names
 }
 
-// BuildRemovePlan records whether each name is in Config and whether its
-// master Skill exists. It does not look at leftover empty agent dirs.
-func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) RemovePlan {
+// BuildRemovePlan records whether each name is in Config, whether its master
+// Skill exists, and whether it is an untracked directory, as Inventory
+// classifies it. It does not look at leftover empty agent dirs.
+func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) (RemovePlan, error) {
+	inv, err := LoadInventory(cfg, skillsDir)
+	if err != nil {
+		return RemovePlan{}, err
+	}
+	untracked := inv.UntrackedDirectories()
 	plan := RemovePlan{Skills: make([]RemoveItem, 0, len(names))}
 	for _, name := range names {
 		if name == "" {
 			continue
 		}
 		kind, _, inConfig := config.FindSkillSource(cfg, name)
-		info, err := os.Lstat(filepath.Join(skillsDir, name))
+		_, err := os.Lstat(filepath.Join(skillsDir, name))
 		plan.Skills = append(plan.Skills, RemoveItem{
 			Name:               name,
 			InConfig:           inConfig,
 			Remote:             kind == config.SkillRemote,
 			MasterExists:       err == nil,
-			UntrackedDirectory: err == nil && !inConfig && info.IsDir(),
+			UntrackedDirectory: slices.Contains(untracked, name),
 		})
 	}
-	return plan
+	return plan, nil
 }
 
 // ApplyRemovePlan Retires each Skill, then removes the Untracked directories
-// among them, which the caller has had the user confirm. A Config that cannot
+// among them if the plan approves them. A Config that cannot
 // be saved is the error, with nothing on disk changed; everything Retire could
 // not remove is in the result.
 func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir string) (RemoveResult, error) {
@@ -115,12 +134,21 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 	result := RemoveResult{Skills: make([]RemoveSkillResult, len(plan.Skills))}
 	for i, item := range plan.Skills {
 		skill := retired[i]
-		if item.UntrackedDirectory && skill.CopyKept {
+		kept := ""
+		switch {
+		case !item.UntrackedDirectory || !skill.CopyKept:
+		case !plan.approved:
+			kept = "not confirmed"
+		// Checked again right before removal: the plan may have waited on a
+		// prompt, and only the directory the user was asked about goes.
+		case !isRealDir(skill.CopyPath):
+			kept = "no longer a directory"
+		default:
 			skill.CopyKept = false
 			skill.CopyErr = RemoveAll(skill.CopyPath)
 			skill.CopyRemoved = skill.CopyErr == nil
 		}
-		result.Skills[i] = RemoveSkillResult{RetiredSkill: skill, RemovedFromConfig: skill.Undeclared, MasterExisted: item.MasterExists}
+		result.Skills[i] = RemoveSkillResult{RetiredSkill: skill, RemovedFromConfig: skill.Undeclared, MasterExisted: item.MasterExists, DirectoryKept: kept}
 	}
 	switch baselines.Verdict(plan.needsBaselines()) {
 	case StateWarn:
