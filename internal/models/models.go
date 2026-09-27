@@ -709,6 +709,9 @@ type SkillItem struct {
 	// Signed is whether a remote Skill's copy verified against a signature
 	// when Sync last applied it.
 	Signed bool `json:"signed"`
+	// Unverified is whether a remote Skill's copy was applied as Trusted
+	// content although its signature does not verify.
+	Unverified bool `json:"unverified"`
 }
 
 // SkillStatus is how Inventory classifies one Skill against the Scope skills

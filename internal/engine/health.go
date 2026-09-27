@@ -88,9 +88,9 @@ type DoctorReport struct {
 	// Unverified are remote Skills whose applied copy is Trusted content,
 	// and StaleTrust the Skills whose Trusted content no longer matches
 	// their Cache copy, or that Config no longer declares.
-	Unverified []UnverifiedSkill
-	StaleTrust []string
-	StateError string
+	Unverified    []UnverifiedSkill
+	StaleTrust    []string
+	StateError    string
 	StaleState    []string
 	StateRepair   ItemRepair
 	CacheRecovery []string
