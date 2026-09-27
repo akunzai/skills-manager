@@ -180,6 +180,9 @@ func refreshSources(cmd *cobra.Command, out io.Writer, cfg *config.Config, targe
 		case engine.UpdateRepoUnchanged:
 			// Counted with the Sources already up to date, not listed.
 			region.Done(ev.Source)
+		case engine.UpdateTrustRootError:
+			// After the refresh, so no region is drawing.
+			fmt.Fprintf(out, "      %sError: %s%s\n", colorRed, ev.Err, colorReset)
 		case engine.UpdateRepoError:
 			region.Fail(ev.Source)
 			region.Above(func() {

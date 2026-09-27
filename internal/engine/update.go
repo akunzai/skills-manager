@@ -28,6 +28,9 @@ type SkippedRepoInfo struct {
 	Reason   string `json:"reason"`
 	LocalSHA string `json:"local_sha,omitempty"`
 }
+
+// UpdateErrorInfo is one thing Update could not do. Source is empty for the
+// Sigstore trust root, which every Source shares.
 type UpdateErrorInfo struct {
 	Source string `json:"source"`
 	Error  string `json:"error"`
@@ -58,6 +61,9 @@ const (
 	UpdateRepoUnchanged = "repo_unchanged"
 	UpdateRepoError     = "repo_error"
 	UpdateRenamed       = "renamed"
+	// UpdateTrustRootError is a Sigstore trust root the signed Skills of the
+	// selected Sources need and Update could not fetch.
+	UpdateTrustRootError = "trust_root_error"
 )
 
 type UpdateEvent struct {
@@ -181,10 +187,6 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoUnchanged, Source: source, NewSHA: sha})
 			continue
 		}
-		if err := refreshTrustRootFor(cache, paths); err != nil {
-			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: err.Error()})
-			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: err.Error()})
-		}
 		result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, NewSHA: sha})
 		emitUpdate(progress, UpdateEvent{Kind: UpdateRepoDone, Source: source, NewSHA: sha})
 	}
@@ -193,8 +195,35 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 	}
 	if !dryRun {
 		followRenames(repositories, cacheDir, result, progress)
+		ensureUpdatedTrustRoot(repositories, cacheDir, result, progress)
 	}
 	return result, nil
+}
+
+// ensureUpdatedTrustRoot fetches the trust root once for every selected
+// Source: a current one when a Source with a signed Skill was just updated,
+// and a missing one whatever was updated, so a Skill blocked because Add
+// could not fetch it converges on the next plain Update.
+func ensureUpdatedTrustRoot(repositories map[string]config.RemoteRepo, cacheDir string, result *UpdateResult, progress UpdateProgress) {
+	var all, updated []string
+	for _, source := range slices.Sorted(maps.Keys(repositories)) {
+		repo := repositories[source]
+		paths := declaredSubpaths(repo)
+		for _, renamed := range result.Renamed {
+			if renamed.Source == source {
+				paths = append(paths, renamed.Subpath)
+			}
+		}
+		dirs := skillDirs(NewCache(source, repo.URL, repo.Branch, cacheDir), paths)
+		all = append(all, dirs...)
+		if slices.ContainsFunc(result.UpdatedRepos, func(info UpdatedRepoInfo) bool { return info.Source == source }) {
+			updated = append(updated, dirs...)
+		}
+	}
+	if err := ensureTrustRoot(cacheDir, anySigned(updated...), all...); err != nil {
+		result.Errors = append(result.Errors, UpdateErrorInfo{Error: err.Error()})
+		emitUpdate(progress, UpdateEvent{Kind: UpdateTrustRootError, Err: err.Error()})
+	}
 }
 
 // followRenames covers the replacement of every declared Skill its Source no

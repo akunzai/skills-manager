@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -471,5 +472,96 @@ func TestSyncBlocksARenameToAnUnverifiedSkill(t *testing.T) {
 	}
 	if !exists(filepath.Join(f.skillsDir, "old")) || exists(filepath.Join(f.skillsDir, "new")) {
 		t.Fatal("a blocked rename should keep old and write nothing for new")
+	}
+}
+
+// failingTrustedRoot makes fetching the trust root fail until the returned
+// func is called, which makes it succeed.
+func failingTrustedRoot(t *testing.T) (reachable func(), fetches *int) {
+	t.Helper()
+	fetches = stubTrustedRoot(t)
+	succeed := fetchTrustedRoot
+	fetchTrustedRoot = func(cacheDir string) ([]byte, error) {
+		*fetches++
+		return nil, errors.New("tuf.sigstore.dev unreachable")
+	}
+	return func() { fetchTrustedRoot = succeed }, fetches
+}
+
+// verifiedOnlyWithTrustRoot verifies a Skill as signed once the trust root is
+// on disk, and as missing it before.
+func verifiedOnlyWithTrustRoot(cacheDir string) func(string, signing.Trust) (signing.Result, error) {
+	return func(string, signing.Trust) (signing.Result, error) {
+		if _, err := os.Stat(trustRootPath(cacheDir)); err != nil {
+			return signing.Result{}, signing.ErrNoTrustRoot
+		}
+		return signing.Result{Signed: true, Signer: testSigner}, nil
+	}
+}
+
+func TestUpdateFetchesATrustRootAddCouldNot(t *testing.T) {
+	cfg, configPath, skillsDir, cacheDir, intake := addSignedFixture(t)
+	reachable, _ := failingTrustedRoot(t)
+	stubVerify(t, verifiedOnlyWithTrustRoot(cacheDir))
+
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	result, err := ApplyAddPlan(plan, cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Blocked != 1 {
+		t.Fatalf("add = %+v, want the Skill blocked for its missing trust root", result.SyncTally)
+	}
+	if !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncTrustRootFailed && ev.Err != "" }) {
+		t.Fatalf("add events = %+v, want the failed trust-root fetch reported", result.Events)
+	}
+
+	reachable()
+	updated, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Errors) != 0 {
+		t.Fatalf("update errors = %+v", updated.Errors)
+	}
+	if _, err := os.Stat(trustRootPath(cacheDir)); err != nil {
+		t.Fatalf("update of a current Source should fetch the missing trust root: %v", err)
+	}
+	if _, report := syncOnce(t, cfg, configPath, skillsDir, cacheDir, SyncDecision{}); report.Blocked+report.Failed != 0 {
+		t.Fatalf("sync = %+v, want the Skill applied once the trust root is there", report.SyncTally)
+	}
+}
+
+func TestUpdateReportsATrustRootItCannotFetch(t *testing.T) {
+	cfg, configPath, skillsDir, cacheDir, intake := addSignedFixture(t)
+	failingTrustedRoot(t)
+	stubVerify(t, verifiedOnlyWithTrustRoot(cacheDir))
+	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(updated.Errors) != 1 || !strings.Contains(updated.Errors[0].Error, "trust root") {
+		t.Fatalf("update errors = %+v, want the trust-root fetch reported once", updated.Errors)
+	}
+}
+
+func TestUpdateOfUnsignedSourceNeverFetchesTrustRoot(t *testing.T) {
+	cfg, configPath, skillsDir, cacheDir := signatureFixture(t)
+	fetches := stubTrustedRoot(t)
+	stubVerify(t, unsigned)
+	syncOnce(t, cfg, configPath, skillsDir, cacheDir, SyncDecision{})
+
+	if _, err := UpdateRemoteSkills(cfg, nil, true, false, cacheDir, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if *fetches != 0 {
+		t.Fatalf("trust root fetched %d times for an unsigned Source", *fetches)
 	}
 }

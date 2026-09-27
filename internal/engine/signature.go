@@ -26,6 +26,10 @@ const SyncSignerRecorded = "signer_recorded"
 // signature does not verify, and the user trusted this exact content.
 const SyncTrustedUnverified = "trusted_unverified"
 
+// SyncTrustRootFailed is a trust root Add could not fetch for the signed
+// Skills it declared. They stay blocked until Update fetches it.
+const SyncTrustRootFailed = "trust_root_failed"
+
 // SyncSignerFailed is a signer Sync could not record because Config could not
 // be saved.
 const SyncSignerFailed = "signer_failed"
@@ -56,9 +60,7 @@ var fetchTrustedRoot = func(cacheDir string) ([]byte, error) {
 }
 
 // RefreshTrustRoot fetches the Sigstore trust root into the Cache directory,
-// where Sync reads it without network access (ADR-0004). It runs only where a
-// Cache was just refreshed and a Skill in it is signed, so Update and Add of
-// unsigned Sources never reach Sigstore.
+// where Sync reads it without network access (ADR-0004).
 func RefreshTrustRoot(cacheDir string) error {
 	data, err := fetchTrustedRoot(cacheDir)
 	if err != nil {
@@ -74,18 +76,31 @@ func RefreshTrustRoot(cacheDir string) error {
 	return os.Rename(tmp, trustRootPath(cacheDir))
 }
 
-// refreshTrustRootFor refreshes the trust root when a Skill at subpaths of
-// cache is signed. A failure is not reported here: verifying that Skill then
-// names Update as the way out.
-func refreshTrustRootFor(cache Cache, subpaths []string) error {
+// ensureTrustRoot makes the signed Skills among dirs verifiable offline. It
+// fetches the trust root when one of them is signed and either none is cached
+// or refresh asks for a current one, as after fetching those Skills. Skills
+// that are all unsigned never reach Sigstore. Add and Update, the commands
+// that reach the network, both go through here, so a trust root one of them
+// could not fetch is fetched by the next Update (ADR-0010).
+func ensureTrustRoot(cacheDir string, refresh bool, dirs ...string) error {
+	if !anySigned(dirs...) {
+		return nil
+	}
+	if !refresh {
+		if _, err := os.Stat(trustRootPath(cacheDir)); err == nil {
+			return nil
+		}
+	}
+	return RefreshTrustRoot(cacheDir)
+}
+
+// skillDirs is where each of subpaths sits in cache's working copy.
+func skillDirs(cache Cache, subpaths []string) []string {
 	dirs := make([]string, 0, len(subpaths))
 	for _, subpath := range subpaths {
 		dirs = append(dirs, filepath.Join(cache.dir(), filepath.FromSlash(subpath)))
 	}
-	if !anySigned(dirs...) {
-		return nil
-	}
-	return RefreshTrustRoot(cache.cacheDir)
+	return dirs
 }
 
 // anySigned reports whether a Skill directory under any of dirs carries a
