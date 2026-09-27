@@ -16,8 +16,8 @@ var (
 		return updater.CheckSelfUpdateWithTimeout("", updater.NoticeCheckTimeoutSec)
 	}
 	// selfUpdateNoticeExecutablePath is a seam over
-	// updater.GetCurrentExecutablePath so tests can simulate a Homebrew or
-	// Scoop install without a real one.
+	// updater.GetCurrentExecutablePath so tests can simulate a Homebrew,
+	// Scoop, or mise install without a real one.
 	selfUpdateNoticeExecutablePath = updater.GetCurrentExecutablePath
 	selfUpdateNoticeCmd            *cobra.Command
 )

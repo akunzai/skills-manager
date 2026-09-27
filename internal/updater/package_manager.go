@@ -10,18 +10,21 @@ type PackageManagerInstall struct {
 	Command string
 }
 
-// Homebrew's acceptance policy forbids a formula from updating itself, and a
-// Scoop manifest owns the binary the same way, so self-update must refuse to
-// replace either and name the upgrade command instead.
+// Homebrew's acceptance policy forbids a formula from updating itself, a
+// Scoop manifest owns the binary the same way, and mise tracks its own
+// installs by content-addressed path, so self-update must refuse to replace
+// any of them and name the upgrade command instead.
 const (
 	HomebrewUpgradeCommand = "brew upgrade akunzai/tap/skills-manager"
 	ScoopUpgradeCommand    = "scoop update skills-manager"
+	MiseUpgradeCommand     = "mise upgrade github:akunzai/skills-manager"
 )
 
 // ClassifyExecutablePath reports which package manager, if any, owns path -
 // the running executable's path with symlinks already resolved
 // (GetCurrentExecutablePath does this). It is a pure function of path and
-// goos, so every case is testable without a real Homebrew or Scoop install.
+// goos, so every case is testable without a real Homebrew, Scoop, or mise
+// install.
 //
 // Homebrew is detected by a "Cellar" path segment rather than a hard-coded
 // prefix: the prefix varies (/opt/homebrew, /usr/local,
@@ -36,6 +39,11 @@ const (
 // Scoop is detected by the path segment sequence "scoop" ... "apps",
 // matched case-insensitively only when goos is "windows" - Scoop only
 // installs there, and Windows paths are case-insensitive on disk.
+//
+// mise is detected by the path segment sequence "mise" ... "installs",
+// matched the same way: every backend (github:, ubi:, ...) resolves through
+// <MISE_DATA_DIR>/installs/<tool-id>/<version>/... regardless of which one
+// installed it.
 func ClassifyExecutablePath(path, goos string) *PackageManagerInstall {
 	segments := pathSegments(path)
 
@@ -45,8 +53,13 @@ func ClassifyExecutablePath(path, goos string) *PackageManagerInstall {
 		}
 	}
 
-	if isScoopApps(segments, goos == "windows") {
+	caseInsensitive := goos == "windows"
+	if isScoopApps(segments, caseInsensitive) {
 		return &PackageManagerInstall{Name: "Scoop", Command: ScoopUpgradeCommand}
+	}
+
+	if isMiseInstalls(segments, caseInsensitive) {
+		return &PackageManagerInstall{Name: "mise", Command: MiseUpgradeCommand}
 	}
 
 	return nil
@@ -71,6 +84,24 @@ func isScoopApps(segments []string, caseInsensitive bool) bool {
 			continue
 		}
 		if equalSegment(seg, "apps", caseInsensitive) {
+			return true
+		}
+	}
+	return false
+}
+
+// isMiseInstalls reports whether segments contains "mise" followed later by
+// "installs", such as .../mise/installs/github-akunzai-skills-manager/0.20.0/skills.
+// A "mise" segment with no later "installs" (its shims or bin directory, for
+// instance) does not match.
+func isMiseInstalls(segments []string, caseInsensitive bool) bool {
+	sawMise := false
+	for _, seg := range segments {
+		if !sawMise {
+			sawMise = equalSegment(seg, "mise", caseInsensitive)
+			continue
+		}
+		if equalSegment(seg, "installs", caseInsensitive) {
 			return true
 		}
 	}
