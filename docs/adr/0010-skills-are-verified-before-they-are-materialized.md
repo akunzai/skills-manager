@@ -6,11 +6,13 @@ Verification is strict, as `model_signing verify` is without `--ignore-unsigned-
 
 The Signer is recorded in Config, not the Scope state. The first keyless Signer seen for a Source, by Add or by Sync, is written to `signature.sigstore`, where a team reviews and shares it; after that a different Signer is refused. Sync writing Config for this follows ADR-0007: it happens only when applying a plan, and only for a Source with no Signer pinned. A certificate chain cannot be discovered, so it is always declared. The Baseline records whether each applied copy was signed, and a Skill once signed that arrives unsigned is refused whatever the Source requires, so stripping a signature is not a way around it. Otherwise an unsigned Skill is Materialized, unless its Source sets `require`; `skills ls` marks only signed Skills, since unsigned is still the norm.
 
+Every command that plans a remote Skill verifies it there, through the one planner that builds the item: Sync, Add, the new Skill of a Rename, and Adopt. A Rename whose new Skill does not verify is blocked whole, before the old Skill is Retired, so the Scope keeps a Skill it can use. Adopt still declares a lock-recorded copy that does not verify, since what is on disk is kept (ADR-0009), but records no Baseline for it, so Sync blocks it until it does. Add, too, declares a Skill it has just found blocked: the user chose that Skill and its Availability, and once the cause is fixed — a trust root fetched by Update, a Source that signs again — Sync Materializes it without that choice being asked again. The declaration is saved knowing the block, and the block is reported with Add's result.
+
 Keyless verification needs the Sigstore trust root. Add and Update, which already reach the network, fetch it through TUF into the Cache directory (`.sigstore/trusted_root.json`) whenever a Skill they just fetched is signed; Sync reads that file and nothing else, so ADR-0004's offline rule holds. A missing trust root blocks a signed Skill with `update` as the next action.
 
 Rejected:
 
-- **Verifying at Materialize time only.** The block would not appear in the Sync plan's preview, and Add would declare a Skill before learning it cannot be written.
+- **Verifying at Materialize time only.** The block would not appear in the Sync plan's preview, and Add would save its declaration before learning it cannot be written.
 - **Git-native verification** (`git verify-commit` in the Cache). A commit merged in GitHub's web UI is signed by GitHub, not the publisher; a copied Skill cannot be verified again; and verification would have to live in the Cache module (ADR-0005).
 - **Verifying integrity without a Signer.** Any Sigstore identity can sign anything, so "signed, Signer not recorded" would read as trust it does not carry.
 - **Sync using TUF with a forced cache.** Reading one serialized trust root file is simpler and is offline by construction.
