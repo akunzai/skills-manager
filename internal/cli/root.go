@@ -100,9 +100,11 @@ func scopeFlagsOf(cmd *cobra.Command, s Scope) string {
 
 // shellWord is path as one shell word: bare when nothing in it needs quoting,
 // which keeps a suggested command readable inside the quotes around it.
+// ':' and '\' stay bare too: a Windows path is literal inside those quotes,
+// and quoting it again would end the suggestion at the path.
 func shellWord(path string) string {
 	tilded := models.ToTildePath(path)
-	if strings.Trim(tilded, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._~-") == "" && !strings.HasPrefix(tilded, "-") {
+	if strings.Trim(tilded, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._~-:\\") == "" && !strings.HasPrefix(tilded, "-") {
 		return tilded
 	}
 	return shellQuotePath(path)

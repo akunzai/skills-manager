@@ -86,6 +86,9 @@ func TestCLIDiffExitCodesAndReadOnly(t *testing.T) {
 	// 0: the Scope copy is its Baseline, and the Cache has not moved.
 	if out, code := diff("sample"); code != 0 || !strings.Contains(out, "Upstream") || !strings.Contains(out, "Local") {
 		t.Fatalf("clean diff = %d:\n%s", code, out)
+	} else if want := "Next: run 'skills diff --fetch sample --config " + configFile; !strings.Contains(out, want) {
+		// An empty Upstream read offline may only mean a stale Cache.
+		t.Fatalf("clean diff lacks the --fetch hint %q:\n%s", want, out)
 	}
 
 	// 1: a local edit, shown as a unified diff.
@@ -157,6 +160,31 @@ func TestCLIDiffWithoutABaselineSaysWhy(t *testing.T) {
 	}
 	if strings.Contains(out, "Local") {
 		t.Fatalf("a Skill without a Baseline has no Local section:\n%s", out)
+	}
+}
+
+// Only an empty Upstream read from an unrefreshed Cache suggests --fetch.
+func TestPrintSkillDiffSuggestsFetchOnlyForAnOfflineEmptyUpstream(t *testing.T) {
+	changed := []engine.FileDiff{{Path: "SKILL.md", Added: 1, Patch: "diff --git a/SKILL.md b/SKILL.md\n"}}
+	for _, tc := range []struct {
+		name     string
+		d        engine.SkillDiff
+		fetched  bool
+		wantHint bool
+	}{
+		{"offline, empty", engine.SkillDiff{BaselineCommit: "abc"}, false, true},
+		{"offline, no Baseline, empty", engine.SkillDiff{}, false, true},
+		{"fetched, empty", engine.SkillDiff{BaselineCommit: "abc"}, true, false},
+		{"offline, upstream changes", engine.SkillDiff{BaselineCommit: "abc", Upstream: changed}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.d.Skill = "sample"
+			var out strings.Builder
+			printSkillDiff(&out, &tc.d, false, tc.fetched, " -p")
+			if got := strings.Contains(out.String(), "Next: run 'skills diff --fetch sample -p'"); got != tc.wantHint {
+				t.Fatalf("hint shown = %v; want %v:\n%s", got, tc.wantHint, out.String())
+			}
+		})
 	}
 }
 

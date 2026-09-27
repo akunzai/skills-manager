@@ -71,3 +71,13 @@ func TestResolveScopeExpandsUserInOverrides(t *testing.T) {
 		t.Errorf("ConfigPath = %q; want expanded", scope.ConfigPath)
 	}
 }
+
+// A suggested command is already wrapped in single quotes. A Windows path's
+// drive colon and backslashes are literal there; quoting them again closes
+// the suggestion at the path.
+func TestShellWordLeavesAWindowsPathBare(t *testing.T) {
+	const path = `D:\a\_temp\skills.json`
+	if got := shellWord(path); got != path {
+		t.Fatalf("shellWord = %q; want the path bare", got)
+	}
+}
