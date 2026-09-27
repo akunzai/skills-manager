@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -356,5 +357,119 @@ func TestAddOfUnsignedSourceNeverFetchesTrustRoot(t *testing.T) {
 	}
 	if *fetches != 0 {
 		t.Fatalf("trust root fetched %d times for an unsigned Source", *fetches)
+	}
+}
+
+// signedAt verifies a Skill as signed by signer only when its Cache path ends
+// in name, and as unsigned otherwise.
+func signedAt(name string, signer signing.Signer) func(string, signing.Trust) (signing.Result, error) {
+	return func(dir string, trust signing.Trust) (signing.Result, error) {
+		if filepath.Base(dir) != name {
+			return signing.Result{}, nil
+		}
+		return signing.Result{Signed: true, Signer: signer}, nil
+	}
+}
+
+func TestAdoptDeclaresAnUnverifiedCopyWithoutABaseline(t *testing.T) {
+	f := newAdoptFixture(t)
+	f.untracked(t, "sample", "# Sample\n")
+	f.lock(t, map[string]string{"sample": "sample"})
+	stubVerify(t, func(string, signing.Trust) (signing.Result, error) {
+		return signing.Result{}, errors.New("SKILL.md changed after signing")
+	})
+
+	result := f.adopt(t, config.DefaultConfig())
+
+	assertAdoptStates(t, result, AdoptDeclaredWithoutBaseline)
+	if reason := result.Skills[0].Reason; reason == "" {
+		t.Fatal("an unverified copy should say why it has no Baseline")
+	}
+	saved, err := config.LoadConfig(f.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := saved.Remote["owner/repo"].Skills["sample"]; !ok {
+		t.Fatal("an unverified copy must still be declared")
+	}
+	if _, ok := OpenBaselines(f.skillsDir).Applied("sample"); ok {
+		t.Fatal("an unverified copy must not get a Baseline")
+	}
+	if summary := f.syncSummary(t); summary.Blocked != 1 {
+		t.Fatalf("sync after adopting an unverified copy = %#v; want it blocked", summary)
+	}
+}
+
+func TestAdoptRecordsFirstKeylessSigner(t *testing.T) {
+	f := newAdoptFixture(t)
+	f.untracked(t, "sample", "# Sample\n")
+	f.lock(t, map[string]string{"sample": "sample"})
+	stubVerify(t, signedBy(testSigner))
+
+	result := f.adopt(t, config.DefaultConfig())
+
+	assertAdoptStates(t, result, AdoptAdopted)
+	saved, err := config.LoadConfig(f.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := saved.Remote["owner/repo"].Signature; got == nil || got.Sigstore == nil || got.Sigstore.Identity != testSigner.Identity {
+		t.Fatalf("saved signature = %+v, want %+v", got, testSigner)
+	}
+	if applied, _ := OpenBaselines(f.skillsDir).Applied("sample"); !applied.Signed {
+		t.Fatal("Baseline should record the adopted copy as signed")
+	}
+}
+
+func TestSyncRenameRecordsTheNewSkillsSigner(t *testing.T) {
+	stubVerify(t, signedAt("new", testSigner))
+	f := newRenameFixture(t)
+	f.renameUpstream(t, "new", "old")
+	f.update(t)
+
+	if report := f.sync(t, SyncDecision{}); !report.Summary().Converged() {
+		t.Fatalf("rename did not converge: %#v", report.SyncTally)
+	}
+
+	cfg, err := config.LoadConfig(f.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Remote["owner/repo"].Signature; got == nil || got.Sigstore == nil || got.Sigstore.Identity != testSigner.Identity {
+		t.Fatalf("saved signature = %+v, want %+v", got, testSigner)
+	}
+	if applied, _ := OpenBaselines(f.skillsDir).Applied("new"); !applied.Signed {
+		t.Fatal("Baseline should record the renamed copy as signed")
+	}
+}
+
+func TestSyncBlocksARenameToAnUnverifiedSkill(t *testing.T) {
+	stubVerify(t, func(dir string, _ signing.Trust) (signing.Result, error) {
+		if filepath.Base(dir) == "new" {
+			return signing.Result{}, errors.New("SKILL.md changed after signing")
+		}
+		return signing.Result{}, nil
+	})
+	f := newRenameFixture(t)
+	f.renameUpstream(t, "new", "old")
+	f.update(t)
+
+	plan := f.plan(t)
+	if item := plan.Items[0]; item.Block != SyncBlockSignature {
+		t.Fatalf("item = %+v, want the rename blocked by its new Skill's signature", item)
+	}
+	report, err := plan.Apply(SyncDecision{Force: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if report.Blocked != 1 || report.Failed != 0 {
+		t.Fatalf("report = %+v, want one blocked rename", report.SyncTally)
+	}
+	if got := f.declared(t); !reflect.DeepEqual(got, map[string]string{"old": "skills/old"}) {
+		t.Fatalf("declared = %v, want old kept", got)
+	}
+	if !exists(filepath.Join(f.skillsDir, "old")) || exists(filepath.Join(f.skillsDir, "new")) {
+		t.Fatal("a blocked rename should keep old and write nothing for new")
 	}
 }
