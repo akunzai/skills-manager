@@ -224,7 +224,7 @@ func TestSignatureTrustResolvesCertificateChainAgainstConfigDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "root.pem"), pem, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := newSignatures(config.DefaultConfig(), filepath.Join(dir, "skills.json"), "", &Baselines{})
+	s := newRemotePlanner(config.DefaultConfig(), filepath.Join(dir, "skills.json"), "", &Baselines{})
 	trust, err := s.trust("src", &config.SignaturePolicy{CertificateChain: "root.pem"})
 	if err != nil || trust.Roots == nil {
 		t.Fatalf("trust = %+v, %v; want roots read from beside skills.json", trust, err)

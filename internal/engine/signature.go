@@ -95,23 +95,25 @@ func anySigned(dirs ...string) bool {
 	return false
 }
 
-// signatures verifies remote Skills against their Source's signature policy
-// for one plan. It loads the trust root once, and remembers the first keyless
-// signer seen for a Source with no pinned signer, so every Skill of that
-// Source in the plan is held to the same one.
-type signatures struct {
+// remotePlanner plans the remote Skills of one operation — a Sync, an Add,
+// an Adopt — and verifies each one's Cache copy against its Source's signature
+// policy as it plans it, so no caller holds a remote item that was not
+// verified (ADR-0010). It loads the trust root once found, and remembers the first
+// keyless signer seen for a Source with no pinned signer, so every Skill of
+// that Source in the operation is held to the same one and recordSigner can
+// write it to Config.
+type remotePlanner struct {
 	cfg       *config.Config
 	configDir string
 	cacheDir  string
 	baselines *Baselines
 
 	trustedRoot root.TrustedMaterial
-	loaded      bool
 	observed    map[string]signing.Signer
 }
 
-func newSignatures(cfg *config.Config, configPath, cacheDir string, baselines *Baselines) *signatures {
-	return &signatures{
+func newRemotePlanner(cfg *config.Config, configPath, cacheDir string, baselines *Baselines) *remotePlanner {
+	return &remotePlanner{
 		cfg:       cfg,
 		configDir: filepath.Dir(configPath),
 		cacheDir:  cacheDir,
@@ -120,70 +122,146 @@ func newSignatures(cfg *config.Config, configPath, cacheDir string, baselines *B
 	}
 }
 
-func (s *signatures) root() root.TrustedMaterial {
-	if !s.loaded {
-		s.loaded = true
-		if trusted, err := root.NewTrustedRootFromPath(trustRootPath(s.cacheDir)); err == nil {
-			s.trustedRoot = trusted
+// reconcile plans one declared remote Skill from its classified Freshness:
+// Sync reconciling an existing declaration. A renamed Skill carries its new
+// Skill, verified now, so a rename to a Skill that does not verify is blocked
+// before the old one is Retired.
+func (p *remotePlanner) reconcile(skillsDir, source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	item := planRemoteItem(source, cache, skill, drift)
+	if skill.Status != SkillRenamed {
+		// A Skill blocked or failed already is not read, so it keeps that
+		// reason.
+		if item.Block == SyncBlockNone && item.Err == "" {
+			p.verify(&item)
 		}
+		return item
 	}
-	return s.trustedRoot
+	item = planRename(p.cfg, skillsDir, item)
+	if item.RenameTargetDeclared || item.Block == SyncBlockRenameOccupied {
+		return item
+	}
+	// The new Skill is planned even when the old copy's Drift blocks the
+	// rename, since --force lifts that; its signature no decision lifts.
+	renamed := p.declared(source, cache, SkillFreshness{
+		Name:      skill.RenamedTo,
+		Source:    source,
+		Subpath:   skill.RenamedSubpath,
+		ScopePath: filepath.Join(skillsDir, skill.RenamedTo),
+	}, AvailabilityDrift{})
+	if renamed.Block != SyncBlockNone {
+		item.Block, item.BlockReason, item.BlockNext = renamed.Block, renamed.BlockReason, renamed.BlockNext
+		return item
+	}
+	item.renamed = &renamed
+	return item
 }
 
-// check verifies item's Skill in its Cache and records the verdict on item: a
-// SyncBlockSignature block, whether it is signed, and the signer to record
-// for a Source that has none.
-func (s *signatures) check(item *SyncPlanItem) {
-	policy := s.cfg.Remote[item.Source].Signature
-	trust, err := s.trust(item.Source, policy)
+// declared plans a remote Skill that was just declared, by Add or as the new
+// name of a Rename. It is always Materialized unless its signature blocks it:
+// neither Drift nor a missing Baseline does, because Add asked before
+// overwriting and a Rename already protected the old copy. skill carries no
+// Freshness status.
+func (p *remotePlanner) declared(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	item := baseRemoteItem(source, cache, skill, drift)
+	item.NeedsWrite = true
+	p.verify(&item)
+	return item
+}
+
+// recorded plans a remote Skill whose copy on the Scope skills directory
+// already matches the Cache, as Adopt finds one: applying it writes nothing
+// and records the Baseline.
+func (p *remotePlanner) recorded(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+	item := baseRemoteItem(source, cache, skill, drift)
+	p.verify(&item)
+	return item
+}
+
+// recordSigner writes the first keyless signer planned for source to Config,
+// when the Source is declared with none pinned. It reports whether Config
+// changed; saving it is the caller's. A plan built without a planner has
+// planned no signer.
+func (p *remotePlanner) recordSigner(source string) (*signing.Signer, bool) {
+	if p == nil {
+		return nil, false
+	}
+	signer, seen := p.observed[source]
+	repo, declared := p.cfg.Remote[source]
+	if !seen || !declared || repo.Signature.Pinned() {
+		return nil, false
+	}
+	policy := config.SignaturePolicy{}
+	if repo.Signature != nil {
+		policy = *repo.Signature
+	}
+	policy.Sigstore = &config.SigstoreSigner{Identity: signer.Identity, Issuer: signer.Issuer}
+	repo.Signature = &policy
+	p.cfg.Remote[source] = repo
+	return &signer, true
+}
+
+// root loads the trust root once it is there. A missing one is looked for
+// again: Adopt declares several Sources in one operation, and the Remote
+// intake of a later, signed one fetches it.
+func (p *remotePlanner) root() root.TrustedMaterial {
+	if p.trustedRoot == nil {
+		if trusted, err := root.NewTrustedRootFromPath(trustRootPath(p.cacheDir)); err == nil {
+			p.trustedRoot = trusted
+		}
+	}
+	return p.trustedRoot
+}
+
+// verify checks item's Skill in its Cache and records the verdict on item: a
+// SyncBlockSignature block, or whether it is signed.
+func (p *remotePlanner) verify(item *SyncPlanItem) {
+	policy := p.cfg.Remote[item.Source].Signature
+	trust, err := p.trust(item.Source, policy)
 	if err != nil {
-		s.block(item, err.Error(), "")
+		p.block(item, err.Error(), "")
 		return
 	}
 	result, err := verifySkill(filepath.Join(item.CachePath, filepath.FromSlash(item.Freshness.Subpath)), trust)
 	if errors.Is(err, signing.ErrNoTrustRoot) {
-		s.block(item, "signed, but "+err.Error(), "update")
+		p.block(item, "signed, but "+err.Error(), "update")
 		return
 	}
 	if err != nil {
-		s.block(item, err.Error(), "")
+		p.block(item, err.Error(), "")
 		return
 	}
 	if !result.Signed {
-		applied, _ := s.baselines.Applied(item.Name)
+		applied, _ := p.baselines.Applied(item.Name)
 		switch {
 		case policy != nil && policy.Require:
-			s.block(item, fmt.Sprintf("unsigned, and Source %s requires signatures", item.Source), "")
+			p.block(item, fmt.Sprintf("unsigned, and Source %s requires signatures", item.Source), "")
 		case applied.Signed:
-			s.block(item, "unsigned, but it was signed when last applied", "")
+			p.block(item, "unsigned, but it was signed when last applied", "")
 		}
 		return
 	}
 	item.Signed = true
 	if !policy.Pinned() && result.Signer != (signing.Signer{}) {
-		if _, seen := s.observed[item.Source]; !seen {
-			s.observed[item.Source] = result.Signer
+		if _, seen := p.observed[item.Source]; !seen {
+			p.observed[item.Source] = result.Signer
 		}
-		signer := s.observed[item.Source]
-		item.RecordSigner = &signer
 	}
 }
 
-func (s *signatures) block(item *SyncPlanItem, reason, next string) {
+func (p *remotePlanner) block(item *SyncPlanItem, reason, next string) {
 	item.Block = SyncBlockSignature
 	item.BlockReason = reason
 	item.BlockNext = next
 	item.Signed = false
-	item.RecordSigner = nil
 }
 
 // trust is what policy trusts for source, falling back to the first keyless
-// signer this plan saw for it.
-func (s *signatures) trust(source string, policy *config.SignaturePolicy) (signing.Trust, error) {
+// signer this operation saw for it.
+func (p *remotePlanner) trust(source string, policy *config.SignaturePolicy) (signing.Trust, error) {
 	if policy != nil && policy.CertificateChain != "" {
 		path := policy.CertificateChain
 		if !filepath.IsAbs(path) {
-			path = filepath.Join(s.configDir, path)
+			path = filepath.Join(p.configDir, path)
 		}
 		pem, err := os.ReadFile(path)
 		if err != nil {
@@ -195,41 +273,11 @@ func (s *signatures) trust(source string, policy *config.SignaturePolicy) (signi
 		}
 		return signing.Trust{Roots: roots}, nil
 	}
-	trust := signing.Trust{TrustedRoot: s.root()}
+	trust := signing.Trust{TrustedRoot: p.root()}
 	if policy != nil && policy.Sigstore != nil {
 		trust.Sigstore = &signing.Signer{Identity: policy.Sigstore.Identity, Issuer: policy.Sigstore.Issuer}
-	} else if signer, ok := s.observed[source]; ok {
+	} else if signer, ok := p.observed[source]; ok {
 		trust.Sigstore = &signer
 	}
 	return trust, nil
-}
-
-// checkable reports whether item is a remote Skill whose Cache copy is about
-// to be read: one with no other block or error, and not a rename, whose new
-// Skill is checked when the rename is applied.
-func checkable(item SyncPlanItem) bool {
-	return item.Kind == config.SkillRemote && item.Block == SyncBlockNone && item.Err == "" && item.Freshness.Status != SkillRenamed
-}
-
-// recordSigner writes the keyless signer items saw for source to cfg, when
-// the Source has none pinned. It reports whether cfg changed.
-func recordSigner(cfg *config.Config, source string, items []SyncPlanItem) (*signing.Signer, bool) {
-	repo, ok := cfg.Remote[source]
-	if !ok || repo.Signature.Pinned() {
-		return nil, false
-	}
-	for _, item := range items {
-		if item.RecordSigner == nil {
-			continue
-		}
-		policy := config.SignaturePolicy{}
-		if repo.Signature != nil {
-			policy = *repo.Signature
-		}
-		policy.Sigstore = &config.SigstoreSigner{Identity: item.RecordSigner.Identity, Issuer: item.RecordSigner.Issuer}
-		repo.Signature = &policy
-		cfg.Remote[source] = repo
-		return item.RecordSigner, true
-	}
-	return nil, false
 }

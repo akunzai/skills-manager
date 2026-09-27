@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
@@ -180,7 +179,7 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 	for _, source := range plan.Sources {
 		items := plan.SourceItems(source)
 		emit(SyncEvent{Kind: SyncRepoStart, Source: source, Skills: itemNames(items)})
-		if signer, changed := recordSigner(plan.cfg, source, items); changed {
+		if signer, changed := plan.planner.recordSigner(source); changed {
 			// Recording a signer is, like a Rename, a Config write Sync makes.
 			if err := config.SaveConfig(plan.cfg, plan.configPath); err != nil {
 				emit(SyncEvent{Kind: SyncSignerFailed, Source: source, Target: signer.Identity, Err: err.Error()})
@@ -387,14 +386,7 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 	if item.RenameTargetDeclared {
 		return SyncDone
 	}
-	renamed := planDeclaredRemoteItem(item.Source, item.cache, SkillFreshness{
-		Name:      skill.RenamedTo,
-		Source:    item.Source,
-		Subpath:   skill.RenamedSubpath,
-		ScopePath: filepath.Join(plan.skillsDir, skill.RenamedTo),
-	}, plan.availability.ObserveOccupancy().Drift(skill.RenamedTo))
-	if plan.signatures != nil {
-		plan.signatures.check(&renamed)
-	}
+	renamed := *item.renamed
+	renamed.Drift = plan.availability.ObserveOccupancy().Drift(skill.RenamedTo)
 	return applyItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
 }

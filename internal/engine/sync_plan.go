@@ -10,7 +10,6 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
-	"github.com/akunzai/skills-manager/internal/signing"
 )
 
 // SyncAction is what Apply does with one planned Skill.
@@ -87,10 +86,10 @@ type SyncPlanItem struct {
 	// RenameTargetDeclared is set on a rename whose new name the Scope
 	// already declares: the rename only drops the old Skill.
 	RenameTargetDeclared bool
-	// Signed is whether the Cache copy verified against a signature, and
-	// RecordSigner the keyless signer to record for a Source with none.
-	Signed       bool
-	RecordSigner *signing.Signer
+	// renamed is a rename's new Skill, planned and verified with the rename.
+	renamed *SyncPlanItem
+	// Signed is whether the Cache copy verified against a signature.
+	Signed bool
 
 	// Local symlink Skills.
 	SourcePath  string
@@ -165,7 +164,7 @@ type SyncPlan struct {
 	configPath   string
 	skillsDir    string
 	availability *Availability
-	signatures   *signatures
+	planner      *remotePlanner
 }
 
 // PlanSync observes the Scope and derives what Sync would do. It writes
@@ -187,19 +186,12 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 		configPath:   configPath,
 		skillsDir:    skillsDir,
 		availability: availability,
-		signatures:   newSignatures(cfg, configPath, cacheDir, OpenBaselines(skillsDir)),
+		planner:      newRemotePlanner(cfg, configPath, cacheDir, OpenBaselines(skillsDir)),
 	}
 	for _, repository := range snapshot.Repositories {
 		plan.Sources = append(plan.Sources, repository.Source)
 		for _, skill := range repository.Skills {
-			item := planRemoteItem(repository.Source, repository.cache, skill, occupancy.Drift(skill.Name))
-			if skill.Status == SkillRenamed {
-				item = planRename(cfg, skillsDir, item)
-			}
-			if checkable(item) {
-				plan.signatures.check(&item)
-			}
-			plan.Items = append(plan.Items, item)
+			plan.Items = append(plan.Items, plan.planner.reconcile(skillsDir, repository.Source, repository.cache, skill, occupancy.Drift(skill.Name)))
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Local)) {
@@ -217,25 +209,8 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 	return plan, nil
 }
 
-// planDeclaredRemoteItem plans a remote Skill that was just declared, by Add or
-// as the new name of a Rename. It is always Materialized: neither Drift nor a
-// missing Baseline blocks it, because Add asked before overwriting and a
-// Rename already protected the old copy. skill carries no Freshness status.
-func planDeclaredRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
-	item := baseRemoteItem(source, cache, skill, drift)
-	item.NeedsWrite = true
-	return item
-}
-
-// planRecordedRemoteItem plans a remote Skill whose copy on the Scope skills
-// directory already matches the Cache, as Adopt finds one: applying it writes
-// nothing and records the Baseline.
-func planRecordedRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
-	return baseRemoteItem(source, cache, skill, drift)
-}
-
-// baseRemoteItem is the part of a remote item every plan shares; only the
-// plan* functions above and below call it. It asks cache where it is and
+// baseRemoteItem is the part of a remote item every plan shares; only
+// planRemoteItem and remotePlanner call it. It asks cache where it is and
 // which commit it has checked out.
 func baseRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	return SyncPlanItem{
@@ -250,8 +225,8 @@ func baseRemoteItem(source string, cache Cache, skill SkillFreshness, drift Avai
 	}
 }
 
-// planRemoteItem plans one declared remote Skill from its classified
-// Freshness: Sync reconciling an existing declaration.
+// planRemoteItem is what a declared remote Skill's classified Freshness
+// alone says Sync should do; remotePlanner.reconcile adds its signature.
 func planRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	item := baseRemoteItem(source, cache, skill, drift)
 	item.NeedsWrite = skill.Status == SkillMissing || skill.Status == SkillCacheUpdateAvailable || skill.Status == SkillUnknownBaseline

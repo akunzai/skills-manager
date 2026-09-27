@@ -519,9 +519,10 @@ func ApplyAdoptPlan(plan AdoptPlan, cfg *config.Config, scope models.Scope) Adop
 	scope.ConfigPath = cmp.Or(scope.ConfigPath, models.DefaultConfigFile())
 	var result AdoptResult
 	baselines := OpenBaselines(scope.SkillsDir)
+	planner := newRemotePlanner(cfg, scope.ConfigPath, scope.CacheDir, baselines)
 	needsBaselines := false
 	for _, item := range plan.Items {
-		a := &adoption{cfg: cfg, scope: scope, baselines: baselines, outcome: AdoptOutcome{AdoptItem: item}}
+		a := &adoption{cfg: cfg, scope: scope, baselines: baselines, planner: planner, outcome: AdoptOutcome{AdoptItem: item}}
 		outcome := a.run()
 		needsBaselines = needsBaselines || a.neededBaseline
 		if outcome.Declared {
@@ -547,7 +548,10 @@ type adoption struct {
 	cfg       *config.Config
 	scope     models.Scope
 	baselines *Baselines
+	planner   *remotePlanner
 	outcome   AdoptOutcome
+	// remoteItem is a remote Skill as planned and verified when declared.
+	remoteItem SyncPlanItem
 
 	// snapshot is Config before this Skill; configExisted and wroteConfig say
 	// whether its file existed then and has been written since.
@@ -723,6 +727,16 @@ func (a *adoption) declare(remote *remoteAdoption, content string) error {
 		if err := remote.intake.Declare(a.cfg, map[string]string{item.Name: remote.subpath}); err != nil {
 			return err
 		}
+		// Declare fetched the trust root a signed Skill needs; the signer it
+		// shows is saved with the declaration.
+		source := remote.intake.spec.SourceKey
+		a.remoteItem = a.planner.recorded(source, remote.intake.cache, SkillFreshness{
+			Name:      item.Name,
+			Source:    source,
+			Subpath:   remote.subpath,
+			ScopePath: content,
+		}, AvailabilityDrift{})
+		a.planner.recordSigner(source)
 	} else {
 		config.AddLocalSymlinkEntry(a.cfg, item.Name, models.StoreLocalSourcePath(content, a.scope.SkillsDir), "")
 	}
@@ -801,14 +815,19 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 		}
 		a.outcome.State = AdoptDeclaredWithoutBaseline
 		return a.outcome
+	case a.remoteItem.Block != SyncBlockNone:
+		// A copy whose Source does not vouch for it gets no Baseline; Sync
+		// blocks it until it does (ADR-0010).
+		if _, err := availability.Apply(name); err != nil {
+			a.outcome.State, a.outcome.Reason = AdoptFailed, err.Error()
+			return a.outcome
+		}
+		a.outcome.State, a.outcome.Reason = AdoptDeclaredWithoutBaseline, a.remoteItem.BlockReason
+		return a.outcome
 	default:
 		a.neededBaseline = true
-		item := planRecordedRemoteItem(remote.intake.spec.SourceKey, remote.intake.cache, SkillFreshness{
-			Name:      name,
-			Source:    remote.intake.spec.SourceKey,
-			Subpath:   remote.subpath,
-			ScopePath: content,
-		}, drift)
+		item := a.remoteItem
+		item.Drift = drift
 		applied, err = applyRemoteItem(availability, skillsDir, item, SyncDecision{}, a.baselines, nil)
 	}
 	if applied != SyncDone {

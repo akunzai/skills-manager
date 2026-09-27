@@ -416,7 +416,7 @@ func TestPlanDeclaredRemoteItemIsAlwaysWritten(t *testing.T) {
 
 	cache, head := refreshedCache(t)
 
-	item := planDeclaredRemoteItem("owner/repo", cache, skill, drift)
+	item := newRemotePlanner(config.DefaultConfig(), "", "", &Baselines{}).declared("owner/repo", cache, skill, drift)
 
 	want := SyncPlanItem{
 		Name: "sample", Kind: config.SkillRemote, Source: "owner/repo",

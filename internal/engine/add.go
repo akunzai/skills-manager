@@ -339,9 +339,9 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	}
 
 	baselines := OpenBaselines(plan.SkillsDir)
-	// verified carries each remote Skill's signature verdict from before
-	// Config is saved, so the signer it records is saved with the Skills.
-	verified := make(map[string]SyncPlanItem)
+	// planned carries each remote Skill, verified before Config is saved, so
+	// the signer it records is saved with the Skills.
+	planned := make(map[string]SyncPlanItem)
 	var signerRecorded *SyncEvent
 	if plan.Source.Kind == AddSourceRemote {
 		if err := plan.Source.Remote.Declare(cfg, plan.Skills); err != nil {
@@ -358,15 +358,16 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 			repo.Signature = &policy
 			cfg.Remote[key] = repo
 		}
-		checks := newSignatures(cfg, plan.ConfigPath, plan.Source.Remote.cache.cacheDir, baselines)
-		var items []SyncPlanItem
+		planner := newRemotePlanner(cfg, plan.ConfigPath, plan.Source.Remote.cache.cacheDir, baselines)
 		for _, name := range names {
-			item := planDeclaredRemoteItem(key, plan.Source.Remote.cache, SkillFreshness{Name: name, Source: key, Subpath: plan.Skills[name]}, AvailabilityDrift{})
-			checks.check(&item)
-			verified[name] = item
-			items = append(items, item)
+			planned[name] = planner.declared(key, plan.Source.Remote.cache, SkillFreshness{
+				Name:      name,
+				Source:    key,
+				Subpath:   plan.Skills[name],
+				ScopePath: filepath.Join(plan.SkillsDir, name),
+			}, AvailabilityDrift{})
 		}
-		if signer, changed := recordSigner(cfg, key, items); changed {
+		if signer, changed := planner.recordSigner(key); changed {
 			signerRecorded = &SyncEvent{Kind: SyncSignerRecorded, Source: key, Target: signer.Identity}
 		}
 	}
@@ -423,15 +424,8 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		var item SyncPlanItem
 		switch plan.Source.Kind {
 		case AddSourceRemote:
-			item = planDeclaredRemoteItem(plan.Source.Key, plan.Source.Remote.cache, SkillFreshness{
-				Name:      name,
-				Source:    plan.Source.Key,
-				Subpath:   subpath,
-				ScopePath: filepath.Join(plan.SkillsDir, name),
-			}, occupancy.Drift(name))
-			checked := verified[name]
-			item.Block, item.BlockReason, item.BlockNext = checked.Block, checked.BlockReason, checked.BlockNext
-			item.Signed = checked.Signed
+			item = planned[name]
+			item.Drift = occupancy.Drift(name)
 		case AddSourceSymlink, AddSourceCommand:
 			item = planLocalItem(cfg, plan.SkillsDir, occupancy.Drift(name), name)
 		}
