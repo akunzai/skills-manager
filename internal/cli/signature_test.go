@@ -28,7 +28,7 @@ func TestCLILsShowsWhetherTheAppliedCopyWasSigned(t *testing.T) {
 			t.Fatal(err)
 		}
 		skill := engine.SkillFreshness{Name: name, Source: "owner/repo", ScopePath: scopeCopy}
-		if err := baselines.Record(skill, "cache", "abc123", signed); err != nil {
+		if err := baselines.Record(skill, "cache", "abc123", signed, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

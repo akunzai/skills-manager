@@ -41,6 +41,58 @@ type SignaturePolicy struct {
 	// CertificateChain is a PEM trust anchor, relative to the directory
 	// holding this Config unless absolute.
 	CertificateChain string `json:"certificateChain,omitempty"`
+	// Trusted is each Skill's Trusted content: the Cache tree id of a copy
+	// the user chose to Materialize although it does not verify.
+	Trusted map[string]string `json:"trusted,omitempty"`
+}
+
+// TrustedTree is the tree id of name's Trusted content, if it has one.
+func (p *SignaturePolicy) TrustedTree(name string) (string, bool) {
+	if p == nil {
+		return "", false
+	}
+	tree, ok := p.Trusted[name]
+	return tree, ok
+}
+
+// TrustContent records tree as the Trusted content of name, a Skill of
+// source.
+func TrustContent(cfg *Config, source, name, tree string) {
+	repo := cfg.Remote[source]
+	policy := SignaturePolicy{}
+	if repo.Signature != nil {
+		policy = *repo.Signature
+	}
+	policy.Trusted = maps.Clone(policy.Trusted)
+	if policy.Trusted == nil {
+		policy.Trusted = make(map[string]string)
+	}
+	policy.Trusted[name] = tree
+	repo.Signature = &policy
+	cfg.Remote[source] = repo
+}
+
+// RevokeTrust removes name's Trusted content, dropping a signature policy it
+// leaves empty. It reports whether there was any.
+func RevokeTrust(cfg *Config, name string) bool {
+	for source, repo := range cfg.Remote {
+		if _, ok := repo.Signature.TrustedTree(name); !ok {
+			continue
+		}
+		policy := *repo.Signature
+		policy.Trusted = maps.Clone(policy.Trusted)
+		delete(policy.Trusted, name)
+		if len(policy.Trusted) == 0 {
+			policy.Trusted = nil
+		}
+		repo.Signature = &policy
+		if !policy.Require && policy.Sigstore == nil && policy.CertificateChain == "" && policy.Trusted == nil {
+			repo.Signature = nil
+		}
+		cfg.Remote[source] = repo
+		return true
+	}
+	return false
 }
 
 // SigstoreSigner is a Sigstore keyless identity, matched exactly.
@@ -303,6 +355,7 @@ func AddLocalCommandEntry(
 }
 
 func RemoveSkillEntry(cfg *Config, skillName string) bool {
+	RevokeTrust(cfg, skillName)
 	found := removeSkillRegistration(cfg, skillName)
 	if _, ok := cfg.Settings.Availability[skillName]; ok {
 		delete(cfg.Settings.Availability, skillName)

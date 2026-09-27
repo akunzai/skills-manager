@@ -22,6 +22,10 @@ const SyncBlockSignature SyncBlock = "signature"
 // to Config so later Skills must match it.
 const SyncSignerRecorded = "signer_recorded"
 
+// SyncTrustedUnverified is a Skill Materialized as Trusted content: its
+// signature does not verify, and the user trusted this exact content.
+const SyncTrustedUnverified = "trusted_unverified"
+
 // SyncSignerFailed is a signer Sync could not record because Config could not
 // be saved.
 const SyncSignerFailed = "signer_failed"
@@ -227,16 +231,16 @@ func (p *remotePlanner) verify(item *SyncPlanItem) {
 		return
 	}
 	if err != nil {
-		p.block(item, err.Error(), "")
+		p.fail(item, err.Error())
 		return
 	}
 	if !result.Signed {
 		applied, _ := p.baselines.Applied(item.Name)
 		switch {
 		case policy != nil && policy.Require:
-			p.block(item, fmt.Sprintf("unsigned, and Source %s requires signatures", item.Source), "")
+			p.fail(item, fmt.Sprintf("unsigned, and Source %s requires signatures", item.Source))
 		case applied.Signed:
-			p.block(item, "unsigned, but it was signed when last applied", "")
+			p.fail(item, "unsigned, but it was signed when last applied")
 		}
 		return
 	}
@@ -246,6 +250,24 @@ func (p *remotePlanner) verify(item *SyncPlanItem) {
 			p.observed[item.Source] = result.Signer
 		}
 	}
+}
+
+// fail is a verdict against item's Cache copy. Trusted content for exactly
+// this copy lets it through, marked unverified; otherwise it is blocked, and
+// Trusted content for another copy names trust as the way out.
+func (p *remotePlanner) fail(item *SyncPlanItem, reason string) {
+	tree := item.cache.atHead(item.Freshness.Subpath).id
+	trusted, ok := p.cfg.Remote[item.Source].Signature.TrustedTree(item.Name)
+	if ok && tree != "" && trusted == tree {
+		item.Signed, item.Unverified = false, reason
+		return
+	}
+	next := ""
+	if ok {
+		next = "trust " + item.Name
+	}
+	p.block(item, reason, next)
+	item.tree = tree
 }
 
 func (p *remotePlanner) block(item *SyncPlanItem, reason, next string) {
