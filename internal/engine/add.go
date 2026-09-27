@@ -349,14 +349,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		}
 		key := plan.Source.Key
 		if plan.TrustCert != "" {
-			repo := cfg.Remote[key]
-			policy := config.SignaturePolicy{}
-			if repo.Signature != nil {
-				policy = *repo.Signature
-			}
-			policy.Sigstore, policy.CertificateChain = nil, plan.TrustCert
-			repo.Signature = &policy
-			cfg.Remote[key] = repo
+			config.SetCertificateChainTrust(cfg, key, plan.TrustCert)
 		}
 		planner := newRemotePlanner(cfg, plan.ConfigPath, plan.Source.Remote.cache.cacheDir, baselines)
 		for _, name := range names {
