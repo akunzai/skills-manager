@@ -46,6 +46,15 @@ func withColor(style Style) Style {
 	return style
 }
 
+// SignedMark marks a Skill whose applied copy verified against its Source's
+// signature.
+func (s Style) SignedMark() string {
+	if s.Plain {
+		return "[signed]"
+	}
+	return "✓"
+}
+
 func (s Style) SourceIcon(sourceType string) string {
 	kind := "remote"
 	switch {

@@ -26,6 +26,33 @@ type RemoteRepo struct {
 	URL    string            `json:"url,omitempty"`
 	Branch string            `json:"branch,omitempty"`
 	Skills map[string]string `json:"skills"`
+	// Signature is who this Source's Skills must be signed by, if anyone.
+	Signature *SignaturePolicy `json:"signature,omitempty"`
+}
+
+// SignaturePolicy is what a remote Source's Skills are verified against
+// before they are Materialized. Sigstore and CertificateChain are exclusive.
+type SignaturePolicy struct {
+	// Require turns an unsigned Skill of this Source into a verification
+	// failure.
+	Require bool `json:"require,omitempty"`
+	// Sigstore is the keyless signer, recorded the first time one is seen.
+	Sigstore *SigstoreSigner `json:"sigstore,omitempty"`
+	// CertificateChain is a PEM trust anchor, relative to the directory
+	// holding this Config unless absolute.
+	CertificateChain string `json:"certificateChain,omitempty"`
+}
+
+// SigstoreSigner is a Sigstore keyless identity, matched exactly.
+type SigstoreSigner struct {
+	Identity string `json:"identity"`
+	Issuer   string `json:"issuer"`
+}
+
+// Pinned reports whether the policy names a signer, so no new one may be
+// recorded.
+func (p *SignaturePolicy) Pinned() bool {
+	return p != nil && (p.Sigstore != nil || p.CertificateChain != "")
 }
 
 type LocalEntry struct {
@@ -98,6 +125,11 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if err := NormalizeAvailability(cfg); err != nil {
 		return nil, err
+	}
+	for key, repo := range cfg.Remote {
+		if p := repo.Signature; p != nil && p.Sigstore != nil && p.CertificateChain != "" {
+			return nil, fmt.Errorf("invalid signature for Source %q: sigstore and certificateChain are exclusive", key)
+		}
 	}
 
 	return cfg, nil

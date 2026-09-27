@@ -2,6 +2,7 @@ package cli
 
 import (
 	"cmp"
+	"crypto/x509"
 	"fmt"
 	"maps"
 	"os"
@@ -251,6 +252,7 @@ func newAddCmd() *cobra.Command {
 		flagYes         bool
 		flagList        bool
 		flagJSON        bool
+		flagTrustCert   string
 	)
 
 	cmd := &cobra.Command{
@@ -300,6 +302,11 @@ func newAddCmd() *cobra.Command {
 				return err
 			}
 
+			if flagTrustCert != "" && (kind != engine.AddSourceRemote || flagList) {
+				cmd.SilenceUsage = false
+				return fmt.Errorf("--trust-cert applies only when adding Skills from a remote Source")
+			}
+
 			if flagList {
 				return runAddList(cmd, kind, source, flagPath, flagBranch, flagURL, cacheDir, flagJSON)
 			}
@@ -330,11 +337,15 @@ func newAddCmd() *cobra.Command {
 				intake := newCommandIntake(skillName, source, flagCheck, flagDescription)
 				return intake.run(cmd, addRequest{scope: scope, skills: []string{skillName}, yes: flagYes, agents: flagAgents})
 			case engine.AddSourceRemote:
+				trustCert, err := storedTrustCert(flagTrustCert, scope.ConfigPath)
+				if err != nil {
+					return err
+				}
 				intake, err := newRemoteIntake(cmd, scope.ConfigPath, source, flagURL, flagBranch, flagPath, cacheDir)
 				if err != nil {
 					return withScopeFlags(err, scopeFlagsOf(scope))
 				}
-				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents}), scopeFlagsOf(scope))
+				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert}), scopeFlagsOf(scope))
 			default:
 				return fmt.Errorf("unsupported Add Source kind %q", kind)
 			}
@@ -354,6 +365,7 @@ func newAddCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompts")
 	cmd.Flags().BoolVar(&flagList, "list", false, "List a Source's Skills without adding them")
 	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON (with --list)")
+	cmd.Flags().StringVar(&flagTrustCert, "trust-cert", "", "PEM certificate the Source's Skill signatures must chain to")
 
 	return cmd
 }
@@ -418,4 +430,32 @@ func agentSelectionBaseline(availability *engine.Availability, skillNames []stri
 		}
 	}
 	return baseline, true
+}
+
+// storedTrustCert checks that path holds a PEM certificate and returns it as
+// Config stores it: relative to the directory holding Config when inside it,
+// so a Project Config stays portable, and absolute otherwise.
+func storedTrustCert(path, configPath string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(models.ExpandUser(path))
+	if err != nil {
+		return "", err
+	}
+	pem, err := os.ReadFile(abs)
+	if err != nil {
+		return "", fmt.Errorf("read --trust-cert: %w", err)
+	}
+	if !x509.NewCertPool().AppendCertsFromPEM(pem) {
+		return "", fmt.Errorf("--trust-cert %s holds no PEM certificate", path)
+	}
+	configDir, err := filepath.Abs(filepath.Dir(configPath))
+	if err != nil {
+		return abs, nil
+	}
+	if rel, err := filepath.Rel(configDir, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel), nil
+	}
+	return abs, nil
 }

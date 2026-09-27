@@ -706,6 +706,9 @@ type SkillItem struct {
 	// Status is how the Skill's entry on the Scope skills directory was
 	// classified, one of the SkillStatus values.
 	Status SkillStatus `json:"status"`
+	// Signed is whether a remote Skill's copy verified against a signature
+	// when Sync last applied it.
+	Signed bool `json:"signed"`
 }
 
 // SkillStatus is how Inventory classifies one Skill against the Scope skills

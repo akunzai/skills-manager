@@ -400,6 +400,10 @@
         <p>Network fetching is isolated to <code>skills update</code>, which then reconciles the Scope; <code>skills sync</code> reconciles disk 100% offline from a shared cache. <code>skills doctor --fix</code> diagnoses broken symlinks, physical collisions, and drift, repairing manageable state safely.</p>
       </div>
       <div>
+        <h3>Signed skills verified before install</h3>
+        <p>When a Source signs its skills with an <a href="https://github.com/sigstore/model-transparency">OpenSSF Model Signing</a> signature (<code>skill.oms.sig</code>), every file is checked against it before the skill is written: Sigstore keyless signers are recorded in <code>skills.json</code> on first sight, and certificate chains such as NVIDIA&rsquo;s are trusted with <code>--trust-cert</code>. A skill that does not verify is never installed, the previous copy stays, and <code>--force</code> cannot override it. <code>skills ls</code> marks signed skills with <code>✓</code>.</p>
+      </div>
+      <div>
         <h3>State-expressing exit codes</h3>
         <p>Exit <code>0</code> when Scope matches declared Config, <code>1</code> when drift or pending action exists (reporting next steps without misleading error styling), and <code>2</code> on real failure. Designed for clean automation in CI pipelines.</p>
       </div>
@@ -539,7 +543,12 @@
           <tr>
             <td><code>skills add</code></td>
             <td>Declare skills from Git, local symlink, or command</td>
-            <td><code>0</code> added</td>
+            <td><code>0</code> added, <code>1</code> blocked</td>
+          </tr>
+          <tr>
+            <td><code>skills add &lt;source&gt; --trust-cert &lt;pem&gt;</code></td>
+            <td>Require the Source&rsquo;s skill signatures to chain to a certificate</td>
+            <td><code>0</code> added and verified, <code>1</code> blocked</td>
           </tr>
           <tr>
             <td><code>skills add &lt;source&gt; --list</code></td>

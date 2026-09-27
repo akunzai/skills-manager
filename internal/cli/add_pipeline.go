@@ -41,6 +41,8 @@ type addRequest struct {
 	skills []string
 	yes    bool
 	agents []string
+	// trustCert is --trust-cert as Config stores it.
+	trustCert string
 }
 
 // resolveSkillsToAdd turns --all/--skill or an interactive prompt
@@ -195,6 +197,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	}
 
 	plan := engine.BuildAddPlan(cfg, configPath, skillsDir, intake.source, skillsToAdd, intent)
+	plan.TrustCert = req.trustCert
 
 	if len(plan.Conflicts) > 0 && !req.yes {
 		if !interactive {

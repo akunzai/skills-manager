@@ -10,6 +10,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
+	"github.com/akunzai/skills-manager/internal/signing"
 )
 
 // SyncAction is what Apply does with one planned Skill.
@@ -86,6 +87,10 @@ type SyncPlanItem struct {
 	// RenameTargetDeclared is set on a rename whose new name the Scope
 	// already declares: the rename only drops the old Skill.
 	RenameTargetDeclared bool
+	// Signed is whether the Cache copy verified against a signature, and
+	// RecordSigner the keyless signer to record for a Source with none.
+	Signed       bool
+	RecordSigner *signing.Signer
 
 	// Local symlink Skills.
 	SourcePath  string
@@ -104,7 +109,7 @@ type SyncPlanItem struct {
 // Resolve is what this item does under decision.
 func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) {
 	switch item.Block {
-	case SyncBlockSourceMissing, SyncBlockCacheMissing, SyncBlockRemovedUpstream, SyncBlockRenameOccupied:
+	case SyncBlockSourceMissing, SyncBlockCacheMissing, SyncBlockRemovedUpstream, SyncBlockRenameOccupied, SyncBlockSignature:
 		return SyncActionSkip, item.Block
 	case SyncBlockLocalDrift:
 		if !decision.Force {
@@ -160,6 +165,7 @@ type SyncPlan struct {
 	configPath   string
 	skillsDir    string
 	availability *Availability
+	signatures   *signatures
 }
 
 // PlanSync observes the Scope and derives what Sync would do. It writes
@@ -181,6 +187,7 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 		configPath:   configPath,
 		skillsDir:    skillsDir,
 		availability: availability,
+		signatures:   newSignatures(cfg, configPath, cacheDir, OpenBaselines(skillsDir)),
 	}
 	for _, repository := range snapshot.Repositories {
 		plan.Sources = append(plan.Sources, repository.Source)
@@ -188,6 +195,9 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 			item := planRemoteItem(repository.Source, repository.cache, skill, occupancy.Drift(skill.Name))
 			if skill.Status == SkillRenamed {
 				item = planRename(cfg, skillsDir, item)
+			}
+			if checkable(item) {
+				plan.signatures.check(&item)
 			}
 			plan.Items = append(plan.Items, item)
 		}
