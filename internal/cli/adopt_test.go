@@ -393,3 +393,55 @@ func TestCLIAdoptWordsEachEndState(t *testing.T) {
 		})
 	}
 }
+
+// Called with no names, no --all, and no --yes, adopt offers every untracked
+// skill through its interactive picker and adopts only what was selected.
+func TestCLIAdoptInteractivePickerSelectsChosenSkills(t *testing.T) {
+	root, scope := adoptCLIScope(t)
+	mine := writeUntrackedCLISkill(t, root, "mine", "# Mine\n")
+	other := writeUntrackedCLISkill(t, root, "other", "# Other\n")
+
+	fp := &fakePrompter{interactive: true, answers: []fakeAnswer{
+		groupedMultiSelectAnswer("Select skills to adopt:", []string{"mine"}),
+	}}
+	useFakePrompter(t, fp)
+
+	out, err := runAdoptCLI(t, scope, "adopt")
+	if err != nil {
+		t.Fatalf("adopt: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Adopted mine") {
+		t.Fatalf("the picker should adopt the selected skill:\n%s", out)
+	}
+	if strings.Contains(out, "Adopted other") {
+		t.Fatalf("the picker should leave the unselected skill alone:\n%s", out)
+	}
+	if isRealDirPath(mine) {
+		t.Fatal("the selected skill should have moved")
+	}
+	if !isRealDirPath(other) {
+		t.Fatal("the unselected skill should stay where it is")
+	}
+}
+
+// adopt --all with no --yes prints the plan and asks before adopting it.
+func TestCLIAdoptAllAsksConfirmationBeforeAdopting(t *testing.T) {
+	root, scope := adoptCLIScope(t)
+	mine := writeUntrackedCLISkill(t, root, "mine", "# Mine\n")
+
+	fp := &fakePrompter{interactive: true, answers: []fakeAnswer{
+		confirmAnswer("Adopt 1 skill?", false),
+	}}
+	useFakePrompter(t, fp)
+
+	out, err := runAdoptCLI(t, scope, "adopt", "--all")
+	if err != nil {
+		t.Fatalf("declining must not be an error: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Operation cancelled.") {
+		t.Fatalf("declining should say so:\n%s", out)
+	}
+	if !isRealDirPath(mine) {
+		t.Fatal("a declined adopt must not move the skill")
+	}
+}
