@@ -38,3 +38,12 @@ func TestSignedMarkFallsBackToText(t *testing.T) {
 		t.Fatalf("mark = %q, want ✓", got)
 	}
 }
+
+func TestUnverifiedMarkFallsBackToText(t *testing.T) {
+	if got := (Style{Plain: true}).UnverifiedMark(); got != "[unverified]" {
+		t.Fatalf("plain mark = %q, want [unverified]", got)
+	}
+	if got := (Style{}).UnverifiedMark(); got != "!" {
+		t.Fatalf("mark = %q, want !", got)
+	}
+}

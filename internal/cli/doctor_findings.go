@@ -214,6 +214,15 @@ func doctorFindings(p engine.DoctorReport, scopeFlags string) []Finding {
 		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("%s cannot be available to %s: %s reserves that directory name.", reserved.Skill, reserved.Agent, agentProductName(reserved.Agent)), Blank: true})
 		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: rename the Skill, or run 'skills agents%s %s exclude %s'.", scopeFlags, reserved.Skill, reserved.Agent)})
 	}
+	// Trusted content is the user's declaration, applied as declared; doctor
+	// only keeps it visible and never removes it (ADR-0010).
+	for _, skill := range p.Unverified {
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("%s is trusted content whose signature does not verify: %s", skill.Name, skill.Reason), Blank: true})
+	}
+	for _, name := range p.StaleTrust {
+		add(Finding{Severity: SeverityWarning, Message: fmt.Sprintf("Trusted content for %s no longer matches its Source.", name), Blank: true})
+		add(Finding{Severity: SeverityInfo, Message: fmt.Sprintf("  Next: run 'skills trust%s --revoke %s'.", scopeFlags, name)})
+	}
 
 	return findings
 }

@@ -870,7 +870,7 @@ func staleBaselineScope(t *testing.T) (configFile, skillsDir string) {
 		t.Fatal(err)
 	}
 	skill := engine.SkillFreshness{Name: "gone", Source: "owner/repo", ScopePath: scopeCopy}
-	if err := engine.OpenBaselines(skillsDir).Record(skill, "cache", "abc123", false); err != nil {
+	if err := engine.OpenBaselines(skillsDir).Record(skill, "cache", "abc123", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(scopeCopy); err != nil {

@@ -55,6 +55,15 @@ func (s Style) SignedMark() string {
 	return "✓"
 }
 
+// UnverifiedMark marks a Skill applied from Trusted content, whose signature
+// does not verify. It is plain ASCII so it keeps one column everywhere.
+func (s Style) UnverifiedMark() string {
+	if s.Plain {
+		return "[unverified]"
+	}
+	return "!"
+}
+
 func (s Style) SourceIcon(sourceType string) string {
 	kind := "remote"
 	switch {

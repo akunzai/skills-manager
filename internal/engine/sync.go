@@ -260,6 +260,9 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 			return SyncFailed, err
 		}
 		emitSync(emit, SyncEvent{Kind: SyncMaterialized, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath})
+		if item.Unverified != "" {
+			emitSync(emit, SyncEvent{Kind: SyncTrustedUnverified, Source: item.Source, Skill: item.Name, Err: item.Unverified})
+		}
 	}
 	copied, err := availability.Apply(item.Name)
 	if err != nil {
@@ -271,7 +274,7 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 	}
 	// An unreadable Scope state is the Scope's verdict, counted once by the
 	// caller, not a failure of each Skill.
-	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA, item.Signed); err != nil && !errors.Is(err, ErrNotRecorded) {
+	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA, item.Signed, item.Unverified); err != nil && !errors.Is(err, ErrNotRecorded) {
 		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
 		return SyncFailed, err
 	}

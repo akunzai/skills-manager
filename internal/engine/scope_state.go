@@ -27,6 +27,9 @@ type AppliedSkillState struct {
 	// Signed is whether the applied copy verified against a signature. A
 	// Skill once signed may not arrive unsigned.
 	Signed bool `json:"signed,omitempty"`
+	// Unverified is why the applied copy did not verify, when it was
+	// Materialized as Trusted content.
+	Unverified string `json:"unverified,omitempty"`
 }
 
 // ScopeState is the versioned applied-state artifact for one Scope.

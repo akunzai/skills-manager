@@ -401,7 +401,7 @@
       </div>
       <div>
         <h3>Signed skills verified before install</h3>
-        <p>When a Source signs its skills with an <a href="https://github.com/sigstore/model-transparency">OpenSSF Model Signing</a> signature (<code>skill.oms.sig</code>), every file is checked against it before the skill is written: Sigstore keyless signers are recorded in <code>skills.json</code> on first sight, and certificate chains such as NVIDIA&rsquo;s are trusted with <code>--trust-cert</code>. A skill that does not verify is never installed, the previous copy stays, and <code>--force</code> cannot override it. <code>skills ls</code> marks signed skills with <code>✓</code>.</p>
+        <p>When a Source signs its skills with an <a href="https://github.com/sigstore/model-transparency">OpenSSF Model Signing</a> signature (<code>skill.oms.sig</code>), every file is checked against it before the skill is written: Sigstore keyless signers are recorded in <code>skills.json</code> on first sight, and certificate chains such as NVIDIA&rsquo;s are trusted with <code>--trust-cert</code>. A skill that does not verify is never installed, the previous copy stays, and <code>--force</code> cannot override it. When you have reviewed the content yourself, <code>skills trust</code> records that exact content in <code>skills.json</code>, where your team sees it; it is installed and marked unverified until the Source changes it. <code>skills ls</code> marks signed skills with <code>✓</code> and trusted unverified ones with <code>!</code>.</p>
       </div>
       <div>
         <h3>State-expressing exit codes</h3>
@@ -549,6 +549,11 @@
             <td><code>skills add &lt;source&gt; --trust-cert &lt;pem&gt;</code></td>
             <td>Require the Source&rsquo;s skill signatures to chain to a certificate</td>
             <td><code>0</code> added and verified, <code>1</code> blocked</td>
+          </tr>
+          <tr>
+            <td><code>skills trust &lt;skill&gt;</code></td>
+            <td>Trust a skill&rsquo;s current content although its signature does not verify; <code>--revoke</code> removes the trust</td>
+            <td><code>0</code> trusted, <code>2</code> refused</td>
           </tr>
           <tr>
             <td><code>skills add &lt;source&gt; --list</code></td>

@@ -19,6 +19,8 @@ const (
 	DoctorFindingUntrackedLink      DoctorFindingKind = "untracked-link"
 	DoctorFindingUnmanagedDirectory DoctorFindingKind = "unmanaged-directory"
 	DoctorFindingReservedName       DoctorFindingKind = "reserved-name"
+	DoctorFindingUnverified         DoctorFindingKind = "unverified"
+	DoctorFindingStaleTrust         DoctorFindingKind = "stale-trust"
 
 	findingMasterMissing        DoctorFindingKind = "master-missing"
 	findingAgentUnusable        DoctorFindingKind = "agent-unusable"
@@ -46,6 +48,9 @@ const (
 // occupancy on the skills directory, and an unmanaged directory this tool did
 // not create and Config does not declare on an Agent directory, are not
 // Drift (ADR-0002): the tool leaves both alone and reports them as warnings.
+// Trusted content is a declaration the user made, applied as declared, so a
+// Skill applied from it and Trusted content that no longer matches are
+// warnings too.
 // A Skill whose name an Agent reserves is not Drift either: no repair can make
 // it available there, so it is a warning about the declaration. Availability
 // Copies never appear as a kind.
@@ -62,6 +67,8 @@ func DoctorWarningKinds() []DoctorFindingKind {
 		DoctorFindingUntrackedLink,
 		DoctorFindingUnmanagedDirectory,
 		DoctorFindingReservedName,
+		DoctorFindingUnverified,
+		DoctorFindingStaleTrust,
 	}
 }
 
@@ -137,6 +144,8 @@ func (p DoctorReport) findings() []DoctorFindingKind {
 	add(findingStub, len(p.Stubs))
 	add(findingUnknownAgent, len(p.UnknownAgents))
 	add(DoctorFindingReservedName, len(p.ReservedNames))
+	add(DoctorFindingUnverified, len(p.Unverified))
+	add(DoctorFindingStaleTrust, len(p.StaleTrust))
 	if p.StateError != "" {
 		add(findingStateError, 1)
 	}

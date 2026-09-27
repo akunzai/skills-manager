@@ -88,6 +88,10 @@ _Avoid_: move, alias, migration (when you mean the declaration)
 Who signed a remote Skill's `skill.oms.sig`: a Sigstore keyless identity and issuer, or a certificate chaining to a trust anchor the Source names. A Source's Signer is recorded in Config the first time a signed Skill of it is seen; a Skill signed by anyone else, or once signed and now unsigned, is not Materialized.
 _Avoid_: publisher key, author, owner
 
+**Trusted content**:
+A remote Skill's Cache tree id that Config records because the user chose to Materialize that exact copy although its signature does not verify. It holds only for that copy: once the Source changes the Skill, it is verified again. `skills trust` records it; Retire removes it.
+_Avoid_: override, bypass, exception
+
 **Materialize**:
 Putting one Skill from its Source onto the Scope skills directory (copy, symlink, or command).
 _Avoid_: install (when you mean the disk write only), checkout, restore

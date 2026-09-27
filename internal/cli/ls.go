@@ -98,6 +98,7 @@ func newLsCmd() *cobra.Command {
 			for i := range skills {
 				applied, _ := baselines.Applied(skills[i].Name)
 				skills[i].Signed = skills[i].IsInstalled && applied.Signed
+				skills[i].Unverified = skills[i].IsInstalled && applied.Unverified != ""
 			}
 
 			if flagAgent != "" {
@@ -158,6 +159,7 @@ func newLsCmd() *cobra.Command {
 						"valid":      s.IsValidSkill,
 						"status":     s.Status,
 						"signed":     s.Signed,
+						"unverified": s.Unverified,
 					})
 				}
 				data, _ := json.MarshalIndent(outList, "", "  ")
@@ -240,12 +242,16 @@ func newLsCmd() *cobra.Command {
 				} else {
 					rawSource = fmt.Sprintf("%s %s", icon, s.Source)
 				}
-				// Only a signed copy is marked; an unsigned one is the norm. The
-				// mark survives truncation, since it is what the row asserts.
+				// Only a signed copy, and one applied from Trusted content, is
+				// marked; an unsigned one is the norm. The mark survives
+				// truncation, since it is what the row asserts.
 				sourceCol := padRight(truncateWithEllipsis(rawSource, sourceWidth), sourceWidth)
 				if s.Signed {
 					mark := " " + style.SignedMark()
 					sourceCol = padRight(truncateWithEllipsis(rawSource, sourceWidth-stringRuneLen(mark))+mark, sourceWidth)
+				} else if s.Unverified {
+					mark := style.UnverifiedMark()
+					sourceCol = padRight(truncateWithEllipsis(rawSource, sourceWidth-stringRuneLen(mark)-1)+" "+style.Yellow+mark+style.Reset, sourceWidth+len(style.Yellow)+len(style.Reset))
 				}
 
 				targetList := agentDisplayLabels(s.Agents)

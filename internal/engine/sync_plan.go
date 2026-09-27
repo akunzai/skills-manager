@@ -88,8 +88,13 @@ type SyncPlanItem struct {
 	RenameTargetDeclared bool
 	// renamed is a rename's new Skill, planned and verified with the rename.
 	renamed *SyncPlanItem
-	// Signed is whether the Cache copy verified against a signature.
-	Signed bool
+	// Signed is whether the Cache copy verified against a signature, and
+	// Unverified why it did not when it is applied as Trusted content.
+	Signed     bool
+	Unverified string
+	// tree is the Cache tree id of a Skill its signature blocks, which
+	// Trusted content would record.
+	tree string
 
 	// Local symlink Skills.
 	SourcePath  string

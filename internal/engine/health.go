@@ -2,7 +2,9 @@ package engine
 
 import (
 	"errors"
+	"maps"
 	"os"
+	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
 )
@@ -83,6 +85,11 @@ type DoctorReport struct {
 	// ReservedNames are declared Skills whose name an Agent they are
 	// available to keeps for its own content. Availability skips that pair.
 	ReservedNames []ReservedAvailability
+	// Unverified are remote Skills whose applied copy is Trusted content,
+	// and StaleTrust the Skills whose Trusted content no longer matches
+	// their Cache copy, or that Config no longer declares.
+	Unverified    []UnverifiedSkill
+	StaleTrust    []string
 	StateError    string
 	StaleState    []string
 	StateRepair   ItemRepair
@@ -253,6 +260,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	} else {
 		plan.StaleState = plan.baselines.Stale(d.cfg)
 	}
+	plan.Unverified, plan.StaleTrust = d.trust(plan.baselines)
 	artifacts, artifactErr := ListScopeStateArtifacts()
 	if artifactErr != nil {
 		return DoctorReport{}, artifactErr
@@ -320,6 +328,42 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 		})
 	}
 	return plan, nil
+}
+
+// UnverifiedSkill is a remote Skill applied as Trusted content, and why its
+// signature does not verify.
+type UnverifiedSkill struct {
+	Name   string
+	Reason string
+}
+
+// trust reports the Skills applied as Trusted content, and the Trusted
+// content that no longer matches its Skill's Cache copy. A Cache Doctor
+// cannot read says nothing about the latter.
+func (d *Doctor) trust(baselines *Baselines) (unverified []UnverifiedSkill, stale []string) {
+	for _, source := range slices.Sorted(maps.Keys(d.cfg.Remote)) {
+		repo := d.cfg.Remote[source]
+		for _, name := range slices.Sorted(maps.Keys(repo.Skills)) {
+			if applied, _ := baselines.Applied(name); applied.Unverified != "" {
+				unverified = append(unverified, UnverifiedSkill{Name: name, Reason: applied.Unverified})
+			}
+		}
+		if repo.Signature == nil {
+			continue
+		}
+		cache := NewCache(source, repo.URL, repo.Branch, d.cacheDir)
+		for _, name := range slices.Sorted(maps.Keys(repo.Signature.Trusted)) {
+			subpath, declared := repo.Skills[name]
+			if !declared {
+				stale = append(stale, name)
+				continue
+			}
+			if tree := cache.atHead(subpath).id; tree != "" && tree != repo.Signature.Trusted[name] {
+				stale = append(stale, name)
+			}
+		}
+	}
+	return unverified, stale
 }
 
 // issueCount is Remaining: how many classified findings still stand in the

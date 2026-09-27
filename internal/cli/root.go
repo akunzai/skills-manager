@@ -176,6 +176,7 @@ func init() {
 	RootCmd.AddCommand(newLsCmd())
 	RootCmd.AddCommand(newAddCmd())
 	RootCmd.AddCommand(newRmCmd())
+	RootCmd.AddCommand(newTrustCmd())
 	RootCmd.AddCommand(newSyncCmd())
 	RootCmd.AddCommand(newPruneCmd())
 	RootCmd.AddCommand(newAdoptCmd())
