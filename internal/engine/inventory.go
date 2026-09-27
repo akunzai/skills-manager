@@ -17,6 +17,7 @@ import (
 type Inventory struct {
 	missing        []string
 	untracked      []string
+	untrackedDirs  []string
 	untrackedLinks []string
 	invalid        []InvalidSkill
 	stubs          []string
@@ -34,6 +35,10 @@ type presentSkill struct {
 func (inv Inventory) Missing() []string { return slices.Clone(inv.missing) }
 
 func (inv Inventory) Untracked() []string { return slices.Clone(inv.untracked) }
+
+// UntrackedDirectories is the Untracked occupancy that is a real directory:
+// the user's own content, which only an explicit choice removes.
+func (inv Inventory) UntrackedDirectories() []string { return slices.Clone(inv.untrackedDirs) }
 
 func (inv Inventory) UntrackedLinks() []string { return slices.Clone(inv.untrackedLinks) }
 
@@ -169,6 +174,9 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 		case item.SourceType == "untracked":
 			item.Status = models.SkillStatusUntracked
 			inv.untracked = append(inv.untracked, item.Name)
+			if mode.IsDir() {
+				inv.untrackedDirs = append(inv.untrackedDirs, item.Name)
+			}
 		case item.SourceType == "local_symlink" && models.LocalSourceInsideSkillsDir(models.ResolveLocalSourcePath(item.Source, baseSkills), baseSkills) && mode&os.ModeSymlink == 0 && mode != 0:
 			item.Status = models.SkillStatusIllegalLocal
 			inv.illegalLocal = append(inv.illegalLocal, IllegalLocalSource{Name: item.Name, Source: item.Source})

@@ -692,7 +692,10 @@ func TestApplyRemovePlanDropsConfigBeforeMaster(t *testing.T) {
 	}
 	plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "sample")
 
-	plan := BuildRemovePlan(cfg, skillsDir, []string{"sample"})
+	plan, err := BuildRemovePlan(cfg, skillsDir, []string{"sample"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(plan.Skills) != 1 || !plan.Skills[0].InConfig || !plan.Skills[0].MasterExists {
 		t.Fatalf("plan = %#v", plan)
 	}
@@ -734,7 +737,10 @@ func TestApplyRemovePlanSavesConfigWhenMasterMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan := BuildRemovePlan(cfg, skillsDir, []string{"ghost"})
+	plan, err := BuildRemovePlan(cfg, skillsDir, []string{"ghost"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !plan.Skills[0].InConfig || plan.Skills[0].MasterExists {
 		t.Fatalf("plan = %#v", plan.Skills[0])
 	}

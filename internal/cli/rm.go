@@ -87,11 +87,16 @@ func newRmCmd() *cobra.Command {
 				}
 			}
 
-			plan := engine.BuildRemovePlan(cfg, skillsDir, skillsToRemove)
+			plan, err := engine.BuildRemovePlan(cfg, skillsDir, skillsToRemove)
+			if err != nil {
+				return err
+			}
 			// A real directory Config does not declare is content Sync never
 			// wrote, so it goes only once the user says so, and before
 			// anything else is removed.
-			if untracked := plan.UntrackedDirectories(); len(untracked) > 0 && !flagYes {
+			if untracked := plan.UntrackedDirectories(); len(untracked) > 0 && flagYes {
+				plan = plan.ApproveUntrackedDirectories()
+			} else if len(untracked) > 0 {
 				subject := fmt.Sprintf("%d untracked directories", len(untracked))
 				if len(untracked) == 1 {
 					subject = "1 untracked directory"
@@ -107,6 +112,7 @@ func newRmCmd() *cobra.Command {
 					fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
 					return nil
 				}
+				plan = plan.ApproveUntrackedDirectories()
 			}
 			result, err := engine.ApplyRemovePlan(plan, cfg, configPath, skillsDir)
 			if err != nil {
@@ -155,7 +161,9 @@ func printRemoveResult(out io.Writer, result engine.RemoveResult) {
 		if s.CopyRemoved && s.MasterExisted {
 			fmt.Fprintf(out, "  %sRemoved master directory: %s.%s\n", colorGreen, models.ToTildePath(s.CopyPath), colorReset)
 		}
-		if s.CopyKept {
+		if s.DirectoryKept != "" {
+			fmt.Fprintf(out, "  %sLeft %s in place: %s.%s\n", colorYellow, models.ToTildePath(s.CopyPath), s.DirectoryKept, colorReset)
+		} else if s.CopyKept {
 			fmt.Fprintf(out, "  %sLeft %s in place: a local Skill only links to its Source, and this is a directory.%s\n", colorYellow, models.ToTildePath(s.CopyPath), colorReset)
 		}
 		if s.CopyErr != nil {
