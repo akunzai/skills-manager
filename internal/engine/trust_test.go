@@ -164,3 +164,40 @@ func TestRetireRemovesTrustedContent(t *testing.T) {
 		t.Fatal("Retire should remove the Skill's Trusted content")
 	}
 }
+
+func TestDoctorWarnsAboutTrustedContent(t *testing.T) {
+	cfg, configPath, skillsDir, cacheDir := signatureFixture(t)
+	stubVerify(t, tampered)
+	trustOnce(t, cfg, configPath, skillsDir, cacheDir, "sample")
+	syncOnce(t, cfg, configPath, skillsDir, cacheDir, SyncDecision{})
+
+	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := outcome.Report.Unverified; len(got) != 1 || got[0].Name != "sample" || got[0].Reason != "SKILL.md changed after signing" {
+		t.Fatalf("unverified = %+v, want sample", got)
+	}
+	if len(outcome.Report.StaleTrust) != 0 {
+		t.Fatalf("stale = %v, want none while the content matches", outcome.Report.StaleTrust)
+	}
+	if !slices.ContainsFunc(outcome.Warnings, func(w DoctorWarning) bool { return w.Kind == DoctorFindingUnverified }) {
+		t.Fatalf("warnings = %+v, want an unverified warning", outcome.Warnings)
+	}
+
+	origin := cfg.Remote["owner/repo"].URL
+	if err := os.WriteFile(filepath.Join(origin, "sample", "SKILL.md"), []byte("# Changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, origin, "commit", "-am", "change")
+	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(true, "sample"); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err = NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(outcome.Report.StaleTrust, []string{"sample"}) {
+		t.Fatalf("stale = %v, want [sample] once the content changed", outcome.Report.StaleTrust)
+	}
+}

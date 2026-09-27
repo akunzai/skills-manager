@@ -112,6 +112,10 @@ func warningNote(warning engine.DoctorWarning) string {
 		return fmt.Sprintf("%d unmanaged Agent directories left as-is", n)
 	case engine.DoctorFindingReservedName:
 		return countOf(n, "Skill") + " cannot be available to an Agent"
+	case engine.DoctorFindingUnverified:
+		return countOf(n, "Skill") + " applied from trusted content that does not verify"
+	case engine.DoctorFindingStaleTrust:
+		return countOf(n, "Skill") + " trusted at content its Source no longer has"
 	default:
 		return ""
 	}
