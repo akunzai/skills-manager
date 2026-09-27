@@ -40,7 +40,7 @@ func TestBaselinesRecordThenCompareScopeCopy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			skillsDir, skill := baselinesScope(t)
-			if err := OpenBaselines(skillsDir).Record(skill, "cache", "abc123"); err != nil {
+			if err := OpenBaselines(skillsDir).Record(skill, "cache", "abc123", false); err != nil {
 				t.Fatal(err)
 			}
 			tt.after(t, skill)
@@ -72,7 +72,7 @@ func TestBaselinesForgetStaleKeepsOnlyDeclaredRemoteSkills(t *testing.T) {
 	baselines := OpenBaselines(skillsDir)
 	for _, name := range []string{"remote", "local", "gone"} {
 		skill.Name = name
-		if err := baselines.Record(skill, "cache", "abc123"); err != nil {
+		if err := baselines.Record(skill, "cache", "abc123", false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -123,7 +123,7 @@ func TestBaselinesLeaveUnreadableStateAlone(t *testing.T) {
 		t.Fatal("Err = nil; want why the Scope state could not be read")
 	}
 	for name, err := range map[string]error{
-		"Record":      baselines.Record(skill, "cache", "abc123"),
+		"Record":      baselines.Record(skill, "cache", "abc123", false),
 		"Forget":      baselines.Forget("sample"),
 		"ForgetStale": baselines.ForgetStale(cfg),
 	} {

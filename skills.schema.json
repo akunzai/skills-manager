@@ -68,6 +68,38 @@
               "type": "string"
             },
             "description": "Map of skill name to its relative path within the repository"
+          },
+          "signature": {
+            "type": "object",
+            "description": "Who this Source's Skills must be signed by. Each Skill's skill.oms.sig (OpenSSF Model Signing) is verified before it is Materialized.",
+            "properties": {
+              "require": {
+                "type": "boolean",
+                "description": "Treat an unsigned Skill of this Source as a verification failure"
+              },
+              "sigstore": {
+                "type": "object",
+                "description": "Sigstore keyless signer, matched exactly. Recorded the first time a signed Skill of this Source is seen.",
+                "properties": {
+                  "identity": {
+                    "type": "string",
+                    "description": "Certificate identity (subject alternative name), e.g. a GitHub Actions workflow ref"
+                  },
+                  "issuer": {
+                    "type": "string",
+                    "description": "OIDC issuer, e.g. https://token.actions.githubusercontent.com"
+                  }
+                },
+                "required": ["identity", "issuer"],
+                "additionalProperties": false
+              },
+              "certificateChain": {
+                "type": "string",
+                "description": "PEM trust anchor the signing certificate must chain to, relative to the directory holding this skills.json unless absolute"
+              }
+            },
+            "not": { "required": ["sigstore", "certificateChain"] },
+            "additionalProperties": false
           }
         },
         "required": ["skills"],

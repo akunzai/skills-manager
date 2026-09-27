@@ -191,6 +191,9 @@ type AddPlan struct {
 	Availability AddAvailabilityIntent
 	ConfigPath   string
 	SkillsDir    string
+	// TrustCert is the PEM trust anchor a remote Source's Skills must be
+	// signed with, as it is stored in Config; empty keeps what Config has.
+	TrustCert string
 }
 
 // BuildAddPlan inspects existing Config and filesystem Inventory to calculate
@@ -335,9 +338,36 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		}
 	}
 
+	baselines := OpenBaselines(plan.SkillsDir)
+	// verified carries each remote Skill's signature verdict from before
+	// Config is saved, so the signer it records is saved with the Skills.
+	verified := make(map[string]SyncPlanItem)
+	var signerRecorded *SyncEvent
 	if plan.Source.Kind == AddSourceRemote {
 		if err := plan.Source.Remote.Declare(cfg, plan.Skills); err != nil {
 			return AddResult{}, err
+		}
+		key := plan.Source.Key
+		if plan.TrustCert != "" {
+			repo := cfg.Remote[key]
+			policy := config.SignaturePolicy{}
+			if repo.Signature != nil {
+				policy = *repo.Signature
+			}
+			policy.Sigstore, policy.CertificateChain = nil, plan.TrustCert
+			repo.Signature = &policy
+			cfg.Remote[key] = repo
+		}
+		checks := newSignatures(cfg, plan.ConfigPath, plan.Source.Remote.cache.cacheDir, baselines)
+		var items []SyncPlanItem
+		for _, name := range names {
+			item := planDeclaredRemoteItem(key, plan.Source.Remote.cache, SkillFreshness{Name: name, Source: key, Subpath: plan.Skills[name]}, AvailabilityDrift{})
+			checks.check(&item)
+			verified[name] = item
+			items = append(items, item)
+		}
+		if signer, changed := recordSigner(cfg, key, items); changed {
+			signerRecorded = &SyncEvent{Kind: SyncSignerRecorded, Source: key, Target: signer.Identity}
 		}
 	}
 
@@ -370,7 +400,9 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	occupancy := availability.ObserveOccupancy()
 	result := AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}
 	emit := func(ev SyncEvent) { result.Events = append(result.Events, ev) }
-	baselines := OpenBaselines(plan.SkillsDir)
+	if signerRecorded != nil {
+		emit(*signerRecorded)
+	}
 	for _, name := range names {
 		subpath := plan.Skills[name]
 		target := ""
@@ -397,6 +429,9 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 				Subpath:   subpath,
 				ScopePath: filepath.Join(plan.SkillsDir, name),
 			}, occupancy.Drift(name))
+			checked := verified[name]
+			item.Block, item.BlockReason, item.BlockNext = checked.Block, checked.BlockReason, checked.BlockNext
+			item.Signed = checked.Signed
 		case AddSourceSymlink, AddSourceCommand:
 			item = planLocalItem(cfg, plan.SkillsDir, occupancy.Drift(name), name)
 		}

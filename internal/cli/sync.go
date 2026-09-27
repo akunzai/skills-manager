@@ -400,6 +400,10 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent, scopeFlags string) {
 		fmt.Fprintf(out, "  %sRenamed %s%s%s to %s%s%s, as its Source declares.%s\n", colorGreen, colorBold, ev.Skill, colorReset+colorGreen, colorBold, ev.Target, colorReset+colorGreen, colorReset)
 	case engine.SyncRenameFailed:
 		fmt.Fprintf(out, "  %sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
+	case engine.SyncSignerRecorded:
+		fmt.Fprintf(out, "  %sTrusting %s as the signer of %s, recorded in Config.%s\n", colorGreen, ev.Target, ev.Source, colorReset)
+	case engine.SyncSignerFailed:
+		fmt.Fprintf(out, "  %sFailed to record %s as the signer of %s: %s%s\n", colorRed, ev.Target, ev.Source, ev.Err, colorReset)
 	case engine.SyncSkipped:
 		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
 	case engine.SyncStateUnreadable:

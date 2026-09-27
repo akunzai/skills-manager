@@ -24,6 +24,9 @@ type AppliedSkillState struct {
 	CacheIdentity  string            `json:"cache_identity"`
 	AppliedCommit  string            `json:"applied_commit"`
 	ContentDigests map[string]string `json:"content_digests"`
+	// Signed is whether the applied copy verified against a signature. A
+	// Skill once signed may not arrive unsigned.
+	Signed bool `json:"signed,omitempty"`
 }
 
 // ScopeState is the versioned applied-state artifact for one Scope.

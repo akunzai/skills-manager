@@ -92,6 +92,17 @@ func newLsCmd() *cobra.Command {
 				return err
 			}
 			skills := inv.SkillItems()
+			// Only a remote Skill has a Baseline, and it records whether the
+			// applied copy was signed.
+			baselines := engine.OpenBaselines(skillsDir)
+			for i := range skills {
+				if applied, ok := baselines.Applied(skills[i].Name); ok && skills[i].IsInstalled {
+					skills[i].Signature = models.SignatureUnsigned
+					if applied.Signed {
+						skills[i].Signature = models.SignatureSigned
+					}
+				}
+			}
 
 			if flagAgent != "" {
 				filterAgent := models.NormalizeAgentName(flagAgent)
@@ -150,6 +161,7 @@ func newLsCmd() *cobra.Command {
 						"installed":  s.IsInstalled,
 						"valid":      s.IsValidSkill,
 						"status":     s.Status,
+						"signature":  s.Signature,
 					})
 				}
 				data, _ := json.MarshalIndent(outList, "", "  ")
@@ -298,6 +310,8 @@ func lsStatus(s models.SkillItem) (string, func(presentation.Style) string) {
 		return "Broken link", red
 	case !s.IsValidSkill:
 		return "Invalid (No SKILL.md)", red
+	case s.Signature != "":
+		return "Installed, " + s.Signature, green
 	default:
 		return "Installed", green
 	}

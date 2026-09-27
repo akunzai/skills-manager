@@ -181,6 +181,10 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoUnchanged, Source: source, NewSHA: sha})
 			continue
 		}
+		if err := refreshTrustRootFor(cache, paths); err != nil {
+			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: err.Error()})
+			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: err.Error()})
+		}
 		result.UpdatedRepos = append(result.UpdatedRepos, UpdatedRepoInfo{Source: source, NewSHA: sha})
 		emitUpdate(progress, UpdateEvent{Kind: UpdateRepoDone, Source: source, NewSHA: sha})
 	}

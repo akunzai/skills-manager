@@ -180,6 +180,15 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 	for _, source := range plan.Sources {
 		items := plan.SourceItems(source)
 		emit(SyncEvent{Kind: SyncRepoStart, Source: source, Skills: itemNames(items)})
+		if signer, changed := recordSigner(plan.cfg, source, items); changed {
+			// Recording a signer is, like a Rename, a Config write Sync makes.
+			if err := config.SaveConfig(plan.cfg, plan.configPath); err != nil {
+				emit(SyncEvent{Kind: SyncSignerFailed, Source: source, Target: signer.Identity, Err: err.Error()})
+				report.tally(SyncFailed)
+			} else {
+				emit(SyncEvent{Kind: SyncSignerRecorded, Source: source, Target: signer.Identity})
+			}
+		}
 		for _, item := range items {
 			if item.Block == SyncBlockUnknownBaseline {
 				report.Unknown = append(report.Unknown, item.Freshness)
@@ -263,7 +272,7 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 	}
 	// An unreadable Scope state is the Scope's verdict, counted once by the
 	// caller, not a failure of each Skill.
-	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA); err != nil && !errors.Is(err, ErrNotRecorded) {
+	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA, item.Signed); err != nil && !errors.Is(err, ErrNotRecorded) {
 		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
 		return SyncFailed, err
 	}
@@ -384,5 +393,8 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 		Subpath:   skill.RenamedSubpath,
 		ScopePath: filepath.Join(plan.skillsDir, skill.RenamedTo),
 	}, plan.availability.ObserveOccupancy().Drift(skill.RenamedTo))
+	if plan.signatures != nil {
+		plan.signatures.check(&renamed)
+	}
 	return applyItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
 }

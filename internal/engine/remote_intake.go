@@ -66,6 +66,7 @@ func (in *RemoteIntake) Declare(cfg *config.Config, skills map[string]string) er
 	if err := in.cache.Cover(subpaths...); err != nil {
 		return fmt.Errorf("fetch selected Skills into the Cache: %w", err)
 	}
+	_ = refreshTrustRootFor(in.cache, subpaths)
 	url := storedRemoteURL(key, in.spec.URL)
 	for _, name := range names {
 		config.AddRemoteSkillEntry(cfg, key, name, skills[name], in.spec.RepoType, url)

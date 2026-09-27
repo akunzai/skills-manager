@@ -107,9 +107,9 @@ func (b *Baselines) CompareScopeCopy(name, scopePath string) ScopeCopy {
 }
 
 // Record makes the Skill's Scope copy, as it is now, its Baseline, applied
-// from cacheIdentity at commit. An unreadable Scope state records nothing
-// and reports ErrNotRecorded.
-func (b *Baselines) Record(skill SkillFreshness, cacheIdentity, commit string) error {
+// from cacheIdentity at commit, and whether it verified as signed. An
+// unreadable Scope state records nothing and reports ErrNotRecorded.
+func (b *Baselines) Record(skill SkillFreshness, cacheIdentity, commit string, signed bool) error {
 	if b.err != nil {
 		return b.notRecorded()
 	}
@@ -118,7 +118,9 @@ func (b *Baselines) Record(skill SkillFreshness, cacheIdentity, commit string) e
 		return err
 	}
 	skill.CacheDigests = digests
-	b.state.Skills[skill.Name] = skill.appliedState(cacheIdentity, commit)
+	applied := skill.appliedState(cacheIdentity, commit)
+	applied.Signed = signed
+	b.state.Skills[skill.Name] = applied
 	return b.store.Save(b.state)
 }
 
