@@ -122,10 +122,10 @@ func anySigned(dirs ...string) bool {
 // that Source in the operation is held to the same one and recordSigner can
 // write it to Config.
 type remotePlanner struct {
-	cfg       *config.Config
-	configDir string
-	cacheDir  string
-	baselines *Baselines
+	cfg        *config.Config
+	configPath string
+	cacheDir   string
+	baselines  *Baselines
 
 	trustedRoot root.TrustedMaterial
 	observed    map[string]signing.Signer
@@ -133,11 +133,11 @@ type remotePlanner struct {
 
 func newRemotePlanner(cfg *config.Config, configPath, cacheDir string, baselines *Baselines) *remotePlanner {
 	return &remotePlanner{
-		cfg:       cfg,
-		configDir: filepath.Dir(configPath),
-		cacheDir:  cacheDir,
-		baselines: baselines,
-		observed:  make(map[string]signing.Signer),
+		cfg:        cfg,
+		configPath: configPath,
+		cacheDir:   cacheDir,
+		baselines:  baselines,
+		observed:   make(map[string]signing.Signer),
 	}
 }
 
@@ -296,10 +296,7 @@ func (p *remotePlanner) block(item *SyncPlanItem, reason, next string) {
 // signer this operation saw for it.
 func (p *remotePlanner) trust(source string, policy *config.SignaturePolicy) (signing.Trust, error) {
 	if policy != nil && policy.CertificateChain != "" {
-		path := policy.CertificateChain
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(p.configDir, path)
-		}
+		path := config.ResolveTrustCertPath(policy.CertificateChain, p.configPath)
 		pem, err := os.ReadFile(path)
 		if err != nil {
 			return signing.Trust{}, fmt.Errorf("read trusted certificate: %w", err)

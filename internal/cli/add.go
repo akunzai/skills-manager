@@ -2,7 +2,6 @@ package cli
 
 import (
 	"cmp"
-	"crypto/x509"
 	"fmt"
 	"maps"
 	"os"
@@ -337,7 +336,7 @@ func newAddCmd() *cobra.Command {
 				intake := newCommandIntake(skillName, source, flagCheck, flagDescription)
 				return intake.run(cmd, addRequest{scope: scope, skills: []string{skillName}, yes: flagYes, agents: flagAgents})
 			case engine.AddSourceRemote:
-				trustCert, err := storedTrustCert(flagTrustCert, scope.ConfigPath)
+				trustCert, err := config.StoreTrustCertPath(flagTrustCert, scope.ConfigPath)
 				if err != nil {
 					return err
 				}
@@ -430,32 +429,4 @@ func agentSelectionBaseline(availability *engine.Availability, skillNames []stri
 		}
 	}
 	return baseline, true
-}
-
-// storedTrustCert checks that path holds a PEM certificate and returns it as
-// Config stores it: relative to the directory holding Config when inside it,
-// so a Project Config stays portable, and absolute otherwise.
-func storedTrustCert(path, configPath string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	abs, err := filepath.Abs(models.ExpandUser(path))
-	if err != nil {
-		return "", err
-	}
-	pem, err := os.ReadFile(abs)
-	if err != nil {
-		return "", fmt.Errorf("read --trust-cert: %w", err)
-	}
-	if !x509.NewCertPool().AppendCertsFromPEM(pem) {
-		return "", fmt.Errorf("--trust-cert %s holds no PEM certificate", path)
-	}
-	configDir, err := filepath.Abs(filepath.Dir(configPath))
-	if err != nil {
-		return abs, nil
-	}
-	if rel, err := filepath.Rel(configDir, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return filepath.ToSlash(rel), nil
-	}
-	return abs, nil
 }
