@@ -46,10 +46,10 @@ func TestCLILsShowsWhetherTheAppliedCopyWasSigned(t *testing.T) {
 	}
 	got := make(map[string]any)
 	for _, row := range rows {
-		got[row["name"].(string)] = row["signature"]
+		got[row["name"].(string)] = row["signed"]
 	}
-	if got["signed-one"] != "signed" || got["plain"] != "unsigned" {
-		t.Fatalf("signature = %v, want signed-one signed and plain unsigned", got)
+	if got["signed-one"] != true || got["plain"] != false {
+		t.Fatalf("signed = %v, want signed-one true and plain false", got)
 	}
 
 	resetRootCmdFlags()
@@ -57,8 +57,18 @@ func TestCLILsShowsWhetherTheAppliedCopyWasSigned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ls: %v\n%s", err, table)
 	}
-	if !strings.Contains(table, "Installed, signed") || !strings.Contains(table, "Installed, unsigned") {
-		t.Fatalf("ls table should mark each copy signed or unsigned:\n%s", table)
+	// Captured output is not a terminal, so the mark falls back to text.
+	var signedRow, plainRow string
+	for _, line := range strings.Split(table, "\n") {
+		switch {
+		case strings.HasPrefix(line, "signed-one"):
+			signedRow = line
+		case strings.HasPrefix(line, "plain"):
+			plainRow = line
+		}
+	}
+	if !strings.Contains(signedRow, "[signed]") || strings.Contains(plainRow, "[signed]") || strings.Contains(table, "unsigned") {
+		t.Fatalf("ls should mark only the signed copy:\n%s", table)
 	}
 }
 

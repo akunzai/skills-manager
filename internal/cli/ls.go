@@ -96,12 +96,8 @@ func newLsCmd() *cobra.Command {
 			// applied copy was signed.
 			baselines := engine.OpenBaselines(skillsDir)
 			for i := range skills {
-				if applied, ok := baselines.Applied(skills[i].Name); ok && skills[i].IsInstalled {
-					skills[i].Signature = models.SignatureUnsigned
-					if applied.Signed {
-						skills[i].Signature = models.SignatureSigned
-					}
-				}
+				applied, _ := baselines.Applied(skills[i].Name)
+				skills[i].Signed = skills[i].IsInstalled && applied.Signed
 			}
 
 			if flagAgent != "" {
@@ -161,7 +157,7 @@ func newLsCmd() *cobra.Command {
 						"installed":  s.IsInstalled,
 						"valid":      s.IsValidSkill,
 						"status":     s.Status,
-						"signature":  s.Signature,
+						"signed":     s.Signed,
 					})
 				}
 				data, _ := json.MarshalIndent(outList, "", "  ")
@@ -244,8 +240,13 @@ func newLsCmd() *cobra.Command {
 				} else {
 					rawSource = fmt.Sprintf("%s %s", icon, s.Source)
 				}
-
+				// Only a signed copy is marked; an unsigned one is the norm. The
+				// mark survives truncation, since it is what the row asserts.
 				sourceCol := padRight(truncateWithEllipsis(rawSource, sourceWidth), sourceWidth)
+				if s.Signed {
+					mark := " " + style.SignedMark()
+					sourceCol = padRight(truncateWithEllipsis(rawSource, sourceWidth-stringRuneLen(mark))+mark, sourceWidth)
+				}
 
 				targetList := agentDisplayLabels(s.Agents)
 
@@ -310,8 +311,6 @@ func lsStatus(s models.SkillItem) (string, func(presentation.Style) string) {
 		return "Broken link", red
 	case !s.IsValidSkill:
 		return "Invalid (No SKILL.md)", red
-	case s.Signature != "":
-		return "Installed, " + s.Signature, green
 	default:
 		return "Installed", green
 	}

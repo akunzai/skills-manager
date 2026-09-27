@@ -29,3 +29,12 @@ func TestSourceIconHasNoEmojiFallback(t *testing.T) {
 		t.Fatalf("icon = %q, want arrow", got)
 	}
 }
+
+func TestSignedMarkFallsBackToText(t *testing.T) {
+	if got := (Style{Plain: true}).SignedMark(); got != "[signed]" {
+		t.Fatalf("plain mark = %q, want [signed]", got)
+	}
+	if got := (Style{}).SignedMark(); got != "✓" {
+		t.Fatalf("mark = %q, want ✓", got)
+	}
+}

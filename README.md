@@ -196,7 +196,7 @@ A Source can sign each Skill with an [OpenSSF Model Signing](https://github.com/
 - **Sigstore keyless** signatures need nothing up front. The first signer seen for a Source is recorded in `skills.json` under `signature.sigstore`; review it there, and a later Skill signed by anyone else is refused.
 - **Certificate chains** need their trust anchor named once: `skills add NVIDIA/skills --trust-cert nv-agent-root-cert.pem`.
 - A Skill that fails verification is not written. The copy already in the Scope stays, and the command exits `1` naming why. Right after a publisher merges, a signature can be stale for a few minutes; run `skills update` again later.
-- An unsigned Skill is still installed and `skills ls` marks it `unsigned`. Set `"signature": {"require": true}` on a Source to refuse unsigned Skills from it. A Skill that was signed is always refused if it arrives unsigned.
+- `skills ls` marks a signed Skill with `✓` after its Source (`[signed]` when output is not a terminal); an unsigned Skill is installed and left unmarked. Set `"signature": {"require": true}` on a Source to refuse unsigned Skills from it. A Skill that was signed is always refused if it arrives unsigned.
 
 `skills update` fetches the Sigstore trust root next to the Cache, so `skills sync` verifies offline.
 
