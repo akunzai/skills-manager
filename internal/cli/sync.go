@@ -404,6 +404,8 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent, scopeFlags string) {
 		fmt.Fprintf(out, "  %sTrusting %s as the signer of %s, recorded in Config.%s\n", colorGreen, ev.Target, ev.Source, colorReset)
 	case engine.SyncTrustedUnverified:
 		fmt.Fprintf(out, "  %sTrusted unverified: %s (%s)%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
+	case engine.SyncTrustRootFailed:
+		fmt.Fprintf(out, "  %sWarning: %s%s\n", colorYellow, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
 	case engine.SyncSignerFailed:
 		fmt.Fprintf(out, "  %sFailed to record %s as the signer of %s: %s%s\n", colorRed, ev.Target, ev.Source, ev.Err, colorReset)
 	case engine.SyncSkipped:

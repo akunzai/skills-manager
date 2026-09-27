@@ -114,3 +114,12 @@ func TestStoredTrustCertIsPortableInsideTheConfigDirectory(t *testing.T) {
 		t.Fatal("storedTrustCert should refuse a file with no PEM certificate")
 	}
 }
+
+func TestCLIAddWarnsOfATrustRootItCouldNotFetch(t *testing.T) {
+	var out strings.Builder
+	printSyncEvent(&out, engine.SyncEvent{Kind: engine.SyncTrustRootFailed, Source: "owner/repo", Err: "fetch Sigstore trust root: unreachable", Next: "update"}, " -p")
+
+	if got := out.String(); !strings.Contains(got, "Warning: fetch Sigstore trust root: unreachable") || !strings.Contains(got, "skills update -p") {
+		t.Fatalf("add output = %q; want the failure and update as the way out", got)
+	}
+}

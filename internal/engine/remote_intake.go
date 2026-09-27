@@ -18,6 +18,9 @@ type RemoteIntake struct {
 	Discovered DiscoveredSkills
 	// Descriptions is each Discovered candidate path's SKILL.md description.
 	Descriptions DiscoveredSkillDescriptions
+	// TrustRootErr is why Declare could not fetch the trust root its signed
+	// Skills need.
+	TrustRootErr error
 
 	spec  models.ParsedRepoSource // Branch is the one fetched
 	cache Cache
@@ -66,7 +69,9 @@ func (in *RemoteIntake) Declare(cfg *config.Config, skills map[string]string) er
 	if err := in.cache.Cover(subpaths...); err != nil {
 		return fmt.Errorf("fetch selected Skills into the Cache: %w", err)
 	}
-	_ = refreshTrustRootFor(in.cache, subpaths)
+	// A trust root that cannot be fetched now leaves the signed Skills
+	// blocked, not undeclared; Add reports it, and Update fetches it later.
+	in.TrustRootErr = ensureTrustRoot(in.cache.cacheDir, true, skillDirs(in.cache, subpaths)...)
 	url := storedRemoteURL(key, in.spec.URL)
 	for _, name := range names {
 		config.AddRemoteSkillEntry(cfg, key, name, skills[name], in.spec.RepoType, url)
