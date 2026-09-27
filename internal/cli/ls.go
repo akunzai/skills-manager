@@ -97,7 +97,7 @@ func newLsCmd() *cobra.Command {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
 			cmd.SilenceUsage = true
-			resolvedScope := ResolveScope()
+			resolvedScope := ResolveScope(cmd)
 			configPath, skillsDir := resolvedScope.ConfigPath, resolvedScope.SkillsDir
 			out := cmd.OutOrStdout()
 			style := presentation.For(out)

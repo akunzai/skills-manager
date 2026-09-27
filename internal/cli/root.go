@@ -27,21 +27,6 @@ func ExitCode(err error) int {
 	return 2
 }
 
-// Cobra-owned: bound to --config/--skills-dir/--cache-dir/--global/--project
-// in init() below. Never assign to these directly outside flag parsing — a
-// caller that already knows its Scope (an interactive prompt, for instance)
-// must call resolveScopeFor or resolveScope instead. add's scope prompt used
-// to write here, which is why cli_test.go once needed manual resets of
-// flagProject/flagGlobal between tests to avoid one test's prompt answer
-// leaking into the next.
-var (
-	flagConfigFile string
-	flagSkillsDir  string
-	flagCacheDir   string
-	flagGlobal     bool
-	flagProject    bool
-)
-
 // Scope is the resolved Global or Project configuration for one command
 // invocation: its Config path, skills directory, and git Cache directory.
 // Every command decides its Scope once, at the top of RunE via ResolveScope;
@@ -56,17 +41,20 @@ func resolveScope(isProject bool, cwd, configOverride, skillsDirOverride, cacheD
 	return models.ResolveScope(isProject, cwd, configOverride, skillsDirOverride, cacheDirOverride)
 }
 
-// flagPathOverrides reads the parsed --config/--skills-dir/--cache-dir flags:
-// empty unless the user explicitly set them.
-func flagPathOverrides() (configOverride, skillsDirOverride, cacheDirOverride string) {
-	if RootCmd.PersistentFlags().Changed("config") {
-		configOverride = flagConfigFile
+// flagPathOverrides reads cmd's parsed --config/--skills-dir/--cache-dir
+// flags: empty unless the user explicitly set them. cmd's flag values live on
+// the pflag.FlagSet built fresh for this execution by newRootCmd, so nothing
+// here can carry over from a previous run.
+func flagPathOverrides(cmd *cobra.Command) (configOverride, skillsDirOverride, cacheDirOverride string) {
+	flags := cmd.Flags()
+	if flags.Changed("config") {
+		configOverride, _ = flags.GetString("config")
 	}
-	if RootCmd.PersistentFlags().Changed("skills-dir") {
-		skillsDirOverride = flagSkillsDir
+	if flags.Changed("skills-dir") {
+		skillsDirOverride, _ = flags.GetString("skills-dir")
 	}
-	if RootCmd.PersistentFlags().Changed("cache-dir") {
-		cacheDirOverride = flagCacheDir
+	if flags.Changed("cache-dir") {
+		cacheDirOverride, _ = flags.GetString("cache-dir")
 	}
 	return configOverride, skillsDirOverride, cacheDirOverride
 }
@@ -80,11 +68,11 @@ func workingDir() string {
 }
 
 // resolveScopeFor derives a Scope for an explicitly known isProject, reading
-// only the path-override flags and the working directory — never
+// only cmd's path-override flags and the working directory — never
 // --project/--global. ResolveScope and add's scope prompt both go through
 // this; the only difference between them is where isProject comes from.
-func resolveScopeFor(isProject bool) Scope {
-	configOverride, skillsDirOverride, cacheDirOverride := flagPathOverrides()
+func resolveScopeFor(cmd *cobra.Command, isProject bool) Scope {
+	configOverride, skillsDirOverride, cacheDirOverride := flagPathOverrides(cmd)
 	return resolveScope(isProject, workingDir(), configOverride, skillsDirOverride, cacheDirOverride)
 }
 
@@ -92,12 +80,12 @@ func resolveScopeFor(isProject bool) Scope {
 // on s: the Scope flags the user passed, -p and any path override, so it
 // reaches the same Config, skills directory and Cache. It follows the flags,
 // not the shape of --skills-dir, and adds nothing the user did not pass.
-func scopeFlagsOf(s Scope) string {
+func scopeFlagsOf(cmd *cobra.Command, s Scope) string {
 	var flags strings.Builder
 	if s.IsProject {
 		flags.WriteString(" -p")
 	}
-	configOverride, skillsDirOverride, cacheDirOverride := flagPathOverrides()
+	configOverride, skillsDirOverride, cacheDirOverride := flagPathOverrides(cmd)
 	for _, override := range []struct{ flag, value string }{
 		{"--config", configOverride},
 		{"--skills-dir", skillsDirOverride},
@@ -139,63 +127,82 @@ func withScopeFlags(err error, scopeFlags string) error {
 	return errors.New(strings.Replace(err.Error(), next.Error(), next.Render(scopeFlags), 1))
 }
 
-// ResolveScope reads the parsed --project/--global/--config/--skills-dir/
+// ResolveScope reads cmd's parsed --project/--global/--config/--skills-dir/
 // --cache-dir flags and the working directory, and resolves them to a Scope.
-// Call it once per command invocation.
-func ResolveScope() Scope {
-	isProject := flagProject
-	if RootCmd.PersistentFlags().Changed("global") && flagGlobal {
+// Call it once per command invocation, with the *cobra.Command RunE was
+// handed — never a stashed reference from an earlier run.
+func ResolveScope(cmd *cobra.Command) Scope {
+	flags := cmd.Flags()
+	isProject, _ := flags.GetBool("project")
+	global, _ := flags.GetBool("global")
+	if flags.Changed("global") && global {
 		isProject = false
 	}
-	return resolveScopeFor(isProject)
+	return resolveScopeFor(cmd, isProject)
 }
 
-var RootCmd = &cobra.Command{
-	Use:     "skills",
-	Short:   "Skills manager for AI agents",
-	Long:    `A fast, cross-platform standalone CLI to discover, install, update, and manage skills across AI agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).`,
-	Version: updater.Version,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		selfUpdateNoticeCmd = cmd
-		applyOutputStyle(cmd.OutOrStdout())
-		applyErrorOutputStyle(cmd.ErrOrStderr())
-		return nil
-	},
-	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-		maybeNotifySelfUpdate(cmd)
-		return nil
-	},
+// newRootCmd builds a fresh command tree: a new root Command, its own
+// pflag.FlagSet for every persistent flag, and a fresh instance of every
+// subcommand. Nothing here is a package-level variable, so no flag value or
+// Changed bit can survive from one build to the next — each call starts from
+// the declared defaults, exactly like a freshly started process. Execute
+// calls this once per invocation; tests call it once per test.
+func newRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "skills",
+		Short:         "Skills manager for AI agents",
+		Long:          `A fast, cross-platform standalone CLI to discover, install, update, and manage skills across AI agents (Claude Code, Codex, GitHub Copilot CLI, Antigravity CLI, etc.).`,
+		Version:       updater.Version,
+		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			selfUpdateNoticeCmd = cmd
+			applyOutputStyle(cmd.OutOrStdout())
+			applyErrorOutputStyle(cmd.ErrOrStderr())
+			return nil
+		},
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			maybeNotifySelfUpdate(cmd)
+			return nil
+		},
+	}
+
+	root.PersistentFlags().String("config", "", "Path to skills.json")
+	root.PersistentFlags().String("skills-dir", "", "Path to skills directory")
+	root.PersistentFlags().String("cache-dir", "", "Path to cache directory")
+	root.PersistentFlags().BoolP("global", "g", true, "Manage global skills")
+	root.PersistentFlags().BoolP("project", "p", false, "Manage current project skills")
+	root.AddCommand(newLsCmd())
+	root.AddCommand(newAddCmd())
+	root.AddCommand(newRmCmd())
+	root.AddCommand(newTrustCmd())
+	root.AddCommand(newSyncCmd())
+	root.AddCommand(newPruneCmd())
+	root.AddCommand(newAdoptCmd())
+	root.AddCommand(newOutdatedCmd())
+	root.AddCommand(newUpdateCmd())
+	root.AddCommand(newDiffCmd())
+	root.AddCommand(newDoctorCmd())
+	root.AddCommand(newSelfUpdateCmd())
+	root.AddCommand(newInitCmd())
+	root.AddCommand(newVersionCmd())
+	root.AddCommand(newConfigCmd())
+	root.AddCommand(newAgentsCmd())
+	root.AddCommand(newGuideCmd())
+	return root
 }
 
-func init() {
-	RootCmd.PersistentFlags().StringVar(&flagConfigFile, "config", "", "Path to skills.json")
-	RootCmd.PersistentFlags().StringVar(&flagSkillsDir, "skills-dir", "", "Path to skills directory")
-	RootCmd.PersistentFlags().StringVar(&flagCacheDir, "cache-dir", "", "Path to cache directory")
-	RootCmd.PersistentFlags().BoolVarP(&flagGlobal, "global", "g", true, "Manage global skills")
-	RootCmd.PersistentFlags().BoolVarP(&flagProject, "project", "p", false, "Manage current project skills")
-	RootCmd.AddCommand(newLsCmd())
-	RootCmd.AddCommand(newAddCmd())
-	RootCmd.AddCommand(newRmCmd())
-	RootCmd.AddCommand(newTrustCmd())
-	RootCmd.AddCommand(newSyncCmd())
-	RootCmd.AddCommand(newPruneCmd())
-	RootCmd.AddCommand(newAdoptCmd())
-	RootCmd.AddCommand(newOutdatedCmd())
-	RootCmd.AddCommand(newUpdateCmd())
-	RootCmd.AddCommand(newDiffCmd())
-	RootCmd.AddCommand(newDoctorCmd())
-	RootCmd.AddCommand(newSelfUpdateCmd())
-	RootCmd.AddCommand(newInitCmd())
-	RootCmd.AddCommand(newVersionCmd())
-	RootCmd.AddCommand(newConfigCmd())
-	RootCmd.AddCommand(newAgentsCmd())
-	RootCmd.AddCommand(newGuideCmd())
-}
-
+// Execute builds a fresh command tree and runs it against the process's own
+// args, stdin, stdout and stderr.
 func Execute() error {
-	RootCmd.SilenceErrors = true
+	return execute(newRootCmd())
+}
+
+// execute is Execute's core, taking the *cobra.Command to run so a test can
+// hand it one already configured with SetArgs/SetOut/SetErr — the same
+// tree-per-call guarantee newRootCmd gives Execute.
+func execute(cmd *cobra.Command) error {
 	selfUpdateNoticeCmd = nil
-	err := RootCmd.Execute()
+	err := cmd.Execute()
 	// Cobra skips PersistentPostRunE when RunE returns. outdated, sync, and
 	// doctor still finished; mention a Self-update without changing that error.
 	if err != nil && selfUpdateNoticeCmd != nil {

@@ -29,7 +29,7 @@ func newRmCmd() *cobra.Command {
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
 			p := newPrompter(cmd)
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
 
 			cfg, err := config.LoadConfig(configPath)
@@ -114,7 +114,7 @@ func newRmCmd() *cobra.Command {
 			}
 			printRemoveResult(out, result)
 			if result.StateWarning != "" {
-				printScopeStateWarning(out, result.StateWarning, scopeFlagsOf(scope))
+				printScopeStateWarning(out, result.StateWarning, scopeFlagsOf(cmd, scope))
 			}
 			if result.StateError != "" {
 				printScopeStateUnreadable(out, result.StateError)

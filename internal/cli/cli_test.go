@@ -20,20 +20,16 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 func TestCLIVersion(t *testing.T) {
-	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"version"})
-
-	if err := RootCmd.Execute(); err != nil {
+	out, err := runCLI(t, "version")
+	if err != nil {
 		t.Fatalf("version command failed: %v", err)
 	}
 	want := fmt.Sprintf("skills-manager %s\n", updater.Version)
-	if got := buf.String(); got != want {
-		t.Fatalf("version output = %q; want %q", got, want)
+	if out != want {
+		t.Fatalf("version output = %q; want %q", out, want)
 	}
 }
 
@@ -44,8 +40,7 @@ func TestCLIInitAndLs(t *testing.T) {
 	cacheDir := filepath.Join(tmpDir, ".cache")
 
 	// 1. Run init
-	RootCmd.SetArgs([]string{"init", "--config", configFile})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "init", "--config", configFile); err != nil {
 		t.Fatalf("init command failed: %v", err)
 	}
 	if _, err := os.Stat(configFile); err != nil {
@@ -53,29 +48,21 @@ func TestCLIInitAndLs(t *testing.T) {
 	}
 
 	// 2. Run ls --json
-	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"ls", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "ls", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("ls --json failed: %v", err)
 	}
 }
 
 func TestCLIProjectMode(t *testing.T) {
-	resetRootCmdFlags()
-	// resetRootCmdFlags marks --global as Changed, which makes ResolveScope
-	// force Global Scope. Clear it so -p on individual commands survives.
-	flagGlobal = false
-	_ = RootCmd.PersistentFlags().Set("global", "false")
-
 	tmpProjectDir := t.TempDir()
 	oldWd, _ := os.Getwd()
 	_ = os.Chdir(tmpProjectDir)
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	// Test skills init -p in fresh directory
-	RootCmd.SetArgs([]string{"init", "-p"})
-	if err := RootCmd.Execute(); err != nil {
+	// Test skills init -p in fresh directory. Each runCLI call is its own
+	// invocation, on its own fresh command tree, exactly as separate process
+	// runs of the binary would be.
+	if _, err := runCLI(t, "init", "-p"); err != nil {
 		t.Fatalf("init -p failed: %v", err)
 	}
 
@@ -89,8 +76,7 @@ func TestCLIProjectMode(t *testing.T) {
 	_ = os.MkdirAll(localSkillDir, 0755)
 	_ = os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte("# Proj Skill"), 0644)
 
-	RootCmd.SetArgs([]string{"add", "-p", "--symlink", localSkillDir})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "add", "-p", "--symlink", localSkillDir); err != nil {
 		t.Fatalf("add -p --symlink failed: %v", err)
 	}
 
@@ -106,19 +92,16 @@ func TestCLIProjectMode(t *testing.T) {
 	}
 
 	// Test skills ls -p
-	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"ls", "-p", "--json"})
-	if err := RootCmd.Execute(); err != nil {
+	out, err := runCLI(t, "ls", "-p", "--json")
+	if err != nil {
 		t.Fatalf("ls -p --json failed: %v", err)
 	}
-	if !strings.Contains(buf.String(), `"scope": "project"`) {
-		t.Fatalf("expected scope to be project in ls -p --json, got: %s", buf.String())
+	if !strings.Contains(out, `"scope": "project"`) {
+		t.Fatalf("expected scope to be project in ls -p --json, got: %s", out)
 	}
 
 	// Test skills rm -p
-	RootCmd.SetArgs([]string{"rm", "-p", "my-proj-skill"})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "rm", "-p", "my-proj-skill"); err != nil {
 		t.Fatalf("rm -p failed: %v", err)
 	}
 
@@ -133,6 +116,44 @@ func TestCLIProjectMode(t *testing.T) {
 	}
 }
 
+// Each runCLI call — like each real invocation of the binary — builds its own
+// command tree (newRootCmd), so -p and --config from one run must never
+// answer the Scope of the next, unrelated run. This is what let this test
+// suite delete resetRootCmdFlags/resetSubcommandFlags and the --global
+// workaround in projectScope: a fresh tree cannot carry stale flag state.
+func TestFlagsDoNotLeakBetweenSeparateCLIInvocations(t *testing.T) {
+	home := isolateHome(t)
+	tmpDir := t.TempDir()
+	customConfig := filepath.Join(tmpDir, "custom.json")
+
+	out, err := runCLI(t, "config", "-p", "--config", customConfig)
+	if err != nil {
+		t.Fatalf("config -p --config failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Scope: Project") || !strings.Contains(out, models.ToTildePath(customConfig)) {
+		t.Fatalf("first run did not resolve Project Scope with the custom Config:\n%s", out)
+	}
+
+	// A second, unrelated invocation passing neither flag must resolve the
+	// default (Global) Scope. If flag state leaked from the first run's
+	// command tree, this would still report Project Scope and the custom
+	// Config.
+	out, err = runCLI(t, "config")
+	if err != nil {
+		t.Fatalf("config failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Scope: Global") {
+		t.Fatalf("second run leaked -p from the first:\n%s", out)
+	}
+	if strings.Contains(out, customConfig) {
+		t.Fatalf("second run leaked --config from the first:\n%s", out)
+	}
+	wantConfig := filepath.Join(home, ".agents", "skills.json")
+	if !strings.Contains(out, models.ToTildePath(wantConfig)) {
+		t.Fatalf("second run did not resolve the default Config:\n%s", out)
+	}
+}
+
 func TestCLILocalSymlinkAddAndRemove(t *testing.T) {
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
@@ -144,8 +165,7 @@ func TestCLILocalSymlinkAddAndRemove(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte("# My Skill"), 0644)
 
 	// Add local skill
-	RootCmd.SetArgs([]string{"add", "--symlink", localSkillDir, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "add", "--symlink", localSkillDir, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("add --symlink failed: %v", err)
 	}
 
@@ -155,8 +175,7 @@ func TestCLILocalSymlinkAddAndRemove(t *testing.T) {
 	}
 
 	// Remove skill
-	RootCmd.SetArgs([]string{"rm", "my-local-skill", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "rm", "my-local-skill", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("rm failed: %v", err)
 	}
 
@@ -168,7 +187,6 @@ func TestCLILocalSymlinkAddAndRemove(t *testing.T) {
 // rm previously wrote its progress/summary text with raw fmt.Printf, bypassing
 // whatever the command's writer was set to. Assert it's now capturable.
 func TestCLIRmPrintsRemovalSummaryThroughCapturedOutput(t *testing.T) {
-	resetRootCmdFlags()
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
 	skillsDir := filepath.Join(tmpDir, "skills")
@@ -210,8 +228,6 @@ func TestCLIRmOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
 		{name: "undeclared", undeclared: true, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resetSubcommandFlags()
-			t.Cleanup(resetSubcommandFlags)
 			isolateHome(t)
 			root := t.TempDir()
 			configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
@@ -254,7 +270,6 @@ func TestCLIRmReportsAnAvailabilityLinkItCouldNotRemove(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("a read-only directory does not stop this user removing its entries")
 	}
-	resetRootCmdFlags()
 	isolateHome(t)
 	project := t.TempDir()
 	configFile := filepath.Join(project, ".agents", "skills.json")
@@ -316,8 +331,6 @@ func TestCLISyncOnUnreadableScopeStateFailsOnlyWithARemoteSkill(t *testing.T) {
 		{name: "remote update", remote: true, command: []string{"update"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resetSubcommandFlags()
-			t.Cleanup(resetSubcommandFlags)
 			isolateHome(t)
 			root := t.TempDir()
 			configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
@@ -351,8 +364,6 @@ func TestCLISyncOnUnreadableScopeStateFailsOnlyWithARemoteSkill(t *testing.T) {
 // A local Add has no Baseline to record: it warns about an unreadable Scope
 // state and succeeds. TestCLIAddReportsUnreadableScopeState covers remote.
 func TestCLIAddOfALocalSkillWarnsOnUnreadableScopeState(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
@@ -406,7 +417,6 @@ func writeCLILocalSkill(t *testing.T, root, name string) string {
 // outdated previously wrote with raw fmt.Printf/Println. Assert its no-remote
 // early exit is now capturable without requiring network access.
 func TestCLIOutdatedNoRemoteReposPrintsThroughCapturedOutput(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 
@@ -424,7 +434,6 @@ func TestCLIOutdatedNoRemoteReposPrintsThroughCapturedOutput(t *testing.T) {
 }
 
 func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 
 	tmpDir := t.TempDir()
@@ -433,8 +442,7 @@ func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 	cacheDir := filepath.Join(tmpDir, ".cache")
 
 	// 1. Initialize
-	RootCmd.SetArgs([]string{"init", "--config", configFile})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "init", "--config", configFile); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
@@ -444,8 +452,7 @@ func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(orphanDir, "SKILL.md"), []byte("# Orphan"), 0644)
 
 	// 3. Sync only restores declared skills; it must not delete unrelated files.
-	RootCmd.SetArgs([]string{"sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
 
@@ -455,7 +462,6 @@ func TestCLISyncDoesNotPruneOrphans(t *testing.T) {
 }
 
 func TestCLISyncPrintsCommandFailed(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	project := t.TempDir()
 	configFile := filepath.Join(project, ".agents", "skills.json")
@@ -485,7 +491,6 @@ func TestCLISyncPrintsCommandFailed(t *testing.T) {
 // A path Availability refuses fails Sync (ADR-0002), so the preview says so
 // up front rather than promising work the Sync it points to cannot do.
 func TestCLISyncDryRunReportsARefusedAgentPathAsFailed(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	project := t.TempDir()
 	configFile := filepath.Join(project, ".agents", "skills.json")
@@ -523,7 +528,6 @@ func TestCLISyncDryRunReportsARefusedAgentPathAsFailed(t *testing.T) {
 }
 
 func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	project := t.TempDir()
 	configFile := filepath.Join(project, ".agents", "skills.json")
@@ -585,7 +589,6 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 }
 
 func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -650,7 +653,6 @@ func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
 }
 
 func TestCLIPruneSkillsOnlyKeepsConfiguredSkillLinks(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -681,7 +683,6 @@ func TestCLIPruneSkillsOnlyKeepsConfiguredSkillLinks(t *testing.T) {
 // Doctor already counts and removes this as an issue; prune must too, by
 // default and under --yes.
 func TestCLIPruneYesRemovesLeftoverEmptyAgentDir(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -714,7 +715,6 @@ func TestCLIPruneYesRemovesLeftoverEmptyAgentDir(t *testing.T) {
 // --skills-only plans master skills and their links only; a leftover empty
 // Agent directory is links territory and must survive.
 func TestCLIPruneSkillsOnlyKeepsLeftoverEmptyAgentDir(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -755,7 +755,6 @@ func TestCLIPruneSkillsOnlyKeepsLeftoverEmptyAgentDir(t *testing.T) {
 }
 
 func TestCLIPruneDryRunListsLeftoverEmptyAgentDir(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -786,7 +785,6 @@ func TestCLIPruneDryRunListsLeftoverEmptyAgentDir(t *testing.T) {
 }
 
 func TestCLIPruneRequiresYesWithoutTerminal(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -857,7 +855,6 @@ func TestPruneSelectionMapsEachKeyToTheItemItNames(t *testing.T) {
 // the Baseline of a Skill Config no longer declares.
 func staleBaselineScope(t *testing.T) (configFile, skillsDir string) {
 	t.Helper()
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile = filepath.Join(home, ".agents", "skills.json")
 	skillsDir = filepath.Join(home, ".agents", "skills")
@@ -933,7 +930,6 @@ func TestCLIPruneClearsStaleBaselinesOnTheirOwn(t *testing.T) {
 }
 
 func TestCLILsJSONAgentsAreDeclaredAvailability(t *testing.T) {
-	resetRootCmdFlags()
 	project := t.TempDir()
 	configFile := filepath.Join(project, ".agents", "skills.json")
 	skillsDir := filepath.Join(project, ".agents", "skills")
@@ -1006,29 +1002,22 @@ func TestCLILsJSONAgentsAreDeclaredAvailability(t *testing.T) {
 }
 
 func TestCLILsFormatting(t *testing.T) {
-	resetRootCmdFlags()
-
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
 	skillsDir := filepath.Join(tmpDir, "skills")
 	cacheDir := filepath.Join(tmpDir, ".cache")
 
-	RootCmd.SetArgs([]string{"init", "--config", configFile})
-	_ = RootCmd.Execute()
+	_, _ = runCLI(t, "init", "--config", configFile)
 
 	// Add local skill
 	localDir := filepath.Join(tmpDir, "sample-skill")
 	_ = os.MkdirAll(localDir, 0755)
 	_ = os.WriteFile(filepath.Join(localDir, "SKILL.md"), []byte("# Sample"), 0644)
 
-	RootCmd.SetArgs([]string{"add", "--symlink", localDir, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	_ = RootCmd.Execute()
+	_, _ = runCLI(t, "add", "--symlink", localDir, "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 
 	// Run standard table ls
-	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"ls", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "ls", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("ls table view failed: %v", err)
 	}
 }
@@ -1037,31 +1026,25 @@ func TestCLILsFormatting(t *testing.T) {
 // itself flip the reported Scope to project: only the flag says which Scope
 // this is, not where its skills directory happens to point.
 func TestCLILsJSONScopeLabelIgnoresCustomSkillsDirWithoutProjectFlag(t *testing.T) {
-	resetRootCmdFlags()
-
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
 	skillsDir := filepath.Join(tmpDir, "skills")
 	cacheDir := filepath.Join(tmpDir, ".cache")
 
-	RootCmd.SetArgs([]string{"init", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	if err := RootCmd.Execute(); err != nil {
+	if _, err := runCLI(t, "init", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"ls", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	if err := RootCmd.Execute(); err != nil {
+	out, err := runCLI(t, "ls", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
 		t.Fatalf("ls --json failed: %v", err)
 	}
-	if strings.Contains(buf.String(), `"scope": "project"`) {
-		t.Fatalf("custom --skills-dir without --project must not report project scope, got: %s", buf.String())
+	if strings.Contains(out, `"scope": "project"`) {
+		t.Fatalf("custom --skills-dir without --project must not report project scope, got: %s", out)
 	}
 }
 
 func TestCLIConfigScopeLabelIgnoresCustomSkillsDirWithoutProjectFlag(t *testing.T) {
-	resetRootCmdFlags()
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "skills.json")
 	skillsDir := filepath.Join(tmpDir, "skills")
@@ -1121,39 +1104,7 @@ func isSymlink(path string) bool {
 	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
-// resetSubcommandFlags clears flag state on every subcommand. Commands are
-// built once in init(), so their flag targets are closure variables that keep
-// whatever a previous Execute set — a leaked --skill or --symlink silently
-// changes what the next test is actually running.
-func resetSubcommandFlags() {
-	for _, c := range RootCmd.Commands() {
-		c.Flags().VisitAll(func(f *pflag.Flag) {
-			if sv, ok := f.Value.(pflag.SliceValue); ok {
-				_ = sv.Replace(nil)
-			} else {
-				_ = f.Value.Set(f.DefValue)
-			}
-			f.Changed = false
-		})
-	}
-}
-
-func resetRootCmdFlags() {
-	resetSubcommandFlags()
-	flagConfigFile = ""
-	flagSkillsDir = ""
-	flagCacheDir = ""
-	flagProject = false
-	flagGlobal = true
-	_ = RootCmd.PersistentFlags().Set("config", "")
-	_ = RootCmd.PersistentFlags().Set("skills-dir", "")
-	_ = RootCmd.PersistentFlags().Set("cache-dir", "")
-	_ = RootCmd.PersistentFlags().Set("global", "true")
-	_ = RootCmd.PersistentFlags().Set("project", "false")
-}
-
 func TestCLIDoctorIgnoresUnusedEmptyAgentDirs(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -1174,12 +1125,7 @@ func TestCLIDoctorIgnoresUnusedEmptyAgentDirs(t *testing.T) {
 		}
 	}
 
-	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetErr(&buf)
-	RootCmd.SetArgs([]string{"doctor", "--config", configFile, "--skills-dir", skillsDir})
-	err := RootCmd.Execute()
-	out := buf.String()
+	out, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
 
 	if !strings.Contains(out, "[claude-code]") {
 		t.Fatalf("expected configured claude-code in doctor output, got:\n%s", out)
@@ -1199,7 +1145,6 @@ func TestCLIDoctorIgnoresUnusedEmptyAgentDirs(t *testing.T) {
 }
 
 func TestCLIDoctorFixRemovesLeftoverEmptyAgentDirs(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -1220,11 +1165,7 @@ func TestCLIDoctorFixRemovesLeftoverEmptyAgentDirs(t *testing.T) {
 		}
 	}
 
-	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetErr(&buf)
-	RootCmd.SetArgs([]string{"doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir})
-	_ = RootCmd.Execute()
+	_, _ = runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir)
 
 	if _, err := os.Stat(filepath.Join(home, ".jazz")); !os.IsNotExist(err) {
 		t.Fatal("expected leftover ~/.jazz to be removed")
@@ -1238,7 +1179,6 @@ func TestCLIDoctorFixRemovesLeftoverEmptyAgentDirs(t *testing.T) {
 }
 
 func TestCLIUpdateDryRunAndJSON(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 
 	tmpDir := t.TempDir()
@@ -1253,11 +1193,9 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	cfg.Remote["owner/test-repo"] = repo
 	_ = config.SaveConfig(cfg, configFile)
 
-	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetArgs([]string{"update", "--dry-run", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
 	// A Source still to refresh means the Scope does not match its Config.
-	if err := RootCmd.Execute(); ExitCode(err) != 1 {
+	out, err := runCLI(t, "update", "--dry-run", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if ExitCode(err) != 1 {
 		t.Fatalf("update --dry-run --json = %v; want exit 1", err)
 	}
 
@@ -1265,14 +1203,14 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 		UpdatedRepos []engine.UpdatedRepoInfo `json:"updated_repos"`
 		Sync         *updateSyncJSON          `json:"sync"`
 	}
-	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
-		t.Fatalf("stdout is not one JSON document: %v\n%s", err, buf.String())
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("stdout is not one JSON document: %v\n%s", err, out)
 	}
 	if len(doc.UpdatedRepos) != 1 || doc.Sync == nil || doc.Sync.Converged || doc.Sync.Configured != 1 {
-		t.Fatalf("JSON = %s; want the Source to refresh and an unconverged sync", buf.String())
+		t.Fatalf("JSON = %s; want the Source to refresh and an unconverged sync", out)
 	}
-	if strings.Contains(buf.String(), `"updated_skills"`) {
-		t.Fatalf("Update JSON still describes updated Skills: %s", buf.String())
+	if strings.Contains(out, `"updated_skills"`) {
+		t.Fatalf("Update JSON still describes updated Skills: %s", out)
 	}
 	if _, err := runCLI(t, "update", "typo", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err == nil || !strings.Contains(err.Error(), "unknown update target") {
 		t.Fatalf("unknown target error = %v", err)
@@ -1280,7 +1218,6 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 }
 
 func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
@@ -1297,11 +1234,13 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	RootCmd.SetOut(&stdout)
-	RootCmd.SetErr(&stderr)
 	skillsDir := filepath.Join(root, "skills")
-	RootCmd.SetArgs([]string{"update", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache")})
-	if err := RootCmd.Execute(); err != nil {
+	updateArgs := []string{"update", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache")}
+	cmd := newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs(updateArgs)
+	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	// The durable per-Source line replaces the progress region's "ok" line,
@@ -1321,10 +1260,13 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	}
 
 	// A second run finds nothing to refresh and nothing to sync: one line.
-	resetSubcommandFlags()
 	stdout.Reset()
 	stderr.Reset()
-	if err := RootCmd.Execute(); err != nil {
+	cmd = newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs(updateArgs)
+	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	if got := stdout.String() + stderr.String(); got != "Everything is already up to date.\n" {
@@ -1335,7 +1277,6 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 // A commit outside every declared Skill moves the Cache but is not reported
 // as an update, so a daily run stays one line.
 func TestCLIUpdateDoesNotReportASourceWhoseSkillsDidNotChange(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
@@ -1356,12 +1297,12 @@ func TestCLIUpdateDoesNotReportASourceWhoseSkillsDidNotChange(t *testing.T) {
 	cliRunGit(t, origin, "add", ".")
 	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "readme")
 
-	resetSubcommandFlags()
 	var stdout, stderr bytes.Buffer
-	RootCmd.SetOut(&stdout)
-	RootCmd.SetErr(&stderr)
-	RootCmd.SetArgs(args)
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	want := "Everything is already up to date.\n"
@@ -1376,10 +1317,12 @@ func TestCLIUpdateDoesNotReportASourceWhoseSkillsDidNotChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-am", "readme again")
-	resetSubcommandFlags()
 	stdout.Reset()
-	RootCmd.SetArgs(append(args, "--json"))
-	if err := RootCmd.Execute(); err != nil {
+	cmd = newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs(append(args, "--json"))
+	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {
@@ -1397,7 +1340,6 @@ func TestCLIUpdateDoesNotReportASourceWhoseSkillsDidNotChange(t *testing.T) {
 // A Skill whose content changed upstream is named once Sync has written it,
 // in text and in JSON, apart from one the Scope was only missing.
 func TestCLIUpdateNamesTheSkillsItWrote(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
@@ -1424,7 +1366,6 @@ func TestCLIUpdateNamesTheSkillsItWrote(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resetSubcommandFlags()
 	out, err := runCLI(t, args...)
 	if err != nil {
 		t.Fatalf("update = %v:\n%s", err, out)
@@ -1436,11 +1377,11 @@ func TestCLIUpdateNamesTheSkillsItWrote(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(skillsDir, "deleted")); err != nil {
 		t.Fatal(err)
 	}
-	resetSubcommandFlags()
 	var stdout bytes.Buffer
-	RootCmd.SetOut(&stdout)
-	RootCmd.SetArgs(append(args, "--json"))
-	if err := RootCmd.Execute(); err != nil {
+	cmd := newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetArgs(append(args, "--json"))
+	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {
@@ -1491,7 +1432,6 @@ func TestMaterializedLineFitsOneTerminalLine(t *testing.T) {
 // Update is the one daily command whatever the Config declares: without a
 // remote Source it still syncs the Scope.
 func TestCLIUpdateSyncsAScopeWithoutRemoteSources(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
 	source := filepath.Join(root, "src", "local")
@@ -1518,7 +1458,6 @@ func TestCLIUpdateSyncsAScopeWithoutRemoteSources(t *testing.T) {
 
 	// A target names a remote Source or Skill; with none declared, a typo
 	// must not pass for a request to sync everything.
-	resetSubcommandFlags()
 	if out, err := runCLI(t, "update", "typo", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache")); err == nil || !strings.Contains(err.Error(), `unknown update target "typo"`) {
 		t.Fatalf("update typo = %v; want the unknown target refused:\n%s", err, out)
 	}
@@ -1527,7 +1466,6 @@ func TestCLIUpdateSyncsAScopeWithoutRemoteSources(t *testing.T) {
 // One Source that cannot be fetched does not hold back the others: update
 // still syncs the Scope from the Cache it has, then exits 2 (ADR-0002).
 func TestCLIUpdateSyncsTheRestWhenASourceFailsToFetch(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
@@ -1555,7 +1493,6 @@ func TestCLIUpdateSyncsTheRestWhenASourceFailsToFetch(t *testing.T) {
 }
 
 func TestCLIOutdatedJSONNestsScopeStatusAndReturnsNonZero(t *testing.T) {
-	resetRootCmdFlags()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
@@ -1564,14 +1501,7 @@ func TestCLIOutdatedJSONNestsScopeStatusAndReturnsNonZero(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	var output bytes.Buffer
-	RootCmd.SetOut(&output)
-	RootCmd.SetErr(&output)
-	RootCmd.SetArgs([]string{"outdated", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir})
-	oldSilenceErrors := RootCmd.SilenceErrors
-	t.Cleanup(func() { RootCmd.SilenceErrors = oldSilenceErrors })
-	err := Execute()
-	out := output.String()
+	out, err := runCLI(t, "outdated", "--json", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err == nil {
 		t.Fatal("Outdated should fail when Cache/Scope is not current")
 	}
@@ -1614,8 +1544,6 @@ func TestOutdatedStatusStyling(t *testing.T) {
 }
 
 func TestCLISyncExitCodes(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -1642,7 +1570,6 @@ func TestCLISyncExitCodes(t *testing.T) {
 	if out, err = runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("converged dry-run should exit 0: %v\n%s", err, out)
 	}
-	resetSubcommandFlags()
 
 	// 1 again: a local edit is protected rather than overwritten.
 	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
@@ -1660,7 +1587,6 @@ func TestCLISyncExitCodes(t *testing.T) {
 	if out, err = runCLI(t, "sync", "--force", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("force Sync should converge: %v\n%s", err, out)
 	}
-	resetSubcommandFlags()
 	// A custom --skills-dir is Project-scoped, so the Agent directory lives
 	// beside it rather than under the user's home.
 	foreign := filepath.Join(root, ".claude", "skills", "sample")
@@ -1682,8 +1608,6 @@ func TestCLISyncExitCodes(t *testing.T) {
 // Without a terminal, Sync leaves one "ok" line per Skill it applied and
 // words only what stands in the way.
 func TestCLISyncReportsEachSkillOnceWithoutATerminal(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -1762,7 +1686,6 @@ func TestCLISyncInteractiveUnknownBaselineDeclineLeavesItBlocked(t *testing.T) {
 		{[]string{"update", "--json"}, false},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
-			resetRootCmdFlags()
 			isolateHome(t)
 			root := t.TempDir()
 			configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -1817,11 +1740,6 @@ func TestCLISyncInteractiveUnknownBaselineDeclineLeavesItBlocked(t *testing.T) {
 // working directory, and returns the project root.
 func projectScope(t *testing.T) string {
 	t.Helper()
-	resetRootCmdFlags()
-	// resetRootCmdFlags marks --global as Changed, which makes ResolveScope
-	// force Global Scope and ignore -p. Clear it so Project Scope survives.
-	flagGlobal = false
-	_ = RootCmd.PersistentFlags().Set("global", "false")
 	home := isolateHome(t)
 	project := filepath.Join(home, "workspace", "demo")
 	if err := os.MkdirAll(project, 0755); err != nil {
@@ -1844,13 +1762,16 @@ func projectScope(t *testing.T) string {
 	return resolved
 }
 
+// runCLI runs args against a fresh command tree, exactly as a separate
+// process invocation of the binary would, and returns its combined output.
 func runCLI(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	var buf bytes.Buffer
-	RootCmd.SetOut(&buf)
-	RootCmd.SetErr(&buf)
-	RootCmd.SetArgs(args)
-	err := RootCmd.Execute()
+	cmd := newRootCmd()
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
 	return buf.String(), err
 }
 
@@ -1881,8 +1802,6 @@ func cliRunGit(t *testing.T, dir string, args ...string) string {
 }
 
 func TestCLIConfigSetGetAndClear(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -1904,8 +1823,6 @@ func TestCLIConfigSetGetAndClear(t *testing.T) {
 }
 
 func TestCLIConfigAgentDefaultsReconcileInstalledSkills(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -1933,8 +1850,6 @@ func TestCLIConfigAgentDefaultsReconcileInstalledSkills(t *testing.T) {
 // The policy is saved before it is applied, so a Skill whose Agent path is
 // not Availability's to change must not keep the rest from following it.
 func TestCLIConfigAgentDefaultsApplyPastARefusedSkill(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -1946,7 +1861,6 @@ func TestCLIConfigAgentDefaultsApplyPastARefusedSkill(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: "+name+"\n---\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		resetSubcommandFlags()
 		if _, err := runCLI(t, "add", "--symlink", source, "--skill", name, "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
 			t.Fatalf("add %s: %v", name, err)
 		}
@@ -1973,8 +1887,6 @@ func TestCLIConfigAgentDefaultsApplyPastARefusedSkill(t *testing.T) {
 }
 
 func TestCLIAgentsMutationsPersistAndReconcile(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2021,8 +1933,6 @@ func TestCLIAgentsMutationsPersistAndReconcile(t *testing.T) {
 }
 
 func TestCLIAddAgentPersistsAndRmAgentIsRemoved(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2180,7 +2090,6 @@ func TestCLIProjectNextActionsCarryTheScopeFlag(t *testing.T) {
 	if !strings.Contains(out, "Cache missing for Source owner/repo; run 'skills update -p'") {
 		t.Fatalf("sync -p did not point at update -p:\n%s", out)
 	}
-	resetSubcommandFlags()
 	if out, err := runCLI(t, "update", "-p"); err != nil {
 		t.Fatalf("update -p: %v\n%s", err, out)
 	}
@@ -2189,12 +2098,10 @@ func TestCLIProjectNextActionsCarryTheScopeFlag(t *testing.T) {
 	}
 
 	// The CLI's own sentences for protected drift.
-	resetSubcommandFlags()
 	out, _ = runCLI(t, "sync", "-p")
 	if !strings.Contains(out, "re-run with 'skills sync -p --force'") {
 		t.Fatalf("sync -p did not suggest sync -p --force:\n%s", out)
 	}
-	resetSubcommandFlags()
 	out, _ = runCLI(t, "outdated", "-p")
 	if !strings.Contains(out, "'skills sync -p --force' if intended") {
 		t.Fatalf("outdated -p did not suggest sync -p --force:\n%s", out)
@@ -2205,8 +2112,6 @@ func TestCLIProjectNextActionsCarryTheScopeFlag(t *testing.T) {
 // Scope whose --skills-dir looks like a Project's is still Global, so its
 // commands carry that --skills-dir and no -p.
 func TestCLIDoctorNextActionsFollowTheFlagsNotThePath(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	skillsDir := filepath.Join(home, "work", "demo", ".agents", "skills")
 	configFile := filepath.Join(home, "work", "demo", ".agents", "skills.json")
@@ -2318,7 +2223,6 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 // rebuild, no network, and so no progress region — only the finding and its
 // repair outcome.
 func TestCLIDoctorFixRemovesLegacyCacheRootWithoutRebuilding(t *testing.T) {
-	resetRootCmdFlags()
 	isolateHome(t)
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
@@ -2394,7 +2298,6 @@ func TestCLIDoctorFixStillReportsUnrepairableIssues(t *testing.T) {
 }
 
 func TestCLIDoctorFixExplainsForeignAvailabilityPathWithoutTerminal(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	claudeDir := filepath.Join(home, ".claude with space")
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
@@ -2441,7 +2344,6 @@ func TestCLIDoctorFixExplainsForeignAvailabilityPathWithoutTerminal(t *testing.T
 }
 
 func TestCLIDoctorFixReplacesConfirmedForeignAvailabilityPath(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2541,7 +2443,6 @@ func TestCLIMisuseStillPrintsUsage(t *testing.T) {
 // Stale links in universal agent directories were invisible to doctor, so once
 // accumulated they could never be cleaned up.
 func TestCLIDoctorDetectsAndFixesStaleUniversalAgentLinks(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2602,7 +2503,6 @@ func TestCLIDoctorDetectsAndFixesStaleUniversalAgentLinks(t *testing.T) {
 }
 
 func TestCLILocalDirectoryScanMultipleSkills(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2658,7 +2558,6 @@ func TestCLILocalDirectoryScanMultipleSkills(t *testing.T) {
 }
 
 func TestCLILocalPositionalPathAutoDetection(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2686,7 +2585,6 @@ func TestCLILocalPositionalPathAutoDetection(t *testing.T) {
 }
 
 func TestCLISyncReplacesLocalSymlinkWithRemotePhysicalSkill(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2729,7 +2627,6 @@ func TestCLISyncReplacesLocalSymlinkWithRemotePhysicalSkill(t *testing.T) {
 }
 
 func TestCLILocalAddOverwriteRequiresConfirmationOrYes(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2768,7 +2665,6 @@ func TestCLILocalAddOverwriteRequiresConfirmationOrYes(t *testing.T) {
 }
 
 func TestCLIDoctorTildePathFormatting(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2804,7 +2700,6 @@ func TestCLIDoctorTildePathFormatting(t *testing.T) {
 }
 
 func TestCLILsJSONTildePath(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2842,7 +2737,6 @@ func TestCLILsJSONTildePath(t *testing.T) {
 }
 
 func TestCLICommandAddOverwriteRequiresYes(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2869,7 +2763,6 @@ func TestCLICommandAddOverwriteRequiresYes(t *testing.T) {
 }
 
 func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -2900,7 +2793,6 @@ func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
 }
 
 func TestCLICommandAddCheckFailureStillSaves(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -3196,8 +3088,6 @@ func TestCLIRmConfirmsAnUntrackedDirectory(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			project := projectScope(t)
-			resetSubcommandFlags()
-			t.Cleanup(resetSubcommandFlags)
 			loose := filepath.Join(project, ".agents", "skills", "loose")
 			if err := os.MkdirAll(loose, 0o755); err != nil {
 				t.Fatal(err)
@@ -3227,7 +3117,6 @@ func TestCLIRmConfirmsAnUntrackedDirectory(t *testing.T) {
 }
 
 func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -3266,7 +3155,6 @@ func TestCLIPruneYesRemovesLeftoverMasterSymlink(t *testing.T) {
 // Selecting a master skill in the interactive picker takes its managed link
 // with it (DependsOn), even though only the master's own key was chosen.
 func TestCLIPruneInteractivePickerSelectsMasterWithLinks(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -3308,7 +3196,6 @@ func TestCLIPruneInteractivePickerSelectsMasterWithLinks(t *testing.T) {
 // An unreadable Scope state leaves Baselines alone but must not stop prune:
 // everything else is removed, then prune warns and exits 0 (ADR-0002).
 func TestCLIPruneProceedsPastUnreadableScopeState(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -3398,17 +3285,10 @@ func TestCLIDoctorExitCodes(t *testing.T) {
 	}
 
 	// 1: alpha is declared but has no Availability link yet — drift doctor
-	// reports with a next action, not a command failure. Routed through
-	// Execute, like the outdated test, so SilenceErrors matches the binary
-	// and the absence of an Error: line means something.
-	var output bytes.Buffer
-	RootCmd.SetOut(&output)
-	RootCmd.SetErr(&output)
-	RootCmd.SetArgs([]string{"doctor", "-p"})
-	oldSilenceErrors := RootCmd.SilenceErrors
-	t.Cleanup(func() { RootCmd.SilenceErrors = oldSilenceErrors })
-	err := Execute()
-	out := output.String()
+	// reports with a next action, not a command failure. Every fresh command
+	// tree has SilenceErrors set, so the absence of an Error: line means
+	// something.
+	out, err := runCLI(t, "doctor", "-p")
 	if err == nil || ExitCode(err) != 1 {
 		t.Fatalf("availability drift should exit 1, got err=%v:\n%s", err, out)
 	}
@@ -3525,7 +3405,6 @@ func copiedAvailabilityScope(t *testing.T) (configFile, skillsDir, cacheDir stri
 // line saying it is copies and why. Once per Sync, not once per Skill, or a
 // Scope with thirty Skills buries its own result.
 func TestCLISyncSaysOnceThatAvailabilityWasAppliedByCopying(t *testing.T) {
-	resetRootCmdFlags()
 	configFile, skillsDir, cacheDir := copiedAvailabilityScope(t)
 	denyLinkPrivilege(t)
 
@@ -3552,7 +3431,6 @@ func TestCLISyncSaysOnceThatAvailabilityWasAppliedByCopying(t *testing.T) {
 // The same fact, asked later: doctor counts the copies on disk, so the user
 // never has to re-run Sync to find out why their Agent directories hold files.
 func TestCLIDoctorCountsAvailabilityPathsAppliedByCopying(t *testing.T) {
-	resetRootCmdFlags()
 	configFile, skillsDir, cacheDir := copiedAvailabilityScope(t)
 	denyLinkPrivilege(t)
 	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
@@ -3622,8 +3500,6 @@ func TestCLIDoctorReportsASkillThatArrivedAsATextStub(t *testing.T) {
 // Another Scope's update left the shared Cache without this Scope's Skill:
 // outdated names update, not sync alone, and exits 1 (ADR 0002, ADR 0004).
 func TestCLIOutdatedReportsIncompleteCache(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -3655,8 +3531,6 @@ func TestCLIOutdatedReportsIncompleteCache(t *testing.T) {
 }
 
 func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -3688,7 +3562,6 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	scope := []string{"--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
 	run := func(args ...string) (string, error) {
 		t.Helper()
-		resetSubcommandFlags()
 		return runCLI(t, append(args, scope...)...)
 	}
 	if out, err := run("update"); err != nil {
@@ -3710,7 +3583,6 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	if err := config.SaveConfig(cfg, otherConfig); err != nil {
 		t.Fatal(err)
 	}
-	resetSubcommandFlags()
 	out, err := runCLI(t, "update", "--config", otherConfig, "--skills-dir", otherSkills, "--cache-dir", cacheDir)
 	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed old") || !strings.Contains(out, "run 'skills rm"+pathOverrideFlags(otherConfig, otherSkills, cacheDir)+" gone'") {
 		t.Fatalf("update should follow the rename and leave gone blocked: %v\n%s", err, out)
@@ -3793,8 +3665,6 @@ func makeScopeStateUnreadable(t *testing.T, skillsDir string) (string, []byte) {
 // ADR-0002 counts a Baseline that could not be recorded as a failure: Add
 // still applies the Skill, then says why and exits 2.
 func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -3826,8 +3696,6 @@ func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 // Without a terminal, Add leaves one "ok" line for the fetched Source and one
 // per Skill it applied, then its summary.
 func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -3846,8 +3714,6 @@ func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
 }
 
 func TestCLIAddBranchIsDeclaredAndKept(t *testing.T) {
-	resetSubcommandFlags()
-	t.Cleanup(resetSubcommandFlags)
 	isolateHome(t)
 	root := t.TempDir()
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
@@ -3875,7 +3741,6 @@ func TestCLIAddBranchIsDeclaredAndKept(t *testing.T) {
 	scope := []string{"--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
 	run := func(args ...string) (string, error) {
 		t.Helper()
-		resetSubcommandFlags()
 		return runCLI(t, append(args, scope...)...)
 	}
 	scopeContent := func() string {

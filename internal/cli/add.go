@@ -34,14 +34,14 @@ func markInstalledSkills(options []tui.SelectOption, skillsDir string) {
 // the one they choose. Add settles it before reading the Source, because the
 // Scope's Config decides which branch a declared Source is read from.
 func resolveAddScope(cmd *cobra.Command, yes bool) (Scope, error) {
-	scope := ResolveScope()
+	scope := ResolveScope(cmd)
 	prompter := newAddPrompter(cmd)
 	if prompter.Interactive() && !yes && !cmd.Flags().Changed("global") && !cmd.Flags().Changed("project") {
 		project, err := prompter.SelectScope()
 		if err != nil {
 			return Scope{}, err
 		}
-		scope = resolveScopeFor(project)
+		scope = resolveScopeFor(cmd, project)
 	}
 	return scope, nil
 }
@@ -272,7 +272,7 @@ func newAddCmd() *cobra.Command {
 				}
 				args = []string{source}
 			}
-			cacheDir := ResolveScope().CacheDir
+			cacheDir := ResolveScope(cmd).CacheDir
 
 			// Positional skills arguments override or append to --skill
 			if len(args) > 1 {
@@ -343,9 +343,9 @@ func newAddCmd() *cobra.Command {
 				}
 				intake, err := newRemoteIntake(cmd, scope.ConfigPath, source, flagURL, flagBranch, flagPath, cacheDir)
 				if err != nil {
-					return withScopeFlags(err, scopeFlagsOf(scope))
+					return withScopeFlags(err, scopeFlagsOf(cmd, scope))
 				}
-				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert}), scopeFlagsOf(scope))
+				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert}), scopeFlagsOf(cmd, scope))
 			default:
 				return fmt.Errorf("unsupported Add Source kind %q", kind)
 			}

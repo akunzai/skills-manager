@@ -66,7 +66,7 @@ excluded and keep their copies.`,
 func runAdopt(cmd *cobra.Command, names []string, options adoptOptions) error {
 	out := cmd.OutOrStdout()
 	p := newPrompter(cmd)
-	scope := ResolveScope()
+	scope := ResolveScope(cmd)
 	cfg, err := config.LoadConfig(scope.ConfigPath)
 	if err != nil {
 		return err
@@ -135,7 +135,7 @@ func runAdopt(cmd *cobra.Command, names []string, options adoptOptions) error {
 		printAdoptPlan(out, plan, scope.SkillsDir)
 	}
 
-	return reportAdoptOutcome(out, engine.ApplyAdoptPlan(plan, cfg, scope), scope)
+	return reportAdoptOutcome(cmd, out, engine.ApplyAdoptPlan(plan, cfg, scope), scope)
 }
 
 // adoptAction words what adopt does, or would do, with one Skill.
@@ -288,8 +288,8 @@ var adoptStateParts = []struct {
 
 // reportAdoptOutcome words each Skill by the state the engine says it ended
 // in, then sums up with the highest of their exit codes.
-func reportAdoptOutcome(out io.Writer, result engine.AdoptResult, scope Scope) error {
-	syncCmd := "skills sync" + scopeFlagsOf(scope)
+func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptResult, scope Scope) error {
+	syncCmd := "skills sync" + scopeFlagsOf(cmd, scope)
 	var recorded []string
 	code := 0
 	counts := map[engine.AdoptState]int{}
@@ -328,7 +328,7 @@ func reportAdoptOutcome(out io.Writer, result engine.AdoptResult, scope Scope) e
 		code = 2
 	}
 	if result.StateWarning != "" {
-		printScopeStateWarning(out, result.StateWarning, scopeFlagsOf(scope))
+		printScopeStateWarning(out, result.StateWarning, scopeFlagsOf(cmd, scope))
 	}
 	printInstallerWarning(out, recorded, scope.SkillsDir)
 

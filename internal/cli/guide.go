@@ -33,7 +33,7 @@ With --install, materializes the skill to the Scope skills directory, registers 
 				return err
 			}
 
-			scope := ResolveScope()
+			scope := ResolveScope(cmd)
 			skillDir := filepath.Join(scope.SkillsDir, "skills-manager")
 			if err := os.MkdirAll(skillDir, 0o755); err != nil {
 				return fmt.Errorf("create skill directory %s: %w", models.ToTildePath(skillDir), err)

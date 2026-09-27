@@ -9,7 +9,7 @@ import (
 
 // resolveScope is a pure function of its arguments — no cobra flag parsing,
 // no package-level flag vars — so it is tested directly rather than through
-// RootCmd.Execute().
+// a *cobra.Command's Execute().
 func TestResolveScopeGlobalDefault(t *testing.T) {
 	scope := resolveScope(false, "/cwd", "", "", "")
 	if scope.IsProject {

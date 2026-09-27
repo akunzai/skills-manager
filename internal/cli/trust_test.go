@@ -17,8 +17,6 @@ import (
 // trust. It returns the Scope flags every command takes.
 func unverifiableScope(t *testing.T) (args []string, configFile string) {
 	t.Helper()
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	isolateHome(t)
 	project := t.TempDir()
 	configFile = filepath.Join(project, ".agents", "skills.json")
@@ -58,7 +56,6 @@ func TestCLITrustLetsSyncApplyUnverifiedContent(t *testing.T) {
 	scope, configFile := unverifiableScope(t)
 	useFakePrompter(t, &fakePrompter{interactive: false})
 	run := func(args ...string) (string, error) {
-		resetRootCmdFlags()
 		return runCLI(t, append(args, scope...)...)
 	}
 

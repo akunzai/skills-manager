@@ -295,8 +295,6 @@ type addRunScope struct {
 
 func newAddRunScope(t *testing.T) addRunScope {
 	t.Helper()
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	project := filepath.Join(home, "project")
 	source := filepath.Join(home, "source")
@@ -312,7 +310,7 @@ func newAddRunScope(t *testing.T) addRunScope {
 		t.Fatal(err)
 	}
 	t.Chdir(project)
-	global, local := resolveScopeFor(false), resolveScopeFor(true)
+	global, local := resolveScopeFor(testCmd(), false), resolveScopeFor(testCmd(), true)
 	return addRunScope{
 		source:       source,
 		globalConfig: global.ConfigPath, projectConfig: local.ConfigPath,
@@ -504,11 +502,12 @@ func TestAddRunCancellation(t *testing.T) {
 // The exit code a cancelled Add ends with, through the command itself.
 func TestCLIAddCancelledExitsZero(t *testing.T) {
 	scope := newAddRunScope(t)
-	// resetRootCmdFlags marks --global as set, so Scope is not asked here.
+	// --global is explicit, so the Scope prompt is skipped and only
+	// Availability is asked here.
 	prompter := &fakeAddPrompter{interactive: true, skills: []string{"alpha"}, availErr: errAddCancelled}
 	useAddPrompter(t, prompter)
 
-	out, err := runCLI(t, "add", "--symlink", scope.source)
+	out, err := runCLI(t, "add", "--symlink", scope.source, "--global")
 	if err != nil {
 		t.Fatalf("add error = %v (exit %d); want exit 0\n%s", err, ExitCode(err), out)
 	}

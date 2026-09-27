@@ -16,8 +16,6 @@ import (
 // to root/skills-local.
 func adoptCLIScope(t *testing.T) (root string, args []string) {
 	t.Helper()
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	isolateHome(t)
 	root = t.TempDir()
 	args = []string{"--config", filepath.Join(root, "skills.json"), "--skills-dir", filepath.Join(root, "skills"), "--cache-dir", filepath.Join(root, "cache")}
@@ -49,7 +47,6 @@ func writeCLIInstallerLock(t *testing.T, root string, entries map[string]map[str
 
 func runAdoptCLI(t *testing.T, scopeArgs []string, args ...string) (string, error) {
 	t.Helper()
-	resetSubcommandFlags()
 	return runCLI(t, append(args, scopeArgs...)...)
 }
 
@@ -375,7 +372,7 @@ func TestCLIAdoptWordsEachEndState(t *testing.T) {
 			var out bytes.Buffer
 			scope := Scope{ConfigPath: "/scratch/skills.json", SkillsDir: "/scratch/skills", IsProject: true}
 
-			err := reportAdoptOutcome(&out, engine.AdoptResult{Skills: []engine.AdoptOutcome{tc.outcome}}, scope)
+			err := reportAdoptOutcome(testCmd(), &out, engine.AdoptResult{Skills: []engine.AdoptOutcome{tc.outcome}}, scope)
 
 			if exit := exitCodeOf(err); exit != tc.wantExit {
 				t.Fatalf("exit = %d (%v); want %d\n%s", exit, err, tc.wantExit, out.String())

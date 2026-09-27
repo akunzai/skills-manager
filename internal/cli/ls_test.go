@@ -140,7 +140,6 @@ func TestCLILsStatusFollowsInventory(t *testing.T) {
 		}
 	}
 
-	resetSubcommandFlags()
 	out, err = runCLI(t, "ls", "-p", "--json")
 	if err != nil {
 		t.Fatalf("ls -p --json: %v\n%s", err, out)
@@ -166,7 +165,6 @@ func TestCLILsStatusFollowsInventory(t *testing.T) {
 // an always-present empty "subpath" a map produced but a tagged struct
 // field would drop under omitempty.
 func TestCLILsJSONExactContract(t *testing.T) {
-	resetRootCmdFlags()
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")

@@ -81,8 +81,6 @@ func snapshotTree(t *testing.T, root string, skip ...string) map[string]string {
 }
 
 func TestCLIAddListLocalSymlinkPrintsNameSubpathAndDescription(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -106,8 +104,6 @@ func TestCLIAddListLocalSymlinkPrintsNameSubpathAndDescription(t *testing.T) {
 }
 
 func TestCLIAddListJSONShape(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -134,8 +130,6 @@ func TestCLIAddListJSONShape(t *testing.T) {
 }
 
 func TestCLIAddListPathNarrowsDiscovery(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -168,8 +162,6 @@ func TestCLIAddListPathNarrowsDiscovery(t *testing.T) {
 }
 
 func TestCLIAddListEmptyResultExitsOne(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -190,8 +182,6 @@ func TestCLIAddListEmptyResultExitsOne(t *testing.T) {
 }
 
 func TestCLIAddListSourceCannotBeFetchedExitsTwo(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -205,8 +195,6 @@ func TestCLIAddListSourceCannotBeFetchedExitsTwo(t *testing.T) {
 }
 
 func TestCLIAddListRemoteSourceFetchesCacheOnly(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -236,8 +224,6 @@ func TestCLIAddListRemoteSourceFetchesCacheOnly(t *testing.T) {
 // --list declares nothing, so a branch other than the one the Scope declares
 // for the Source is listed rather than refused.
 func TestCLIAddListListsAnotherBranchOfADeclaredSource(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	scope := []string{"--config", filepath.Join(home, ".agents", "skills.json"), "--skills-dir", filepath.Join(home, ".agents", "skills"), "--cache-dir", filepath.Join(home, ".agents", "cache")}
 
@@ -249,7 +235,6 @@ func TestCLIAddListListsAnotherBranchOfADeclaredSource(t *testing.T) {
 		t.Fatalf("seed add: %v\n%s", err, out)
 	}
 
-	resetSubcommandFlags()
 	out, err := runCLI(t, append([]string{"add", "owner/repo", "--url", origin, "--branch", defaultBranch, "--list"}, scope...)...)
 	if err != nil {
 		t.Fatalf("add --list on another branch: %v\n%s", err, out)
@@ -264,8 +249,6 @@ func TestCLIAddListListsAnotherBranchOfADeclaredSource(t *testing.T) {
 // snapshot of the whole isolated home (except the Cache, which --list is
 // allowed to populate) before and after listing a different Source.
 func TestCLIAddListDoesNotMutateExistingConfigOrScope(t *testing.T) {
-	resetRootCmdFlags()
-	t.Cleanup(resetRootCmdFlags)
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")
 	skillsDir := filepath.Join(home, ".agents", "skills")
@@ -283,7 +266,6 @@ func TestCLIAddListDoesNotMutateExistingConfigOrScope(t *testing.T) {
 	}
 	before := snapshotTree(t, home, cacheRel)
 
-	resetSubcommandFlags()
 	out, err := runCLI(t, "add", "--symlink", source, "--list", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err != nil {
 		t.Fatalf("add --list failed: %v\n%s", err, out)
@@ -307,8 +289,6 @@ func TestCLIAddListUsageErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resetRootCmdFlags()
-			t.Cleanup(resetRootCmdFlags)
 			home := isolateHome(t)
 			configFile := filepath.Join(home, ".agents", "skills.json")
 			skillsDir := filepath.Join(home, ".agents", "skills")
@@ -324,8 +304,6 @@ func TestCLIAddListUsageErrors(t *testing.T) {
 	}
 
 	t.Run("command", func(t *testing.T) {
-		resetRootCmdFlags()
-		t.Cleanup(resetRootCmdFlags)
 		home := isolateHome(t)
 		configFile := filepath.Join(home, ".agents", "skills.json")
 		skillsDir := filepath.Join(home, ".agents", "skills")
