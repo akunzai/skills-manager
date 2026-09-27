@@ -96,6 +96,13 @@
               "certificateChain": {
                 "type": "string",
                 "description": "PEM trust anchor the signing certificate must chain to, relative to the directory holding this skills.json unless absolute"
+              },
+              "trusted": {
+                "type": "object",
+                "description": "Trusted content, recorded by 'skills trust': each skill's Cache tree id that is installed although its signature does not verify. It no longer applies once the Source changes the skill.",
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "not": { "required": ["sigstore", "certificateChain"] },

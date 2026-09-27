@@ -8,6 +8,8 @@ The Signer is recorded in Config, not the Scope state. The first keyless Signer 
 
 Every command that plans a remote Skill verifies it there, through the one planner that builds the item: Sync, Add, the new Skill of a Rename, and Adopt. A Rename whose new Skill does not verify is blocked whole, before the old Skill is Retired, so the Scope keeps a Skill it can use. Adopt still declares a lock-recorded copy that does not verify, since what is on disk is kept (ADR-0009), but records no Baseline for it, so Sync blocks it until it does. Add, too, declares a Skill it has just found blocked: the user chose that Skill and its Availability, and once the cause is fixed — a trust root fetched by Update, a Source that signs again — Sync Materializes it without that choice being asked again. The declaration is saved knowing the block, and the block is reported with Add's result.
 
+A user who has reviewed a Skill that does not verify can still choose it, through Trusted content rather than a flag. `skills trust` records the Skill's Cache tree id in Config under the Source's `signature.trusted`, where it is reviewed and shared like a Signer; Sync then Materializes that exact copy, notes it, and the Baseline records it as unverified, which `skills ls` and `skills doctor` keep visible. The trust holds only for that tree: once the Source changes the Skill, it is verified again and blocked if it still fails, naming `skills trust`. Sync never removes stale Trusted content, following ADR-0007; doctor reports it and `skills trust --revoke` removes it. A missing trust root is not a verdict and cannot be trusted; Update clears it.
+
 Keyless verification needs the Sigstore trust root. Add and Update, which already reach the network, fetch it through TUF into the Cache directory (`.sigstore/trusted_root.json`) whenever a Skill they just fetched is signed; Sync reads that file and nothing else, so ADR-0004's offline rule holds. A missing trust root blocks a signed Skill with `update` as the next action.
 
 Rejected:
@@ -17,3 +19,4 @@ Rejected:
 - **Verifying integrity without a Signer.** Any Sigstore identity can sign anything, so "signed, Signer not recorded" would read as trust it does not carry.
 - **Sync using TUF with a forced cache.** Reading one serialized trust root file is simpler and is offline by construction.
 - **A built-in list of trusted publishers.** Trust is declared per Source, never compiled in.
+- **`--force` or a one-shot flag lifting a signature block.** A habit flag makes verification optional, and a one-shot answer either blocks again on the next Sync or stops verifying for good. Trusted content is written down, reviewable, and bound to one copy.
