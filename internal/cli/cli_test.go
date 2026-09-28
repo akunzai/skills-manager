@@ -1640,7 +1640,7 @@ func TestCLISyncReportsEachSkillOnceWithoutATerminal(t *testing.T) {
 	body := out
 	// runCLI goes around Execute, which keeps exit 1 from reading as an error.
 	body, _, _ = strings.Cut(body, "Error: ")
-	want := "  Skipped drifted: local_drift\n" +
+	want := "Skipped drifted: local_drift\n" +
 		"ok  sample\n" +
 		"Sync did not converge. 1 blocked skill.\n" +
 		"Next: inspect the changes, then re-run with 'skills sync" + pathOverrideFlags(configFile, skillsDir, cacheDir) + " --force' to overwrite them.\n"
