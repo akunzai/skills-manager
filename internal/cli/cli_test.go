@@ -1212,6 +1212,10 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	if strings.Contains(out, `"updated_skills"`) {
 		t.Fatalf("Update JSON still describes updated Skills: %s", out)
 	}
+	out, _ = runCLI(t, "update", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if !strings.HasPrefix(out, "[1/1] [Dry-run] Would refresh owner/test-repo\n") {
+		t.Fatalf("dry-run output = %q; want the Source line unindented first", out)
+	}
 	if _, err := runCLI(t, "update", "typo", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err == nil || !strings.Contains(err.Error(), "unknown update target") {
 		t.Fatalf("unknown target error = %v", err)
 	}
@@ -1245,7 +1249,7 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	}
 	// The durable per-Source line replaces the progress region's "ok" line,
 	// and the Sync that follows applies what was refreshed and names it.
-	want := "      Updated owner/repo (" + sha + ").\n" +
+	want := "Updated owner/repo (" + sha + ").\n" +
 		"Refreshed 1 Source Cache(s).\n" +
 		"Restored 1 skill: sample.\n" +
 		"Skills sync complete. 1 skills configured.\n"
