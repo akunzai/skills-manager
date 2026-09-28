@@ -1212,6 +1212,10 @@ func TestCLIUpdateDryRunAndJSON(t *testing.T) {
 	if strings.Contains(out, `"updated_skills"`) {
 		t.Fatalf("Update JSON still describes updated Skills: %s", out)
 	}
+	out, _ = runCLI(t, "update", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if !strings.HasPrefix(out, "[1/1] [Dry-run] Would refresh owner/test-repo\n") {
+		t.Fatalf("dry-run output = %q; want the Source line unindented first", out)
+	}
 	if _, err := runCLI(t, "update", "typo", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err == nil || !strings.Contains(err.Error(), "unknown update target") {
 		t.Fatalf("unknown target error = %v", err)
 	}
@@ -1245,7 +1249,7 @@ func TestCLIUpdateReportsEachRefreshedSourceOnceWithoutATerminal(t *testing.T) {
 	}
 	// The durable per-Source line replaces the progress region's "ok" line,
 	// and the Sync that follows applies what was refreshed and names it.
-	want := "      Updated owner/repo (" + sha + ").\n" +
+	want := "Updated owner/repo (" + sha + ").\n" +
 		"Refreshed 1 Source Cache(s).\n" +
 		"Restored 1 skill: sample.\n" +
 		"Skills sync complete. 1 skills configured.\n"
@@ -1636,7 +1640,7 @@ func TestCLISyncReportsEachSkillOnceWithoutATerminal(t *testing.T) {
 	body := out
 	// runCLI goes around Execute, which keeps exit 1 from reading as an error.
 	body, _, _ = strings.Cut(body, "Error: ")
-	want := "  Skipped drifted: local_drift\n" +
+	want := "Skipped drifted: local_drift\n" +
 		"ok  sample\n" +
 		"Sync did not converge. 1 blocked skill.\n" +
 		"Next: inspect the changes, then re-run with 'skills sync" + pathOverrideFlags(configFile, skillsDir, cacheDir) + " --force' to overwrite them.\n"

@@ -383,35 +383,35 @@ func syncEventIsProgress(kind string) bool {
 func printSyncEvent(out io.Writer, ev engine.SyncEvent, scopeFlags string) {
 	switch ev.Kind {
 	case engine.SyncFetchFailed:
-		fmt.Fprintf(out, "  %sFailed to fetch %s: %s%s\n", colorRed, ev.Source, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
+		fmt.Fprintf(out, "%sFailed to fetch %s: %s%s\n", colorRed, ev.Source, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
 	case engine.SyncPathMissing:
-		fmt.Fprintf(out, "  %sSkill path missing in Source: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
+		fmt.Fprintf(out, "%sSkill path missing in Source: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
 	case engine.SyncAvailabilityFailed:
-		fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	case engine.SyncCopyFailed:
-		fmt.Fprintf(out, "  %sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	case engine.SyncSourceMissing:
-		fmt.Fprintf(out, "  %sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
+		fmt.Fprintf(out, "%sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
 	case engine.SyncSymlinkFailed:
-		fmt.Fprintf(out, "  %sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	case engine.SyncCheckFailed:
-		fmt.Fprintf(out, "  %sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
+		fmt.Fprintf(out, "%sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
 	case engine.SyncCommandFailed:
-		fmt.Fprintf(out, "  %sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	case engine.SyncRenamed:
-		fmt.Fprintf(out, "  %sRenamed %s%s%s to %s%s%s, as its Source declares.%s\n", colorGreen, colorBold, ev.Skill, colorReset+colorGreen, colorBold, ev.Target, colorReset+colorGreen, colorReset)
+		fmt.Fprintf(out, "%sRenamed %s%s%s to %s%s%s, as its Source declares.%s\n", colorGreen, colorBold, ev.Skill, colorReset+colorGreen, colorBold, ev.Target, colorReset+colorGreen, colorReset)
 	case engine.SyncRenameFailed:
-		fmt.Fprintf(out, "  %sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
 	case engine.SyncSignerRecorded:
-		fmt.Fprintf(out, "  %sTrusting %s as the signer of %s, recorded in Config.%s\n", colorGreen, ev.Target, ev.Source, colorReset)
+		fmt.Fprintf(out, "%sTrusting %s as the signer of %s, recorded in Config.%s\n", colorGreen, ev.Target, ev.Source, colorReset)
 	case engine.SyncTrustedUnverified:
-		fmt.Fprintf(out, "  %sTrusted unverified: %s (%s)%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sTrusted unverified: %s (%s)%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
 	case engine.SyncTrustRootFailed:
-		fmt.Fprintf(out, "  %sWarning: %s%s\n", colorYellow, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
+		fmt.Fprintf(out, "%sWarning: %s%s\n", colorYellow, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
 	case engine.SyncSignerFailed:
-		fmt.Fprintf(out, "  %sFailed to record %s as the signer of %s: %s%s\n", colorRed, ev.Target, ev.Source, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to record %s as the signer of %s: %s%s\n", colorRed, ev.Target, ev.Source, ev.Err, colorReset)
 	case engine.SyncSkipped:
-		fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, ev.Skill, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
+		fmt.Fprintf(out, "%sSkipped %s: %s%s\n", colorYellow, ev.Skill, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
 	case engine.SyncStateUnreadable:
 		// applySyncPlan warns once the region is gone, with the scope flag
 		// its next action needs.
@@ -420,7 +420,7 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent, scopeFlags string) {
 			printScopeStateUnreadable(out, ev.Err)
 			break
 		}
-		fmt.Fprintf(out, "  %sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
 	}
 }
 

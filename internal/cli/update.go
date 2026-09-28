@@ -165,7 +165,7 @@ func refreshSources(cmd *cobra.Command, out io.Writer, cfg *config.Config, targe
 			region = nil
 		case engine.UpdateStart:
 			if ev.DryRun {
-				fmt.Fprintf(out, "  [%d/%d] %s[Dry-run]%s Would refresh %s%s%s\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset)
+				fmt.Fprintf(out, "[%d/%d] %s[Dry-run]%s Would refresh %s%s%s\n", ev.Index, ev.Total, colorCyan, colorReset, colorBold, ev.Source, colorReset)
 			} else {
 				region.Start(presentation.Job{Name: ev.Source, Phase: "fetching"})
 			}
@@ -175,18 +175,18 @@ func refreshSources(cmd *cobra.Command, out io.Writer, cfg *config.Config, targe
 				shaStr = fmt.Sprintf(" (%s)", ev.NewSHA[:7])
 			}
 			region.DoneWith(ev.Source, func() {
-				fmt.Fprintf(out, "      %sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
+				fmt.Fprintf(out, "%sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)
 			})
 		case engine.UpdateRepoUnchanged:
 			// Counted with the Sources already up to date, not listed.
 			region.Done(ev.Source)
 		case engine.UpdateTrustRootError:
 			// After the refresh, so no region is drawing.
-			fmt.Fprintf(out, "      %sError: %s%s\n", colorRed, ev.Err, colorReset)
+			fmt.Fprintf(out, "%sError: %s%s\n", colorRed, ev.Err, colorReset)
 		case engine.UpdateRepoError:
 			region.Fail(ev.Source)
 			region.Above(func() {
-				fmt.Fprintf(out, "      %sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
+				fmt.Fprintf(out, "%sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
 			})
 		}
 	}
