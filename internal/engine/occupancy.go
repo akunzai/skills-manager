@@ -65,7 +65,7 @@ type UnmanagedAgentPath struct {
 }
 
 // Occupancy is a Scope's Agent directory occupancy, observed once (see
-// CONTEXT.md): the health of each configured Agent directory, the Leftover
+// GLOSSARY.md): the health of each configured Agent directory, the Leftover
 // occupancy across every Agent directory, the Unexpected managed paths of
 // declared Skills, and the Unmanaged paths on every linkable Agent directory.
 // Each path lands in at most one of Leftover, Unexpected and Unmanaged, and
