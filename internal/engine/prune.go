@@ -17,7 +17,7 @@ type PrunePlan struct {
 	UntrackedDirs   []string
 	Unconfigured    []ManagedAgentPath
 	// EmptyAgentDirs are leftover empty Agent directories the current
-	// Availability policy does not select (see CONTEXT.md's Leftover
+	// Availability policy does not select (see GLOSSARY.md's Leftover
 	// occupancy). Populated only when BuildPrunePlan is asked to include
 	// configured links, the same condition Unconfigured uses.
 	EmptyAgentDirs []AgentDir

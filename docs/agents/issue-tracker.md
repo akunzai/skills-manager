@@ -85,7 +85,7 @@ excerpts, open questions>
 </details>
 ```
 
-Use the vocabulary `CONTEXT.md` defines — Scope, Source, Availability,
+Use the vocabulary `GLOSSARY.md` defines — Scope, Source, Availability,
 Sync, Materialize, Freshness, Drift — so the issue, the tests, and the
 code name the same things. Do not drift to the synonyms it lists under
 _Avoid_.

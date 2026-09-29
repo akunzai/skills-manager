@@ -22,7 +22,7 @@ This project is written in Go (>=1.27) and compiled to standalone cross-platform
 - Scope paths: `internal/models/scope.go`
 - GoReleaser config: `.goreleaser.yaml`
 - Triage labels: `docs/agents/triage-labels.md`
-- Domain glossary: `CONTEXT.md`
+- Domain glossary: `GLOSSARY.md`
 - Domain docs: `docs/agents/domain.md`
 - Engine sync: `internal/engine/sync.go`
 - Lessons learned: `docs/agents/lessons-learned.md`
