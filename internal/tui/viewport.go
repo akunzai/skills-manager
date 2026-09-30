@@ -15,9 +15,7 @@ func viewportWindow(cursorIdx, windowStart, total, maxVisible int) (newWindowSta
 			windowStart = cursorIdx - visibleCount + 1
 		}
 	}
-	if windowStart >= total {
-		windowStart = total - visibleCount
-	}
+	windowStart = max(0, min(windowStart, total-visibleCount))
 	windowEnd = min(windowStart+visibleCount, total)
 	return windowStart, visibleCount, windowEnd, isScrollable
 }

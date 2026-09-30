@@ -47,7 +47,7 @@ func singleSelectInstructions(isScrollable bool) [2]string {
 // PromptSelect displays a locally redrawn single-select list navigated with
 // arrow keys. The cursor starts at defaultIndex.
 // Returns (selectedKey, nil) or ("", nil) on Esc/q cancel.
-func PromptSelect(title string, options []SelectOption, defaultIndex int) (string, error) {
+func PromptSelect(title string, options []SelectOption, defaultIndex int, optionsConfig ...ListOptions) (string, error) {
 	if !IsTerminal() {
 		return "", fmt.Errorf("interactive prompt requires a terminal")
 	}
@@ -55,7 +55,7 @@ func PromptSelect(title string, options []SelectOption, defaultIndex int) (strin
 	err := rawListSession(func() error {
 		choice, err := runSelect(title, options, defaultIndex, presentation.For(os.Stdout), os.Stdout, func() keyType {
 			return readKey(int(os.Stdin.Fd()))
-		}, sizeFromViewport(terminalPromptViewport()))
+		}, sessionSize(newListSession(optionsConfig)))
 		selected = choice
 		return err
 	})
@@ -92,6 +92,7 @@ func runSelect(
 		maxVisible:   size.maxVisible,
 		frameLines:   size.frame,
 		cursorIdx:    cursorIdx,
+		session:      size.session,
 		total:        func() int { return numItems },
 		instructions: singleSelectInstructions,
 		extraHeader:  blankHeader,
@@ -271,7 +272,7 @@ func multiSelectInstructions(isScrollable bool) [2]string {
 
 // PromptMultiSelect displays a locally redrawn checkbox list.
 // Returns (selectedKeys, nil) or (nil, nil) on cancel.
-func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
+func PromptMultiSelect(title string, items []SelectOption, optionsConfig ...ListOptions) ([]string, error) {
 	if !IsTerminal() {
 		return nil, fmt.Errorf("interactive prompt requires a terminal")
 	}
@@ -279,7 +280,7 @@ func PromptMultiSelect(title string, items []SelectOption) ([]string, error) {
 	err := rawListSession(func() error {
 		choice, err := runMultiSelect(title, items, presentation.For(os.Stdout), os.Stdout, func() keyType {
 			return readKey(int(os.Stdin.Fd()))
-		}, sizeFromViewport(terminalPromptViewport()))
+		}, sessionSize(newListSession(optionsConfig)))
 		selected = choice
 		return err
 	})
@@ -316,6 +317,8 @@ func runMultiSelect(
 		maxVisible:   size.maxVisible,
 		frameLines:   size.frame,
 		cursorIdx:    0,
+		session:      size.session,
+		click:        func(int, int) keyType { return keySpace },
 		total:        func() int { return numItems },
 		instructions: multiSelectInstructions,
 		extraHeader:  blankHeader,
@@ -440,17 +443,17 @@ func redrawPrefix(rendered bool, frameLines int) string {
 // PromptGroupedMultiSelect displays grouped items with collapsible/batch-selectable group headers.
 // Pressing Space on a group header batch toggles all skills in that group.
 // Returns (selectedSkillKeys, nil) or (nil, nil) on Esc/q cancel.
-func PromptGroupedMultiSelect(title string, groupedItems GroupedItems) ([]string, error) {
-	return promptGroupedMultiSelect(title, groupedItems, nil)
+func PromptGroupedMultiSelect(title string, groupedItems GroupedItems, optionsConfig ...ListOptions) ([]string, error) {
+	return promptGroupedMultiSelect(title, groupedItems, nil, optionsConfig...)
 }
 
 // PromptOrderedGroupedMultiSelect displays groups in groupOrder first, then
 // any remaining groups alphabetically.
-func PromptOrderedGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrder []string) ([]string, error) {
-	return promptGroupedMultiSelect(title, groupedItems, groupOrder)
+func PromptOrderedGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrder []string, optionsConfig ...ListOptions) ([]string, error) {
+	return promptGroupedMultiSelect(title, groupedItems, groupOrder, optionsConfig...)
 }
 
-func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrder []string) ([]string, error) {
+func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrder []string, optionsConfig ...ListOptions) ([]string, error) {
 	if !IsTerminal() {
 		return nil, fmt.Errorf("interactive prompt requires a terminal")
 	}
@@ -458,7 +461,7 @@ func promptGroupedMultiSelect(title string, groupedItems GroupedItems, groupOrde
 	err := rawListSession(func() error {
 		choice, err := runGroupedMultiSelect(title, groupedItems, groupOrder, presentation.For(os.Stdout), os.Stdout, func() keyType {
 			return readKey(int(os.Stdin.Fd()))
-		}, sizeFromViewport(terminalPromptViewport()))
+		}, sessionSize(newListSession(optionsConfig)))
 		selected = choice
 		return err
 	})
@@ -578,6 +581,16 @@ func runGroupedMultiSelect(
 		maxVisible:   size.maxVisible,
 		frameLines:   size.frame,
 		cursorIdx:    0,
+		session:      size.session,
+		click: func(row, column int) keyType {
+			if rows[row].rType == rowGroup && column == 7 {
+				if collapsed[rows[row].groupSource] {
+					return keyRight
+				}
+				return keyLeft
+			}
+			return keySpace
+		},
 		total:        func() int { return totalRows },
 		instructions: groupedMultiSelectInstructions,
 		extraHeader:  groupedTopIndicator,
