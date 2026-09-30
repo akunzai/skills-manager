@@ -168,6 +168,7 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
+	root.PersistentFlags().Bool("no-mouse", false, "Disable mouse input in interactive lists")
 	root.PersistentFlags().String("config", "", "Path to skills.json")
 	root.PersistentFlags().String("skills-dir", "", "Path to skills directory")
 	root.PersistentFlags().String("cache-dir", "", "Path to cache directory")

@@ -23,14 +23,14 @@ type prompter interface {
 }
 
 // newPrompter is a package var so a test can inject a scripted prompter. cmd
-// is unused by the production adapter, but it keeps this seam's shape the
-// same as newAddPrompter's.
+// supplies per-invocation list options to the production adapter.
 var newPrompter = func(cmd *cobra.Command) prompter {
-	return terminalPrompter{}
+	noMouse, _ := cmd.Flags().GetBool("no-mouse")
+	return terminalPrompter{options: tui.ListOptions{NoMouse: noMouse}}
 }
 
 // terminalPrompter is prompter over the real terminal, through tui.
-type terminalPrompter struct{}
+type terminalPrompter struct{ options tui.ListOptions }
 
 func (terminalPrompter) Interactive() bool { return tui.IsTerminal() }
 
@@ -38,16 +38,16 @@ func (terminalPrompter) Confirm(prompt string, defaultYes bool) (bool, error) {
 	return tui.PromptConfirm(prompt, defaultYes)
 }
 
-func (terminalPrompter) Select(title string, options []tui.SelectOption, defaultIndex int) (string, error) {
-	return tui.PromptSelect(title, options, defaultIndex)
+func (p terminalPrompter) Select(title string, options []tui.SelectOption, defaultIndex int) (string, error) {
+	return tui.PromptSelect(title, options, defaultIndex, p.options)
 }
 
-func (terminalPrompter) MultiSelect(title string, options []tui.SelectOption) ([]string, error) {
-	return tui.PromptMultiSelect(title, options)
+func (p terminalPrompter) MultiSelect(title string, options []tui.SelectOption) ([]string, error) {
+	return tui.PromptMultiSelect(title, options, p.options)
 }
 
-func (terminalPrompter) GroupedMultiSelect(title string, groups tui.GroupedItems, order []string) ([]string, error) {
-	return tui.PromptOrderedGroupedMultiSelect(title, groups, order)
+func (p terminalPrompter) GroupedMultiSelect(title string, groups tui.GroupedItems, order []string) ([]string, error) {
+	return tui.PromptOrderedGroupedMultiSelect(title, groups, order, p.options)
 }
 
 func (terminalPrompter) Input(prompt string) (string, error) {
