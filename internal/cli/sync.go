@@ -128,7 +128,22 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 	}
 	printMaterialized(out, report)
 	printCopiedAvailability(out, report, scopeFlagsOf(cmd, scope))
+	if eventsRefused(report.Events) {
+		printDoctorNext(out, scopeFlagsOf(cmd, scope))
+	}
 	return report, err
+}
+
+// eventsRefused reports whether Availability failed on a path that only
+// Doctor can resolve.
+func eventsRefused(events []engine.SyncEvent) bool {
+	return slices.ContainsFunc(events, func(ev engine.SyncEvent) bool { return ev.Refused })
+}
+
+// printDoctorNext is the next step for a path Availability refuses: Doctor
+// inspects it and replaces it once the user confirms, which Sync cannot.
+func printDoctorNext(out io.Writer, scopeFlag string) {
+	fmt.Fprintf(out, "Next: run 'skills doctor%s --fix'.\n", scopeFlag)
 }
 
 // printMaterialized names the Skills whose content Sync wrote, once the
@@ -250,7 +265,7 @@ func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDec
 	// Doctor is where a path Availability refuses is inspected, and replaced
 	// once the user confirms.
 	if slices.ContainsFunc(plan.Failed(decision), func(item engine.SyncPlanItem) bool { return item.Drift.Refused() }) {
-		fmt.Fprintf(out, "Next: run 'skills doctor%s --fix'.\n", scopeFlag)
+		printDoctorNext(out, scopeFlag)
 	}
 }
 

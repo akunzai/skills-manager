@@ -303,7 +303,7 @@ func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Failed != 1 || !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncAvailabilityFailed }) {
+	if result.Failed != 1 || !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncAvailabilityFailed && ev.Refused }) {
 		t.Fatalf("Failed=%d Events=%#v; want the unmanaged Availability path to fail closed", result.Failed, result.Events)
 	}
 	loaded, err := config.LoadConfig(configPath)

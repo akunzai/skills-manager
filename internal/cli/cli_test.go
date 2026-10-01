@@ -522,8 +522,38 @@ func TestCLISyncDryRunReportsARefusedAgentPathAsFailed(t *testing.T) {
 	if strings.Contains(out, "to reconcile") {
 		t.Fatalf("dry-run still counts the refused Skill as pending:\n%s", out)
 	}
-	if out, err := runCLI(t, args...); ExitCode(err) != 2 {
+	out, err = runCLI(t, args...)
+	if ExitCode(err) != 2 {
 		t.Fatalf("sync = %v; want the exit 2 the preview promised:\n%s", err, out)
+	}
+	if !strings.Contains(out, "Next: run 'skills doctor") {
+		t.Fatalf("sync did not point at Doctor for the refused path:\n%s", out)
+	}
+}
+
+// Sync cannot clear a path Availability refuses, so Add points at Doctor
+// rather than at the Sync that would fail on it again.
+func TestCLIAddPointsAtDoctorForARefusedAgentPath(t *testing.T) {
+	isolateHome(t)
+	project := t.TempDir()
+	source := filepath.Join(project, "src", "sample")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, ".claude", "skills", "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "add", "--symlink", source, "--agent", "claude-code", "--yes", "--project",
+		"--config", filepath.Join(project, ".agents", "skills.json"), "--skills-dir", filepath.Join(project, ".agents", "skills"), "--cache-dir", filepath.Join(project, "cache"))
+	if ExitCode(err) != 2 {
+		t.Fatalf("add = %v; want exit 2:\n%s", err, out)
+	}
+	if !strings.Contains(out, "Next: run 'skills doctor") || strings.Contains(out, "then run 'skills sync") {
+		t.Fatalf("add output = %q; want Doctor as the next step, not Sync", out)
 	}
 }
 

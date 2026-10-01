@@ -57,7 +57,10 @@ type SyncEvent struct {
 	Target string
 	Err    string
 	// Next is the skills command that clears what Err reports, if one does.
-	Next       string
+	Next string
+	// Refused marks a SyncAvailabilityFailed on a path Availability does not
+	// manage or cannot inspect, which Doctor resolves and Sync cannot.
+	Refused    bool
 	Missing    []string
 	Unexpected []string
 	// Agents carries the Agents named by an Availability event — for
@@ -264,9 +267,9 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 			emitSync(emit, SyncEvent{Kind: SyncTrustedUnverified, Source: item.Source, Skill: item.Name, Err: item.Unverified})
 		}
 	}
-	copied, err := availability.Apply(item.Name)
+	copied, refused, err := availability.apply(item.Name)
 	if err != nil {
-		emitSync(emit, SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
+		emitSync(emit, SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error(), Refused: refused})
 		return SyncFailed, err
 	}
 	if len(copied) > 0 {
@@ -330,9 +333,9 @@ func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanI
 		}
 		emitSync(emit, SyncEvent{Kind: SyncSymlinked, Skill: item.Name, Target: item.SourcePath})
 	}
-	copied, err := availability.Apply(item.Name)
+	copied, refused, err := availability.apply(item.Name)
 	if err != nil {
-		emitSync(emit, SyncEvent{Kind: SyncAvailabilityFailed, Skill: item.Name, Err: err.Error()})
+		emitSync(emit, SyncEvent{Kind: SyncAvailabilityFailed, Skill: item.Name, Err: err.Error(), Refused: refused})
 		return SyncFailed, err
 	}
 	if len(copied) > 0 {
