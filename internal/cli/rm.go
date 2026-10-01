@@ -115,13 +115,13 @@ func newRmCmd() *cobra.Command {
 			if result.StateWarning != "" {
 				printScopeStateWarning(out, result.StateWarning, scopeFlagsOf(cmd, scope))
 			}
-			if result.StateError != "" {
+			if result.StateFailed() {
 				printScopeStateUnreadable(out, result.StateError)
 			}
 			if names := result.NotFullyRemoved(); len(names) > 0 {
 				return exitError{message: "Skill removal did not complete: " + strings.Join(names, ", ") + " not fully removed", code: 2}
 			}
-			if result.StateError != "" {
+			if result.StateFailed() {
 				return exitError{message: "Baselines were not forgotten", code: 2}
 			}
 
