@@ -123,6 +123,8 @@ completed.`,
 			if flagJSON {
 				printUpdateJSON(cmd.OutOrStdout(), result, newUpdateSyncJSON(outcome, report))
 			}
+			// A failed refresh is work that broke (2), so it outranks a Sync
+			// that merely has work left (1) (ADR-0002).
 			if updateErr != nil {
 				fmt.Fprintf(out, "%s%sUpdate completed with errors.%s\n", colorBold, colorYellow, colorReset)
 				return updateErr

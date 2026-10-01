@@ -1491,8 +1491,45 @@ func TestCLIUpdateSyncsTheRestWhenASourceFailsToFetch(t *testing.T) {
 	if ExitCode(err) != 2 || !strings.Contains(out, "Error updating owner/missing") || !strings.Contains(out, "Update completed with errors.") {
 		t.Fatalf("update = %v; want exit 2 naming the failed Source:\n%s", err, out)
 	}
+	// The failed Source's Skill is still to reconcile, which alone would exit
+	// 1; the failed refresh wins.
+	if !strings.Contains(out, "Sync did not converge.") {
+		t.Fatalf("update output = %q; want the Sync to be left unconverged beside the failed refresh", out)
+	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
 		t.Fatalf("the fetched Skill was not synced: %v\n%s", err, out)
+	}
+}
+
+// A dry run refreshes nothing, so a Scope can match its Config while a Source
+// still has changes to bring in: that is work to do (exit 1), not "up to date".
+func TestCLIUpdateDryRunWithAConvergedScopeAndAChangedSourceExitsOne(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	configFile := filepath.Join(root, "skills.json")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"update", "--config", configFile, "--skills-dir", filepath.Join(root, "skills"), "--cache-dir", filepath.Join(root, "cache")}
+	if out, err := runCLI(t, args...); err != nil {
+		t.Fatalf("first update = %v:\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(origin, "sample", "extra.md"), []byte("# New\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliRunGit(t, origin, "add", ".")
+	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "change the Skill")
+
+	out, err := runCLI(t, append(args, "--dry-run")...)
+	if ExitCode(err) != 1 || !strings.Contains(out, "Next: run 'skills update") {
+		t.Fatalf("update --dry-run = %v; want exit 1 pointing at update:\n%s", err, out)
+	}
+	if strings.Contains(out, "Everything is already up to date.") {
+		t.Fatalf("output = %q; a Source with changes is not up to date", out)
 	}
 }
 
