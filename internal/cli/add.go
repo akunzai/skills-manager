@@ -19,12 +19,15 @@ import (
 
 const repositoryRootGroup = "Repository root"
 
-// markInstalledSkills marks the options already present on the Scope Add
-// declares into.
-func markInstalledSkills(options []tui.SelectOption, skillsDir string) {
+// markOccupiedSkills marks the options whose place on the Scope Add declares
+// into is already taken, from the same occupancy BuildAddPlan acts on.
+func markOccupiedSkills(options []tui.SelectOption, occupancy func(name string) engine.AddOccupancy) {
 	for i := range options {
-		if _, err := os.Stat(filepath.Join(skillsDir, options[i].Key)); err == nil {
-			options[i].Installed = true
+		switch occupancy(options[i].Key) {
+		case engine.AddSlotDeclared:
+			options[i].State = tui.OptionInstalled
+		case engine.AddSlotConflict:
+			options[i].State = tui.OptionConflict
 		}
 	}
 }

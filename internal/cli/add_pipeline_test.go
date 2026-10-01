@@ -91,7 +91,7 @@ func TestResolveSkillsToAddAllFlag(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"one": {"skills/one"}, "two": {"skills/two"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, true, nil, &fakeAddPrompter{}, false, t.TempDir())
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, true, nil, &fakeAddPrompter{}, false, nil)
 	if err != nil || cancelled {
 		t.Fatalf("resolveSkillsToAdd() = %v, %v, %v", got, cancelled, err)
 	}
@@ -116,7 +116,7 @@ func TestResolveSkillsToAddFlagsRejectUnresolvedDuplicatesWithoutTerminal(t *tes
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, &fakeAddPrompter{}, false, t.TempDir())
+			_, _, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, &fakeAddPrompter{}, false, nil)
 			if err == nil || !strings.Contains(err.Error(), "requires a Source path") {
 				t.Fatalf("error = %v; want unresolved duplicate error", err)
 			}
@@ -141,7 +141,7 @@ func TestResolveSkillsToAddFlagsPromptForDivergentCandidates(t *testing.T) {
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, t.TempDir())
+			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, func(string) engine.AddOccupancy { return engine.AddSlotFree })
 			if err != nil || cancelled || got["duplicate"] != "skills/duplicate" {
 				t.Fatalf("got=%v cancelled=%v err=%v; want selected Source path", got, cancelled, err)
 			}
@@ -153,7 +153,7 @@ func TestResolveSkillsToAddSkillFlagExactAndCaseInsensitiveMatch(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"Api": {"skills/api"}, "lint": {"skills/lint"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "api"}, &fakeAddPrompter{}, false, t.TempDir())
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "api"}, &fakeAddPrompter{}, false, nil)
 	if err != nil || cancelled {
 		t.Fatalf("resolveSkillsToAdd() = %v, %v, %v", got, cancelled, err)
 	}
@@ -166,7 +166,7 @@ func TestResolveSkillsToAddSkillFlagUnmatchedFailsAtomically(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"lint": {"skills/lint"}, "api": {"skills/api"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "ghost"}, &fakeAddPrompter{}, false, t.TempDir())
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "ghost"}, &fakeAddPrompter{}, false, nil)
 	if err == nil || cancelled || got != nil || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("got=%v cancelled=%v err=%v; want atomic not-found error", got, cancelled, err)
 	}

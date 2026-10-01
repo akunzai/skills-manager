@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/presentation"
 	"github.com/akunzai/skills-manager/internal/tui"
@@ -57,7 +58,7 @@ func resolveSkillsToAdd(
 	flagSkills []string,
 	prompter addPrompter,
 	interactive bool,
-	skillsDir string,
+	occupancy func(name string) engine.AddOccupancy,
 ) (skillsToAdd map[string]string, noneChosen bool, err error) {
 	out := cmd.OutOrStdout()
 	labels := intake.labels
@@ -115,7 +116,7 @@ func resolveSkillsToAdd(
 			var flat []tui.SelectOption
 			if shouldGroup {
 				for _, options := range groups {
-					markInstalledSkills(options, skillsDir)
+					markOccupiedSkills(options, occupancy)
 				}
 			} else {
 				groups = nil
@@ -128,7 +129,7 @@ func resolveSkillsToAdd(
 					}
 					options = append(options, tui.SelectOption{Key: skName, Title: skName, Extra: extra})
 				}
-				markInstalledSkills(options, skillsDir)
+				markOccupiedSkills(options, occupancy)
 				slices.SortFunc(options, func(a, b tui.SelectOption) int {
 					return cmp.Compare(a.Key, b.Key)
 				})
@@ -173,7 +174,18 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	prompter := newAddPrompter(cmd)
 	interactive := prompter.Interactive() && !req.yes
 
-	skillsToAdd, noneChosen, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, prompter, interactive, req.scope.SkillsDir)
+	var occupancy func(name string) engine.AddOccupancy
+	if interactive {
+		pickerCfg, err := config.LoadConfig(req.scope.ConfigPath)
+		if err != nil {
+			return err
+		}
+		occupancy = func(name string) engine.AddOccupancy {
+			return engine.ClassifyAddOccupancy(pickerCfg, req.scope.SkillsDir, name)
+		}
+	}
+
+	skillsToAdd, noneChosen, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, prompter, interactive, occupancy)
 	if err != nil {
 		return err
 	}

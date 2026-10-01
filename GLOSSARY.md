@@ -25,7 +25,7 @@ The declared Skills for one Scope plus what is on its skills directory, classifi
 _Avoid_: scan, catalog, listing
 
 **Untracked**:
-Occupancy on a Scope skills directory that Config does not declare. A real directory there is occupancy the tool does not manage, not a missing declaration. A leftover symlink on that directory is the same occupancy in another shape.
+Occupancy on a Scope skills directory that Config does not declare. A real directory there is occupancy the tool does not manage, not a missing declaration. A leftover symlink on that directory is the same occupancy in another shape. The Add selection prompt marks it as a conflict from the same occupancy `BuildAddPlan` acts on.
 _Avoid_: orphan (when you mean this occupancy), undeclared (as a noun)
 
 **Stub**:

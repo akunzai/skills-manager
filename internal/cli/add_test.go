@@ -14,25 +14,35 @@ import (
 	"github.com/akunzai/skills-manager/internal/tui"
 )
 
-// Add knows its Scope before it offers Skills, so only a Skill on that
-// Scope reads as installed.
-func TestMarkInstalledSkillsOnTheChosenScope(t *testing.T) {
+// Add knows its Scope before it offers Skills, so a Skill the Scope declares
+// reads as installed, and Untracked occupancy (a real directory or a dangling
+// symlink) reads as a conflict, as BuildAddPlan will report it.
+func TestMarkOccupiedSkillsOnTheChosenScope(t *testing.T) {
 	skillsDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Local["installed"] = config.LocalEntry{Type: "command", Command: "true"}
 	if err := os.MkdirAll(filepath.Join(skillsDir, "installed"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(skillsDir, "untracked"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(skillsDir, "gone"), filepath.Join(skillsDir, "dangling")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
 	options := []tui.SelectOption{
-		{Key: "installed", Title: "installed"},
-		{Key: "new", Title: "new"},
+		{Key: "installed"}, {Key: "untracked"}, {Key: "dangling"}, {Key: "new"},
 	}
 
-	markInstalledSkills(options, skillsDir)
+	markOccupiedSkills(options, func(name string) engine.AddOccupancy {
+		return engine.ClassifyAddOccupancy(cfg, skillsDir, name)
+	})
 
-	if !options[0].Installed || options[0].Selected {
-		t.Fatalf("installed option = %#v; want installed but unselected", options[0])
-	}
-	if options[1].Installed || options[1].Selected {
-		t.Fatalf("new option = %#v; want unselected", options[1])
+	want := []tui.OptionState{tui.OptionInstalled, tui.OptionConflict, tui.OptionConflict, tui.OptionFree}
+	for i, opt := range options {
+		if opt.State != want[i] || opt.Selected {
+			t.Errorf("%s = %#v; want state %d, unselected", opt.Key, opt, want[i])
+		}
 	}
 }
 
