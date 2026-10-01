@@ -9,6 +9,19 @@ function Write-Success ($text) { Write-Host $text -ForegroundColor Green }
 function Write-Warn ($text) { Write-Host "Note: $text" -ForegroundColor Yellow }
 function Write-Err ($text) { Write-Host "Error: $text" -ForegroundColor Red }
 
+function Show-InstalledCommand ($installedPath) {
+    $command = Get-Command skills -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and $command.Source -ne $installedPath) {
+        Write-Warn "The skills command currently runs a different executable: $($command.Source)"
+        Write-Host "Run the installed version directly:"
+        Write-Host "& '$($installedPath.Replace("'", "''"))'"
+    } elseif (-not $command) {
+        Write-Warn "The installed executable is not currently on PATH."
+        Write-Host "Run the installed version directly:"
+        Write-Host "& '$($installedPath.Replace("'", "''"))'"
+    }
+}
+
 Write-Header "Installing Skills Manager..."
 Write-Host ""
 
@@ -30,6 +43,7 @@ if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "cmd\skills\main.go")
             Write-Host ""
             Write-Success "Installed Skills Manager."
             Write-Host "   Installed at: $targetBin"
+            Show-InstalledCommand $targetBin
             exit 0
         } finally {
             Pop-Location
@@ -91,6 +105,7 @@ try {
     Write-Host ""
     Write-Success "Installed Skills Manager."
     Write-Host "   Installed at: $targetBin"
+    Show-InstalledCommand $targetBin
 
     # Check PATH
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
