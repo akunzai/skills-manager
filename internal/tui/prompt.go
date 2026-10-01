@@ -20,11 +20,33 @@ const (
 	clearLine  = "\033[2K"
 )
 
+// OptionState is what already occupies an option's place: nothing, a Skill
+// the Scope declares, or something it does not (a conflict Add would
+// overwrite).
+type OptionState int
+
+const (
+	OptionFree OptionState = iota
+	OptionInstalled
+	OptionConflict
+)
+
+// badge is the label a prompt row carries for the state.
+func (s OptionState) badge() string {
+	switch s {
+	case OptionInstalled:
+		return " (installed)"
+	case OptionConflict:
+		return " (conflict)"
+	}
+	return ""
+}
+
 type SelectOption struct {
 	Key       string
 	Title     string
 	Extra     string
-	Installed bool
+	State     OptionState
 	Selected  bool
 	DependsOn string
 }
@@ -332,10 +354,7 @@ func runMultiSelect(
 			if name == "" {
 				name = item.Key
 			}
-			badge := ""
-			if item.Installed {
-				badge = " (installed)"
-			}
+			badge := item.State.badge()
 			if item.Extra != "" {
 				badge += " " + item.Extra
 			}
@@ -406,7 +425,7 @@ type displayRow struct {
 	groupSource string
 	skillKey    string
 	skillTitle  string
-	installed   bool
+	state       OptionState
 	extra       string
 	dependsOn   string
 	groupSkills []string
@@ -530,7 +549,7 @@ func runGroupedMultiSelect(
 				groupSource: source,
 				skillKey:    sk.Key,
 				skillTitle:  sk.Title,
-				installed:   sk.Installed,
+				state:       sk.State,
 				extra:       sk.Extra,
 				dependsOn:   sk.DependsOn,
 			})
@@ -626,10 +645,7 @@ func runGroupedMultiSelect(
 			if isSelected(row) {
 				box = "[✓]"
 			}
-			badge := ""
-			if row.installed {
-				badge = " (installed)"
-			}
+			badge := row.state.badge()
 			if row.extra != "" {
 				badge += " " + row.extra
 			}

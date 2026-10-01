@@ -54,12 +54,11 @@ func newRmCmd() *cobra.Command {
 					groups := make(map[string][]tui.SelectOption)
 					for _, s := range allSkills {
 						srcKey := s.Source
-						groups[srcKey] = append(groups[srcKey], tui.SelectOption{
-							Key:       s.Name,
-							Title:     s.Name,
-							Installed: s.IsInstalled,
-							Selected:  false,
-						})
+						option := tui.SelectOption{Key: s.Name, Title: s.Name}
+						if s.IsInstalled {
+							option.State = tui.OptionInstalled
+						}
+						groups[srcKey] = append(groups[srcKey], option)
 					}
 
 					chosen, err := p.GroupedMultiSelect("Select skills to remove:", groups, nil)

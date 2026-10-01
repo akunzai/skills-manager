@@ -39,12 +39,17 @@ type fakeAddPrompter struct {
 	agentsErr   error
 	overwrite   error
 	asked       []string
+	offered     []tui.SelectOption
 }
 
 func (f *fakeAddPrompter) Interactive() bool { return f.interactive }
 
-func (f *fakeAddPrompter) SelectSkills(string, tui.GroupedItems, []tui.SelectOption) ([]string, error) {
+func (f *fakeAddPrompter) SelectSkills(_ string, groups tui.GroupedItems, flat []tui.SelectOption) ([]string, error) {
 	f.asked = append(f.asked, "skills")
+	f.offered = flat
+	for _, options := range groups {
+		f.offered = append(f.offered, options...)
+	}
 	return f.skills, f.skillsErr
 }
 
@@ -91,7 +96,7 @@ func TestResolveSkillsToAddAllFlag(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"one": {"skills/one"}, "two": {"skills/two"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, true, nil, &fakeAddPrompter{}, false, t.TempDir())
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, true, nil, &fakeAddPrompter{}, false, nil)
 	if err != nil || cancelled {
 		t.Fatalf("resolveSkillsToAdd() = %v, %v, %v", got, cancelled, err)
 	}
@@ -116,7 +121,7 @@ func TestResolveSkillsToAddFlagsRejectUnresolvedDuplicatesWithoutTerminal(t *tes
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, &fakeAddPrompter{}, false, t.TempDir())
+			_, _, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, &fakeAddPrompter{}, false, nil)
 			if err == nil || !strings.Contains(err.Error(), "requires a Source path") {
 				t.Fatalf("error = %v; want unresolved duplicate error", err)
 			}
@@ -141,7 +146,7 @@ func TestResolveSkillsToAddFlagsPromptForDivergentCandidates(t *testing.T) {
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, t.TempDir())
+			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, func(string) engine.AddOccupancy { return engine.AddSlotFree })
 			if err != nil || cancelled || got["duplicate"] != "skills/duplicate" {
 				t.Fatalf("got=%v cancelled=%v err=%v; want selected Source path", got, cancelled, err)
 			}
@@ -153,7 +158,7 @@ func TestResolveSkillsToAddSkillFlagExactAndCaseInsensitiveMatch(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"Api": {"skills/api"}, "lint": {"skills/lint"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "api"}, &fakeAddPrompter{}, false, t.TempDir())
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "api"}, &fakeAddPrompter{}, false, nil)
 	if err != nil || cancelled {
 		t.Fatalf("resolveSkillsToAdd() = %v, %v, %v", got, cancelled, err)
 	}
@@ -166,7 +171,7 @@ func TestResolveSkillsToAddSkillFlagUnmatchedFailsAtomically(t *testing.T) {
 	discovered := engine.DiscoveredSkills{"lint": {"skills/lint"}, "api": {"skills/api"}}
 	src := selectionIntake(t.TempDir())
 
-	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "ghost"}, &fakeAddPrompter{}, false, t.TempDir())
+	got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, false, []string{"lint", "ghost"}, &fakeAddPrompter{}, false, nil)
 	if err == nil || cancelled || got != nil || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("got=%v cancelled=%v err=%v; want atomic not-found error", got, cancelled, err)
 	}
@@ -513,5 +518,47 @@ func TestCLIAddCancelledExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(out, "Operation cancelled.") {
 		t.Fatalf("output does not say it was cancelled (asked %v):\n%q", prompter.asked, out)
+	}
+}
+
+// The prompt marks each Skill from the occupancy BuildAddPlan acts on: one the
+// Scope declares is installed, Untracked occupancy is a conflict.
+func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
+	skillsDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Local["declared"] = config.LocalEntry{Type: "command", Command: "true"}
+	for _, name := range []string{"declared", "untracked"} {
+		if err := os.MkdirAll(filepath.Join(skillsDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(skillsDir, "gone"), filepath.Join(skillsDir, "dangling")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	prompter := &fakeAddPrompter{interactive: true, skills: []string{"fresh"}}
+	discovered := engine.DiscoveredSkills{
+		"declared":  {"skills/declared"},
+		"untracked": {"skills/untracked"},
+		"dangling":  {"skills/dangling"},
+		"fresh":     {"skills/fresh"},
+	}
+
+	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, func(name string) engine.AddOccupancy {
+		return engine.ClassifyAddOccupancy(cfg, skillsDir, name)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]tui.OptionState{}
+	for _, option := range prompter.offered {
+		got[option.Key] = option.State
+	}
+	want := map[string]tui.OptionState{
+		"declared": tui.OptionInstalled, "untracked": tui.OptionConflict,
+		"dangling": tui.OptionConflict, "fresh": tui.OptionFree,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("prompt states = %v; want %v", got, want)
 	}
 }

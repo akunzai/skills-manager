@@ -6,14 +6,14 @@ import (
 
 func TestSelectOptionData(t *testing.T) {
 	opt := SelectOption{
-		Key:       "my-skill",
-		Title:     "my-skill",
-		Extra:     "(v1.0)",
-		Installed: true,
-		Selected:  true,
+		Key:      "my-skill",
+		Title:    "my-skill",
+		Extra:    "(v1.0)",
+		State:    OptionInstalled,
+		Selected: true,
 	}
 
-	if opt.Key != "my-skill" || !opt.Installed || !opt.Selected {
+	if opt.Key != "my-skill" || opt.State != OptionInstalled || !opt.Selected {
 		t.Errorf("unexpected option values: %+v", opt)
 	}
 }
@@ -182,6 +182,18 @@ func TestGroupedMultiSelectInstructionsUseTwoTopLines(t *testing.T) {
 		}
 		if got[1] != "Space to toggle, 'a' to toggle all, Enter to confirm, Esc/q to cancel." {
 			t.Fatalf("second instruction = %q", got[1])
+		}
+	}
+}
+
+func TestOptionStateBadge(t *testing.T) {
+	for state, want := range map[OptionState]string{
+		OptionFree:      "",
+		OptionInstalled: " (installed)",
+		OptionConflict:  " (conflict)",
+	} {
+		if got := state.badge(); got != want {
+			t.Errorf("badge(%d) = %q; want %q", state, got, want)
 		}
 	}
 }
