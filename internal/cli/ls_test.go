@@ -216,3 +216,96 @@ func TestCLILsJSONExactContract(t *testing.T) {
 		t.Fatalf("ls --json =\n%s\nwant\n%s", out, want)
 	}
 }
+
+// lsScope is a Scope with one installed Skill and one declared command Skill
+// that is not installed.
+func lsScope(t *testing.T) (configFile, skillsDir string) {
+	t.Helper()
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir = filepath.Join(root, "skills.json"), filepath.Join(root, "skills")
+	source := filepath.Join(root, "installed-src", "installed")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Installed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCLI(t, "add", "--symlink", source, "--yes", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache")); err != nil {
+		t.Fatalf("add = %v:\n%s", err, out)
+	}
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Local["pending"] = config.LocalEntry{Type: "command", Command: "pendingcmd"}
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+	return configFile, skillsDir
+}
+
+// agents, all and universal are not Agent names: each means every installed
+// Skill, and a declared Skill that is not installed is left out.
+func TestCLILsAgentAliasesMeanEveryInstalledSkill(t *testing.T) {
+	configFile, skillsDir := lsScope(t)
+	for _, alias := range []string{"agents", "all", "universal"} {
+		out, err := runCLI(t, "ls", "--agent", alias, "--config", configFile, "--skills-dir", skillsDir)
+		if err != nil {
+			t.Fatalf("ls --agent %s = %v:\n%s", alias, err, out)
+		}
+		if !strings.Contains(out, "installed") || strings.Contains(out, "pending") {
+			t.Fatalf("ls --agent %s = %q; want only the installed Skill", alias, out)
+		}
+	}
+	out, err := runCLI(t, "ls", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil || !strings.Contains(out, "pending") {
+		t.Fatalf("ls = %v; want the declared Skill listed without a filter:\n%s", err, out)
+	}
+}
+
+// --source matches the Source or its type, ignoring case.
+func TestCLILsSourceFilterMatchesSourceAndType(t *testing.T) {
+	configFile, skillsDir := lsScope(t)
+	for _, pattern := range []string{"PENDINGCMD", "command"} {
+		out, err := runCLI(t, "ls", "--source", pattern, "--config", configFile, "--skills-dir", skillsDir)
+		if err != nil {
+			t.Fatalf("ls --source %s = %v:\n%s", pattern, err, out)
+		}
+		if !strings.Contains(out, "pending") || strings.Contains(out, "installed") {
+			t.Fatalf("ls --source %s = %q; want only the command Skill", pattern, out)
+		}
+	}
+}
+
+// The Name column is as wide as the longest name in characters, not bytes: a
+// short non-ASCII name keeps the default width.
+func TestCLILsNameColumnCountsCharactersNotBytes(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills")
+	name := strings.Repeat("技能", 6)
+	source := filepath.Join(root, "src", name)
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCLI(t, "add", "--symlink", source, "--yes", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", filepath.Join(root, "cache")); err != nil {
+		t.Fatalf("add = %v:\n%s", err, out)
+	}
+	out, err := runCLI(t, "ls", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "NAME") {
+			if got, want := len([]rune(line[:strings.Index(line, "SOURCE")])), 21; got != want {
+				t.Fatalf("SOURCE starts at column %d; want %d (20-wide Name column and a space):\n%s", got, want, out)
+			}
+			return
+		}
+	}
+	t.Fatalf("no header row in:\n%s", out)
+}

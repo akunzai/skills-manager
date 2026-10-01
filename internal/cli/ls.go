@@ -208,8 +208,8 @@ func newLsCmd() *cobra.Command {
 			// Calculate dynamic column widths
 			nameWidth := 20
 			for _, s := range skills {
-				if len(s.Name)+2 > nameWidth {
-					nameWidth = len(s.Name) + 2
+				if stringRuneLen(s.Name)+2 > nameWidth {
+					nameWidth = stringRuneLen(s.Name) + 2
 				}
 			}
 			if nameWidth > 34 {
@@ -223,8 +223,8 @@ func newLsCmd() *cobra.Command {
 				maxAgentsLen := 12
 				for _, s := range skills {
 					joined := strings.Join(agentDisplayLabels(s.Agents), ", ")
-					if len(joined) > maxAgentsLen {
-						maxAgentsLen = len(joined)
+					if stringRuneLen(joined) > maxAgentsLen {
+						maxAgentsLen = stringRuneLen(joined)
 					}
 				}
 				if maxAgentsLen > 28 {
@@ -277,13 +277,13 @@ func newLsCmd() *cobra.Command {
 				rawTargets := "-"
 				if len(targetList) > 0 {
 					allAgents := strings.Join(targetList, ", ")
-					if len(allAgents) <= agentsWidth {
+					if stringRuneLen(allAgents) <= agentsWidth {
 						rawTargets = allAgents
 					} else if len(targetList) == 1 {
 						rawTargets = truncateWithEllipsis(targetList[0], agentsWidth)
 					} else {
 						summary := fmt.Sprintf("%s (+%d)", targetList[0], len(targetList)-1)
-						if len(summary) <= agentsWidth {
+						if stringRuneLen(summary) <= agentsWidth {
 							rawTargets = summary
 						} else {
 							rawTargets = truncateWithEllipsis(summary, agentsWidth)
