@@ -39,12 +39,17 @@ type fakeAddPrompter struct {
 	agentsErr   error
 	overwrite   error
 	asked       []string
+	offered     []tui.SelectOption
 }
 
 func (f *fakeAddPrompter) Interactive() bool { return f.interactive }
 
-func (f *fakeAddPrompter) SelectSkills(string, tui.GroupedItems, []tui.SelectOption) ([]string, error) {
+func (f *fakeAddPrompter) SelectSkills(_ string, groups tui.GroupedItems, flat []tui.SelectOption) ([]string, error) {
 	f.asked = append(f.asked, "skills")
+	f.offered = flat
+	for _, options := range groups {
+		f.offered = append(f.offered, options...)
+	}
 	return f.skills, f.skillsErr
 }
 
@@ -513,5 +518,47 @@ func TestCLIAddCancelledExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(out, "Operation cancelled.") {
 		t.Fatalf("output does not say it was cancelled (asked %v):\n%q", prompter.asked, out)
+	}
+}
+
+// The prompt marks each Skill from the occupancy BuildAddPlan acts on: one the
+// Scope declares is installed, Untracked occupancy is a conflict.
+func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
+	skillsDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Local["declared"] = config.LocalEntry{Type: "command", Command: "true"}
+	for _, name := range []string{"declared", "untracked"} {
+		if err := os.MkdirAll(filepath.Join(skillsDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(skillsDir, "gone"), filepath.Join(skillsDir, "dangling")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	prompter := &fakeAddPrompter{interactive: true, skills: []string{"fresh"}}
+	discovered := engine.DiscoveredSkills{
+		"declared":  {"skills/declared"},
+		"untracked": {"skills/untracked"},
+		"dangling":  {"skills/dangling"},
+		"fresh":     {"skills/fresh"},
+	}
+
+	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, func(name string) engine.AddOccupancy {
+		return engine.ClassifyAddOccupancy(cfg, skillsDir, name)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]tui.OptionState{}
+	for _, option := range prompter.offered {
+		got[option.Key] = option.State
+	}
+	want := map[string]tui.OptionState{
+		"declared": tui.OptionInstalled, "untracked": tui.OptionConflict,
+		"dangling": tui.OptionConflict, "fresh": tui.OptionFree,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("prompt states = %v; want %v", got, want)
 	}
 }
