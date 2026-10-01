@@ -400,6 +400,15 @@ func (a *Availability) Apply(skill string) ([]string, error) {
 	return a.state(skill).apply()
 }
 
+// apply is Apply that also says whether a failure was on a path Availability
+// refuses, read before the attempt changes anything.
+func (a *Availability) apply(skill string) (copied []string, refused bool, err error) {
+	state := a.state(skill)
+	refused = state.drift().Refused()
+	copied, err = state.apply()
+	return copied, err != nil && refused, err
+}
+
 // AvailabilityOutcome is how applying one Skill's Availability ended. Copied
 // is the Agents that hold a copy rather than a link (ADR-0003). Refused marks
 // a failure on a path Availability does not manage or cannot inspect, which
@@ -425,10 +434,8 @@ func (a *Availability) Reconcile(skills ...string) []AvailabilityOutcome {
 		if _, err := os.Lstat(filepath.Join(a.skillsDir, skill)); err != nil {
 			continue
 		}
-		state := a.state(skill)
-		refused := state.drift().Refused()
-		copied, err := state.apply()
-		outcomes = append(outcomes, AvailabilityOutcome{Skill: skill, Copied: copied, Err: err, Refused: err != nil && refused})
+		copied, refused, err := a.apply(skill)
+		outcomes = append(outcomes, AvailabilityOutcome{Skill: skill, Copied: copied, Err: err, Refused: refused})
 	}
 	return outcomes
 }

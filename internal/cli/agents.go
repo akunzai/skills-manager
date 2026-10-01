@@ -108,7 +108,7 @@ func reportReconciled(out io.Writer, outcomes []engine.AvailabilityOutcome, scop
 		fmt.Fprintln(out, "\n"+copiedAvailabilityNotice(copied, "", scopeFlag))
 	}
 	if refused {
-		fmt.Fprintf(out, "Next: run 'skills doctor%s --fix'.\n", scopeFlag)
+		printDoctorNext(out, scopeFlag)
 	}
 	if failed > 0 {
 		return exitError{message: "Availability not applied for " + countOf(failed, "skill"), code: 2}
