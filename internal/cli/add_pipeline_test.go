@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -560,5 +561,34 @@ func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("prompt states = %v; want %v", got, want)
+	}
+}
+
+// An unreadable Scope state fails Add (exit 2, ADR-0002) although every Skill
+// was applied, and sync is not the next step because it cannot read the state
+// either.
+func TestReportAddOutcomeFailsOnUnreadableState(t *testing.T) {
+	var out bytes.Buffer
+	err := reportAddOutcome(&out, engine.AddResult{AddedSkills: []string{"a"}, StateError: "bad state"}, "skills.json", "")
+	var exit exitError
+	if !errors.As(err, &exit) || exit.code != 2 {
+		t.Fatalf("err = %v; want exit 2", err)
+	}
+	if !strings.Contains(exit.message, "0 failures") || !strings.Contains(exit.message, "Baselines not recorded") {
+		t.Fatalf("message = %q; want the failure and the unrecorded Baselines", exit.message)
+	}
+	if strings.Contains(out.String(), "Next:") {
+		t.Fatalf("output = %q; sync is not the next step", out.String())
+	}
+}
+
+// A Skill that failed on its own beside an unreadable state still points at sync.
+func TestReportAddOutcomePointsAtSyncForASkillFailure(t *testing.T) {
+	var out bytes.Buffer
+	err := reportAddOutcome(&out, engine.AddResult{
+		AddedSkills: []string{"a"}, StateError: "bad state", SyncTally: engine.SyncTally{Failed: 1},
+	}, "skills.json", "")
+	if err == nil || !strings.Contains(out.String(), "Next:") {
+		t.Fatalf("err = %v, output = %q; want sync as the next step", err, out.String())
 	}
 }

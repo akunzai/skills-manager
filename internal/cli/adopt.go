@@ -323,7 +323,7 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 			recorded = append(recorded, skill.Name)
 		}
 	}
-	if result.StateError != "" {
+	if result.StateFailed() {
 		printScopeStateUnreadable(out, result.StateError)
 		code = 2
 	}

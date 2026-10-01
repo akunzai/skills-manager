@@ -253,14 +253,14 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeF
 			printSyncEvent(out, ev, scopeFlag)
 		}
 	}
-	if result.StateError != "" {
+	if result.StateFailed() {
 		printScopeStateUnreadable(out, result.StateError)
 	}
 	if result.StateWarning != "" {
 		printScopeStateWarning(out, result.StateWarning, scopeFlag)
 	}
 	added := fmt.Sprintf("Added %d skill(s) [%s]", len(result.AddedSkills), strings.Join(result.AddedSkills, ", "))
-	if result.Blocked == 0 && result.Failed == 0 {
+	if result.Blocked == 0 && result.Failed == 0 && !result.StateFailed() {
 		fmt.Fprintf(out, "%s%s and updated %s.%s\n", colorGreen, added, configName, colorReset)
 		return nil
 	}
@@ -271,14 +271,21 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeF
 	if result.Failed > 0 {
 		parts = append(parts, fmt.Sprintf("%d failed", result.Failed))
 	}
+	if result.StateFailed() {
+		parts = append(parts, "Baselines not recorded")
+	}
 	fmt.Fprintf(out, "%s%s to %s; %s.%s\n", colorYellow, added, configName, strings.Join(parts, ", "), colorReset)
 	// Sync cannot get past an unreadable Scope state either, so it is only
 	// the next step for a Skill that was blocked or failed on its own.
-	if result.StateError == "" || result.Blocked+result.Failed > 1 {
+	if !result.StateFailed() || result.Blocked+result.Failed > 0 {
 		fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync%s'.\n", scopeFlag)
 	}
-	if result.Failed > 0 {
-		return exitError{message: fmt.Sprintf("Add did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill")), code: 2}
+	if result.Failed > 0 || result.StateFailed() {
+		message := fmt.Sprintf("Add did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill"))
+		if result.StateFailed() {
+			message += ", Baselines not recorded"
+		}
+		return exitError{message: message, code: 2}
 	}
 	return exitError{message: "Scope does not match its Config", code: 1}
 }

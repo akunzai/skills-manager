@@ -493,6 +493,10 @@ type AdoptResult struct {
 	StateWarning string
 }
 
+// StateFailed reports that a remote Skill's Baseline was not recorded, a
+// failure (ADR-0002).
+func (r AdoptResult) StateFailed() bool { return r.StateError != "" }
+
 // Adopted is the Skills Config now declares, whatever their state.
 func (r AdoptResult) Adopted() []AdoptOutcome {
 	var adopted []AdoptOutcome

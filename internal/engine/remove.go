@@ -78,6 +78,10 @@ type RemoveResult struct {
 	StateWarning string
 }
 
+// StateFailed reports that the removed Skills' Baselines were not forgotten,
+// a failure (ADR-0002).
+func (r RemoveResult) StateFailed() bool { return r.StateError != "" }
+
 // NotFullyRemoved names the Skills Retire could not take fully out of the
 // Scope, in the order removed.
 func (r RemoveResult) NotFullyRemoved() []string {
