@@ -313,13 +313,8 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeF
 		parts = append(parts, "Baselines not recorded")
 	}
 	fmt.Fprintf(out, "%s%s to %s; %s.%s\n", colorYellow, added, configName, strings.Join(parts, ", "), colorReset)
-	// Sync cannot get past an unreadable Scope state either, so it is only
-	// the next step for a Skill that was blocked or failed on its own.
-	// Sync cannot clear a path Availability refuses either; Doctor can.
-	switch {
-	case eventsRefused(result.Events):
-		printDoctorNext(out, scopeFlag)
-	case !result.StateFailed() || result.Blocked+result.Failed > 0:
+	// A command carried by an outcome takes precedence over a generic retry.
+	if !printNextCommands(out, scopeFlag, syncErrors(result.Events)...) && (!result.StateFailed() || result.Blocked+result.Failed > 0) {
 		fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync%s'.\n", scopeFlag)
 	}
 	if result.Failed > 0 || result.StateFailed() {

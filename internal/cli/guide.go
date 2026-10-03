@@ -73,7 +73,9 @@ With --install, materializes the skill to the Scope skills directory, registers 
 
 			availability := engine.NewAvailability(cfg, scope.SkillsDir)
 			if _, err := availability.Apply("skills-manager"); err != nil {
-				return fmt.Errorf("apply availability for skills-manager: %w", err)
+				fmt.Fprintf(cmd.OutOrStdout(), "Failed to apply availability for skills-manager: %s\n", errorReasons(err))
+				printNextCommands(cmd.OutOrStdout(), scopeFlagsOf(cmd, scope), err)
+				return exitError{message: "Guide installation did not complete", code: 2}
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "%sInstalled skills-manager to %s and configured agent availability.%s\n", colorGreen, models.ToTildePath(skillMdPath), colorReset)

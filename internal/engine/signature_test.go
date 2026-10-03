@@ -524,7 +524,7 @@ func TestUpdateFetchesATrustRootAddCouldNot(t *testing.T) {
 	if result.Blocked != 1 {
 		t.Fatalf("add = %+v, want the Skill blocked for its missing trust root", result.SyncTally)
 	}
-	if !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncTrustRootFailed && ev.Err != "" }) {
+	if !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncTrustRootFailed && ev.Err != nil }) {
 		t.Fatalf("add events = %+v, want the failed trust-root fetch reported", result.Events)
 	}
 

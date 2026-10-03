@@ -472,6 +472,8 @@ type AdoptOutcome struct {
 	Declared bool
 	// Reason is why the Skill was skipped or failed.
 	Reason string
+	// Err retains a failure cause and its structured next command.
+	Err error
 	// CopiesLeft are the copies on Agent directories left in place, in
 	// AdoptDeclaredWithCopiesLeft.
 	CopiesLeft []string
@@ -811,7 +813,7 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 		applied, err = applyLocalItem(availability, skillsDir, planLocalItem(a.cfg, skillsDir, drift, name), nil)
 	case !sameSkillContent(content, remote.cachePath()):
 		if _, err := availability.Apply(name); err != nil {
-			a.outcome.State, a.outcome.Reason = AdoptFailed, err.Error()
+			a.outcome.State, a.outcome.Err = AdoptFailed, err
 			return a.outcome
 		}
 		a.outcome.State = AdoptDeclaredWithoutBaseline
@@ -820,7 +822,7 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 		// A copy whose Source does not vouch for it gets no Baseline; Sync
 		// blocks it until it does (ADR-0010).
 		if _, err := availability.Apply(name); err != nil {
-			a.outcome.State, a.outcome.Reason = AdoptFailed, err.Error()
+			a.outcome.State, a.outcome.Err = AdoptFailed, err
 			return a.outcome
 		}
 		a.outcome.State, a.outcome.Reason = AdoptDeclaredWithoutBaseline, a.remoteItem.BlockReason
@@ -832,7 +834,7 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 		applied, err = applyRemoteItem(availability, skillsDir, item, SyncDecision{}, a.baselines, nil)
 	}
 	if applied != SyncDone {
-		a.outcome.State, a.outcome.Reason = AdoptFailed, err.Error()
+		a.outcome.State, a.outcome.Err = AdoptFailed, err
 		return a.outcome
 	}
 	a.outcome.State = AdoptAdopted

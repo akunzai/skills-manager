@@ -293,6 +293,7 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 	var recorded []string
 	code := 0
 	counts := map[engine.AdoptState]int{}
+	var errs []error
 	for _, skill := range result.Skills {
 		counts[skill.State]++
 		code = max(code, adoptExitCodes[skill.State])
@@ -310,10 +311,15 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 		case engine.AdoptSkipped:
 			fmt.Fprintf(out, "  %sSkipped %s: %s%s\n", colorYellow, skill.Name, skill.Reason, colorReset)
 		case engine.AdoptFailed:
+			reason := skill.Reason
+			if skill.Err != nil {
+				reason = errorReasons(skill.Err)
+				errs = append(errs, skill.Err)
+			}
 			if skill.Declared {
-				fmt.Fprintf(out, "  %sFailed to finish adopting %s: %s. It is declared; fix the cause, then run '%s'.%s\n", colorRed, skill.Name, skill.Reason, syncCmd, colorReset)
+				fmt.Fprintf(out, "  %sFailed to finish adopting %s: %s. It is declared; fix the cause, then run '%s'.%s\n", colorRed, skill.Name, reason, syncCmd, colorReset)
 			} else {
-				fmt.Fprintf(out, "  %sFailed to adopt %s: %s; it was not declared.%s\n", colorRed, skill.Name, skill.Reason, colorReset)
+				fmt.Fprintf(out, "  %sFailed to adopt %s: %s; it was not declared.%s\n", colorRed, skill.Name, reason, colorReset)
 			}
 		}
 		if skill.Declared && skill.OnAgentDirectories() {
@@ -348,6 +354,7 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 		summary += "; " + strings.Join(parts, ", ")
 	}
 	fmt.Fprintf(out, "%s%s.%s\n", colorYellow, summary, colorReset)
+	printNextCommands(out, scopeFlagsOf(cmd, scope), errs...)
 	if code == 2 {
 		return exitError{message: "Adopt did not complete: " + cmp.Or(strings.Join(parts, ", "), "the Scope state could not be read"), code: 2}
 	}

@@ -456,7 +456,7 @@ func TestAdoptKeepsTheDeclarationWhenAvailabilityFailsAfterIt(t *testing.T) {
 	result := f.adopt(t, cfg)
 
 	assertAdoptStates(t, result, AdoptFailed)
-	if got := result.Skills[0]; !got.Declared || got.Reason == "" {
+	if got := result.Skills[0]; !got.Declared || got.Err == nil {
 		t.Fatalf("failed = %#v; want it declared, with a reason", got)
 	}
 	if entry := f.saved(t).Local["mine"]; entry.Source != ".agents/skills-local/mine" {

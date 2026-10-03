@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +82,7 @@ func TestCLIAddRefusesTrustCertForALocalSource(t *testing.T) {
 
 func TestCLIAddWarnsOfATrustRootItCouldNotFetch(t *testing.T) {
 	var out strings.Builder
-	printSyncEvent(&out, engine.SyncEvent{Kind: engine.SyncTrustRootFailed, Source: "owner/repo", Err: "fetch Sigstore trust root: unreachable", Next: "update"}, " -p")
+	printSyncEvent(&out, engine.SyncEvent{Kind: engine.SyncTrustRootFailed, Source: "owner/repo", Err: errors.New("fetch Sigstore trust root: unreachable"), Next: "update"}, " -p")
 
 	if got := out.String(); !strings.Contains(got, "Warning: fetch Sigstore trust root: unreachable") || !strings.Contains(got, "skills update -p") {
 		t.Fatalf("add output = %q; want the failure and update as the way out", got)

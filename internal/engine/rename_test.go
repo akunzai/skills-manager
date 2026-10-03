@@ -330,7 +330,7 @@ func TestSyncRenameFailsOnAnOldLinkItCannotRemove(t *testing.T) {
 			failed = append(failed, ev)
 		}
 	}
-	if report.Failed != 1 || len(failed) != 1 || failed[0].Skill != "old" || !strings.Contains(failed[0].Err, link) {
+	if report.Failed != 1 || len(failed) != 1 || failed[0].Skill != "old" || !strings.Contains(failed[0].Err.Error(), link) {
 		t.Fatalf("failed = %d, events = %#v; want the rename of old failed naming %s", report.Failed, failed, link)
 	}
 	if !exists(link) {
