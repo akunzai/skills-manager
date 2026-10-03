@@ -58,7 +58,7 @@ func resolveSkillsToAdd(
 	flagSkills []string,
 	prompter addPrompter,
 	interactive bool,
-	occupancy func(name string) engine.AddOccupancy,
+	occupancy func(name, subpath string) (engine.AddSlot, error),
 ) (skillsToAdd map[string]string, noneChosen bool, err error) {
 	out := cmd.OutOrStdout()
 	labels := intake.labels
@@ -99,6 +99,41 @@ func resolveSkillsToAdd(
 				return nil, false, fmt.Errorf("multiple skills found without selection")
 			}
 
+			slots := make(map[string]engine.AddSlot, len(outcome.Options))
+			if occupancy != nil {
+				for _, name := range outcome.Options {
+					paths := discovered[name]
+					slot, err := occupancy(name, paths[0])
+					if err != nil {
+						return nil, false, err
+					}
+					// Ask early only when choosing a path changes the occupancy badge.
+					// Otherwise keep Source-path selection after Skill selection.
+					for _, path := range paths[1:] {
+						other, err := occupancy(name, path)
+						if err != nil {
+							return nil, false, err
+						}
+						if other.Occupancy == slot.Occupancy {
+							continue
+						}
+						chosen, err := prompter.SelectSourcePath(name, paths)
+						if err != nil {
+							return nil, false, err
+						}
+						if !slices.Contains(paths, chosen) {
+							return nil, false, fmt.Errorf("Source path %q is not a candidate for Skill %q", chosen, name)
+						}
+						answers.Paths[name] = chosen
+						slot, err = occupancy(name, chosen)
+						if err != nil {
+							return nil, false, err
+						}
+						break
+					}
+					slots[name] = slot
+				}
+			}
 			displayPaths := make(map[string]string, len(discovered))
 			shouldGroup := true
 			for name, paths := range discovered {
@@ -116,7 +151,7 @@ func resolveSkillsToAdd(
 			var flat []tui.SelectOption
 			if shouldGroup {
 				for _, options := range groups {
-					markOccupiedSkills(options, occupancy)
+					markOccupiedSkills(options, slots)
 				}
 			} else {
 				groups = nil
@@ -129,7 +164,7 @@ func resolveSkillsToAdd(
 					}
 					options = append(options, tui.SelectOption{Key: skName, Title: skName, Extra: extra})
 				}
-				markOccupiedSkills(options, occupancy)
+				markOccupiedSkills(options, slots)
 				slices.SortFunc(options, func(a, b tui.SelectOption) int {
 					return cmp.Compare(a.Key, b.Key)
 				})
@@ -174,14 +209,14 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	prompter := newAddPrompter(cmd)
 	interactive := prompter.Interactive() && !req.yes
 
-	var occupancy func(name string) engine.AddOccupancy
+	var occupancy func(name, subpath string) (engine.AddSlot, error)
 	if interactive {
 		pickerCfg, err := config.LoadConfig(req.scope.ConfigPath)
 		if err != nil {
 			return err
 		}
-		occupancy = func(name string) engine.AddOccupancy {
-			return engine.ClassifyAddOccupancy(pickerCfg, req.scope.SkillsDir, name)
+		occupancy = func(name, subpath string) (engine.AddSlot, error) {
+			return engine.InspectAddSlot(pickerCfg, req.scope.SkillsDir, intake.source, name, subpath)
 		}
 	}
 
@@ -208,7 +243,10 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 		return err
 	}
 
-	plan := engine.BuildAddPlan(cfg, configPath, skillsDir, intake.source, skillsToAdd, intent)
+	plan, err := engine.BuildAddPlan(cfg, configPath, skillsDir, intake.source, skillsToAdd, intent)
+	if err != nil {
+		return err
+	}
 	plan.TrustCert = req.trustCert
 
 	if len(plan.Conflicts) > 0 && !req.yes {

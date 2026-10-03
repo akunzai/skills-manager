@@ -190,6 +190,7 @@ func TestOptionStateBadge(t *testing.T) {
 	for state, want := range map[OptionState]string{
 		OptionFree:      "",
 		OptionInstalled: " (installed)",
+		OptionDeclared:  " (declared)",
 		OptionConflict:  " (conflict)",
 	} {
 		if got := state.badge(); got != want {

@@ -21,11 +21,11 @@ const repositoryRootGroup = "Repository root"
 
 // markOccupiedSkills marks the options whose place on the Scope Add declares
 // into is already taken, from the same occupancy BuildAddPlan acts on.
-func markOccupiedSkills(options []tui.SelectOption, occupancy func(name string) engine.AddOccupancy) {
+func markOccupiedSkills(options []tui.SelectOption, slots map[string]engine.AddSlot) {
 	for i := range options {
-		switch occupancy(options[i].Key) {
+		switch slots[options[i].Key].Occupancy {
 		case engine.AddSlotDeclared:
-			options[i].State = tui.OptionInstalled
+			options[i].State = tui.OptionDeclared
 		case engine.AddSlotConflict:
 			options[i].State = tui.OptionConflict
 		}

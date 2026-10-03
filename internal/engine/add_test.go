@@ -98,7 +98,10 @@ func TestBuildAddPlanDetectsRemoteConflicts(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "original/repo", "my-skill", "subpath", "github", "")
 
 	source := NewRemoteAddSource(&RemoteIntake{spec: models.ParsedRepoSource{SourceKey: "new/repo"}})
-	plan := BuildAddPlan(cfg, "/tmp/skills.json", "/tmp/skills", source, map[string]string{"my-skill": "subpath"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, "/tmp/skills.json", "/tmp/skills", source, map[string]string{"my-skill": "subpath"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 
 	if len(plan.Conflicts) != 1 {
 		t.Fatalf("expected 1 conflict, got %d", len(plan.Conflicts))
@@ -124,7 +127,10 @@ func TestApplyAddPlanRefusesSourceInsideSkillsDir(t *testing.T) {
 	}
 	configPath := filepath.Join(t.TempDir(), "skills.json")
 	cfg := config.DefaultConfig()
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(dest, ""), map[string]string{"mine": "."}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(dest, ""), map[string]string{"mine": "."}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
 		t.Fatal("expected refusal of a Source inside the skills directory")
 	}
@@ -149,7 +155,10 @@ func TestBuildAddPlanDetectsUntrackedDiskConflicts(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	source := NewSymlinkAddSource("/tmp/local-source", "local test")
-	plan := BuildAddPlan(cfg, "/tmp/skills.json", skillsDir, source, map[string]string{"existing-skill": "."}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, "/tmp/skills.json", skillsDir, source, map[string]string{"existing-skill": "."}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 
 	if len(plan.Conflicts) != 1 {
 		t.Fatalf("expected 1 conflict, got %d", len(plan.Conflicts))
@@ -177,9 +186,12 @@ func TestApplyAddPlanRecordsBaselineSoUpdateIsNotUnknown(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(origin, "", ""), cacheDir)
-	plan := BuildAddPlan(cfg, configPath, skillsDir,
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource(intake),
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -220,9 +232,12 @@ func TestApplyAddPlanOverwritesALocallyEditedCopy(t *testing.T) {
 	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(origin, "", ""), filepath.Join(project, "cache"))
 	add := func() AddResult {
 		t.Helper()
-		plan := BuildAddPlan(cfg, configPath, skillsDir,
+		plan, planErr := BuildAddPlan(cfg, configPath, skillsDir,
 			NewRemoteAddSource(intake),
 			map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+		if planErr != nil {
+			t.Fatal(planErr)
+		}
 		result, err := ApplyAddPlan(plan, cfg, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -256,9 +271,12 @@ func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {
 	statePath, bad := writeUnreadableScopeState(t, skillsDir)
 
 	cfg := config.DefaultConfig()
-	plan := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
+	plan, planErr := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
 		NewRemoteAddSource(mustPrepareRemoteIntake(t, cfg, remoteSpec(commitOrigin(t, repoDir), "", ""), filepath.Join(project, "cache"))),
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -296,9 +314,12 @@ func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	configPath := filepath.Join(project, ".agents", "skills.json")
 	cfg := config.DefaultConfig()
-	plan := BuildAddPlan(cfg, configPath, skillsDir,
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource(mustPrepareRemoteIntake(t, cfg, remoteSpec(commitOrigin(t, repoDir), "", ""), filepath.Join(project, "cache"))),
 		map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -332,9 +353,12 @@ func TestApplyAddPlanContinuesPastAFailedSkill(t *testing.T) {
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	configPath := filepath.Join(project, ".agents", "skills.json")
 	cfg := config.DefaultConfig()
-	plan := BuildAddPlan(cfg, configPath, skillsDir,
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir,
 		NewRemoteAddSource(mustPrepareRemoteIntake(t, cfg, remoteSpec(commitOrigin(t, repoDir), "", ""), filepath.Join(project, "cache"))),
 		map[string]string{"bad": "missing", "good": "good"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	var progress []string
 	result, err := ApplyAddPlan(plan, cfg, func(ev AddSkillEvent) {
 		progress = append(progress, ev.Name+":"+string(ev.Outcome))
@@ -364,9 +388,12 @@ func TestApplyAddPlanCountsAFailedCheckAsBlocked(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cfg := config.DefaultConfig()
-	plan := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
+	plan, planErr := BuildAddPlan(cfg, filepath.Join(project, ".agents", "skills.json"), skillsDir,
 		NewCommandAddSource("echo ok", "exit 1", ""),
 		map[string]string{"cmd-skill": "."}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
@@ -398,7 +425,10 @@ func TestApplyAddPlanAvailabilityIntent(t *testing.T) {
 		if seed != nil {
 			cfg.Settings.Availability["sample"] = *seed
 		}
-		plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, ""), map[string]string{"sample": "sample"}, intent)
+		plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, ""), map[string]string{"sample": "sample"}, intent)
+		if planErr != nil {
+			t.Fatal(planErr)
+		}
 		if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
 			t.Fatal(err)
 		}
