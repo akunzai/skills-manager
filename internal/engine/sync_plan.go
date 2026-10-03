@@ -338,7 +338,7 @@ func (plan *SyncPlan) Pending(decision SyncDecision) []SyncPlanItem {
 	var pending []SyncPlanItem
 	for _, item := range plan.Items {
 		action, _ := item.Resolve(decision)
-		if item.Err != "" || action == SyncActionSkip || item.Drift.Refused() {
+		if item.Err != "" || action == SyncActionSkip || (item.Drift.Refusal() != nil) {
 			continue
 		}
 		if item.changes(action) || item.Drift.Reconcilable() {
@@ -386,7 +386,7 @@ func (plan *SyncPlan) Failed(decision SyncDecision) []SyncPlanItem {
 			failed = append(failed, item)
 			continue
 		}
-		if action, _ := item.Resolve(decision); action != SyncActionSkip && item.Drift.Refused() {
+		if action, _ := item.Resolve(decision); action != SyncActionSkip && (item.Drift.Refusal() != nil) {
 			failed = append(failed, item)
 		}
 	}

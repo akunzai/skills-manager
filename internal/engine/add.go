@@ -361,7 +361,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		emit(*signerRecorded)
 	}
 	if plan.Source.Kind == AddSourceRemote && plan.Source.Remote.TrustRootErr != nil {
-		emit(SyncEvent{Kind: SyncTrustRootFailed, Source: plan.Source.Key, Err: plan.Source.Remote.TrustRootErr.Error(), Next: "update"})
+		emit(SyncEvent{Kind: SyncTrustRootFailed, Source: plan.Source.Key, Err: plan.Source.Remote.TrustRootErr, Next: "update"})
 	}
 	for _, name := range names {
 		subpath := plan.Skills[name]

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -324,7 +325,12 @@ func TestApplyAddPlanAvailabilityFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Failed != 1 || !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool { return ev.Kind == SyncAvailabilityFailed && ev.Refused }) {
+	if result.Failed != 1 || !slices.ContainsFunc(result.Events, func(ev SyncEvent) bool {
+		return ev.Kind == SyncAvailabilityFailed && func() bool {
+			next, ok := errors.AsType[NextCommand](ev.Err)
+			return ok && next.Command == "doctor --fix"
+		}()
+	}) {
 		t.Fatalf("Failed=%d Events=%#v; want the unmanaged Availability path to fail closed", result.Failed, result.Events)
 	}
 	loaded, err := config.LoadConfig(configPath)

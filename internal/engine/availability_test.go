@@ -1,9 +1,12 @@
 package engine
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -259,8 +262,8 @@ func TestDriftVerdictMatchesApply(t *testing.T) {
 			tc.setup(t, availability, linkPath)
 
 			drift := availability.ObserveOccupancy().Drift("sample")
-			if drift.Reconcilable() != tc.reconcilable || drift.Refused() != tc.refused {
-				t.Fatalf("Drift %#v: Reconcilable = %v, Refused = %v; want %v, %v", drift, drift.Reconcilable(), drift.Refused(), tc.reconcilable, tc.refused)
+			if drift.Reconcilable() != tc.reconcilable || (drift.Refusal() != nil) != tc.refused {
+				t.Fatalf("Drift %#v: Reconcilable = %v, Refused = %v; want %v, %v", drift, drift.Reconcilable(), (drift.Refusal() != nil), tc.reconcilable, tc.refused)
 			}
 			_, err := availability.Apply("sample")
 			if refused := err != nil; refused != tc.refused {
@@ -295,7 +298,7 @@ func TestReconcileAppliesPastARefusedSkill(t *testing.T) {
 	if len(outcomes) != 2 || outcomes[0].Skill != "alpha" || outcomes[1].Skill != "beta" {
 		t.Fatalf("outcomes = %#v; want alpha and beta, gamma left to Sync", outcomes)
 	}
-	if outcomes[0].Err == nil || !outcomes[0].Refused {
+	if outcomes[0].Err == nil {
 		t.Fatalf("alpha = %#v; want a refused failure", outcomes[0])
 	}
 	if outcomes[1].Err != nil {
@@ -486,5 +489,78 @@ func TestApplyLeavesAgentReservedNameAlone(t *testing.T) {
 	assertClaudeReservedDirIntact(t, claudeFile)
 	if !isManagedSkillPath(filepath.Join(project, ".continue", "skills", "synced"), "synced", skillsDir) {
 		t.Fatal("Apply did not make synced available to continue")
+	}
+}
+
+func TestAvailabilityApplyCarriesForeignRemedy(t *testing.T) {
+	availability, path, _ := projectAvailability(t, "sample")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(path, "keep")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := availability.Apply("sample")
+	next, ok := errors.AsType[NextCommand](err)
+	if !ok || next.Command != "doctor --fix" {
+		t.Fatalf("err=%v; want doctor --fix remedy", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("err=%v; want occupied path", err)
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != "keep" {
+		t.Fatalf("Foreign content changed: %q, %v", got, err)
+	}
+}
+
+func TestAvailabilityReconcileCarriesForeignRemedy(t *testing.T) {
+	availability, path, _ := projectAvailability(t, "sample")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outcomes := availability.Reconcile("sample")
+	if len(outcomes) != 1 {
+		t.Fatalf("outcomes=%v", outcomes)
+	}
+	next, ok := errors.AsType[NextCommand](outcomes[0].Err)
+	if !ok || next.Command != "doctor --fix" {
+		t.Fatalf("err=%v; want structured remedy", outcomes[0].Err)
+	}
+}
+
+func TestAvailabilityApplyDistinguishesUnobservableAndMixedRefusals(t *testing.T) {
+	for _, foreign := range []bool{false, true} {
+		t.Run(fmt.Sprintf("foreign=%t", foreign), func(t *testing.T) {
+			availability, occupied, skillsDir := projectAvailability(t, "sample")
+			availability.cfg.Settings.DefaultAgents = []string{"claude", "continue"}
+			if foreign {
+				if err := os.MkdirAll(occupied, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root := filepath.Dir(filepath.Dir(skillsDir))
+			agentDir := filepath.Join(root, ".continue", "skills")
+			if err := os.MkdirAll(filepath.Dir(agentDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(agentDir, []byte("keep"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := availability.Apply("sample")
+			if err == nil || !strings.Contains(err.Error(), agentDir) || !strings.Contains(err.Error(), "inspect Agent directory") {
+				t.Fatalf("err=%v; want inspection cause and manual action", err)
+			}
+			next, ok := errors.AsType[NextCommand](err)
+			if ok != foreign || (ok && next.Command != "doctor --fix") {
+				t.Fatalf("next=%v found=%t; Foreign=%t", next, ok, foreign)
+			}
+			if foreign && !strings.Contains(err.Error(), occupied) {
+				t.Fatalf("err=%v; lost Foreign path", err)
+			}
+			if got, err := os.ReadFile(agentDir); err != nil || string(got) != "keep" {
+				t.Fatalf("unobservable directory changed: %q, %v", got, err)
+			}
+		})
 	}
 }

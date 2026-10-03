@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -357,6 +358,7 @@ func (s availabilityState) drift() AvailabilityDrift {
 }
 
 func (s availabilityState) apply() ([]string, error) {
+	drift := s.drift()
 	var copied []string
 	for agent := range s.desired {
 		agentDir, ok := s.known[agent]
@@ -366,14 +368,17 @@ func (s availabilityState) apply() ([]string, error) {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		_, err := os.Lstat(linkPath)
 		if err == nil && !s.isManagedPath(linkPath) {
-			return copied, fmt.Errorf("agent path already exists and is not managed by skills: %s", models.ToTildePath(linkPath))
+			if !slices.ContainsFunc(drift.Foreign, func(path ForeignAvailabilityPath) bool { return path.Path == linkPath }) {
+				drift.Foreign = append(drift.Foreign, describeForeignAvailabilityPath(agent, linkPath))
+			}
+			return copied, drift.Refusal()
 		}
 	}
 	for agent, agentDir := range s.known {
 		linkPath := filepath.Join(agentDir, s.skillName)
 		if _, shouldLink := s.desired[agent]; shouldLink {
 			if err := s.link(agent); err != nil {
-				return copied, err
+				return copied, errors.Join(err, drift.Refusal())
 			}
 			// Read the outcome back rather than inferring it: a copy left
 			// over from an earlier run is as much a copy as one made now, and
@@ -386,7 +391,7 @@ func (s availabilityState) apply() ([]string, error) {
 		if s.isManagedPath(linkPath) {
 			managed, err := removeManagedSkillPath(linkPath, s.skillName, s.skillsDir)
 			if !managed || (err != nil && !os.IsNotExist(err)) {
-				return copied, fmt.Errorf("failed to remove managed availability path: %s", linkPath)
+				return copied, errors.Join(fmt.Errorf("failed to remove managed availability path: %s", linkPath), drift.Refusal())
 			}
 		}
 	}
@@ -400,24 +405,13 @@ func (a *Availability) Apply(skill string) ([]string, error) {
 	return a.state(skill).apply()
 }
 
-// apply is Apply that also says whether a failure was on a path Availability
-// refuses, read before the attempt changes anything.
-func (a *Availability) apply(skill string) (copied []string, refused bool, err error) {
-	state := a.state(skill)
-	refused = state.drift().Refused()
-	copied, err = state.apply()
-	return copied, err != nil && refused, err
-}
-
 // AvailabilityOutcome is how applying one Skill's Availability ended. Copied
-// is the Agents that hold a copy rather than a link (ADR-0003). Refused marks
-// a failure on a path Availability does not manage or cannot inspect, which
-// Doctor resolves.
+// is the Agents that hold a copy rather than a link (ADR-0003). Err retains
+// the cause and any next command so callers need not infer a remedy.
 type AvailabilityOutcome struct {
-	Skill   string
-	Copied  []string
-	Err     error
-	Refused bool
+	Skill  string
+	Copied []string
+	Err    error
 }
 
 // Reconcile applies declared Availability after a policy change: to each
@@ -434,8 +428,8 @@ func (a *Availability) Reconcile(skills ...string) []AvailabilityOutcome {
 		if _, err := os.Lstat(filepath.Join(a.skillsDir, skill)); err != nil {
 			continue
 		}
-		copied, refused, err := a.apply(skill)
-		outcomes = append(outcomes, AvailabilityOutcome{Skill: skill, Copied: copied, Err: err, Refused: refused})
+		copied, err := a.Apply(skill)
+		outcomes = append(outcomes, AvailabilityOutcome{Skill: skill, Copied: copied, Err: err})
 	}
 	return outcomes
 }
@@ -552,19 +546,13 @@ type AvailabilityDrift struct {
 // Availability and the filesystem. Copies are a working Availability by
 // another mechanism (ADR-0003), not Drift.
 func (d AvailabilityDrift) Empty() bool {
-	return !d.Reconcilable() && !d.Refused()
+	return !d.Reconcilable() && d.Refusal() == nil
 }
 
 // Reconcilable reports whether Apply would change the Skill's Availability: a
 // link to add, repair, or remove.
 func (d AvailabilityDrift) Reconcilable() bool {
 	return len(d.Missing) > 0 || len(d.Unexpected) > 0 || len(d.Broken) > 0
-}
-
-// Refused reports whether Apply would fail for the Skill: a path it does not
-// manage, which it fails closed on, or one it cannot inspect.
-func (d AvailabilityDrift) Refused() bool {
-	return len(d.Foreign) > 0 || len(d.Unobservable) > 0
 }
 
 func (a *Availability) declaredSkills() map[string]struct{} {
@@ -586,4 +574,25 @@ func (a *Availability) declaredSkills() map[string]struct{} {
 type ReservedAvailability struct {
 	Skill string
 	Agent string
+}
+
+// availabilityRefusal leaves the command out of per-Skill reasons. Callers can
+// discover NextCommand through Unwrap and render it once for the active Scope.
+type availabilityRefusal struct{ NextCommand }
+
+func (r availabilityRefusal) Error() string { return r.Reason }
+func (r availabilityRefusal) Unwrap() error { return r.NextCommand }
+
+// Refusal describes every observed path Apply refuses, with the next step
+// each kind allows. It only uses the observation, so previews need no new reads.
+func (d AvailabilityDrift) Refusal() error {
+	var reasons []error
+	for _, foreign := range d.Foreign {
+		reason := fmt.Sprintf("agent path already exists and is not managed by skills: %s; Doctor can replace this Foreign occupancy after confirmation", models.ToTildePath(foreign.Path))
+		reasons = append(reasons, availabilityRefusal{NextCommand{Reason: reason, Command: "doctor --fix"}})
+	}
+	for _, path := range d.Unobservable {
+		reasons = append(reasons, fmt.Errorf("cannot inspect agent path %s: %s; inspect Agent directory %s and its permissions before retrying", models.ToTildePath(path.Path), path.Err, models.ToTildePath(path.Dir)))
+	}
+	return errors.Join(reasons...)
 }

@@ -3,11 +3,13 @@ package engine
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -199,7 +201,7 @@ func TestSyncApplyNamesTheSkillWhoseAvailabilityFailed(t *testing.T) {
 	if err != nil || report.Failed != 1 || report.Blocked != 0 {
 		t.Fatalf("expected one failure, got err=%v failed=%d blocked=%d", err, report.Failed, report.Blocked)
 	}
-	if len(failures) != 1 || failures[0].Skill != "local" || failures[0].Err == "" {
+	if len(failures) != 1 || failures[0].Skill != "local" || failures[0].Err == nil {
 		t.Fatalf("failure must name the Skill and say why: %#v", failures)
 	}
 }
@@ -477,5 +479,51 @@ func TestSyncReportSummaryUsesTheAppliedDecision(t *testing.T) {
 
 	if got, want := report.Summary(), (SyncSummary{Configured: 1}); got != want || !got.Converged() {
 		t.Fatalf("report summary = %+v, want %+v and converged", got, want)
+	}
+}
+
+func TestSyncPreviewRetainsRefusalSnapshotWhileApplyReadsCurrentPaths(t *testing.T) {
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, ".agents", "skills")
+	configPath := filepath.Join(root, ".agents", "skills.json")
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude-code", "continue"}
+	config.AddLocalCommandEntry(cfg, "sample", "exit 0", "", "")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(root, ".claude", "skills", "sample")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(root, ".continue", "skills")
+	if err := os.MkdirAll(filepath.Dir(blocked), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blocked, []byte("blocked"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanSync(cfg, configPath, skillsDir, filepath.Join(root, "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(foreign); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	failed := plan.Failed(SyncDecision{})
+	if len(failed) != 1 || plan.Summary(SyncDecision{}).Failed != 1 {
+		t.Fatalf("failed=%v; preview lost its observation", failed)
+	}
+	refusal := failed[0].Drift.Refusal()
+	next, ok := errors.AsType[NextCommand](refusal)
+	if !ok || next.Command != "doctor --fix" || !strings.Contains(refusal.Error(), blocked) {
+		t.Fatalf("refusal=%v; preview lost a cause or remedy", refusal)
+	}
+	report, err := plan.Apply(SyncDecision{}, nil)
+	if err != nil || report.Failed != 0 {
+		t.Fatalf("report=%v err=%v; Apply must use current paths", report, err)
 	}
 }

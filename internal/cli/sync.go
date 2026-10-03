@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -123,27 +122,13 @@ func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.
 	region.Stop()
 	for _, ev := range report.Events {
 		if ev.Kind == engine.SyncStateUnreadable {
-			printScopeStateWarning(out, ev.Err, scopeFlagsOf(cmd, scope))
+			printScopeStateWarning(out, ev.Err.Error(), scopeFlagsOf(cmd, scope))
 		}
 	}
 	printMaterialized(out, report)
 	printCopiedAvailability(out, report, scopeFlagsOf(cmd, scope))
-	if eventsRefused(report.Events) {
-		printDoctorNext(out, scopeFlagsOf(cmd, scope))
-	}
+	printNextCommands(out, scopeFlagsOf(cmd, scope), syncErrors(report.Events)...)
 	return report, err
-}
-
-// eventsRefused reports whether Availability failed on a path that only
-// Doctor can resolve.
-func eventsRefused(events []engine.SyncEvent) bool {
-	return slices.ContainsFunc(events, func(ev engine.SyncEvent) bool { return ev.Refused })
-}
-
-// printDoctorNext is the next step for a path Availability refuses: Doctor
-// inspects it and replaces it once the user confirms, which Sync cannot.
-func printDoctorNext(out io.Writer, scopeFlag string) {
-	fmt.Fprintf(out, "Next: run 'skills doctor%s --fix'.\n", scopeFlag)
 }
 
 // printMaterialized names the Skills whose content Sync wrote, once the
@@ -262,11 +247,11 @@ func printSyncPlan(out io.Writer, plan *engine.SyncPlan, decision engine.SyncDec
 	for _, item := range plan.LocalItems() {
 		printSyncPlanItem(out, item, decision, scopeFlag)
 	}
-	// Doctor is where a path Availability refuses is inspected, and replaced
-	// once the user confirms.
-	if slices.ContainsFunc(plan.Failed(decision), func(item engine.SyncPlanItem) bool { return item.Drift.Refused() }) {
-		printDoctorNext(out, scopeFlag)
+	var errs []error
+	for _, item := range plan.Failed(decision) {
+		errs = append(errs, item.Drift.Refusal())
 	}
+	printNextCommands(out, scopeFlag, errs...)
 }
 
 func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.SyncDecision, scopeFlags string) {
@@ -308,11 +293,8 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 	if len(item.Drift.Unexpected) > 0 {
 		fmt.Fprintf(out, "  [Dry-run] Would unlink %s from %s.\n", item.Name, strings.Join(item.Drift.Unexpected, ", "))
 	}
-	for _, foreign := range item.Drift.Foreign {
-		fmt.Fprintf(out, "  %s[Dry-run] Would fail %s: %s is not managed by skills%s\n", colorRed, item.Name, models.ToTildePath(foreign.Path), colorReset)
-	}
-	for _, unobservable := range item.Drift.Unobservable {
-		fmt.Fprintf(out, "  %s[Dry-run] Would fail %s: cannot inspect %s: %s%s\n", colorRed, item.Name, models.ToTildePath(unobservable.Dir), unobservable.Err, colorReset)
+	if err := item.Drift.Refusal(); err != nil {
+		fmt.Fprintf(out, "  %s[Dry-run] Would fail %s: %s%s\n", colorRed, item.Name, errorReasons(err), colorReset)
 	}
 }
 
@@ -398,44 +380,44 @@ func syncEventIsProgress(kind string) bool {
 func printSyncEvent(out io.Writer, ev engine.SyncEvent, scopeFlags string) {
 	switch ev.Kind {
 	case engine.SyncFetchFailed:
-		fmt.Fprintf(out, "%sFailed to fetch %s: %s%s\n", colorRed, ev.Source, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
+		fmt.Fprintf(out, "%sFailed to fetch %s: %s%s\n", colorRed, ev.Source, withNext(ev.Err.Error(), ev.Next, scopeFlags), colorReset)
 	case engine.SyncPathMissing:
 		fmt.Fprintf(out, "%sSkill path missing in Source: %s for %s%s\n", colorRed, ev.Path, ev.Skill, colorReset)
 	case engine.SyncAvailabilityFailed:
-		fmt.Fprintf(out, "%sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to apply availability for %s: %s%s\n", colorRed, ev.Skill, errorReasons(ev.Err), colorReset)
 	case engine.SyncCopyFailed:
-		fmt.Fprintf(out, "%sFailed to copy %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to copy %s: %s%s\n", colorRed, ev.Skill, errorReasons(ev.Err), colorReset)
 	case engine.SyncSourceMissing:
 		fmt.Fprintf(out, "%sWarning: Local symlink source missing: %s (skill: %s)%s\n", colorYellow, models.ToTildePath(ev.Path), ev.Skill, colorReset)
 	case engine.SyncSymlinkFailed:
-		fmt.Fprintf(out, "%sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to symlink %s: %s%s\n", colorRed, ev.Skill, errorReasons(ev.Err), colorReset)
 	case engine.SyncCheckFailed:
 		fmt.Fprintf(out, "%sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
 	case engine.SyncCommandFailed:
-		fmt.Fprintf(out, "%sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, errorReasons(ev.Err), colorReset)
 	case engine.SyncRenamed:
 		fmt.Fprintf(out, "%sRenamed %s%s%s to %s%s%s, as its Source declares.%s\n", colorGreen, colorBold, ev.Skill, colorReset+colorGreen, colorBold, ev.Target, colorReset+colorGreen, colorReset)
 	case engine.SyncRenameFailed:
-		fmt.Fprintf(out, "%sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to rename %s to %s: %s%s\n", colorRed, ev.Skill, ev.Target, errorReasons(ev.Err), colorReset)
 	case engine.SyncSignerRecorded:
 		fmt.Fprintf(out, "%sTrusting %s as the signer of %s, recorded in Config.%s\n", colorGreen, ev.Target, ev.Source, colorReset)
 	case engine.SyncTrustedUnverified:
-		fmt.Fprintf(out, "%sTrusted unverified: %s (%s)%s\n", colorYellow, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sTrusted unverified: %s (%s)%s\n", colorYellow, ev.Skill, errorReasons(ev.Err), colorReset)
 	case engine.SyncTrustRootFailed:
-		fmt.Fprintf(out, "%sWarning: %s%s\n", colorYellow, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
+		fmt.Fprintf(out, "%sWarning: %s%s\n", colorYellow, withNext(ev.Err.Error(), ev.Next, scopeFlags), colorReset)
 	case engine.SyncSignerFailed:
-		fmt.Fprintf(out, "%sFailed to record %s as the signer of %s: %s%s\n", colorRed, ev.Target, ev.Source, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to record %s as the signer of %s: %s%s\n", colorRed, ev.Target, ev.Source, errorReasons(ev.Err), colorReset)
 	case engine.SyncSkipped:
-		fmt.Fprintf(out, "%sSkipped %s: %s%s\n", colorYellow, ev.Skill, withNext(ev.Err, ev.Next, scopeFlags), colorReset)
+		fmt.Fprintf(out, "%sSkipped %s: %s%s\n", colorYellow, ev.Skill, withNext(ev.Err.Error(), ev.Next, scopeFlags), colorReset)
 	case engine.SyncStateUnreadable:
 		// applySyncPlan warns once the region is gone, with the scope flag
 		// its next action needs.
 	case engine.SyncStateFailed:
 		if ev.Skill == "" {
-			printScopeStateUnreadable(out, ev.Err)
+			printScopeStateUnreadable(out, ev.Err.Error())
 			break
 		}
-		fmt.Fprintf(out, "%sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, ev.Err, colorReset)
+		fmt.Fprintf(out, "%sFailed to record the baseline for %s: %s%s\n", colorRed, ev.Skill, errorReasons(ev.Err), colorReset)
 	}
 }
 

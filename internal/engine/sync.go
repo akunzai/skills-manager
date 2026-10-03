@@ -55,12 +55,9 @@ type SyncEvent struct {
 	Skills []string
 	Path   string
 	Target string
-	Err    string
+	Err    error
 	// Next is the skills command that clears what Err reports, if one does.
-	Next string
-	// Refused marks a SyncAvailabilityFailed on a path Availability does not
-	// manage or cannot inspect, which Doctor resolves and Sync cannot.
-	Refused    bool
+	Next       string
 	Missing    []string
 	Unexpected []string
 	// Agents carries the Agents named by an Availability event — for
@@ -162,10 +159,10 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 	baselines := plan.openBaselines()
 	switch baselines.Verdict(plan.needsBaselines()) {
 	case StateFail:
-		emit(SyncEvent{Kind: SyncStateFailed, Err: baselines.Err().Error()})
+		emit(SyncEvent{Kind: SyncStateFailed, Err: baselines.Err()})
 		report.tally(SyncFailed)
 	case StateWarn:
-		emit(SyncEvent{Kind: SyncStateUnreadable, Err: baselines.Err().Error()})
+		emit(SyncEvent{Kind: SyncStateUnreadable, Err: baselines.Err()})
 	}
 	report.Configured = plan.Names()
 	// progress tells onProgress alone where each Skill stands.
@@ -185,7 +182,7 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 		if signer, changed := plan.planner.recordSigner(source); changed {
 			// Recording a signer is, like a Rename, a Config write Sync makes.
 			if err := config.SaveConfig(plan.cfg, plan.configPath); err != nil {
-				emit(SyncEvent{Kind: SyncSignerFailed, Source: source, Target: signer.Identity, Err: err.Error()})
+				emit(SyncEvent{Kind: SyncSignerFailed, Source: source, Target: signer.Identity, Err: err})
 				report.tally(SyncFailed)
 			} else {
 				emit(SyncEvent{Kind: SyncSignerRecorded, Source: source, Target: signer.Identity})
@@ -237,11 +234,11 @@ func applyItem(availability *Availability, skillsDir string, item SyncPlanItem, 
 // records the baseline it was applied from.
 func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlanItem, decision SyncDecision, baselines *Baselines, emit func(SyncEvent)) (SyncOutcome, error) {
 	if item.Block == SyncBlockCacheMissing {
-		emitSync(emit, SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.BlockReason, Next: item.BlockNext})
+		emitSync(emit, SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: errors.New(item.BlockReason), Next: item.BlockNext})
 		return SyncBlocked, fmt.Errorf("%s", item.BlockReason)
 	}
 	if item.Err != "" {
-		emitSync(emit, SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: item.Err})
+		emitSync(emit, SyncEvent{Kind: SyncFetchFailed, Source: item.Source, Skill: item.Name, Err: errors.New(item.Err)})
 		return SyncFailed, fmt.Errorf("%s", item.Err)
 	}
 	action, block := item.Resolve(decision)
@@ -250,7 +247,7 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 		if item.BlockReason != "" {
 			reason += ": " + item.BlockReason
 		}
-		emitSync(emit, SyncEvent{Kind: SyncSkipped, Source: item.Source, Skill: item.Name, Err: reason, Next: item.BlockNext})
+		emitSync(emit, SyncEvent{Kind: SyncSkipped, Source: item.Source, Skill: item.Name, Err: errors.New(reason), Next: item.BlockNext})
 		return SyncBlocked, fmt.Errorf("%s", block)
 	}
 	if action == SyncActionMaterialize {
@@ -259,17 +256,17 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 			if errors.Is(err, errRepoPathMissing) {
 				kind = SyncPathMissing
 			}
-			emitSync(emit, SyncEvent{Kind: kind, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath, Err: err.Error()})
+			emitSync(emit, SyncEvent{Kind: kind, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath, Err: err})
 			return SyncFailed, err
 		}
 		emitSync(emit, SyncEvent{Kind: SyncMaterialized, Source: item.Source, Skill: item.Name, Path: item.Freshness.Subpath})
 		if item.Unverified != "" {
-			emitSync(emit, SyncEvent{Kind: SyncTrustedUnverified, Source: item.Source, Skill: item.Name, Err: item.Unverified})
+			emitSync(emit, SyncEvent{Kind: SyncTrustedUnverified, Source: item.Source, Skill: item.Name, Err: errors.New(item.Unverified)})
 		}
 	}
-	copied, refused, err := availability.apply(item.Name)
+	copied, err := availability.Apply(item.Name)
 	if err != nil {
-		emitSync(emit, SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err.Error(), Refused: refused})
+		emitSync(emit, SyncEvent{Kind: SyncAvailabilityFailed, Source: item.Source, Skill: item.Name, Err: err})
 		return SyncFailed, err
 	}
 	if len(copied) > 0 {
@@ -278,7 +275,7 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 	// An unreadable Scope state is the Scope's verdict, counted once by the
 	// caller, not a failure of each Skill.
 	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA, item.Signed, item.Unverified); err != nil && !errors.Is(err, ErrNotRecorded) {
-		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err.Error()})
+		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err})
 		return SyncFailed, err
 	}
 	return SyncDone, nil
@@ -322,20 +319,20 @@ func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanI
 		}
 		emitSync(emit, SyncEvent{Kind: SyncCommandStart, Skill: item.Name})
 		if err := MaterializeCommand(item.Command); err != nil {
-			emitSync(emit, SyncEvent{Kind: SyncCommandFailed, Skill: item.Name, Err: err.Error()})
+			emitSync(emit, SyncEvent{Kind: SyncCommandFailed, Skill: item.Name, Err: err})
 			outcome = SyncFailed
 			applyErr = err
 		}
 	} else {
 		if err := MaterializeLocalSymlink(item.Name, item.LinkTarget, skillsDir); err != nil {
-			emitSync(emit, SyncEvent{Kind: SyncSymlinkFailed, Skill: item.Name, Err: err.Error()})
+			emitSync(emit, SyncEvent{Kind: SyncSymlinkFailed, Skill: item.Name, Err: err})
 			return SyncFailed, err
 		}
 		emitSync(emit, SyncEvent{Kind: SyncSymlinked, Skill: item.Name, Target: item.SourcePath})
 	}
-	copied, refused, err := availability.apply(item.Name)
+	copied, err := availability.Apply(item.Name)
 	if err != nil {
-		emitSync(emit, SyncEvent{Kind: SyncAvailabilityFailed, Skill: item.Name, Err: err.Error(), Refused: refused})
+		emitSync(emit, SyncEvent{Kind: SyncAvailabilityFailed, Skill: item.Name, Err: err})
 		return SyncFailed, err
 	}
 	if len(copied) > 0 {
@@ -362,7 +359,7 @@ func itemNames(items []SyncPlanItem) []string {
 func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit func(SyncEvent)) SyncOutcome {
 	old, skill := item.Name, item.Freshness
 	fail := func(err error) SyncOutcome {
-		emitSync(emit, SyncEvent{Kind: SyncRenameFailed, Source: item.Source, Skill: old, Target: skill.RenamedTo, Err: err.Error()})
+		emitSync(emit, SyncEvent{Kind: SyncRenameFailed, Source: item.Source, Skill: old, Target: skill.RenamedTo, Err: err})
 		return SyncFailed
 	}
 	if plan.configPath == "" {

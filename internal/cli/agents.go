@@ -95,21 +95,20 @@ func configuredSkillSource(cfg *config.Config, skill string) (string, error) {
 // path Availability refuses. The policy is saved either way; a Skill left
 // unapplied is work that failed (ADR-0002).
 func reportReconciled(out io.Writer, outcomes []engine.AvailabilityOutcome, scopeFlag string) error {
-	copied, failed, refused := 0, 0, false
+	copied, failed := 0, 0
+	var errs []error
 	for _, outcome := range outcomes {
 		copied += len(outcome.Copied)
 		if outcome.Err != nil {
 			failed++
-			refused = refused || outcome.Refused
-			fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, outcome.Skill, outcome.Err, colorReset)
+			errs = append(errs, outcome.Err)
+			fmt.Fprintf(out, "  %sFailed to apply availability for %s: %s%s\n", colorRed, outcome.Skill, errorReasons(outcome.Err), colorReset)
 		}
 	}
 	if copied > 0 {
 		fmt.Fprintln(out, "\n"+copiedAvailabilityNotice(copied, "", scopeFlag))
 	}
-	if refused {
-		printDoctorNext(out, scopeFlag)
-	}
+	printNextCommands(out, scopeFlag, errs...)
 	if failed > 0 {
 		return exitError{message: "Availability not applied for " + countOf(failed, "skill"), code: 2}
 	}
