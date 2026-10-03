@@ -67,6 +67,9 @@ func InspectAddSlot(cfg *config.Config, skillsDir string, source AddSource, name
 	targetPath := filepath.Join(skillsDir, name)
 	fi, err := os.Lstat(targetPath)
 	if errors.Is(err, os.ErrNotExist) {
+		if err := checkAddSlotParent(skillsDir); err != nil {
+			return AddSlot{}, fmt.Errorf("inspect occupancy for Skill %q: %w", name, err)
+		}
 		return AddSlot{Occupancy: AddSlotFree}, nil
 	}
 	if err != nil {
@@ -81,4 +84,34 @@ func InspectAddSlot(cfg *config.Config, skillsDir string, source AddSource, name
 		current = fmt.Sprintf("[symlink] %s", models.ToTildePath(target))
 	}
 	return AddSlot{Occupancy: AddSlotConflict, CurrentSrc: current}, nil
+}
+
+// Windows maps ERROR_PATH_NOT_FOUND to ErrNotExist even when an ancestor is a
+// file: https://go.dev/src/syscall/syscall_windows.go. Check the nearest existing
+// ancestor before treating a missing child as Free; do not create directories.
+func checkAddSlotParent(path string) error {
+	path = filepath.Clean(path)
+	for {
+		info, err := os.Lstat(path)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				info, err = os.Stat(path)
+				if err != nil {
+					return err
+				}
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("%s is not a directory", models.ToTildePath(path))
+			}
+			return nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return err
+		}
+		path = parent
+	}
 }

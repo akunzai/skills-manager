@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -134,20 +135,65 @@ func TestAddSlotMatchesPortableLocalSource(t *testing.T) {
 }
 
 func TestAddPlanRejectsUninspectableOccupancy(t *testing.T) {
-	skillsDir := filepath.Join(t.TempDir(), "not-a-directory")
-	if err := os.WriteFile(skillsDir, []byte("keep"), 0o644); err != nil {
-		t.Fatal(err)
+	for _, nested := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			blocker := filepath.Join(t.TempDir(), "not-a-directory")
+			if err := os.WriteFile(blocker, []byte("keep"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			skillsDir := blocker
+			if nested {
+				skillsDir = filepath.Join(blocker, "missing", "skills")
+			}
+			source := NewCommandAddSource("true", "", "")
+			_, err := InspectAddSlot(nil, skillsDir, source, "sample", ".")
+			if err == nil || !strings.Contains(err.Error(), `Skill "sample"`) {
+				t.Fatalf("inspection error = %v", err)
+			}
+			plan, err := BuildAddPlan(nil, "unused.json", skillsDir, source, map[string]string{"sample": "."}, AddAvailabilityIntent{})
+			if err == nil || plan.Skills != nil {
+				t.Fatalf("plan=%v err=%v; want no applicable plan", plan, err)
+			}
+			if got, err := os.ReadFile(blocker); err != nil || string(got) != "keep" {
+				t.Fatalf("occupancy was changed: %q, %v", got, err)
+			}
+		})
 	}
-	source := NewCommandAddSource("true", "", "")
-	_, err := InspectAddSlot(nil, skillsDir, source, "sample", ".")
-	if err == nil || !strings.Contains(err.Error(), `Skill "sample"`) {
-		t.Fatalf("inspection error = %v", err)
+}
+
+func TestAddSlotIsFreeWhenScopeDirectoriesAreMissing(t *testing.T) {
+	skillsDir := filepath.Join(t.TempDir(), "missing", ".agents", "skills")
+	slot, err := InspectAddSlot(nil, skillsDir, NewCommandAddSource("true", "", ""), "sample", ".")
+	if err != nil || slot.Occupancy != AddSlotFree {
+		t.Fatalf("slot=%v err=%v; want Free", slot, err)
 	}
-	plan, err := BuildAddPlan(nil, "unused.json", skillsDir, source, map[string]string{"sample": "."}, AddAvailabilityIntent{})
-	if err == nil || plan.Skills != nil {
-		t.Fatalf("plan=%v err=%v; want no applicable plan", plan, err)
+	if _, err := os.Stat(skillsDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("inspection created directories: %v", err)
 	}
-	if got, err := os.ReadFile(skillsDir); err != nil || string(got) != "keep" {
-		t.Fatalf("occupancy was changed: %q, %v", got, err)
+}
+
+func TestAddSlotChecksSymlinkedScopeDirectories(t *testing.T) {
+	for _, exists := range []bool{false, true} {
+		t.Run(fmt.Sprintf("target-exists=%t", exists), func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "target")
+			if exists {
+				if err := os.Mkdir(target, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			link := filepath.Join(root, "skills")
+			if err := os.Symlink(target, link); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			slot, err := InspectAddSlot(nil, link, NewCommandAddSource("true", "", ""), "sample", ".")
+			if exists {
+				if err != nil || slot.Occupancy != AddSlotFree {
+					t.Fatalf("slot=%v err=%v; want Free", slot, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), `Skill "sample"`) {
+				t.Fatalf("inspection error = %v; a dangling parent is not a free slot", err)
+			}
+		})
 	}
 }
