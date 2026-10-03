@@ -487,17 +487,10 @@ type AdoptOutcome struct {
 // AdoptResult records the outcome of applying an AdoptPlan.
 type AdoptResult struct {
 	Skills []AdoptOutcome
-	// StateError is why the Scope state could not be read when a remote
-	// Skill needed its Baseline recorded: a failure.
-	StateError string
-	// StateWarning is why the Scope state could not be read when no adopted
-	// Skill needed a Baseline: a warning, not a failure (ADR-0002).
-	StateWarning string
+	// State reports whether an adopted Skill needed a Baseline that could
+	// not be recorded.
+	State StateOutcome
 }
-
-// StateFailed reports that a remote Skill's Baseline was not recorded, a
-// failure (ADR-0002).
-func (r AdoptResult) StateFailed() bool { return r.StateError != "" }
 
 // Adopted is the Skills Config now declares, whatever their state.
 func (r AdoptResult) Adopted() []AdoptOutcome {
@@ -533,12 +526,7 @@ func ApplyAdoptPlan(plan AdoptPlan, cfg *config.Config, scope models.Scope) Adop
 		}
 		result.Skills = append(result.Skills, outcome)
 	}
-	switch baselines.Verdict(needsBaselines) {
-	case StateFail:
-		result.StateError = baselines.Err().Error()
-	case StateWarn:
-		result.StateWarning = baselines.Err().Error()
-	}
+	result.State = baselines.Outcome(needsBaselines)
 	return result
 }
 

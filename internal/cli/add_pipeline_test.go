@@ -570,7 +570,10 @@ func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
 // either.
 func TestReportAddOutcomeFailsOnUnreadableState(t *testing.T) {
 	var out bytes.Buffer
-	err := reportAddOutcome(&out, engine.AddResult{AddedSkills: []string{"a"}, StateError: "bad state"}, "skills.json", "")
+	err := reportAddOutcome(&out, engine.AddResult{
+		AddedSkills: []string{"a"},
+		State:       engine.StateOutcome{Verdict: engine.StateFail, Message: "bad state"},
+	}, "skills.json", "")
 	var exit exitError
 	if !errors.As(err, &exit) || exit.code != 2 {
 		t.Fatalf("err = %v; want exit 2", err)
@@ -587,7 +590,9 @@ func TestReportAddOutcomeFailsOnUnreadableState(t *testing.T) {
 func TestReportAddOutcomePointsAtSyncForASkillFailure(t *testing.T) {
 	var out bytes.Buffer
 	err := reportAddOutcome(&out, engine.AddResult{
-		AddedSkills: []string{"a"}, StateError: "bad state", SyncTally: engine.SyncTally{Failed: 1},
+		AddedSkills: []string{"a"},
+		State:       engine.StateOutcome{Verdict: engine.StateFail, Message: "bad state"},
+		SyncTally:   engine.SyncTally{Failed: 1},
 	}, "skills.json", "")
 	if err == nil || !strings.Contains(out.String(), "Next:") {
 		t.Fatalf("err = %v, output = %q; want sync as the next step", err, out.String())

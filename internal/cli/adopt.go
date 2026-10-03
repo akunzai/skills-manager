@@ -329,12 +329,12 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 			recorded = append(recorded, skill.Name)
 		}
 	}
-	if result.StateFailed() {
-		printScopeStateUnreadable(out, result.StateError)
+	if result.State.Verdict == engine.StateFail {
+		printScopeStateUnreadable(out, result.State.Message)
 		code = 2
 	}
-	if result.StateWarning != "" {
-		printScopeStateWarning(out, result.StateWarning, scopeFlagsOf(cmd, scope))
+	if result.State.Verdict == engine.StateWarn {
+		printScopeStateWarning(out, result.State.Message, scopeFlagsOf(cmd, scope))
 	}
 	printInstallerWarning(out, recorded, scope.SkillsDir)
 

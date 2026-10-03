@@ -70,17 +70,10 @@ type RemoveSkillResult struct {
 // RemoveResult is the observable outcome of applying a RemovePlan.
 type RemoveResult struct {
 	Skills []RemoveSkillResult
-	// StateError is why the Scope state could not be read. The Skills are
-	// removed but their Baselines are not forgotten.
-	StateError string
-	// StateWarning is why the Scope state could not be read when no removed
-	// Skill had a Baseline to forget: a warning, not a failure (ADR-0002).
-	StateWarning string
+	// State reports whether the removed Skills needed Baselines that could
+	// not be forgotten.
+	State StateOutcome
 }
-
-// StateFailed reports that the removed Skills' Baselines were not forgotten,
-// a failure (ADR-0002).
-func (r RemoveResult) StateFailed() bool { return r.StateError != "" }
 
 // NotFullyRemoved names the Skills Retire could not take fully out of the
 // Scope, in the order removed.
@@ -154,11 +147,6 @@ func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir 
 		}
 		result.Skills[i] = RemoveSkillResult{RetiredSkill: skill, RemovedFromConfig: skill.Undeclared, MasterExisted: item.MasterExists, DirectoryKept: kept}
 	}
-	switch baselines.Verdict(plan.needsBaselines()) {
-	case StateWarn:
-		result.StateWarning = baselines.Err().Error()
-	case StateFail:
-		result.StateError = baselines.Err().Error()
-	}
+	result.State = baselines.Outcome(plan.needsBaselines())
 	return result, nil
 }
