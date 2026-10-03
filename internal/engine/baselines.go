@@ -47,6 +47,13 @@ func (v StateVerdict) String() string {
 	return [...]string{"ok", "warn", "fail"}[v]
 }
 
+// StateOutcome pairs a command's Scope state verdict with the read error
+// explaining it. Its zero value is success, with no message.
+type StateOutcome struct {
+	Verdict StateVerdict
+	Message string
+}
+
 // OpenBaselines reads skillsDir's Scope state. It never fails: when the state
 // cannot be read, Err reports why and the Baselines are read-only and empty.
 func OpenBaselines(skillsDir string) *Baselines {
@@ -76,6 +83,16 @@ func (b *Baselines) Verdict(needed bool) StateVerdict {
 	default:
 		return StateWarn
 	}
+}
+
+// Outcome includes the reason for Verdict without deciding how the command
+// counts or presents it.
+func (b *Baselines) Outcome(needed bool) StateOutcome {
+	outcome := StateOutcome{Verdict: b.Verdict(needed)}
+	if b.err != nil {
+		outcome.Message = b.err.Error()
+	}
+	return outcome
 }
 
 // notRecorded is ErrNotRecorded, saying why.

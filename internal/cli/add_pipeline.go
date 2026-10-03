@@ -291,14 +291,14 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeF
 			printSyncEvent(out, ev, scopeFlag)
 		}
 	}
-	if result.StateFailed() {
-		printScopeStateUnreadable(out, result.StateError)
+	if result.State.Verdict == engine.StateFail {
+		printScopeStateUnreadable(out, result.State.Message)
 	}
-	if result.StateWarning != "" {
-		printScopeStateWarning(out, result.StateWarning, scopeFlag)
+	if result.State.Verdict == engine.StateWarn {
+		printScopeStateWarning(out, result.State.Message, scopeFlag)
 	}
 	added := fmt.Sprintf("Added %d skill(s) [%s]", len(result.AddedSkills), strings.Join(result.AddedSkills, ", "))
-	if result.Blocked == 0 && result.Failed == 0 && !result.StateFailed() {
+	if result.Blocked == 0 && result.Failed == 0 && result.State.Verdict != engine.StateFail {
 		fmt.Fprintf(out, "%s%s and updated %s.%s\n", colorGreen, added, configName, colorReset)
 		return nil
 	}
@@ -309,17 +309,17 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeF
 	if result.Failed > 0 {
 		parts = append(parts, fmt.Sprintf("%d failed", result.Failed))
 	}
-	if result.StateFailed() {
+	if result.State.Verdict == engine.StateFail {
 		parts = append(parts, "Baselines not recorded")
 	}
 	fmt.Fprintf(out, "%s%s to %s; %s.%s\n", colorYellow, added, configName, strings.Join(parts, ", "), colorReset)
 	// A command carried by an outcome takes precedence over a generic retry.
-	if !printNextCommands(out, scopeFlag, syncErrors(result.Events)...) && (!result.StateFailed() || result.Blocked+result.Failed > 0) {
+	if !printNextCommands(out, scopeFlag, syncErrors(result.Events)...) && (result.State.Verdict != engine.StateFail || result.Blocked+result.Failed > 0) {
 		fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync%s'.\n", scopeFlag)
 	}
-	if result.Failed > 0 || result.StateFailed() {
+	if result.Failed > 0 || result.State.Verdict == engine.StateFail {
 		message := fmt.Sprintf("Add did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill"))
-		if result.StateFailed() {
+		if result.State.Verdict == engine.StateFail {
 			message += ", Baselines not recorded"
 		}
 		return exitError{message: message, code: 2}

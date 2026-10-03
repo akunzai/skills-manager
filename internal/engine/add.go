@@ -260,18 +260,10 @@ type AddResult struct {
 	AddedSkills []string
 	ConfigPath  string
 	Events      []SyncEvent
-	// StateError is why the Scope state could not be read. The Skills are
-	// applied but their Baselines are not recorded: StateFailed says that is
-	// a failure, and Failed counts Skills only.
-	StateError string
-	// StateWarning is why the Scope state could not be read when the added
-	// Skills have no Baseline to record: a warning, not a failure (ADR-0002).
-	StateWarning string
+	// State reports whether the added Skills needed Baselines that could
+	// not be recorded. Failed counts Skills only, not this Scope verdict.
+	State StateOutcome
 }
-
-// StateFailed reports that the added Skills' Baselines were not recorded, a
-// failure in its own right (ADR-0002).
-func (r AddResult) StateFailed() bool { return r.StateError != "" }
 
 // ApplyAddPlan records all selected Skills in Config (a remote Source's
 // through its RemoteIntake), saves Config,
@@ -397,11 +389,6 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	}
 
 	// Only a remote Skill has a Baseline to record.
-	switch baselines.Verdict(plan.Source.Kind == AddSourceRemote) {
-	case StateFail:
-		result.StateError = baselines.Err().Error()
-	case StateWarn:
-		result.StateWarning = baselines.Err().Error()
-	}
+	result.State = baselines.Outcome(plan.Source.Kind == AddSourceRemote)
 	return result, nil
 }

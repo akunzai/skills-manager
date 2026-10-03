@@ -171,8 +171,20 @@ func TestBaselinesVerdict(t *testing.T) {
 				writeUnreadableScopeState(t, skillsDir)
 			}
 
-			if got := OpenBaselines(skillsDir).Verdict(tt.needed); got != tt.want {
+			baselines := OpenBaselines(skillsDir)
+			if got := baselines.Verdict(tt.needed); got != tt.want {
 				t.Fatalf("Verdict(%v) = %v; want %v", tt.needed, got, tt.want)
+			}
+			outcome := baselines.Outcome(tt.needed)
+			if outcome.Verdict != tt.want {
+				t.Fatalf("Outcome(%v).Verdict = %v; want %v", tt.needed, outcome.Verdict, tt.want)
+			}
+			if tt.unreadable {
+				if outcome.Message != baselines.Err().Error() {
+					t.Fatalf("Outcome message = %q; want the Scope state read error", outcome.Message)
+				}
+			} else if outcome != (StateOutcome{}) {
+				t.Fatalf("Outcome = %#v; want the successful zero value", outcome)
 			}
 		})
 	}

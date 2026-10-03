@@ -285,8 +285,8 @@ func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {
 	if result.Failed != 0 {
 		t.Fatalf("Failed = %d; Failed counts Skills, and this one was applied", result.Failed)
 	}
-	if !result.StateFailed() || result.StateError == "" {
-		t.Fatal("StateFailed is false; an unrecorded Baseline is a failure with a reason")
+	if result.State.Verdict != StateFail || result.State.Message == "" {
+		t.Fatal("an unrecorded Baseline must have a failed State verdict with a reason")
 	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
 		t.Fatalf("the Skill must still be Materialized: %v", err)
