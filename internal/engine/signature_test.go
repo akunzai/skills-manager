@@ -271,7 +271,10 @@ func TestAddRecordsSignerWithTheSkills(t *testing.T) {
 	fetches := stubTrustedRoot(t)
 	stubVerify(t, signedBy(testSigner))
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +320,10 @@ func TestAddWithTrustCertVerifiesAgainstIt(t *testing.T) {
 		return signing.Result{}, errors.New("certificate does not chain to the trusted certificate")
 	})
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	plan.TrustCert = "root.pem"
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
@@ -352,7 +358,10 @@ func TestAddOfUnsignedSourceNeverFetchesTrustRoot(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 	cfg := config.DefaultConfig()
 	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(origin, "", ""), filepath.Join(project, "cache"))
-	plan := BuildAddPlan(cfg, filepath.Join(project, "skills.json"), filepath.Join(project, "skills"), NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, filepath.Join(project, "skills.json"), filepath.Join(project, "skills"), NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +513,10 @@ func TestUpdateFetchesATrustRootAddCouldNot(t *testing.T) {
 	reachable, _ := failingTrustedRoot(t)
 	stubVerify(t, verifiedOnlyWithTrustRoot(cacheDir))
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -536,7 +548,10 @@ func TestUpdateReportsATrustRootItCannotFetch(t *testing.T) {
 	cfg, configPath, skillsDir, cacheDir, intake := addSignedFixture(t)
 	failingTrustedRoot(t)
 	stubVerify(t, verifiedOnlyWithTrustRoot(cacheDir))
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
 		t.Fatal(err)
 	}

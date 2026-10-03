@@ -205,7 +205,7 @@ func BuildAddPlan(
 	source AddSource,
 	skills map[string]string,
 	availability AddAvailabilityIntent,
-) AddPlan {
+) (AddPlan, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
@@ -226,61 +226,19 @@ func BuildAddPlan(
 
 	for _, name := range sortedSkillKeys(skills) {
 		subpath := skills[name]
-		newSrcDisplay := source.proposedDisplay(subpath, skillsDir)
-		kind, srcKey, found := config.FindSkillSource(cfg, name)
-		if found {
-			entry := cfg.Local[name]
-			switch kind {
-			case config.SkillRemote:
-				if source.Kind != AddSourceRemote || srcKey != source.Key {
-					plan.Conflicts = append(plan.Conflicts, AddConflict{
-						Skill:       name,
-						CurrentSrc:  fmt.Sprintf("[remote] %s", srcKey),
-						ProposedSrc: newSrcDisplay,
-					})
-				}
-			case config.SkillCommand:
-				if source.Kind != AddSourceCommand || entry.Command != source.Command {
-					plan.Conflicts = append(plan.Conflicts, AddConflict{
-						Skill:       name,
-						CurrentSrc:  fmt.Sprintf("[command] %s", entry.Command),
-						ProposedSrc: newSrcDisplay,
-					})
-				}
-			case config.SkillSymlink:
-				localSkillSource := source.LocalPath
-				if subpath != "" && subpath != "." {
-					localSkillSource = filepath.Join(source.LocalPath, filepath.FromSlash(subpath))
-				}
-				stored := models.StoreLocalSourcePath(localSkillSource, skillsDir)
-				if source.Kind != AddSourceSymlink || (entry.Source != stored && models.ToTildePath(entry.Source) != models.ToTildePath(localSkillSource)) {
-					plan.Conflicts = append(plan.Conflicts, AddConflict{
-						Skill:       name,
-						CurrentSrc:  fmt.Sprintf("[symlink] %s", models.ToTildePath(entry.Source)),
-						ProposedSrc: newSrcDisplay,
-					})
-				}
-			}
-		} else {
-			targetPath := filepath.Join(skillsDir, name)
-			if fi, err := os.Lstat(targetPath); err == nil {
-				current := "[untracked directory]"
-				if fi.Mode()&os.ModeSymlink != 0 {
-					if target, err := os.Readlink(targetPath); err == nil {
-						current = fmt.Sprintf("[symlink] %s", models.ToTildePath(target))
-					} else {
-						current = "[symlink]"
-					}
-				}
-				plan.Conflicts = append(plan.Conflicts, AddConflict{
-					Skill:       name,
-					CurrentSrc:  current,
-					ProposedSrc: newSrcDisplay,
-				})
-			}
+		slot, err := InspectAddSlot(cfg, skillsDir, source, name, subpath)
+		if err != nil {
+			return AddPlan{}, err
+		}
+		if slot.Occupancy == AddSlotConflict {
+			plan.Conflicts = append(plan.Conflicts, AddConflict{
+				Skill:       name,
+				CurrentSrc:  slot.CurrentSrc,
+				ProposedSrc: source.proposedDisplay(subpath, skillsDir),
+			})
 		}
 	}
-	return plan
+	return plan, nil
 }
 
 // AddSkillEvent is emitted during ApplyAddPlan for UI progress reporting:

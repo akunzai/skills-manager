@@ -20,15 +20,14 @@ const (
 	clearLine  = "\033[2K"
 )
 
-// OptionState is what already occupies an option's place: nothing, a Skill
-// the Scope declares, or something it does not (a conflict Add would
-// overwrite).
+// OptionState describes an option's installation, declaration, or conflict.
 type OptionState int
 
 const (
 	OptionFree OptionState = iota
 	OptionInstalled
 	OptionConflict
+	OptionDeclared
 )
 
 // badge is the label a prompt row carries for the state.
@@ -38,6 +37,8 @@ func (s OptionState) badge() string {
 		return " (installed)"
 	case OptionConflict:
 		return " (conflict)"
+	case OptionDeclared:
+		return " (declared)"
 	}
 	return ""
 }

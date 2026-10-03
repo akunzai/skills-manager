@@ -1578,7 +1578,10 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 		plantManagedLink(t, skillsDir, filepath.Join(project, agent, "skills"), "sample")
 	}
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	result, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1612,7 +1615,10 @@ func TestAddPlanSymlinkDeclaresAndMaterializes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, "local sample"), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, "local sample"), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1641,7 +1647,10 @@ func TestAddPlanRemoteDeclaresAndMaterializes(t *testing.T) {
 	}
 
 	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(origin, "", ""), filepath.Join(project, "cache"))
-	plan := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
 	_, err := ApplyAddPlan(plan, cfg, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -147,7 +148,7 @@ func TestResolveSkillsToAddFlagsPromptForDivergentCandidates(t *testing.T) {
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, func(string) engine.AddOccupancy { return engine.AddSlotFree })
+			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, func(string, string) (engine.AddSlot, error) { return engine.AddSlot{}, nil })
 			if err != nil || cancelled || got["duplicate"] != "skills/duplicate" {
 				t.Fatalf("got=%v cancelled=%v err=%v; want selected Source path", got, cancelled, err)
 			}
@@ -523,7 +524,7 @@ func TestCLIAddCancelledExitsZero(t *testing.T) {
 }
 
 // The prompt marks each Skill from the occupancy BuildAddPlan acts on: one the
-// Scope declares is installed, Untracked occupancy is a conflict.
+// Scope declares from the same Source is declared; replacements are conflicts.
 func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
 	skillsDir := t.TempDir()
 	cfg := config.DefaultConfig()
@@ -544,8 +545,8 @@ func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
 		"fresh":     {"skills/fresh"},
 	}
 
-	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, func(name string) engine.AddOccupancy {
-		return engine.ClassifyAddOccupancy(cfg, skillsDir, name)
+	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, func(name, subpath string) (engine.AddSlot, error) {
+		return engine.InspectAddSlot(cfg, skillsDir, engine.NewCommandAddSource("true", "", ""), name, subpath)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -556,7 +557,7 @@ func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
 		got[option.Key] = option.State
 	}
 	want := map[string]tui.OptionState{
-		"declared": tui.OptionInstalled, "untracked": tui.OptionConflict,
+		"declared": tui.OptionDeclared, "untracked": tui.OptionConflict,
 		"dangling": tui.OptionConflict, "fresh": tui.OptionFree,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -590,5 +591,134 @@ func TestReportAddOutcomePointsAtSyncForASkillFailure(t *testing.T) {
 	}, "skills.json", "")
 	if err == nil || !strings.Contains(out.String(), "Next:") {
 		t.Fatalf("err = %v, output = %q; want sync as the next step", err, out.String())
+	}
+}
+
+func TestAddRunResolvesIdentitySensitivePathsBeforeSkillSelection(t *testing.T) {
+	scope := newAddRunScope(t)
+	scope.plantDuplicate(t)
+	cfg := config.DefaultConfig()
+	cfg.Local["alpha"] = config.LocalEntry{Type: "symlink", Source: filepath.Join(scope.source, "alpha")}
+	if err := config.SaveConfig(cfg, scope.globalConfig); err != nil {
+		t.Fatal(err)
+	}
+	prompter := &fakeAddPrompter{interactive: true, skills: []string{"alpha"}, path: func(string, []string) (string, error) { return "plugins/alpha", nil }}
+	if out, err := scope.run(t, prompter, addRequest{}); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	if want := []string{"scope", "path", "skills", "availability", "overwrite"}; !reflect.DeepEqual(prompter.asked, want) {
+		t.Fatalf("asked %v; want %v", prompter.asked, want)
+	}
+	for _, option := range prompter.offered {
+		if option.Key == "alpha" && option.State != tui.OptionConflict {
+			t.Fatalf("alpha state = %v; want Conflict", option.State)
+		}
+	}
+	got, err := os.Readlink(filepath.Join(scope.globalSkills, "alpha"))
+	if err != nil || got != filepath.Join(scope.source, "plugins", "alpha") {
+		t.Fatalf("linked Source = %q, %v", got, err)
+	}
+}
+
+func TestAddRunPickerAndOverwriteAgreeOnDeclarations(t *testing.T) {
+	for _, same := range []bool{false, true} {
+		for _, present := range []bool{false, true} {
+			t.Run(fmt.Sprintf("same=%t/present=%t", same, present), func(t *testing.T) {
+				scope := newAddRunScope(t)
+				cfg := config.DefaultConfig()
+				existing := filepath.Join(scope.source, "alpha")
+				if !same {
+					existing = filepath.Join(t.TempDir(), "other")
+				}
+				cfg.Local["alpha"] = config.LocalEntry{Type: "symlink", Source: existing}
+				if err := config.SaveConfig(cfg, scope.globalConfig); err != nil {
+					t.Fatal(err)
+				}
+				if present {
+					scope.plantConflict(t)
+				}
+				prompter := &fakeAddPrompter{interactive: true, skills: []string{"alpha"}}
+				if out, err := scope.run(t, prompter, addRequest{}); err != nil {
+					t.Fatalf("run: %v\n%s", err, out)
+				}
+				want := tui.OptionConflict
+				if same {
+					want = tui.OptionDeclared
+				}
+				for _, option := range prompter.offered {
+					if option.Key == "alpha" && (option.State != want || option.Selected) {
+						t.Fatalf("alpha=%v; want state %v, initially unselected", option, want)
+					}
+				}
+				if slices.Contains(prompter.asked, "overwrite") == same {
+					t.Fatalf("asked %v; overwrite must match Conflict", prompter.asked)
+				}
+			})
+		}
+	}
+}
+
+func TestAddRunOccupancyErrorStopsBeforeSelectionAndMutation(t *testing.T) {
+	for _, interactive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("interactive=%t", interactive), func(t *testing.T) {
+			scope := newAddRunScope(t)
+			if err := os.MkdirAll(filepath.Dir(scope.globalSkills), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(scope.globalSkills, []byte("keep"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			prompter := &fakeAddPrompter{interactive: interactive, skills: []string{"beta"}}
+			req := addRequest{}
+			if !interactive {
+				req.skills = []string{"beta"}
+			}
+			_, err := scope.run(t, prompter, req)
+			name := "beta"
+			if interactive {
+				name = "alpha"
+			}
+			if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), fmt.Sprintf("Skill %q", name)) {
+				t.Fatalf("err=%v; want occupancy failure naming %s", err, name)
+			}
+			if slices.Contains(prompter.asked, "skills") || slices.Contains(prompter.asked, "overwrite") {
+				t.Fatalf("asked %v after failed inspection", prompter.asked)
+			}
+			if _, err := os.Stat(scope.globalConfig); !os.IsNotExist(err) {
+				t.Fatalf("Config was written: %v", err)
+			}
+			if got, err := os.ReadFile(scope.globalSkills); err != nil || string(got) != "keep" {
+				t.Fatalf("occupancy changed: %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestAddRunEarlySourcePathCancellationPreservesDeclaration(t *testing.T) {
+	scope := newAddRunScope(t)
+	scope.plantDuplicate(t)
+	cfg := config.DefaultConfig()
+	cfg.Local["alpha"] = config.LocalEntry{Type: "symlink", Source: filepath.Join(scope.source, "alpha")}
+	if err := config.SaveConfig(cfg, scope.globalConfig); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(scope.globalConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompter := &fakeAddPrompter{interactive: true, path: func(string, []string) (string, error) { return "", errAddCancelled }}
+	out, err := scope.run(t, prompter, addRequest{})
+	if err != nil || !strings.Contains(out, "Operation cancelled.") {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+	if want := []string{"scope", "path"}; !reflect.DeepEqual(prompter.asked, want) {
+		t.Fatalf("asked=%v; want %v", prompter.asked, want)
+	}
+	after, err := os.ReadFile(scope.globalConfig)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("declaration changed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(scope.globalSkills, "alpha")); !os.IsNotExist(err) {
+		t.Fatalf("cancelled Add materialized alpha: %v", err)
 	}
 }
