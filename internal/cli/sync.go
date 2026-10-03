@@ -92,43 +92,55 @@ completed.`,
 	return cmd
 }
 
-// applySyncPlan asks about unknown baselines when a person is there to answer,
-// then applies plan with progress on stderr. The report's Summary already
-// answers whether --force would lift what is left under the decision applied.
-// Sync and update both reconcile a Scope through it.
+// applySyncPlan keeps ordinary Sync's decision, progress, and rendering together.
 func applySyncPlan(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.SyncPlan, decision engine.SyncDecision) (*engine.SyncReport, error) {
+	decision, err := decideSync(cmd, out, plan, decision)
+	if err != nil {
+		return nil, err
+	}
+	progress, stop := syncProgress(cmd, out, scope, plan)
+	report, err := plan.Apply(decision, progress)
+	stop()
+	printSyncReport(out, scopeFlagsOf(cmd, scope), report)
+	return report, err
+}
+
+// decideSync leaves unknown Skills blocked when confirmation is declined;
+// other Skills still reconcile (ADR-0002).
+func decideSync(cmd *cobra.Command, out io.Writer, plan *engine.SyncPlan, decision engine.SyncDecision) (engine.SyncDecision, error) {
 	p := newPrompter(cmd)
 	if !decision.Force && p.Interactive() {
 		if unknown := plan.Unknown(); len(unknown) > 0 {
-			allowUnknown, promptErr := promptSyncUnknown(p, out, unknown)
-			if promptErr != nil {
-				return nil, promptErr
+			allowUnknown, err := promptSyncUnknown(p, out, unknown)
+			if err != nil {
+				return decision, err
 			}
-			// Declining leaves those Skills blocked, as a Sync without a
-			// terminal would, and Sync still reconciles the rest. The Scope
-			// then does not match its Config: exit 1, not a failure
-			// (ADR-0002).
 			decision.AllowUnknown = allowUnknown
 		}
 	}
+	return decision, nil
+}
 
-	// With nothing declared there is no progress to show; a nil region
-	// shows none.
+// syncProgress returns the event adapter and its cleanup. With no Skills a
+// nil region shows no progress.
+func syncProgress(cmd *cobra.Command, out io.Writer, scope Scope, plan *engine.SyncPlan) (func(engine.SyncEvent), func()) {
 	var region *presentation.Region
 	if n := len(plan.Items); n > 0 {
 		region = presentation.StartRegion(cmd.ErrOrStderr(), "Syncing "+countOf(n, "Skill"), n)
 	}
-	report, err := plan.Apply(decision, func(ev engine.SyncEvent) { showSyncProgress(region, out, ev, scopeFlagsOf(cmd, scope)) })
-	region.Stop()
+	return func(ev engine.SyncEvent) { showSyncProgress(region, out, ev, scopeFlagsOf(cmd, scope)) }, region.Stop
+}
+
+// printSyncReport renders after the progress region is stopped.
+func printSyncReport(out io.Writer, scopeFlags string, report *engine.SyncReport) {
 	for _, ev := range report.Events {
 		if ev.Kind == engine.SyncStateUnreadable {
-			printScopeStateWarning(out, ev.Err.Error(), scopeFlagsOf(cmd, scope))
+			printScopeStateWarning(out, ev.Err.Error(), scopeFlags)
 		}
 	}
 	printMaterialized(out, report)
-	printCopiedAvailability(out, report, scopeFlagsOf(cmd, scope))
-	printNextCommands(out, scopeFlagsOf(cmd, scope), syncErrors(report.Events)...)
-	return report, err
+	printCopiedAvailability(out, report, scopeFlags)
+	printNextCommands(out, scopeFlags, syncErrors(report.Events)...)
 }
 
 // printMaterialized names the Skills whose content Sync wrote, once the
