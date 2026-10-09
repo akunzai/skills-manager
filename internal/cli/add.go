@@ -49,20 +49,6 @@ func resolveAddScope(cmd *cobra.Command, yes bool) (Scope, error) {
 	return scope, nil
 }
 
-func prepareAddTarget(scope Scope, agents []string) (*config.Config, []string, error) {
-	cfg, err := config.LoadConfig(scope.ConfigPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(agents) > 0 {
-		agents, err = engine.NewAvailability(cfg, scope.SkillsDir).ValidateManagedAgents(agents)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	return cfg, agents, nil
-}
-
 func groupDiscoveredSkills(discovered map[string]string) (tui.GroupedItems, bool) {
 	byDirectory := make(map[string][]tui.SelectOption)
 	for name, skillPath := range discovered {
@@ -192,17 +178,13 @@ func newCommandIntake(skillName, command, check, description string) *addIntake 
 }
 
 // fetchRemoteIntake parses a remote Source argument and its flags, then
-// prepares it through Remote intake under a progress region. It returns the
-// Source key for display.
-func fetchRemoteIntake(cmd *cobra.Command, configPath, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*engine.RemoteIntake, string, error) {
+// prepares it through Remote intake under a progress region, on the branch
+// cfg declares for it. It returns the Source key for display.
+func fetchRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*engine.RemoteIntake, string, error) {
 	spec := models.ParseRepoSource(rawSource)
 	spec.URL = cmp.Or(flagURL, spec.URL)
 	spec.Branch = cmp.Or(flagBranch, spec.Branch)
 	spec.Subpath = cmp.Or(flagPath, spec.Subpath)
-	cfg, err := config.LoadConfig(configPath)
-	if err != nil {
-		return nil, "", err
-	}
 
 	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
 	region.Start(presentation.Job{Name: spec.SourceKey, Label: "Fetching " + spec.SourceKey})
@@ -217,8 +199,8 @@ func fetchRemoteIntake(cmd *cobra.Command, configPath, rawSource, flagURL, flagB
 	return intake, spec.SourceKey, nil
 }
 
-func newRemoteIntake(cmd *cobra.Command, configPath, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
-	intake, key, err := fetchRemoteIntake(cmd, configPath, rawSource, flagURL, flagBranch, flagPath, cacheDir)
+func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
+	intake, key, err := fetchRemoteIntake(cmd, cfg, rawSource, flagURL, flagBranch, flagPath, cacheDir)
 	if err != nil {
 		return nil, err
 	}
@@ -318,6 +300,12 @@ func newAddCmd() *cobra.Command {
 			if err != nil {
 				return endAdd(cmd.OutOrStdout(), err)
 			}
+			// One Config for the whole Add: the branch Remote intake fetches,
+			// the occupancy the prompt marks, and the declaration it saves.
+			cfg, err := config.LoadConfig(scope.ConfigPath)
+			if err != nil {
+				return err
+			}
 
 			switch kind {
 			case engine.AddSourceSymlink:
@@ -325,7 +313,7 @@ func newAddCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
+				return intake.run(cmd, addRequest{scope: scope, cfg: cfg, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
 			case engine.AddSourceCommand:
 				if len(flagSkills) == 0 && len(args) == 0 {
 					cmd.SilenceUsage = false
@@ -338,17 +326,17 @@ func newAddCmd() *cobra.Command {
 					skillName = args[0]
 				}
 				intake := newCommandIntake(skillName, source, flagCheck, flagDescription)
-				return intake.run(cmd, addRequest{scope: scope, skills: []string{skillName}, yes: flagYes, agents: flagAgents})
+				return intake.run(cmd, addRequest{scope: scope, cfg: cfg, skills: []string{skillName}, yes: flagYes, agents: flagAgents})
 			case engine.AddSourceRemote:
 				trustCert, err := config.StoreTrustCertPath(flagTrustCert, scope.ConfigPath)
 				if err != nil {
 					return err
 				}
-				intake, err := newRemoteIntake(cmd, scope.ConfigPath, source, flagURL, flagBranch, flagPath, cacheDir)
+				intake, err := newRemoteIntake(cmd, cfg, source, flagURL, flagBranch, flagPath, cacheDir)
 				if err != nil {
 					return withScopeFlags(err, scopeFlagsOf(cmd, scope))
 				}
-				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert}), scopeFlagsOf(cmd, scope))
+				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, cfg: cfg, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert}), scopeFlagsOf(cmd, scope))
 			default:
 				return fmt.Errorf("unsupported Add Source kind %q", kind)
 			}

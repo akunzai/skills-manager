@@ -5,6 +5,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/akunzai/skills-manager/internal/config"
 )
 
 type AddSelectionKind uint8
@@ -27,6 +29,22 @@ const (
 type AddSelectionRequest struct {
 	All    bool
 	Skills []string
+	// Occupancy marks the Skills offered for the user to choose, or is nil
+	// when nothing is offered.
+	Occupancy *AddSlotInspector
+}
+
+// AddSlotInspector inspects a Skill's occupancy against the Config, skills
+// directory, and Source an Add's plan is built from.
+type AddSlotInspector struct {
+	Config    *config.Config
+	SkillsDir string
+	Source    AddSource
+}
+
+// Inspect is name's occupancy were it added from subpath.
+func (i *AddSlotInspector) Inspect(name, subpath string) (AddSlot, error) {
+	return InspectAddSlot(i.Config, i.SkillsDir, i.Source, name, subpath)
 }
 
 type AddSelectionAnswers struct {
@@ -41,6 +59,9 @@ type AddSelectionOutcome struct {
 	Options      []string
 	Skills       map[string]string
 	CancelReason AddSelectionCancelReason
+	// Slots is each offered Skill's occupancy, when NeedsSkills has an
+	// AddSelectionRequest.Occupancy to inspect.
+	Slots map[string]AddSlot
 }
 
 func ResolveAddSelection(discovered DiscoveredSkills, request AddSelectionRequest, answers AddSelectionAnswers) (AddSelectionOutcome, error) {
@@ -55,6 +76,9 @@ func ResolveAddSelection(discovered DiscoveredSkills, request AddSelectionReques
 	}
 
 	selected, outcome, err := selectedSkillNames(discovered, request, answers)
+	if err == nil && outcome.Kind == AddSelectionNeedsSkills && request.Occupancy != nil {
+		return markOccupancy(discovered, request.Occupancy, answers, outcome)
+	}
 	if err != nil || outcome.Kind != AddSelectionResolved {
 		return outcome, err
 	}
@@ -79,6 +103,37 @@ func ResolveAddSelection(discovered DiscoveredSkills, request AddSelectionReques
 		resolved[name] = path
 	}
 	return AddSelectionOutcome{Kind: AddSelectionResolved, Skills: resolved}, nil
+}
+
+// markOccupancy inspects each offered Skill. A Skill whose
+// Source paths would mark it differently needs its path first, so the mark
+// is the one its plan acts on; otherwise its path is asked after selection.
+func markOccupancy(discovered DiscoveredSkills, inspector *AddSlotInspector, answers AddSelectionAnswers, outcome AddSelectionOutcome) (AddSelectionOutcome, error) {
+	outcome.Slots = make(map[string]AddSlot, len(outcome.Options))
+	for _, name := range outcome.Options {
+		paths := discovered[name]
+		if path, answered := answers.Paths[name]; answered {
+			if !slices.Contains(paths, path) {
+				return AddSelectionOutcome{}, fmt.Errorf("Source path %q is not a candidate for Skill %q", path, name)
+			}
+			paths = []string{path}
+		}
+		slot, err := inspector.Inspect(name, paths[0])
+		if err != nil {
+			return AddSelectionOutcome{}, err
+		}
+		for _, path := range paths[1:] {
+			other, err := inspector.Inspect(name, path)
+			if err != nil {
+				return AddSelectionOutcome{}, err
+			}
+			if other.Occupancy != slot.Occupancy {
+				return AddSelectionOutcome{Kind: AddSelectionNeedsPath, Skill: name, Options: slices.Clone(paths)}, nil
+			}
+		}
+		outcome.Slots[name] = slot
+	}
+	return outcome, nil
 }
 
 func selectedSkillNames(discovered DiscoveredSkills, request AddSelectionRequest, answers AddSelectionAnswers) ([]string, AddSelectionOutcome, error) {

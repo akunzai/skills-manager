@@ -148,7 +148,7 @@ func TestResolveSkillsToAddFlagsPromptForDivergentCandidates(t *testing.T) {
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, func(string, string) (engine.AddSlot, error) { return engine.AddSlot{}, nil })
+			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, &engine.AddSlotInspector{Config: config.DefaultConfig(), SkillsDir: t.TempDir(), Source: src.source})
 			if err != nil || cancelled || got["duplicate"] != "skills/duplicate" {
 				t.Fatalf("got=%v cancelled=%v err=%v; want selected Source path", got, cancelled, err)
 			}
@@ -234,7 +234,7 @@ func TestNewRemoteIntakeAppliesTreeURLScopeBeforeDiscovery(t *testing.T) {
 
 	cmd := testCmd()
 	cmd.SetErr(new(bytes.Buffer))
-	intake, err := newRemoteIntake(cmd, filepath.Join(t.TempDir(), "skills.json"), "https://github.com/owner/repo/tree/main/skills", origin, "", "", t.TempDir())
+	intake, err := newRemoteIntake(cmd, config.DefaultConfig(), "https://github.com/owner/repo/tree/main/skills", origin, "", "", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,14 +272,18 @@ func TestAddReadsARemoteSourceOnTheChosenScopesBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	intake, err := newRemoteIntake(cmd, target.ConfigPath, "owner/repo", origin, "", "", t.TempDir())
+	cfg, err = config.LoadConfig(target.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intake, err := newRemoteIntake(cmd, cfg, "owner/repo", origin, "", "", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := intake.discovered["dev-only"]; !ok {
 		t.Fatalf("discovered = %v; want the dev branch the Project declares", intake.discovered)
 	}
-	if err := intake.run(cmd, addRequest{scope: target}); err != nil {
+	if err := intake.run(cmd, addRequest{scope: target, cfg: cfg}); err != nil {
 		t.Fatalf("run: %v\n%s", err, cmd.OutOrStdout())
 	}
 	got, err := config.LoadConfig(scope.projectConfig)
@@ -338,7 +342,11 @@ func (s addRunScope) run(t *testing.T, prompter *fakeAddPrompter, req addRequest
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.scope = scope
+	cfg, err := config.LoadConfig(scope.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.scope, req.cfg = scope, cfg
 	err = intake.run(cmd, req)
 	return cmd.OutOrStdout().(*bytes.Buffer).String(), err
 }
@@ -545,9 +553,7 @@ func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
 		"fresh":     {"skills/fresh"},
 	}
 
-	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, func(name, subpath string) (engine.AddSlot, error) {
-		return engine.InspectAddSlot(cfg, skillsDir, engine.NewCommandAddSource("true", "", ""), name, subpath)
-	})
+	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, &engine.AddSlotInspector{Config: cfg, SkillsDir: skillsDir, Source: engine.NewCommandAddSource("true", "", "")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,6 +631,9 @@ func TestAddRunResolvesIdentitySensitivePathsBeforeSkillSelection(t *testing.T) 
 	}
 }
 
+// The prompt and the overwrite question read one Config, but each inspects
+// the skills directory itself: the prompt when it draws, the plan just before
+// it applies. A present copy must still be marked and confirmed alike.
 func TestAddRunPickerAndOverwriteAgreeOnDeclarations(t *testing.T) {
 	for _, same := range []bool{false, true} {
 		for _, present := range []bool{false, true} {
