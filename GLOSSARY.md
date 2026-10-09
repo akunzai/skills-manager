@@ -72,6 +72,10 @@ _Avoid_: agent state, agent scan
 Reconciling the selected Scope from its Config and existing Cache, without network access: Materialize declared Skills and apply Availability. Sync writes Config only to apply a Rename or to record a Source's first Signer.
 _Avoid_: restore, install (when you mean the whole declared state)
 
+**Convergence**:
+Whether a command left its Scope matching its Config (converged), not matching it with a next action (unreconciled), or could not complete its work (incomplete) — ADR-0002's three outcomes, decided once per result. Add, Adopt, and rm decide it this way; Sync and Update still decide it through their Sync summary (#290).
+_Avoid_: disposition (that is Freshness's), status, exit code
+
 **Baseline**:
 What Sync last applied a remote Skill's copy on the Scope skills directory from: the copy's content digests, its Source, Cache identity and commit. Drift protection compares that copy with its Baseline. Only a remote Skill has one; the Scope state is the file that holds them.
 _Avoid_: snapshot, lock
