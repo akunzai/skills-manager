@@ -99,6 +99,8 @@ type SyncReport struct {
 	// event.
 	Updated  []string
 	Restored []string
+	// State is the Scope state verdict. Failed counts Skills only, not it.
+	State StateVerdict
 	// forceable is whether --force would lift a block left under the
 	// decision Apply applied.
 	forceable bool
@@ -122,7 +124,7 @@ func (r *SyncReport) noteMaterialized(skill string, before SkillFreshnessStatus)
 // Summary is where the Scope stands after Apply. Nothing is pending once
 // applied: each Skill was done, blocked, or failed.
 func (r *SyncReport) Summary() SyncSummary {
-	return SyncSummary{Configured: len(r.Configured), Blocked: r.Blocked, Failed: r.Failed, Forceable: r.forceable}
+	return SyncSummary{Configured: len(r.Configured), Blocked: r.Blocked, Failed: r.Failed, Forceable: r.forceable, State: r.State}
 }
 
 // Apply materializes the planned Skills and applies Availability. The plan is
@@ -157,10 +159,10 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 		}
 	}
 	baselines := plan.openBaselines()
-	switch baselines.Verdict(plan.needsBaselines()) {
+	report.State = baselines.Verdict(plan.needsBaselines())
+	switch report.State {
 	case StateFail:
 		emit(SyncEvent{Kind: SyncStateFailed, Err: baselines.Err()})
-		report.tally(SyncFailed)
 	case StateWarn:
 		emit(SyncEvent{Kind: SyncStateUnreadable, Err: baselines.Err()})
 	}
@@ -272,8 +274,8 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 	if len(copied) > 0 {
 		emitSync(emit, SyncEvent{Kind: SyncAvailabilityCopied, Source: item.Source, Skill: item.Name, Agents: copied})
 	}
-	// An unreadable Scope state is the Scope's verdict, counted once by the
-	// caller, not a failure of each Skill.
+	// An unreadable Scope state is the Scope's verdict, which Apply reports
+	// once in State, not a failure of each Skill.
 	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA, item.Signed, item.Unverified); err != nil && !errors.Is(err, ErrNotRecorded) {
 		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err})
 		return SyncFailed, err

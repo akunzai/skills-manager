@@ -258,7 +258,8 @@ func TestSyncApplyContinuesAfterMaterializeFailure(t *testing.T) {
 
 // A Scope state that became unreadable after the plan read it is reported
 // once, like one the plan could not read: the Skill is still applied, its
-// Baseline is not recorded, and the state is left as it is.
+// Baseline is not recorded, and the state is left as it is. The Sync is
+// incomplete, but no Skill failed.
 func TestSyncApplyReportsScopeStateUnreadableSincePlanning(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
@@ -285,8 +286,11 @@ func TestSyncApplyReportsScopeStateUnreadableSincePlanning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Failed != 1 || !slices.Contains(kinds, SyncStateFailed) {
-		t.Fatalf("failed=%d events=%#v; want one Scope state failure", report.Failed, kinds)
+	if report.Failed != 0 || report.State != StateFail || !slices.Contains(kinds, SyncStateFailed) {
+		t.Fatalf("failed=%d state=%v events=%#v; want the Scope state failed, not the Skill", report.Failed, report.State, kinds)
+	}
+	if got := report.Summary().Convergence(); got != Incomplete {
+		t.Fatalf("Convergence = %v; want incomplete", got)
 	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "good", "SKILL.md")); err != nil {
 		t.Fatalf("the Skill must still be Materialized: %v", err)
@@ -311,9 +315,8 @@ func TestSyncApplyWarnsOnUnreadableScopeStateWithoutRemoteSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.StateVerdict() != StateWarn || plan.FailedCount(SyncDecision{}) != 0 {
-		t.Fatalf("StateVerdict=%v FailedCount=%d; want an unreadable state that is not a failure",
-			plan.StateVerdict(), plan.FailedCount(SyncDecision{}))
+	if summary := plan.Summary(SyncDecision{}); summary.State != StateWarn || summary.Convergence() == Incomplete {
+		t.Fatalf("summary = %+v; want an unreadable state that is not a failure", summary)
 	}
 
 	var kinds []string
@@ -322,8 +325,8 @@ func TestSyncApplyWarnsOnUnreadableScopeStateWithoutRemoteSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if report.Failed != 0 || !slices.Contains(kinds, SyncStateUnreadable) || slices.Contains(kinds, SyncStateFailed) {
-		t.Fatalf("failed=%d events=%#v; want a warning, not a failure", report.Failed, kinds)
+	if report.Failed != 0 || !report.Summary().Converged() || !slices.Contains(kinds, SyncStateUnreadable) || slices.Contains(kinds, SyncStateFailed) {
+		t.Fatalf("failed=%d state=%v events=%#v; want a warning, not a failure", report.Failed, report.State, kinds)
 	}
 }
 

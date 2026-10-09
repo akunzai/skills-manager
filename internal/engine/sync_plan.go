@@ -402,14 +402,32 @@ type SyncSummary struct {
 	Configured int
 	Pending    int
 	Blocked    int
-	Failed     int
-	Forceable  bool
+	// Failed counts Skills only, not the Scope state verdict.
+	Failed    int
+	Forceable bool
+	// State is the Scope state verdict: StateFail when Baselines the Sync
+	// needed could not be recorded.
+	State StateVerdict
+}
+
+// Convergence is what the Sync leaves of its Scope: a failed Skill or an
+// unrecorded Baseline leaves the work incomplete, and a Skill still to change
+// or refused leaves the Scope unreconciled.
+func (s SyncSummary) Convergence() Convergence {
+	switch {
+	case s.Failed > 0:
+		return Incomplete
+	case s.Pending > 0 || s.Blocked > 0:
+		return max(Unreconciled, stateConvergence(s.State))
+	default:
+		return stateConvergence(s.State)
+	}
 }
 
 // Converged reports whether the Scope matches its Config: nothing to change,
 // nothing refused, nothing broken.
 func (s SyncSummary) Converged() bool {
-	return s.Pending == 0 && s.Blocked == 0 && s.Failed == 0
+	return s.Convergence() == Converged
 }
 
 // Summary is where the Scope stands if Apply ran under decision.
@@ -418,18 +436,10 @@ func (plan *SyncPlan) Summary(decision SyncDecision) SyncSummary {
 		Configured: len(plan.Names()),
 		Pending:    len(plan.Pending(decision)),
 		Blocked:    len(plan.Blocked(decision)),
-		Failed:     plan.FailedCount(decision),
+		Failed:     len(plan.Failed(decision)),
 		Forceable:  plan.Forceable(decision),
+		State:      plan.StateVerdict(),
 	}
-}
-
-// FailedCount counts the failures observable before anything is applied.
-func (plan *SyncPlan) FailedCount(decision SyncDecision) int {
-	count := len(plan.Failed(decision))
-	if plan.StateVerdict() == StateFail {
-		count++
-	}
-	return count
 }
 
 // StateVerdict is what the Scope state the plan observed means for applying

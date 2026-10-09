@@ -99,7 +99,7 @@ func (p *PreparedUpdate) Finish(decision SyncDecision, progress func(SyncEvent))
 	switch {
 	case len(p.Refresh.Errors) > 0:
 		outcome.State = UpdateRefreshFailed
-	case outcome.Summary.Failed > 0:
+	case outcome.Summary.Convergence() == Incomplete:
 		outcome.State = UpdateSyncFailed
 	case !outcome.Summary.Converged():
 		outcome.State = UpdatePendingSync

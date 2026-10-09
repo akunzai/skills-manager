@@ -509,7 +509,7 @@ func (s AdoptState) Convergence() Convergence {
 // Convergence is the furthest any adopted Skill, or an unrecorded Baseline,
 // leaves the Scope from its Config.
 func (r AdoptResult) Convergence() Convergence {
-	convergence := stateConvergence(r.State)
+	convergence := stateConvergence(r.State.Verdict)
 	for _, skill := range r.Skills {
 		convergence = max(convergence, skill.State.Convergence())
 	}
