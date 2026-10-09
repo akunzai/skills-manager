@@ -437,7 +437,7 @@ func (p AdoptPlan) narrow(keep func(AdoptItem) bool) AdoptPlan {
 }
 
 // AdoptState is the one state each Skill Adopt was asked to adopt ends in.
-// The CLI words each and maps it to an exit code (ADR-0002).
+// The CLI words each; Convergence says what it leaves of the Scope.
 type AdoptState string
 
 const (
@@ -490,6 +490,30 @@ type AdoptResult struct {
 	// State reports whether an adopted Skill needed a Baseline that could
 	// not be recorded.
 	State StateOutcome
+}
+
+// Convergence is what one Skill's state leaves of the Scope: adopted
+// matches Config, a Skill declared without everything applied or left as it
+// was is for the user to act on, and a failed one is incomplete.
+func (s AdoptState) Convergence() Convergence {
+	switch s {
+	case AdoptAdopted:
+		return Converged
+	case AdoptFailed:
+		return Incomplete
+	default:
+		return Unreconciled
+	}
+}
+
+// Convergence is the furthest any adopted Skill, or an unrecorded Baseline,
+// leaves the Scope from its Config.
+func (r AdoptResult) Convergence() Convergence {
+	convergence := stateConvergence(r.State)
+	for _, skill := range r.Skills {
+		convergence = max(convergence, skill.State.Convergence())
+	}
+	return convergence
 }
 
 // Adopted is the Skills Config now declares, whatever their state.

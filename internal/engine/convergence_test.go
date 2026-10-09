@@ -30,3 +30,34 @@ func TestAddResultConvergence(t *testing.T) {
 		})
 	}
 }
+
+// Adopt's furthest Skill decides, and an unrecorded Baseline makes an
+// otherwise adopted Scope incomplete.
+func TestAdoptResultConvergence(t *testing.T) {
+	skills := func(states ...AdoptState) []AdoptOutcome {
+		outcomes := make([]AdoptOutcome, len(states))
+		for i, state := range states {
+			outcomes[i] = AdoptOutcome{State: state}
+		}
+		return outcomes
+	}
+	for _, tc := range []struct {
+		name   string
+		result AdoptResult
+		want   Convergence
+	}{
+		{name: "every Skill adopted", result: AdoptResult{Skills: skills(AdoptAdopted, AdoptAdopted)}, want: Converged},
+		{name: "adopted with a warning", result: AdoptResult{Skills: skills(AdoptAdopted), State: stateWarned}, want: Converged},
+		{name: "declared without a Baseline", result: AdoptResult{Skills: skills(AdoptAdopted, AdoptDeclaredWithoutBaseline)}, want: Unreconciled},
+		{name: "declared with copies left", result: AdoptResult{Skills: skills(AdoptDeclaredWithCopiesLeft)}, want: Unreconciled},
+		{name: "skipped", result: AdoptResult{Skills: skills(AdoptSkipped)}, want: Unreconciled},
+		{name: "a failed Skill beside a skipped one", result: AdoptResult{Skills: skills(AdoptSkipped, AdoptFailed)}, want: Incomplete},
+		{name: "Baselines not recorded", result: AdoptResult{Skills: skills(AdoptAdopted), State: stateFailed}, want: Incomplete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.result.Convergence(); got != tc.want {
+				t.Fatalf("Convergence() = %s; want %s", got, tc.want)
+			}
+		})
+	}
+}
