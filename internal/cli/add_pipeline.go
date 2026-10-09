@@ -37,7 +37,9 @@ type addIntake struct {
 type addRequest struct {
 	// scope is where the Skills are declared, settled before the Source was
 	// read (resolveAddScope).
-	scope  Scope
+	scope Scope
+	// cfg is the Scope's Config, loaded once for the whole Add.
+	cfg    *config.Config
 	all    bool
 	skills []string
 	yes    bool
@@ -211,12 +213,8 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 
 	var occupancy func(name, subpath string) (engine.AddSlot, error)
 	if interactive {
-		pickerCfg, err := config.LoadConfig(req.scope.ConfigPath)
-		if err != nil {
-			return err
-		}
 		occupancy = func(name, subpath string) (engine.AddSlot, error) {
-			return engine.InspectAddSlot(pickerCfg, req.scope.SkillsDir, intake.source, name, subpath)
+			return engine.InspectAddSlot(req.cfg, req.scope.SkillsDir, intake.source, name, subpath)
 		}
 	}
 
@@ -231,13 +229,13 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 		return fmt.Errorf("no matching skills to add")
 	}
 
-	scope := req.scope
-	cfg, agents, err := prepareAddTarget(scope, req.agents)
-	if err != nil {
-		return err
-	}
+	scope, cfg := req.scope, req.cfg
 	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
-	req.agents = agents
+	if len(req.agents) > 0 {
+		if req.agents, err = engine.NewAvailability(cfg, skillsDir).ValidateManagedAgents(req.agents); err != nil {
+			return err
+		}
+	}
 	intent, err := promptAddAvailability(cfg, skillsToAdd, skillsDir, prompter, interactive, req.agents)
 	if err != nil {
 		return err

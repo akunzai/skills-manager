@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/spf13/cobra"
@@ -55,7 +56,11 @@ func listLocalSkills(cmd *cobra.Command, localPath, selectionPath string, jsonOu
 }
 
 func listRemoteSkills(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string, jsonOutput bool) error {
-	intake, key, err := fetchRemoteIntake(cmd, ResolveScope(cmd).ConfigPath, rawSource, flagURL, flagBranch, flagPath, cacheDir)
+	cfg, err := config.LoadConfig(ResolveScope(cmd).ConfigPath)
+	if err != nil {
+		return err
+	}
+	intake, key, err := fetchRemoteIntake(cmd, cfg, rawSource, flagURL, flagBranch, flagPath, cacheDir)
 	if err != nil {
 		return err
 	}

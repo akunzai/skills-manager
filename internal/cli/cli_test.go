@@ -369,6 +369,26 @@ func TestCLIAddOfALocalSkillWarnsOnUnreadableScopeState(t *testing.T) {
 	assertScopeStateWarning(t, out, true)
 }
 
+// Add reads the Scope's Config once, before the Source: a skills.json it
+// cannot parse fails the Add before any Source is read or question asked.
+func TestCLIAddFailsOnAnUnreadableConfigBeforeReadingTheSource(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
+	if err := os.WriteFile(configFile, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "add", "--symlink", filepath.Join(root, "missing"), "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+
+	if exit := exitCodeOf(err); exit != 2 || !strings.Contains(err.Error(), "failed to parse skills config") {
+		t.Fatalf("add error = %v (exit %d); want the Config parse failure, exit 2\n%s", err, exit, out)
+	}
+	if strings.Contains(err.Error(), "missing") {
+		t.Fatalf("add error = %v; the Source must not be read before the Config", err)
+	}
+}
+
 // scopeStateWarning opens the warning a command prints for an unreadable
 // Scope state it needed no Baseline from (ADR-0002).
 const scopeStateWarning = "Scope state is unreadable: "
