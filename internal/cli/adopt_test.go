@@ -279,9 +279,10 @@ func TestCLIAdoptFromAgentDirectoriesExitCodes(t *testing.T) {
 	}
 }
 
-// Adopting only local Skills records no Baseline, so an unreadable Scope
-// state is a warning; declaring a remote Skill whose Baseline cannot be
-// recorded is a failure (ADR-0002).
+// adopt words each Convergence an unreadable Scope state leaves: a warning
+// and exit 0 for a local Skill, the failure and exit 2 for a remote one whose
+// Baseline cannot be recorded. Which Skills need one is the engine's rule,
+// tested there.
 func TestCLIAdoptOnUnreadableScopeStateFailsOnlyForARemoteSkill(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
