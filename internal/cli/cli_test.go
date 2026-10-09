@@ -315,12 +315,17 @@ func TestCLISyncOnUnreadableScopeStateFailsOnlyWithARemoteSkill(t *testing.T) {
 		command  []string
 		wantExit int
 		wantLine string
+		// wantErr is the summary: the unrecorded Baselines, not a Skill failure.
+		// The Skill is blocked because its Baseline cannot be read.
+		wantErr string
 	}{
 		{name: "local", command: []string{"sync"}, wantExit: 0, wantLine: scopeStateWarning},
 		{name: "local dry run", command: []string{"sync", "--dry-run"}, wantExit: 0, wantLine: scopeStateWarning},
 		{name: "local update", command: []string{"update"}, wantExit: 0, wantLine: scopeStateWarning},
-		{name: "remote", remote: true, command: []string{"sync"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
-		{name: "remote update", remote: true, command: []string{"update"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: "},
+		{name: "remote", remote: true, command: []string{"sync"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: ", wantErr: "Sync did not converge: 0 failures, 1 blocked skill, Baselines not recorded"},
+		{name: "remote update", remote: true, command: []string{"update"}, wantExit: 2, wantLine: "Failed to read the Scope baseline: ", wantErr: "Sync did not converge: 0 failures, 1 blocked skill, Baselines not recorded"},
+		{name: "remote dry run", remote: true, command: []string{"sync", "--dry-run"}, wantExit: 2, wantLine: "Skipped : ", wantErr: "Sync did not converge: 0 failures, 1 blocked skill, Baselines not recorded"},
+		{name: "remote update json", remote: true, command: []string{"update", "--json"}, wantExit: 2, wantLine: `"baselines_recorded": false`, wantErr: "Sync did not converge: 0 failures, 1 blocked skill, Baselines not recorded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateHome(t)
@@ -342,6 +347,9 @@ func TestCLISyncOnUnreadableScopeStateFailsOnlyWithARemoteSkill(t *testing.T) {
 			if exit := exitCodeOf(err); exit != tc.wantExit {
 				t.Fatalf("%s error = %v (exit %d); want exit %d\n%s", strings.Join(tc.command, " "), err, exit, tc.wantExit, out)
 			}
+			if tc.wantErr != "" && err.Error() != tc.wantErr {
+				t.Fatalf("%s error = %q; want %q", strings.Join(tc.command, " "), err, tc.wantErr)
+			}
 			if !strings.Contains(out, tc.wantLine) {
 				t.Fatalf("output does not contain %q:\n%s", tc.wantLine, out)
 			}
@@ -350,6 +358,35 @@ func TestCLISyncOnUnreadableScopeStateFailsOnlyWithARemoteSkill(t *testing.T) {
 				t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
 			}
 		})
+	}
+}
+
+// update --json counts Skills in sync.failed and reports unrecorded Baselines
+// on their own, so a failed Scope state is not read as a failed Skill.
+func TestUpdateSyncJSONReportsUnrecordedBaselinesApartFromFailures(t *testing.T) {
+	for _, tc := range []struct {
+		state engine.StateVerdict
+		want  bool
+	}{
+		{engine.StateOK, true},
+		{engine.StateWarn, true},
+		{engine.StateFail, false},
+	} {
+		out, err := json.Marshal(newUpdateSyncJSON(engine.SyncSummary{Configured: 1, State: tc.state}, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc struct {
+			Converged         bool  `json:"converged"`
+			Failed            *int  `json:"failed"`
+			BaselinesRecorded *bool `json:"baselines_recorded"`
+		}
+		if err := json.Unmarshal(out, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if doc.Failed == nil || *doc.Failed != 0 || doc.BaselinesRecorded == nil || *doc.BaselinesRecorded != tc.want || doc.Converged != tc.want {
+			t.Fatalf("state %v: JSON = %s; want failed 0, baselines_recorded and converged %v", tc.state, out, tc.want)
+		}
 	}
 }
 

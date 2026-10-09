@@ -212,27 +212,31 @@ func printRefreshed(out io.Writer, refreshed, skipped int, dryRun bool) {
 
 // updateSyncJSON is where the Scope stands after update's Sync. Pending is
 // only ever non-zero under --dry-run; Updated and Restored are only ever
-// non-empty without it.
+// non-empty without it. Failed counts Skills; BaselinesRecorded is false when
+// the Scope state could not be read and the Sync needed Baselines, or under
+// --dry-run would need them.
 type updateSyncJSON struct {
-	Converged  bool     `json:"converged"`
-	Configured int      `json:"configured"`
-	Pending    int      `json:"pending"`
-	Blocked    int      `json:"blocked"`
-	Failed     int      `json:"failed"`
-	Updated    []string `json:"updated"`
-	Restored   []string `json:"restored"`
+	Converged         bool     `json:"converged"`
+	Configured        int      `json:"configured"`
+	Pending           int      `json:"pending"`
+	Blocked           int      `json:"blocked"`
+	Failed            int      `json:"failed"`
+	BaselinesRecorded bool     `json:"baselines_recorded"`
+	Updated           []string `json:"updated"`
+	Restored          []string `json:"restored"`
 }
 
 // newUpdateSyncJSON words summary, and the Skills report wrote when Sync ran.
 func newUpdateSyncJSON(summary engine.SyncSummary, report *engine.SyncReport) updateSyncJSON {
 	doc := updateSyncJSON{
-		Converged:  summary.Converged(),
-		Configured: summary.Configured,
-		Pending:    summary.Pending,
-		Blocked:    summary.Blocked,
-		Failed:     summary.Failed,
-		Updated:    []string{},
-		Restored:   []string{},
+		Converged:         summary.Converged(),
+		Configured:        summary.Configured,
+		Pending:           summary.Pending,
+		Blocked:           summary.Blocked,
+		Failed:            summary.Failed,
+		BaselinesRecorded: summary.State != engine.StateFail,
+		Updated:           []string{},
+		Restored:          []string{},
 	}
 	if report != nil {
 		doc.Updated = append(doc.Updated, report.Updated...)

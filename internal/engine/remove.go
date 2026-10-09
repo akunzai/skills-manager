@@ -82,7 +82,7 @@ func (r RemoveResult) Convergence() Convergence {
 	if len(r.NotFullyRemoved()) > 0 {
 		return Incomplete
 	}
-	return stateConvergence(r.State)
+	return stateConvergence(r.State.Verdict)
 }
 
 // NotFullyRemoved names the Skills Retire could not take fully out of the

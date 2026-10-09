@@ -190,8 +190,12 @@ func materializedLine(verb string, skills []string, width int) string {
 // pending work. A blocked Skill is a state to decide on,
 // not an error, so it never reads as a failure.
 func reportSyncOutcome(out io.Writer, summary engine.SyncSummary, dryRun bool, next, scopeFlags string) error {
-	if summary.Failed > 0 {
-		return exitError{message: fmt.Sprintf("Sync did not converge: %s, %s", countOf(summary.Failed, "failure"), countOf(summary.Blocked, "blocked skill")), code: 2}
+	if summary.Convergence() == engine.Incomplete {
+		message := fmt.Sprintf("Sync did not converge: %s, %s", countOf(summary.Failed, "failure"), countOf(summary.Blocked, "blocked skill"))
+		if summary.State == engine.StateFail {
+			message += ", Baselines not recorded"
+		}
+		return exitError{message: message, code: 2}
 	}
 	if summary.Blocked > 0 || summary.Pending > 0 {
 		parts := make([]string, 0, 2)

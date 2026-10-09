@@ -25,8 +25,8 @@ func (c Convergence) String() string {
 // stateConvergence is the least a Scope state verdict allows: a failure when
 // a Baseline could not be recorded, compared, or forgotten, otherwise
 // nothing, because a warning keeps the code the command's other work earns.
-func stateConvergence(state StateOutcome) Convergence {
-	if state.Verdict == StateFail {
+func stateConvergence(verdict StateVerdict) Convergence {
+	if verdict == StateFail {
 		return Incomplete
 	}
 	return Converged

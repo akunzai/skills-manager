@@ -283,9 +283,9 @@ func (r AddResult) Convergence() Convergence {
 	case r.Failed > 0:
 		return Incomplete
 	case r.Blocked > 0:
-		return max(Unreconciled, stateConvergence(r.State))
+		return max(Unreconciled, stateConvergence(r.State.Verdict))
 	default:
-		return stateConvergence(r.State)
+		return stateConvergence(r.State.Verdict)
 	}
 }
 
