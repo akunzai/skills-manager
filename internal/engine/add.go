@@ -194,6 +194,16 @@ type AddPlan struct {
 	// TrustCert is the PEM trust anchor a remote Source's Skills must be
 	// signed with, as it is stored in Config; empty keeps what Config has.
 	TrustCert string
+	// approved says the user agreed to replace the plan's Conflicts. A
+	// conflict may be the user's own content, so only ApproveConflicts sets it.
+	approved bool
+}
+
+// ApproveConflicts is the plan with its Conflicts approved for replacement,
+// once the user has agreed.
+func (p AddPlan) ApproveConflicts() AddPlan {
+	p.approved = true
+	return p
 }
 
 // BuildAddPlan inspects existing Config and filesystem Inventory to calculate
@@ -283,8 +293,12 @@ func (r AddResult) Convergence() Convergence {
 // through its RemoteIntake), saves Config,
 // Materializes each Skill, and applies Availability. It returns an error only
 // when it fails before any Skill is applied; after that, each Skill's outcome
-// is in the result and one that fails does not stop the rest.
+// is in the result and one that fails does not stop the rest. A plan whose
+// Conflicts are not approved is refused before anything changes.
 func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEvent)) (AddResult, error) {
+	if len(plan.Conflicts) > 0 && !plan.approved {
+		return AddResult{}, fmt.Errorf("Add plan replaces %d conflicting Skill(s) without approval", len(plan.Conflicts))
+	}
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}

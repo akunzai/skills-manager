@@ -173,6 +173,107 @@ func TestBuildAddPlanDetectsUntrackedDiskConflicts(t *testing.T) {
 	}
 }
 
+// A conflict may be the user's own content or another Source's declaration,
+// so ApplyAddPlan replaces it only once the plan approves its Conflicts,
+// whoever calls it, and refuses before changing Config or disk otherwise.
+func TestApplyAddPlanReplacesConflictsOnlyOnceApproved(t *testing.T) {
+	t.Parallel()
+	writeSkill := func(t *testing.T, dir string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# Skill\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name string
+		// setup makes "mine" occupied and returns the Source that conflicts
+		// with it, plus checks for the occupancy before and after approval.
+		setup func(t *testing.T, cfg *config.Config, configPath, skillsDir string) (source AddSource, kept, replaced func(t *testing.T))
+	}{
+		{
+			name: "Untracked directory",
+			setup: func(t *testing.T, cfg *config.Config, configPath, skillsDir string) (AddSource, func(*testing.T), func(*testing.T)) {
+				untracked := filepath.Join(skillsDir, "mine")
+				writeSkill(t, untracked)
+				source := filepath.Join(filepath.Dir(skillsDir), "src", "mine")
+				writeSkill(t, source)
+				kept := func(t *testing.T) {
+					if _, ok := cfg.Local["mine"]; ok {
+						t.Fatal("refused plan declared the Skill")
+					}
+					if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+						t.Fatalf("refused plan saved Config: %v", err)
+					}
+					if info, err := os.Lstat(untracked); err != nil || !info.IsDir() {
+						t.Fatalf("refused plan touched the Untracked directory: %v", err)
+					}
+				}
+				replaced := func(t *testing.T) {
+					if info, err := os.Lstat(untracked); err != nil || info.Mode()&os.ModeSymlink == 0 {
+						t.Fatalf("approved plan left the Untracked directory in place: %v", err)
+					}
+				}
+				return NewSymlinkAddSource(source, ""), kept, replaced
+			},
+		},
+		{
+			name: "declared from another command",
+			setup: func(t *testing.T, cfg *config.Config, configPath, skillsDir string) (AddSource, func(*testing.T), func(*testing.T)) {
+				first, err := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("echo first", "", ""), map[string]string{"mine": "."}, AddAvailabilityIntent{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := ApplyAddPlan(first, cfg, nil); err != nil {
+					t.Fatal(err)
+				}
+				declared := func(t *testing.T, want string) {
+					t.Helper()
+					saved, err := config.LoadConfig(configPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := saved.Local["mine"].Command; got != want || cfg.Local["mine"].Command != want {
+						t.Fatalf("command = %q in skills.json, %q in memory; want %q", got, cfg.Local["mine"].Command, want)
+					}
+				}
+				return NewCommandAddSource("echo second", "", ""),
+					func(t *testing.T) { declared(t, "echo first") },
+					func(t *testing.T) { declared(t, "echo second") }
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			project := t.TempDir()
+			skillsDir := filepath.Join(project, ".agents", "skills")
+			configPath := filepath.Join(project, ".agents", "skills.json")
+			cfg := config.DefaultConfig()
+			source, kept, replaced := tc.setup(t, cfg, configPath, skillsDir)
+			plan, err := BuildAddPlan(cfg, configPath, skillsDir, source, map[string]string{"mine": "."}, AddAvailabilityIntent{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.Conflicts) != 1 {
+				t.Fatalf("Conflicts = %v; want the occupied Skill", plan.Conflicts)
+			}
+
+			if _, err := ApplyAddPlan(plan, cfg, nil); err == nil {
+				t.Fatal("ApplyAddPlan replaced a conflict nobody approved")
+			}
+			kept(t)
+
+			if _, err := ApplyAddPlan(plan.ApproveConflicts(), cfg, nil); err != nil {
+				t.Fatal(err)
+			}
+			replaced(t)
+		})
+	}
+}
+
 // Add must record the same applied baseline Sync does. Without it a Skill
 // added today is classified SkillUnknownBaseline after the next Update, so
 // Sync blocks a routine upstream change instead of applying it.

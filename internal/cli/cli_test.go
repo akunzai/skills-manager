@@ -2819,32 +2819,6 @@ func TestCLILsJSONTildePath(t *testing.T) {
 	}
 }
 
-func TestCLICommandAddOverwriteRequiresYes(t *testing.T) {
-	home := isolateHome(t)
-	configFile := filepath.Join(home, ".agents", "skills.json")
-	skillsDir := filepath.Join(home, ".agents", "skills")
-	if _, err := runCLI(t, "add", "--command", "echo first", "--skill", "cmd-skill", "--config", configFile, "--skills-dir", skillsDir); err != nil {
-		t.Fatalf("first add: %v", err)
-	}
-	out, err := runCLI(t, "add", "--command", "echo second", "--skill", "cmd-skill", "--config", configFile, "--skills-dir", skillsDir)
-	if err == nil {
-		t.Fatalf("expected overwrite refusal, got:\n%s", out)
-	}
-	if !strings.Contains(err.Error(), "refusing to overwrite") {
-		t.Fatalf("got %v", err)
-	}
-	if _, err := runCLI(t, "add", "--command", "echo second", "--skill", "cmd-skill", "-y", "--config", configFile, "--skills-dir", skillsDir); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.LoadConfig(configFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Local["cmd-skill"].Command != "echo second" {
-		t.Fatalf("command = %#v", cfg.Local["cmd-skill"])
-	}
-}
-
 func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")

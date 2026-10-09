@@ -211,13 +211,16 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	}
 	plan.TrustCert = req.trustCert
 
-	if len(plan.Conflicts) > 0 && !req.yes {
-		if !interactive {
-			return fmt.Errorf("refusing to overwrite %d existing skill(s) without a terminal; rerun with --yes", len(plan.Conflicts))
+	if len(plan.Conflicts) > 0 {
+		if !req.yes {
+			if !interactive {
+				return fmt.Errorf("refusing to overwrite %d existing skill(s) without a terminal; rerun with --yes", len(plan.Conflicts))
+			}
+			if err := prompter.ConfirmOverwrite(plan.Conflicts); err != nil {
+				return err
+			}
 		}
-		if err := prompter.ConfirmOverwrite(plan.Conflicts); err != nil {
-			return err
-		}
+		plan = plan.ApproveConflicts()
 	}
 
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {

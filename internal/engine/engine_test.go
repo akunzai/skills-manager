@@ -1582,7 +1582,7 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 	if planErr != nil {
 		t.Fatal(planErr)
 	}
-	result, err := ApplyAddPlan(plan, cfg, nil)
+	result, err := ApplyAddPlan(plan.ApproveConflicts(), cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
