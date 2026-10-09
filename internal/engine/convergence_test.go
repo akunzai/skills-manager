@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 var (
 	stateWarned = StateOutcome{Verdict: StateWarn, Message: "unreadable"}
@@ -53,6 +56,29 @@ func TestAdoptResultConvergence(t *testing.T) {
 		{name: "skipped", result: AdoptResult{Skills: skills(AdoptSkipped)}, want: Unreconciled},
 		{name: "a failed Skill beside a skipped one", result: AdoptResult{Skills: skills(AdoptSkipped, AdoptFailed)}, want: Incomplete},
 		{name: "Baselines not recorded", result: AdoptResult{Skills: skills(AdoptAdopted), State: stateFailed}, want: Incomplete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.result.Convergence(); got != tc.want {
+				t.Fatalf("Convergence() = %s; want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// A removal is never unreconciled: a Skill not fully removed or a Baseline
+// not forgotten is incomplete, and a warning costs nothing.
+func TestRemoveResultConvergence(t *testing.T) {
+	removed := RemoveSkillResult{RetiredSkill: RetiredSkill{Name: "removed", CopyRemoved: true}}
+	broken := RemoveSkillResult{RetiredSkill: RetiredSkill{Name: "broken", CopyErr: errors.New("permission denied")}}
+	for _, tc := range []struct {
+		name   string
+		result RemoveResult
+		want   Convergence
+	}{
+		{name: "every Skill removed", result: RemoveResult{Skills: []RemoveSkillResult{removed}}, want: Converged},
+		{name: "removed with a warning", result: RemoveResult{Skills: []RemoveSkillResult{removed}, State: stateWarned}, want: Converged},
+		{name: "a Skill not fully removed", result: RemoveResult{Skills: []RemoveSkillResult{removed, broken}}, want: Incomplete},
+		{name: "Baselines not forgotten", result: RemoveResult{Skills: []RemoveSkillResult{removed}, State: stateFailed}, want: Incomplete},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.result.Convergence(); got != tc.want {
