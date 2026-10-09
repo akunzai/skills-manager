@@ -13,6 +13,10 @@ A later review the same month proposed one more, rejected on the same test:
 
 - **Freshness classification takes every observed fact, so no status is rewritten after it.** `classifyRemoteSkill` compares Cache, Scope, and Baseline content; `attachScopeObservations` then overrides its answer for a Source never fetched, a subpath the sparse checkout does not cover, an unreadable Scope state, and a Skill gone at the Cache head. Those four need the Cache and Baselines, which the classifier does not hold, and they already sit together in one function that `InspectFreshness`'s tests exercise. Moving them in would add four parameters and move the ordering, not remove it. Kept instead: the overrides where they are.
 
+An October 2026 review proposed one more, rejected because the two sites decide different things:
+
+- **Adopt hands a blocked remote Skill to `applyRemoteItem`, as Sync does.** Sync leaves a blocked Skill untouched: no Availability, no Baseline. Adopt applies Availability and records no Baseline, because the copy it adopts is already the user's and its Agents already read it. A blocked Skill, such as one its Signature does not vouch for (ADR-0010), and a copy that differs from the Cache both end in `AdoptDeclaredWithoutBaseline`. Routing the block through `applyRemoteItem` would drop the Agent links Adopt keeps, so it would change Adopt rather than share a rule. Kept instead: the branches in `adoption.apply`, reading the block from the planned item's `Block`.
+
 Revisit when a second frontend, such as a `--json` for doctor or prune, needs the same grouping or wording the CLI now owns. Presentation would then have two adapters, and a shared seam for it would be real.
 
 This does not reopen ADR-0001 (Add's Source kind switch) or ADR-0002 (exit codes express state).
