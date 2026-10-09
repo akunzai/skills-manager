@@ -118,11 +118,16 @@ func newRmCmd() *cobra.Command {
 			if result.State.Verdict == engine.StateFail {
 				printScopeStateUnreadable(out, result.State.Message)
 			}
-			if names := result.NotFullyRemoved(); len(names) > 0 {
-				return exitError{message: "Skill removal did not complete: " + strings.Join(names, ", ") + " not fully removed", code: 2}
-			}
-			if result.State.Verdict == engine.StateFail {
-				return exitError{message: "Baselines were not forgotten", code: 2}
+			if result.Convergence() == engine.Incomplete {
+				names := result.NotFullyRemoved()
+				switch {
+				case len(names) > 0:
+					return exitError{message: "Skill removal did not complete: " + strings.Join(names, ", ") + " not fully removed", code: 2}
+				case result.State.Verdict == engine.StateFail:
+					return exitError{message: "Baselines were not forgotten", code: 2}
+				default:
+					return exitError{message: "Skill removal did not complete", code: 2}
+				}
 			}
 
 			fmt.Fprintf(out, "%sSkill removal complete.%s\n", colorGreen, colorReset)

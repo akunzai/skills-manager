@@ -75,6 +75,16 @@ type RemoveResult struct {
 	State StateOutcome
 }
 
+// Convergence is what the removal left of the Scope. Retire either takes a
+// Skill fully out or fails, so nothing is left for the user to decide: a
+// Skill not fully removed, or a Baseline not forgotten, is incomplete.
+func (r RemoveResult) Convergence() Convergence {
+	if len(r.NotFullyRemoved()) > 0 {
+		return Incomplete
+	}
+	return stateConvergence(r.State)
+}
+
 // NotFullyRemoved names the Skills Retire could not take fully out of the
 // Scope, in the order removed.
 func (r RemoveResult) NotFullyRemoved() []string {

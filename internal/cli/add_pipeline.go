@@ -282,9 +282,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 }
 
 // reportAddOutcome says why any Skill could not be applied, in Sync's words,
-// then sums up. Add has already declared every Skill, so it adopts ADR-0002's
-// codes: a blocked Skill leaves the Scope not matching its Config (1), a
-// failed one is work that broke (2).
+// then sums up with ADR-0002's code for the result's Convergence.
 func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeFlag string) error {
 	for _, ev := range result.Events {
 		if !syncEventIsProgress(ev.Kind) {
@@ -298,7 +296,8 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeF
 		printScopeStateWarning(out, result.State.Message, scopeFlag)
 	}
 	added := fmt.Sprintf("Added %d skill(s) [%s]", len(result.AddedSkills), strings.Join(result.AddedSkills, ", "))
-	if result.Blocked == 0 && result.Failed == 0 && result.State.Verdict != engine.StateFail {
+	convergence := result.Convergence()
+	if convergence == engine.Converged {
 		fmt.Fprintf(out, "%s%s and updated %s.%s\n", colorGreen, added, configName, colorReset)
 		return nil
 	}
@@ -317,7 +316,7 @@ func reportAddOutcome(out io.Writer, result engine.AddResult, configName, scopeF
 	if !printNextCommands(out, scopeFlag, syncErrors(result.Events)...) && (result.State.Verdict != engine.StateFail || result.Blocked+result.Failed > 0) {
 		fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run 'skills sync%s'.\n", scopeFlag)
 	}
-	if result.Failed > 0 || result.State.Verdict == engine.StateFail {
+	if convergence == engine.Incomplete {
 		message := fmt.Sprintf("Add did not complete: %s, %s", countOf(result.Failed, "failure"), countOf(result.Blocked, "blocked skill"))
 		if result.State.Verdict == engine.StateFail {
 			message += ", Baselines not recorded"

@@ -264,16 +264,6 @@ func promptAdoptPlan(p prompter, plan engine.AdoptPlan, skillsDir string) ([]str
 	return p.GroupedMultiSelect("Select skills to adopt:", groups, []string{adoptScopeGroup, adoptAgentGroup})
 }
 
-// adoptExitCodes is ADR-0002's code for each state adopt reports: 0 adopted,
-// 1 something left for the user, 2 a failure.
-var adoptExitCodes = map[engine.AdoptState]int{
-	engine.AdoptAdopted:                 0,
-	engine.AdoptDeclaredWithoutBaseline: 1,
-	engine.AdoptDeclaredWithCopiesLeft:  1,
-	engine.AdoptSkipped:                 1,
-	engine.AdoptFailed:                  2,
-}
-
 // adoptStateParts names the states other than adopted in the summary line,
 // in the order it lists them.
 var adoptStateParts = []struct {
@@ -287,16 +277,14 @@ var adoptStateParts = []struct {
 }
 
 // reportAdoptOutcome words each Skill by the state the engine says it ended
-// in, then sums up with the highest of their exit codes.
+// in, then sums up with ADR-0002's code for the result's Convergence.
 func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptResult, scope Scope) error {
 	syncCmd := "skills sync" + scopeFlagsOf(cmd, scope)
 	var recorded []string
-	code := 0
 	counts := map[engine.AdoptState]int{}
 	var errs []error
 	for _, skill := range result.Skills {
 		counts[skill.State]++
-		code = max(code, adoptExitCodes[skill.State])
 		switch skill.State {
 		case engine.AdoptAdopted:
 			fmt.Fprintf(out, "  %sAdopted %s%s.%s\n", colorGreen, skill.Name, adoptedFrom(skill), colorReset)
@@ -331,7 +319,6 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 	}
 	if result.State.Verdict == engine.StateFail {
 		printScopeStateUnreadable(out, result.State.Message)
-		code = 2
 	}
 	if result.State.Verdict == engine.StateWarn {
 		printScopeStateWarning(out, result.State.Message, scopeFlagsOf(cmd, scope))
@@ -339,7 +326,8 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 	printInstallerWarning(out, recorded, scope.SkillsDir)
 
 	adopted := counts[engine.AdoptAdopted]
-	if code == 0 {
+	convergence := result.Convergence()
+	if convergence == engine.Converged {
 		fmt.Fprintf(out, "%sAdopted %s and updated %s.%s\n", colorGreen, countOf(adopted, "skill"), filepath.Base(scope.ConfigPath), colorReset)
 		return nil
 	}
@@ -355,7 +343,7 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 	}
 	fmt.Fprintf(out, "%s%s.%s\n", colorYellow, summary, colorReset)
 	printNextCommands(out, scopeFlagsOf(cmd, scope), errs...)
-	if code == 2 {
+	if convergence == engine.Incomplete {
 		return exitError{message: "Adopt did not complete: " + cmp.Or(strings.Join(parts, ", "), "the Scope state could not be read"), code: 2}
 	}
 	fmt.Fprintf(out, "Next: follow the reason given for each skill above, then run '%s'.\n", syncCmd)

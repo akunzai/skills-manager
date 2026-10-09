@@ -288,6 +288,9 @@ func TestApplyAddPlanReportsUnreadableScopeState(t *testing.T) {
 	if result.State.Verdict != StateFail || result.State.Message == "" {
 		t.Fatal("an unrecorded Baseline must have a failed State verdict with a reason")
 	}
+	if got := result.Convergence(); got != Incomplete {
+		t.Fatalf("Convergence() = %s; an unrecorded Baseline leaves the Add incomplete", got)
+	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
 		t.Fatalf("the Skill must still be Materialized: %v", err)
 	}

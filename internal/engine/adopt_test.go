@@ -400,3 +400,39 @@ func mustEvalSymlinks(t *testing.T, path string) string {
 	}
 	return resolved
 }
+
+// Adopting a Skill moved to a local Source records no Baseline, so an
+// unreadable Scope state only warns; declaring a lock-recorded remote Skill
+// whose Baseline cannot be recorded leaves the Adopt incomplete (ADR-0002).
+func TestAdoptOnUnreadableScopeStateIsIncompleteOnlyForARemoteSkill(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		remote  bool
+		want    Convergence
+		verdict StateVerdict
+	}{
+		{name: "local", want: Converged, verdict: StateWarn},
+		{name: "remote", remote: true, want: Incomplete, verdict: StateFail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAdoptFixture(t)
+			f.untracked(t, "sample", "# Sample\n")
+			if tc.remote {
+				f.lock(t, map[string]string{"sample": "sample/SKILL.md"})
+			}
+			statePath, bad := writeUnreadableScopeState(t, f.skillsDir)
+
+			result := f.adopt(t, config.DefaultConfig())
+
+			if got := result.Convergence(); got != tc.want {
+				t.Fatalf("Convergence() = %s; want %s (%#v)", got, tc.want, result.Skills)
+			}
+			if result.State.Verdict != tc.verdict || result.State.Message == "" {
+				t.Fatalf("State = %#v; want verdict %s with a reason", result.State, tc.verdict)
+			}
+			if got, _ := os.ReadFile(statePath); string(got) != string(bad) {
+				t.Fatalf("Scope state = %q; an unreadable state must never be rewritten", got)
+			}
+		})
+	}
+}

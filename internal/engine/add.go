@@ -265,6 +265,20 @@ type AddResult struct {
 	State StateOutcome
 }
 
+// Convergence is what the Add left of its Scope. Every Skill is already
+// declared, so a blocked one leaves the Scope unreconciled, and a failed one
+// or an unrecorded Baseline leaves the work incomplete.
+func (r AddResult) Convergence() Convergence {
+	switch {
+	case r.Failed > 0:
+		return Incomplete
+	case r.Blocked > 0:
+		return max(Unreconciled, stateConvergence(r.State))
+	default:
+		return stateConvergence(r.State)
+	}
+}
+
 // ApplyAddPlan records all selected Skills in Config (a remote Source's
 // through its RemoteIntake), saves Config,
 // Materializes each Skill, and applies Availability. It returns an error only
