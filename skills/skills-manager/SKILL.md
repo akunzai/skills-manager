@@ -40,7 +40,7 @@ When calling `skills` in automated scripts or tool calls:
 - **Inspect with `--json`**: `skills ls --json` outputs structured inventory; `skills add <source> --list --json` previews a Source's Skills the same way, before choosing `--skill` names.
 - **Non-interactive Source Replacement**: When overwriting or migrating an existing skill (e.g. from a remote Git repository to a local CLI command), pass `-y` to automatically accept the replacement plan.
 - **Never bypass a signature block**: A `signature:` reason on a skipped Skill means its `skill.oms.sig` did not verify, so it was not written. Report it; do not edit `signature` in `skills.json`, delete the signature, or re-add the Source to get past it. If the reason names `skills update`, run that and retry. Never run `skills trust` on your own: it installs content whose signature does not verify, so only the human decides, after seeing the reason. A `!` / `[unverified]` mark in `skills ls` is such content.
-- **Self-update only on request**: Run `skills self-update` only when the human explicitly asks. A TTY notice that a newer release exists is not a request. A Homebrew or Scoop install refuses self-update and names that package manager's upgrade command instead.
+- **Self-update only on request**: Run `skills self-update` only when the human explicitly asks. A TTY notice that a newer release exists is not a request. On a Homebrew or mise install, self-update runs that package manager's upgrade command after a confirmation, which `--yes` answers; a Scoop install only names `scoop update skills-manager`.
 
 ## Configuration Structure (`skills.json`)
 
