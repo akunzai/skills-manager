@@ -53,37 +53,40 @@ func newDoctorCmd() *cobra.Command {
 			}
 
 			fmt.Fprintln(out, strings.Repeat(tableRule, 60))
-			if outcome.Remaining == 0 {
-				// Untracked occupancy, unmanaged Agent directories and reserved
-				// names are not issues (ADR-0002: 1 means the Scope does not
-				// match its Config), so the exit code stays 0 — but saying "top
-				// condition" above a standing warning is what made --fix read
-				// as broken.
-				var notes []string
-				for _, warning := range outcome.Warnings {
-					notes = append(notes, warningNote(warning))
-				}
-				if len(notes) > 0 {
-					fmt.Fprintf(out, "%s%sNo issues detected. %s.%s\n", colorBold, colorYellow, strings.Join(notes, "; "), colorReset)
-				} else {
-					fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n", colorBold, colorGreen, colorReset)
-				}
-				return nil
+			// Untracked occupancy, unmanaged Agent directories and reserved
+			// names are not issues (ADR-0002: 1 means the Scope does not match
+			// its Config), so they never change the exit code — but saying
+			// "top condition" above a standing warning is what made --fix read
+			// as broken.
+			var notes []string
+			for _, warning := range outcome.Warnings {
+				notes = append(notes, warningNote(warning))
 			}
-
-			// Not every issue is repairable by --fix or Sync — an invalid
-			// folder and an untracked Skill are not — so this line points at
-			// the per-finding next actions instead of promising a blanket
-			// repair it cannot deliver.
-			fmt.Fprintf(out, "%s%sFound %d issue(s). See the next action for each, or run with --fix.%s\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+			if outcome.Remaining > 0 {
+				// Not every issue is repairable by --fix or Sync — an invalid
+				// folder and an untracked Skill are not — so this line points
+				// at the per-finding next actions instead of promising a
+				// blanket repair it cannot deliver.
+				fmt.Fprintf(out, "%s%sFound %d issue(s). See the next action for each, or run with --fix.%s\n", colorBold, colorYellow, outcome.Remaining, colorReset)
+			}
 			// doctor is ADR-0002's third adopter: findings are a state to act
 			// on, not a command failure, so they exit 1 without the Error:
-			// prefix. 2 stays reserved for work that genuinely broke, and wins
-			// when both are present.
-			if outcome.Failed > 0 {
+			// prefix. 2 is work that genuinely broke.
+			switch outcome.Convergence() {
+			case engine.Incomplete:
+				if outcome.Remaining == 0 && len(notes) > 0 {
+					fmt.Fprintf(out, "%s%s%s.%s\n", colorBold, colorYellow, strings.Join(notes, "; "), colorReset)
+				}
 				return exitError{message: fmt.Sprintf("doctor could not complete %s", countOf(outcome.Failed, "repair")), code: 2}
+			case engine.Unreconciled:
+				return exitError{message: "Scope does not match its Config", code: 1}
 			}
-			return exitError{message: "Scope does not match its Config", code: 1}
+			if len(notes) > 0 {
+				fmt.Fprintf(out, "%s%sNo issues detected. %s.%s\n", colorBold, colorYellow, strings.Join(notes, "; "), colorReset)
+			} else {
+				fmt.Fprintf(out, "%s%sEverything is in top condition. No issues detected.%s\n", colorBold, colorGreen, colorReset)
+			}
+			return nil
 		},
 	}
 
