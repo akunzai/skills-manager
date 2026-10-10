@@ -18,10 +18,10 @@ func TestFreshnessSnapshotDispositionsPreserveIndependentAxes(t *testing.T) {
 	}{
 		{name: "no_action", repository: FreshnessRepository{RemoteStatus: RemoteUpToDate, Skills: []SkillFreshness{{Status: SkillInSync}}}, want: []FreshnessDispositionKind{FreshnessNone}},
 		{name: "unobserved remote", repository: FreshnessRepository{Skills: []SkillFreshness{{Status: SkillInSync}}}, want: []FreshnessDispositionKind{FreshnessNone}},
-		{name: "not cached", repository: FreshnessRepository{RemoteStatus: RemoteNotCached, Skills: []SkillFreshness{{Status: SkillUnverified}}}, want: []FreshnessDispositionKind{FreshnessUpdate, FreshnessSync}},
+		{name: "not cached", repository: FreshnessRepository{RemoteStatus: RemoteNotCached, Skills: []SkillFreshness{{Status: SkillNotCached}}}, want: []FreshnessDispositionKind{FreshnessUpdate, FreshnessSync}},
 		{name: "remote update and safe sync", repository: FreshnessRepository{RemoteStatus: RemoteUpdateAvailable, Skills: []SkillFreshness{{Status: SkillCacheUpdateAvailable}}}, want: []FreshnessDispositionKind{FreshnessUpdate, FreshnessSync}},
 		{name: "unknown baseline", repository: FreshnessRepository{RemoteStatus: RemoteUpToDate, Skills: []SkillFreshness{{Status: SkillUnknownBaseline}}}, want: []FreshnessDispositionKind{FreshnessSync}},
-		{name: "unverified cache", repository: FreshnessRepository{RemoteStatus: RemoteUpToDate, Skills: []SkillFreshness{{Status: SkillUnverified}}}, want: []FreshnessDispositionKind{FreshnessSync}},
+		{name: "unverified cache", repository: FreshnessRepository{RemoteStatus: RemoteUpToDate, Skills: []SkillFreshness{{Status: SkillNotCached}}}, want: []FreshnessDispositionKind{FreshnessSync}},
 		{name: "drift remains protected", repository: FreshnessRepository{RemoteStatus: RemoteUpToDate, Skills: []SkillFreshness{{Status: SkillLocalDrift}}}, want: []FreshnessDispositionKind{FreshnessSync, FreshnessProtectDrift}},
 		{name: "partial observation error", repository: FreshnessRepository{RemoteStatus: RemoteError, Skills: []SkillFreshness{{Status: SkillInSync}}}, want: []FreshnessDispositionKind{FreshnessUpdate, FreshnessInvestigate}},
 		{name: "skill error", repository: FreshnessRepository{RemoteStatus: RemoteUpToDate, Skills: []SkillFreshness{{Status: SkillError}}}, want: []FreshnessDispositionKind{FreshnessSync, FreshnessInvestigate}},
@@ -157,7 +157,7 @@ func TestInspectFreshnessReportsUnverifiedWithoutCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plan.Repositories[0].Skills[0].Status; got != SkillUnverified {
+	if got := plan.Repositories[0].Skills[0].Status; got != SkillNotCached {
 		t.Fatalf("status = %q", got)
 	}
 }
@@ -319,8 +319,8 @@ func TestInspectFreshnessTreatsUncoveredSkillAsMissingFromCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, skill := range snapshot.Repositories[0].Skills {
-		if skill.Status != SkillUnverified {
-			t.Errorf("%s status = %q; want %q", skill.Name, skill.Status, SkillUnverified)
+		if skill.Status != SkillNotCached {
+			t.Errorf("%s status = %q; want %q", skill.Name, skill.Status, SkillNotCached)
 		}
 	}
 }

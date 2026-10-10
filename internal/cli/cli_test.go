@@ -1631,7 +1631,7 @@ func TestCLIOutdatedJSONNestsScopeStatusAndReturnsNonZero(t *testing.T) {
 	if strings.Contains(out, "Error:") {
 		t.Fatalf("freshness difference printed as an error:\n%s", out)
 	}
-	if !strings.Contains(out, `"repositories"`) || !strings.Contains(out, `"skills"`) || !strings.Contains(out, `"status": "unverified"`) {
+	if !strings.Contains(out, `"repositories"`) || !strings.Contains(out, `"skills"`) || !strings.Contains(out, `"status": "not_cached"`) {
 		t.Fatalf("unexpected nested JSON:\n%s", out)
 	}
 }
@@ -3617,7 +3617,7 @@ func TestCLIOutdatedReportsIncompleteCache(t *testing.T) {
 	if got := ExitCode(err); err == nil || got != 1 {
 		t.Fatalf("outdated exit code = %d (err=%v); want 1:\n%s", got, err, out)
 	}
-	for _, want := range []string{"Cache: Cache incomplete", "beta: Unverified", "run 'skills update" + pathOverrideFlags(configFile, skillsDir, cacheDir) + "'"} {
+	for _, want := range []string{"Cache: Cache incomplete", "beta: Not cached", "run 'skills update" + pathOverrideFlags(configFile, skillsDir, cacheDir) + "'"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("outdated output lacks %q:\n%s", want, out)
 		}
