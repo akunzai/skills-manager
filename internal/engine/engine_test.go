@@ -440,7 +440,7 @@ func TestInventoryClassifiesConfigVsSkillsDir(t *testing.T) {
 	}
 
 	gotB, ok := byName["skill-b"]
-	if !ok || gotB.SourceType != "untracked" {
+	if !ok || gotB.Kind != models.InventoryUntracked {
 		t.Fatalf("skill-b = %+v", gotB)
 	}
 	if len(gotB.Agents) != 0 {

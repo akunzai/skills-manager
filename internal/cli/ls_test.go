@@ -309,3 +309,24 @@ func TestCLILsNameColumnCountsCharactersNotBytes(t *testing.T) {
 	}
 	t.Fatalf("no header row in:\n%s", out)
 }
+
+// ls --json's sourceType is a contract older than the typed Inventory row,
+// so each kind keeps the exact string it has always had.
+func TestLsSourceTypeKeepsTheJSONContract(t *testing.T) {
+	for _, tc := range []struct {
+		item models.SkillItem
+		want string
+	}{
+		{models.SkillItem{Kind: models.InventoryRemote, RepoType: "github"}, "github"},
+		{models.SkillItem{Kind: models.InventoryRemote, RepoType: "gitlab"}, "gitlab"},
+		{models.SkillItem{Kind: models.InventoryRemote, RepoType: "git"}, "git"},
+		{models.SkillItem{Kind: models.InventorySymlink}, "local_symlink"},
+		{models.SkillItem{Kind: models.InventoryCommand}, "local_command"},
+		{models.SkillItem{Kind: models.InventoryUntracked}, "untracked"},
+		{models.SkillItem{Kind: models.InventoryUntrackedLink}, "symlink"},
+	} {
+		if got := lsSourceType(tc.item); got != tc.want {
+			t.Errorf("lsSourceType(%#v) = %q; want %q", tc.item, got, tc.want)
+		}
+	}
+}

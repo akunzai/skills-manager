@@ -3,6 +3,8 @@ package presentation
 import (
 	"bytes"
 	"testing"
+
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 func TestForDisablesPresentationForBufferedOutput(t *testing.T) {
@@ -20,13 +22,22 @@ func TestForDisablesPresentationForBufferedOutput(t *testing.T) {
 }
 
 func TestSourceIconHasNoEmojiFallback(t *testing.T) {
-	style := Style{Plain: true}
-	if got := style.SourceIcon("github"); got != "[remote]" {
-		t.Fatalf("icon = %q, want [remote]", got)
-	}
-	style.Plain = false
-	if got := style.SourceIcon("symlink"); got != "→" {
-		t.Fatalf("icon = %q, want arrow", got)
+	for _, tc := range []struct {
+		kind        models.InventoryKind
+		icon, plain string
+	}{
+		{models.InventoryRemote, "●", "[remote]"},
+		{models.InventorySymlink, "→", "[link]"},
+		{models.InventoryUntrackedLink, "→", "[link]"},
+		{models.InventoryCommand, "›", "[command]"},
+		{models.InventoryUntracked, "○", "[untracked]"},
+	} {
+		if got := (Style{}).SourceIcon(tc.kind); got != tc.icon {
+			t.Errorf("icon for %d = %q, want %q", tc.kind, got, tc.icon)
+		}
+		if got := (Style{Plain: true}).SourceIcon(tc.kind); got != tc.plain {
+			t.Errorf("plain icon for %d = %q, want %q", tc.kind, got, tc.plain)
+		}
 	}
 }
 

@@ -692,15 +692,32 @@ func ParseRepoSource(raw string) ParsedRepoSource {
 	}
 }
 
+// InventoryKind is how Inventory classified a row: by the Skill kind Config
+// declares it with, or, for occupancy Config does not declare, by its shape
+// on the skills directory.
+type InventoryKind int
+
+const (
+	InventoryRemote InventoryKind = iota
+	InventorySymlink
+	InventoryCommand
+	// InventoryUntracked is a real directory or file Config does not declare.
+	InventoryUntracked
+	// InventoryUntrackedLink is a symlink Config does not declare.
+	InventoryUntrackedLink
+)
+
 // SkillItem is one Skill as Inventory classified it against a Scope's Config
 // and skills directory. It is an engine row, not a wire format: a frontend
 // that needs JSON (ls --json) defines its own typed DTO and picks its own
 // presentation, such as a tilde path or a Scope label (ADR-0008).
 type SkillItem struct {
-	Name       string
-	SourceType string // "github", "gitlab", "git", "local_symlink", "local_command", "symlink", "untracked"
-	Source     string
-	Subpath    string
+	Name string
+	Kind InventoryKind
+	// RepoType is a remote Skill's forge: "github", "gitlab", or "git".
+	RepoType string
+	Source   string
+	Subpath  string
 	// InstalledPath is always set: the Skill's path on the skills directory
 	// if it is on disk, otherwise the path it would take there.
 	InstalledPath string
