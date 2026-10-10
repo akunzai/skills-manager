@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 type AgentHealth struct {
@@ -53,9 +54,9 @@ type ItemRepair struct {
 // can be re-Materialized, a symlinked one is only as valid as its Source — so
 // the finding carries the declaration, not just the name.
 type InvalidSkill struct {
-	Name       string
-	SourceType string
-	Source     string
+	Name   string
+	Kind   models.InventoryKind
+	Source string
 }
 
 // IllegalLocalSource is a declared local symlink whose Source resolves inside

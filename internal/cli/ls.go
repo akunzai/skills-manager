@@ -148,7 +148,7 @@ func newLsCmd() *cobra.Command {
 				pat := strings.ToLower(strings.TrimSpace(flagSource))
 				filtered := make([]models.SkillItem, 0)
 				for _, s := range skills {
-					if strings.Contains(strings.ToLower(s.Source), pat) || strings.Contains(strings.ToLower(s.SourceType), pat) {
+					if strings.Contains(strings.ToLower(s.Source), pat) || strings.Contains(strings.ToLower(lsSourceType(s)), pat) {
 						filtered = append(filtered, s)
 					}
 				}
@@ -171,7 +171,7 @@ func newLsCmd() *cobra.Command {
 						Scope:      scopeLabel,
 						Agents:     s.Agents,
 						Source:     models.ToTildePath(s.Source),
-						SourceType: s.SourceType,
+						SourceType: lsSourceType(s),
 						Subpath:    s.Subpath,
 						Installed:  s.IsInstalled,
 						Valid:      s.IsValidSkill,
@@ -247,17 +247,14 @@ func newLsCmd() *cobra.Command {
 				label, color := lsStatus(s)
 				statusDisplay := fmt.Sprintf("%s%s%s", color(style), padRight(label, statusWidth), style.Reset)
 
-				icon := style.SourceIcon(s.SourceType)
+				icon := style.SourceIcon(s.Kind)
 				var rawSource string
-				if s.SourceType == "untracked" {
+				switch s.Kind {
+				case models.InventoryUntracked:
 					rawSource = icon
-				} else if strings.HasPrefix(s.SourceType, "local_symlink") || s.SourceType == "symlink" {
+				case models.InventorySymlink, models.InventoryUntrackedLink:
 					rawSource = fmt.Sprintf("%s %s", icon, models.ToTildePath(s.Source))
-				} else if s.SourceType == "local_command" || s.SourceType == "command" {
-					rawSource = fmt.Sprintf("%s %s", icon, s.Source)
-				} else if strings.HasPrefix(s.SourceType, "local_") {
-					rawSource = fmt.Sprintf("%s %s", icon, models.ToTildePath(s.Source))
-				} else {
+				default:
 					rawSource = fmt.Sprintf("%s %s", icon, s.Source)
 				}
 				// Only a signed copy, and one applied from Trusted content, is
@@ -337,5 +334,21 @@ func lsStatus(s models.SkillItem) (string, func(presentation.Style) string) {
 		return "Invalid (No SKILL.md)", red
 	default:
 		return "Installed", green
+	}
+}
+
+// lsSourceType is the sourceType ls --json has always printed for a row.
+func lsSourceType(item models.SkillItem) string {
+	switch item.Kind {
+	case models.InventorySymlink:
+		return "local_symlink"
+	case models.InventoryCommand:
+		return "local_command"
+	case models.InventoryUntracked:
+		return "untracked"
+	case models.InventoryUntrackedLink:
+		return "symlink"
+	default:
+		return item.RepoType
 	}
 }

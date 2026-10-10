@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"golang.org/x/term"
+
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 type Style struct {
@@ -64,15 +66,15 @@ func (s Style) UnverifiedMark() string {
 	return "!"
 }
 
-func (s Style) SourceIcon(sourceType string) string {
-	kind := "remote"
-	switch {
-	case sourceType == "symlink" || sourceType == "local_symlink":
-		kind = "link"
-	case sourceType == "local_command" || sourceType == "command":
-		kind = "command"
-	case sourceType == "untracked":
-		kind = "untracked"
+func (s Style) SourceIcon(kind models.InventoryKind) string {
+	icon := "remote"
+	switch kind {
+	case models.InventorySymlink, models.InventoryUntrackedLink:
+		icon = "link"
+	case models.InventoryCommand:
+		icon = "command"
+	case models.InventoryUntracked:
+		icon = "untracked"
 	}
 
 	if !s.Plain {
@@ -81,14 +83,14 @@ func (s Style) SourceIcon(sourceType string) string {
 			"command":   "›",
 			"untracked": "○",
 			"remote":    "●",
-		}[kind]
+		}[icon]
 	}
 	return map[string]string{
 		"link":      "[link]",
 		"command":   "[command]",
 		"untracked": "[untracked]",
 		"remote":    "[remote]",
-	}[kind]
+	}[icon]
 }
 
 // LineWidth is how many columns one line on w may take without wrapping, or

@@ -104,13 +104,49 @@ func TestLoadInventoryClassifiesOccupancy(t *testing.T) {
 	if !reflect.DeepEqual(statuses, wantStatuses) {
 		t.Fatalf("statuses = %#v; want %#v", statuses, wantStatuses)
 	}
+}
+
+// Each row carries how it was declared, or for occupancy Config does not
+// declare, its shape on disk, so a frontend never parses a string for it. A
+// local type Config does not know is a symlink, as Sync treats it.
+func TestLoadInventoryClassifiesKind(t *testing.T) {
+	skillsDir := filepath.Join(t.TempDir(), "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "orphan"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "gone"), filepath.Join(skillsDir, "leftover")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/hub", "hub", "hub", "github", "")
+	config.AddRemoteSkillEntry(cfg, "group/lab", "lab", "lab", "gitlab", "")
+	config.AddLocalSymlinkEntry(cfg, "linked", "/src/linked", "")
+	config.AddLocalCommandEntry(cfg, "installed", "install-it", "", "")
+	cfg.Local["odd"] = config.LocalEntry{Type: "foo", Source: "/src/odd"}
+
+	inv, err := LoadInventory(cfg, skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		Kind     models.InventoryKind
+		RepoType string
+	}
+	got := make(map[string]row)
 	for _, item := range inv.SkillItems(nil) {
-		if item.Name == "orphan" && item.SourceType != "untracked" {
-			t.Fatalf("projection SourceType for orphan = %q", item.SourceType)
-		}
-		if item.Name == "leftover" && item.SourceType != "symlink" {
-			t.Fatalf("projection SourceType for leftover = %q", item.SourceType)
-		}
+		got[item.Name] = row{item.Kind, item.RepoType}
+	}
+	want := map[string]row{
+		"hub":       {models.InventoryRemote, "github"},
+		"lab":       {models.InventoryRemote, "gitlab"},
+		"linked":    {models.InventorySymlink, ""},
+		"installed": {models.InventoryCommand, ""},
+		"odd":       {models.InventorySymlink, ""},
+		"orphan":    {models.InventoryUntracked, ""},
+		"leftover":  {models.InventoryUntrackedLink, ""},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("kinds = %#v; want %#v", got, want)
 	}
 }
 

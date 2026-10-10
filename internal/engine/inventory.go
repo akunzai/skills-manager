@@ -28,9 +28,8 @@ type Inventory struct {
 }
 
 type presentSkill struct {
-	Name       string
-	SourceType string
-	Source     string
+	Name   string
+	Source string
 }
 
 func (inv Inventory) Missing() []string { return slices.Clone(inv.missing) }
@@ -51,7 +50,7 @@ func (inv Inventory) IllegalLocal() []IllegalLocalSource { return slices.Clone(i
 
 // SkillItems projects classified occupancy into the engine row a frontend
 // builds its own presentation from. Callers that decide from occupancy use
-// the typed queries instead of SourceType. baselines fills Signed and
+// the typed queries instead of a row's Kind. baselines fills Signed and
 // Unverified, the same rule ls has always used: both are true only for an
 // installed Skill, since only Sync's Apply records a Baseline. A nil
 // baselines leaves them false, as when the caller has no Scope state to
@@ -111,11 +110,12 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 				repoType = "github"
 			}
 			items[name] = &models.SkillItem{
-				Name:       name,
-				SourceType: repoType,
-				Source:     sourceKey,
-				Subpath:    subpath,
-				Agents:     availability.ManagedAgents(name),
+				Name:     name,
+				Kind:     models.InventoryRemote,
+				RepoType: repoType,
+				Source:   sourceKey,
+				Subpath:  subpath,
+				Agents:   availability.ManagedAgents(name),
 			}
 		}
 	}
@@ -128,9 +128,14 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 		if src == "" {
 			src = "local"
 		}
+		// A type Config does not know is a symlink, as Sync treats it.
+		rowKind := models.InventorySymlink
+		if localInfo.Type == "command" {
+			rowKind = models.InventoryCommand
+		}
 		items[name] = &models.SkillItem{
 			Name:        name,
-			SourceType:  "local_" + localInfo.Type,
+			Kind:        rowKind,
 			Source:      src,
 			Description: localInfo.Description,
 			Agents:      availability.ManagedAgents(name),
@@ -159,18 +164,18 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 			}
 			item, exists := items[name]
 			if !exists {
-				sourceType := "untracked"
+				rowKind := models.InventoryUntracked
 				source := "local"
 				if info != nil && info.Mode()&os.ModeSymlink != 0 {
-					sourceType = "symlink"
+					rowKind = models.InventoryUntrackedLink
 					if linkTarget, err := os.Readlink(fullPath); err == nil {
 						source = linkTarget
 					}
 				}
 				item = &models.SkillItem{
-					Name:       name,
-					SourceType: sourceType,
-					Source:     source,
+					Name:   name,
+					Kind:   rowKind,
+					Source: source,
 				}
 				items[name] = item
 			}
@@ -212,29 +217,29 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 		case !item.IsInstalled:
 			item.Status = models.SkillStatusMissing
 			inv.missing = append(inv.missing, item.Name)
-		case item.SourceType == "symlink":
+		case item.Kind == models.InventoryUntrackedLink:
 			item.Status = models.SkillStatusUntrackedLink
 			inv.untrackedLinks = append(inv.untrackedLinks, item.Name)
-		case item.SourceType == "untracked":
+		case item.Kind == models.InventoryUntracked:
 			item.Status = models.SkillStatusUntracked
 			inv.untracked = append(inv.untracked, item.Name)
 			if mode.IsDir() {
 				inv.untrackedDirs = append(inv.untrackedDirs, item.Name)
 			}
-		case item.SourceType == "local_symlink" && models.LocalSourceInsideSkillsDir(models.ResolveLocalSourcePath(item.Source, baseSkills), baseSkills) && mode&os.ModeSymlink == 0 && mode != 0:
+		case item.Kind == models.InventorySymlink && models.LocalSourceInsideSkillsDir(models.ResolveLocalSourcePath(item.Source, baseSkills), baseSkills) && mode&os.ModeSymlink == 0 && mode != 0:
 			item.Status = models.SkillStatusIllegalLocal
 			inv.illegalLocal = append(inv.illegalLocal, IllegalLocalSource{Name: item.Name, Source: item.Source})
-		case item.SourceType == "local_symlink" && mode.IsRegular():
+		case item.Kind == models.InventorySymlink && mode.IsRegular():
 			item.Status = models.SkillStatusStub
 			inv.stubs = append(inv.stubs, item.Name)
-			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
+			inv.present = append(inv.present, presentSkill{Name: item.Name, Source: item.Source})
 		case !item.IsValidSkill:
 			item.Status = models.SkillStatusInvalid
-			inv.invalid = append(inv.invalid, InvalidSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
-			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
+			inv.invalid = append(inv.invalid, InvalidSkill{Name: item.Name, Kind: item.Kind, Source: item.Source})
+			inv.present = append(inv.present, presentSkill{Name: item.Name, Source: item.Source})
 		default:
 			item.Status = models.SkillStatusPresent
-			inv.present = append(inv.present, presentSkill{Name: item.Name, SourceType: item.SourceType, Source: item.Source})
+			inv.present = append(inv.present, presentSkill{Name: item.Name, Source: item.Source})
 		}
 	}
 	return inv, nil
