@@ -8,12 +8,18 @@ import "strings"
 type PackageManagerInstall struct {
 	Name    string
 	Command string
+	// UpgradesWhileRunning reports whether Command can replace this binary
+	// while it is running, so self-update can run Command itself. Scoop
+	// cannot: scoop update skips an app with a process running from its
+	// directory (test_running_process in Scoop's lib/install.ps1), and
+	// self-update is one.
+	UpgradesWhileRunning bool
 }
 
 // Homebrew's acceptance policy forbids a formula from updating itself, a
 // Scoop manifest owns the binary the same way, and mise tracks its own
-// installs by content-addressed path, so self-update must refuse to replace
-// any of them and name the upgrade command instead.
+// installs by content-addressed path, so self-update must never replace
+// any of them itself: it runs the upgrade command, or names it (ADR-0011).
 const (
 	HomebrewUpgradeCommand = "brew upgrade akunzai/tap/skills-manager"
 	ScoopUpgradeCommand    = "scoop update skills-manager"
@@ -49,7 +55,7 @@ func ClassifyExecutablePath(path, goos string) *PackageManagerInstall {
 
 	for _, seg := range segments {
 		if seg == "Cellar" {
-			return &PackageManagerInstall{Name: "Homebrew", Command: HomebrewUpgradeCommand}
+			return &PackageManagerInstall{Name: "Homebrew", Command: HomebrewUpgradeCommand, UpgradesWhileRunning: true}
 		}
 	}
 
@@ -59,7 +65,7 @@ func ClassifyExecutablePath(path, goos string) *PackageManagerInstall {
 	}
 
 	if isMiseInstalls(segments, caseInsensitive) {
-		return &PackageManagerInstall{Name: "mise", Command: MiseUpgradeCommand}
+		return &PackageManagerInstall{Name: "mise", Command: MiseUpgradeCommand, UpgradesWhileRunning: true}
 	}
 
 	return nil
