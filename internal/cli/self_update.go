@@ -20,6 +20,9 @@ var (
 	// selfUpdateCheck is a seam over updater.CheckSelfUpdate so a test can
 	// assert it is never called when a package manager owns this install.
 	selfUpdateCheck = updater.CheckSelfUpdate
+	// selfUpdateInstall is a seam over updater.DownloadAndInstallBinary so a
+	// test can run the install path without replacing a binary.
+	selfUpdateInstall = updater.DownloadAndInstallBinary
 )
 
 func newSelfUpdateCmd() *cobra.Command {
@@ -69,20 +72,31 @@ reports the same command.`,
 				// printing the same failure twice.
 				cmd.SilenceErrors = true
 				if flagJSON {
-					data, _ := json.MarshalIndent(map[string]string{"status": "error", "error": err.Error()}, "", "  ")
-					fmt.Fprintln(out, string(data))
+					printSelfUpdateJSONError(out, err)
 				} else {
 					fmt.Fprintf(cmd.ErrOrStderr(), "%sFailed to check for updates: %s%s\n\n", errStyle.Red, err, errStyle.Reset)
 				}
 				return err
 			}
 
+			// JSON keeps stdout for one document: a check prints the release
+			// it found, and anything past it prints what became of the
+			// install once it is over, with text going nowhere.
+			text := out
 			if flagJSON {
-				data, _ := json.MarshalIndent(info, "", "  ")
-				fmt.Fprintln(out, string(data))
 				if flagCheck || (!info.UpdateAvailable && !flagForce) {
+					data, _ := json.MarshalIndent(info, "", "  ")
+					fmt.Fprintln(out, string(data))
 					return nil
 				}
+				text = io.Discard
+			}
+			fail := func(err error) error {
+				if flagJSON {
+					cmd.SilenceErrors = true
+					printSelfUpdateJSONError(out, err)
+				}
+				return err
 			}
 
 			cmp := updater.CompareSemver(info.CurrentVersion, info.LatestVersion)
@@ -92,50 +106,56 @@ reports the same command.`,
 			}
 
 			if flagCheck {
-				fmt.Fprintf(out, "Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
-				fmt.Fprintf(out, "%s %s%s%s\n", releaseLabel, colorBold, info.LatestTag, colorReset)
+				fmt.Fprintf(text, "Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
+				fmt.Fprintf(text, "%s %s%s%s\n", releaseLabel, colorBold, info.LatestTag, colorReset)
 				if info.UpdateAvailable {
-					fmt.Fprintf(out, "\n%s%sUpdate available: %s -> %s%s\n", colorYellow, colorBold, info.CurrentVersion, info.LatestTag, colorReset)
+					fmt.Fprintf(text, "\n%s%sUpdate available: %s -> %s%s\n", colorYellow, colorBold, info.CurrentVersion, info.LatestTag, colorReset)
 					if pkgMgr != nil {
-						fmt.Fprintf(out, "Run '%s%s%s' to upgrade.\n\n", colorBold, pkgMgr.Command, colorReset)
+						fmt.Fprintf(text, "Run '%s%s%s' to upgrade.\n\n", colorBold, pkgMgr.Command, colorReset)
 					} else {
-						fmt.Fprintf(out, "Run '%s%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset, colorReset)
+						fmt.Fprintf(text, "Run '%s%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset, colorReset)
 					}
 				} else {
-					printSelfUpdateCurrent(out, info, cmp, flagVersion != "")
+					printSelfUpdateCurrent(text, info, cmp, flagVersion != "")
 				}
 				return nil
 			}
 
 			if !info.UpdateAvailable && !flagForce {
-				fmt.Fprintf(out, "Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
-				fmt.Fprintf(out, "%s %s%s%s\n", releaseLabel, colorBold, info.LatestTag, colorReset)
-				printSelfUpdateCurrent(out, info, cmp, flagVersion != "")
+				fmt.Fprintf(text, "Current version: %s%s%s\n", colorBold, info.CurrentVersion, colorReset)
+				fmt.Fprintf(text, "%s %s%s%s\n", releaseLabel, colorBold, info.LatestTag, colorReset)
+				printSelfUpdateCurrent(text, info, cmp, flagVersion != "")
 				return nil
 			}
 
 			if info.AssetURL == "" {
-				return fmt.Errorf("no compatible binary asset found in release %s", info.LatestTag)
+				return fail(fmt.Errorf("no compatible binary asset found in release %s", info.LatestTag))
 			}
 
 			targetPath := selfUpdateExecutablePath()
-			fmt.Fprintf(out, "Upgrading skills CLI:\n")
-			fmt.Fprintf(out, "  Version:   %s%s%s -> %s%s%s\n", colorYellow, info.CurrentVersion, colorReset, colorGreen, info.LatestTag, colorReset)
-			fmt.Fprintf(out, "  Target:    %s\n", models.ToTildePath(targetPath))
-			fmt.Fprintf(out, "  Download:  %s\n", info.AssetURL)
+			fmt.Fprintf(text, "Upgrading skills CLI:\n")
+			fmt.Fprintf(text, "  Version:   %s%s%s -> %s%s%s\n", colorYellow, info.CurrentVersion, colorReset, colorGreen, info.LatestTag, colorReset)
+			fmt.Fprintf(text, "  Target:    %s\n", models.ToTildePath(targetPath))
+			fmt.Fprintf(text, "  Download:  %s\n", info.AssetURL)
 
 			if flagDryRun {
-				fmt.Fprintf(out, "\n%s[Dry-run]%s Would download and replace %s with %s\n\n", colorCyan, colorReset, models.ToTildePath(targetPath), info.LatestTag)
+				fmt.Fprintf(text, "\n%s[Dry-run]%s Would download and replace %s with %s\n\n", colorCyan, colorReset, models.ToTildePath(targetPath), info.LatestTag)
+				if flagJSON {
+					printSelfUpdateJSON(out, selfUpdateJSON{SelfUpdateInfo: info, Status: "dry_run"})
+				}
 				return nil
 			}
 
-			fmt.Fprintf(out, "\nDownloading and installing %s...\n", info.LatestTag)
-			installedDest, err := updater.DownloadAndInstallBinary(info.AssetURL, info.ChecksumsURL, targetPath, 30)
+			fmt.Fprintf(text, "\nDownloading and installing %s...\n", info.LatestTag)
+			installedDest, err := selfUpdateInstall(info.AssetURL, info.ChecksumsURL, targetPath, 30)
 			if err != nil {
-				return fmt.Errorf("update failed: %w", err)
+				return fail(fmt.Errorf("update failed: %w", err))
+			}
+			if flagJSON {
+				printSelfUpdateJSON(out, selfUpdateJSON{SelfUpdateInfo: info, Status: "updated", InstalledPath: installedDest})
 			}
 
-			fmt.Fprintf(out, "%sUpdated skills to %s%s%s. (%s)%s\n\n", colorGreen, colorBold, info.LatestTag, colorReset, models.ToTildePath(installedDest), colorReset)
+			fmt.Fprintf(text, "%sUpdated skills to %s%s%s. (%s)%s\n\n", colorGreen, colorBold, info.LatestTag, colorReset, models.ToTildePath(installedDest), colorReset)
 			return nil
 		},
 	}
@@ -147,6 +167,24 @@ reports the same command.`,
 	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON")
 
 	return cmd
+}
+
+// selfUpdateJSON is what self-update --json prints once an install it went
+// on to was previewed or done: the release it checked, and what became of it.
+type selfUpdateJSON struct {
+	*updater.SelfUpdateInfo
+	Status        string `json:"status"`
+	InstalledPath string `json:"installed_path,omitempty"`
+}
+
+func printSelfUpdateJSON(out io.Writer, doc selfUpdateJSON) {
+	data, _ := json.MarshalIndent(doc, "", "  ")
+	fmt.Fprintln(out, string(data))
+}
+
+func printSelfUpdateJSONError(out io.Writer, err error) {
+	data, _ := json.MarshalIndent(map[string]string{"status": "error", "error": err.Error()}, "", "  ")
+	fmt.Fprintln(out, string(data))
 }
 
 // reportPackageManagerManagedInstall states that pkgMgr already owns this
