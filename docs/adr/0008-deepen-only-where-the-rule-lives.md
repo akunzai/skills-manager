@@ -21,6 +21,11 @@ A second October 2026 review proposed one more, rejected because the rule alread
 
 - **Update's outcome becomes a `Convergence`, as Doctor's did.** `PreparedUpdate.Finish` already decides Update's five `UpdateState`s and their precedence (a refresh failure, then a Sync failure, then pending Sync, then pending refresh), and `update_run_test.go` tests it. The CLI's switch on `State` only picks Update's sentences and hands the Sync half to `reportSyncOutcome`; a refresh failure exits 2 through `ExitCode`'s default for an uncoded error, which is ADR-0002's mapping, not a coincidence. A `Convergence()` beside `State` would leave that switch in place, so it would add a layer rather than remove one. Kept instead: `UpdateState`, decided in `Finish`.
 
+The same review proposed two more, rejected because nothing is decided twice:
+
+- **One consent policy for `--yes` across prune and rm.** prune under `--yes` never calls `PrunePlan.Select`, so no Untracked real directory is approved and apply leaves every one. The CLI's list of skipped directories is therefore exactly `plan.UntrackedDirs`. rm under `--yes` approves the directory because the user named it. The two commands consent to different things by design, and the safety rule stays where #203 put it. Kept instead: `PrunePlan.Select` and `RemovePlan.ApproveUntrackedDirectories`, each read by its own command.
+- **Self-update decides its install in the updater rather than in the CLI.** The upgrade command to suggest is `ClassifyExecutablePath`'s package-manager command, or else `skills self-update`. The check and the once-a-day notice both reach it the same way, in two lines, and Self-update has one frontend. Kept instead: the updater's helpers, with the orchestration in `self-update`'s `RunE`.
+
 Revisit when a second frontend, such as a `--json` for doctor or prune, needs the same grouping or wording the CLI now owns. Presentation would then have two adapters, and a shared seam for it would be real.
 
 This does not reopen ADR-0001 (Add's Source kind switch) or ADR-0002 (exit codes express state).
