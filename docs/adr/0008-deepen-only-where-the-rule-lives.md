@@ -26,6 +26,11 @@ The same review proposed two more, rejected because nothing is decided twice:
 - **One consent policy for `--yes` across prune and rm.** prune under `--yes` never calls `PrunePlan.Select`, so no Untracked real directory is approved and apply leaves every one. The CLI's list of skipped directories is therefore exactly `plan.UntrackedDirs`. rm under `--yes` approves the directory because the user named it. The two commands consent to different things by design, and the safety rule stays where #203 put it. Kept instead: `PrunePlan.Select` and `RemovePlan.ApproveUntrackedDirectories`, each read by its own command.
 - **Self-update decides its install in the updater rather than in the CLI.** The upgrade command to suggest is `ClassifyExecutablePath`'s package-manager command, or else `skills self-update`. The check and the once-a-day notice both reach it the same way, in two lines, and Self-update has one frontend. Kept instead: the updater's helpers, with the orchestration in `self-update`'s `RunE`.
 
+Two more from those October reviews, rejected because they would scatter a rule rather than gather it:
+
+- **Split `internal/engine/adopt.go` by concern.** It is long, but it is one deep module: `BuildAdoptPlan`, the plan's `Select`, and its apply sit in front of a per-Skill transaction that undoes its moves and its Config change when a step fails before the declaration. Splitting it would spread that transaction across files without making the interface any smaller. Kept instead: one file.
+- **One command runner for load, plan, prompt, apply, and report.** Every command orders those steps the same way, but each step's prompt and report is that command's product, as the rejections above already say. A runner would move the order into a framework and leave every step behind as a callback. Kept instead: each command's `RunE`.
+
 Revisit when a second frontend, such as a `--json` for doctor or prune, needs the same grouping or wording the CLI now owns. Presentation would then have two adapters, and a shared seam for it would be real.
 
 This does not reopen ADR-0001 (Add's Source kind switch) or ADR-0002 (exit codes express state).
