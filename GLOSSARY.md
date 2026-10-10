@@ -73,7 +73,7 @@ Reconciling the selected Scope from its Config and existing Cache, without netwo
 _Avoid_: restore, install (when you mean the whole declared state)
 
 **Convergence**:
-Whether a command left its Scope matching its Config (converged), not matching it with a next action (unreconciled), or could not complete its work (incomplete) — ADR-0002's three outcomes, decided once per result. Add, Adopt, rm, Sync, and Doctor decide it this way; Update still decides its refresh outcome apart, through `UpdateState`.
+Whether a command left its Scope matching its Config (converged), not matching it with a next action (unreconciled), or could not complete its work (incomplete) — ADR-0002's three outcomes, decided once per result. Add, Adopt, rm, Sync, and Doctor decide it this way; Update decides it in the engine too, as an `UpdateState` that also says whether the refresh or the Sync is what is left (ADR-0008).
 _Avoid_: disposition (that is Freshness's), status, exit code
 
 **Baseline**:
