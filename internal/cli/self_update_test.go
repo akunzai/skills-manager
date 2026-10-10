@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -187,6 +188,77 @@ func TestSelfUpdateCheckWithAPinnedVersion(t *testing.T) {
 			}
 			if !strings.Contains(out, tc.want) || strings.Contains(out, "ahead of latest release") {
 				t.Fatalf("output = %q; want %q", out, tc.want)
+			}
+		})
+	}
+}
+
+func stubSelfUpdateInstall(t *testing.T, install func(assetURL, checksumsURL, targetPath string, timeoutSec int) (string, error)) {
+	t.Helper()
+	old := selfUpdateInstall
+	selfUpdateInstall = install
+	t.Cleanup(func() { selfUpdateInstall = old })
+}
+
+// --json keeps stdout for one document whatever self-update ends up doing
+// with an available release: installing it, previewing it, or failing to.
+func TestSelfUpdateJSONIsOneDocument(t *testing.T) {
+	stubSelfUpdateExecutablePath(t, "/home/alice/.local/bin/skills")
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		noAsset    bool
+		installErr error
+		wantStatus string
+		wantErr    bool
+		installs   bool
+	}{
+		{name: "installed", args: []string{"--json"}, wantStatus: "updated", installs: true},
+		{name: "dry run", args: []string{"--json", "--dry-run"}, wantStatus: "dry_run"},
+		{name: "install failed", args: []string{"--json"}, installErr: errors.New("checksum mismatch"), wantStatus: "error", wantErr: true, installs: true},
+		{name: "no compatible asset", args: []string{"--json"}, noAsset: true, wantStatus: "error", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubSelfUpdateCheck(t, func(string) (*updater.SelfUpdateInfo, error) {
+				info := &updater.SelfUpdateInfo{CurrentVersion: "0.18.0", LatestVersion: "0.19.0", LatestTag: "v0.19.0", UpdateAvailable: true, AssetURL: "https://example.invalid/skills.tar.gz"}
+				if tc.noAsset {
+					info.AssetURL = ""
+				}
+				return info, nil
+			})
+			installed := false
+			stubSelfUpdateInstall(t, func(_, _, targetPath string, _ int) (string, error) {
+				installed = true
+				return targetPath, tc.installErr
+			})
+
+			out, err := runCLI(t, append([]string{"self-update"}, tc.args...)...)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("self-update %v: err = %v\n%s", tc.args, err, out)
+			}
+			if tc.wantErr && ExitCode(err) != 2 {
+				t.Fatalf("exit code = %d; want 2", ExitCode(err))
+			}
+			if installed != tc.installs {
+				t.Fatalf("installed = %v; want %v", installed, tc.installs)
+			}
+			var doc map[string]any
+			decoder := json.NewDecoder(strings.NewReader(out))
+			if err := decoder.Decode(&doc); err != nil {
+				t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+			}
+			if decoder.More() {
+				t.Fatalf("stdout holds more than one JSON document:\n%s", out)
+			}
+			if doc["status"] != tc.wantStatus {
+				t.Fatalf("status = %v; want %s\n%s", doc["status"], tc.wantStatus, out)
+			}
+			// A failure says why; anything else reports the release it checked.
+			if tc.wantErr && (doc["error"] == nil || doc["error"] == "") {
+				t.Fatalf("error document has no error:\n%s", out)
+			}
+			if !tc.wantErr && doc["latest_tag"] != "v0.19.0" {
+				t.Fatalf("latest_tag = %v; want v0.19.0\n%s", doc["latest_tag"], out)
 			}
 		})
 	}
