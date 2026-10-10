@@ -113,7 +113,7 @@ reports the same command.`,
 					if pkgMgr != nil {
 						fmt.Fprintf(text, "Run '%s%s%s' to upgrade.\n\n", colorBold, pkgMgr.Command, colorReset)
 					} else {
-						fmt.Fprintf(text, "Run '%s%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset, colorReset)
+						fmt.Fprintf(text, "Run '%sskills self-update%s' to upgrade.\n\n", colorBold, colorReset)
 					}
 				} else {
 					printSelfUpdateCurrent(text, info, cmp, flagVersion != "")
