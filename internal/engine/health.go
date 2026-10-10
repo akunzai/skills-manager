@@ -148,6 +148,21 @@ type DoctorOutcome struct {
 	Warnings []DoctorWarning
 }
 
+// Convergence is what Doctor left of the Scope. A failed repair is
+// incomplete even when the diagnosis after it finds nothing, because a
+// condition that merely stopped being detected is not one --fix repaired.
+// Warnings are not issues, so they never move it.
+func (o DoctorOutcome) Convergence() Convergence {
+	switch {
+	case o.Failed > 0:
+		return Incomplete
+	case o.Remaining > 0:
+		return Unreconciled
+	default:
+		return Converged
+	}
+}
+
 type DoctorReplaceForeign func([]ForeignAvailabilityPath) (bool, error)
 
 func NewDoctor(cfg *config.Config, skillsDir string) *Doctor {

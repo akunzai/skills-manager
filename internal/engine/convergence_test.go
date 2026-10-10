@@ -87,3 +87,27 @@ func TestRemoveResultConvergence(t *testing.T) {
 		})
 	}
 }
+
+// Doctor's findings are a state to act on and a failed repair is work that
+// broke, so a failed repair is incomplete even when the diagnosis after it
+// finds nothing left, and a warning is never an issue.
+func TestDoctorOutcomeConvergence(t *testing.T) {
+	warned := []DoctorWarning{{Kind: DoctorFindingUntracked, Count: 1}}
+	for _, tc := range []struct {
+		name    string
+		outcome DoctorOutcome
+		want    Convergence
+	}{
+		{name: "no issues", outcome: DoctorOutcome{}, want: Converged},
+		{name: "only warnings", outcome: DoctorOutcome{Warnings: warned}, want: Converged},
+		{name: "issues remain", outcome: DoctorOutcome{Remaining: 2}, want: Unreconciled},
+		{name: "a failed repair beside remaining issues", outcome: DoctorOutcome{AttemptedFix: true, Remaining: 1, Failed: 1}, want: Incomplete},
+		{name: "a failed repair the diagnosis after it no longer finds", outcome: DoctorOutcome{AttemptedFix: true, Failed: 1}, want: Incomplete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.outcome.Convergence(); got != tc.want {
+				t.Fatalf("Convergence() = %s; want %s", got, tc.want)
+			}
+		})
+	}
+}
