@@ -129,7 +129,7 @@ Refreshing remote Sources into the shared Cache, including covering the replacem
 _Avoid_: upgrade, pull (when you mean this command), Self-update
 
 **Self-update**:
-Replacement of this CLI's own binary by a newer published release.
+Replacement of this CLI's own binary by a newer published release: by this CLI itself, or, for a Homebrew or mise install, by that package manager's upgrade command, which self-update runs (ADR-0011).
 _Avoid_: Update, upgrade (when you mean this or the Source command)
 
 **Doctor**:

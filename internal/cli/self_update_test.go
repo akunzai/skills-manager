@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -259,6 +261,82 @@ func TestSelfUpdateJSONIsOneDocument(t *testing.T) {
 			}
 			if !tc.wantErr && doc["latest_tag"] != "v0.19.0" {
 				t.Fatalf("latest_tag = %v; want v0.19.0\n%s", doc["latest_tag"], out)
+			}
+		})
+	}
+}
+
+func stubSelfUpdateRunPackageManager(t *testing.T, run func(argv []string) error) *[][]string {
+	t.Helper()
+	var calls [][]string
+	old := selfUpdateRunPackageManager
+	selfUpdateRunPackageManager = func(argv []string, _ io.Reader, _, _ io.Writer) error {
+		calls = append(calls, argv)
+		return run(argv)
+	}
+	t.Cleanup(func() { selfUpdateRunPackageManager = old })
+	return &calls
+}
+
+// Homebrew and mise can replace the running binary, so self-update hands the
+// upgrade to them once the user agrees. Scoop skips an app that is running,
+// and a pinned version, --json, or --dry-run never runs anything.
+func TestSelfUpdateDelegatesToThePackageManager(t *testing.T) {
+	const (
+		homebrew = "/opt/homebrew/Cellar/skills-manager/0.18.0/bin/skills"
+		mise     = "/home/alice/.local/share/mise/installs/github-akunzai-skills-manager/0.18.0/skills"
+		scoop    = `C:\Users\alice\scoop\apps\skills-manager\current\skills.exe`
+	)
+	for _, tc := range []struct {
+		name        string
+		path, goos  string
+		args        []string
+		interactive bool
+		answers     []fakeAnswer
+		runErr      error
+		wantRun     []string
+		wantCode    int
+		wantOut     string
+	}{
+		{name: "Homebrew with --yes", path: homebrew, args: []string{"--yes"}, wantRun: strings.Fields(updater.HomebrewUpgradeCommand)},
+		{name: "mise, confirmed", path: mise, interactive: true, answers: []fakeAnswer{confirmAnswer(updater.MiseUpgradeCommand, true)}, wantRun: strings.Fields(updater.MiseUpgradeCommand)},
+		{name: "mise, declined", path: mise, interactive: true, answers: []fakeAnswer{confirmAnswer(updater.MiseUpgradeCommand, false)}, wantOut: "Operation cancelled."},
+		{name: "no terminal and no --yes", path: homebrew, wantCode: 1, wantOut: updater.HomebrewUpgradeCommand},
+		{name: "the upgrade fails", path: homebrew, args: []string{"--yes"}, runErr: errors.New("exit status 1"), wantRun: strings.Fields(updater.HomebrewUpgradeCommand), wantCode: 2, wantOut: "'" + updater.HomebrewUpgradeCommand + "' failed"},
+		{name: "Scoop with --yes", path: scoop, goos: "windows", args: []string{"--yes"}, wantCode: 1, wantOut: "while it runs"},
+		{name: "dry run", path: homebrew, args: []string{"--yes", "--dry-run"}, wantOut: "Would run '" + updater.HomebrewUpgradeCommand + "'"},
+		{name: "JSON", path: homebrew, args: []string{"--yes", "--json"}, wantCode: 1, wantOut: `"status": "package-manager-managed"`},
+		{name: "a pinned version", path: homebrew, args: []string{"--yes", "--version", "v0.17.0"}, wantCode: 1, wantOut: updater.HomebrewUpgradeCommand},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubSelfUpdateExecutablePath(t, tc.path)
+			if tc.goos != "" {
+				stubSelfUpdateGOOS(t, tc.goos)
+			}
+			stubSelfUpdateCheckMustNotBeCalled(t)
+			useFakePrompter(t, &fakePrompter{interactive: tc.interactive, answers: tc.answers})
+			calls := stubSelfUpdateRunPackageManager(t, func([]string) error { return tc.runErr })
+
+			out, err := runCLI(t, append([]string{"self-update"}, tc.args...)...)
+			if got := ExitCode(err); (err != nil || tc.wantCode != 0) && got != tc.wantCode {
+				t.Fatalf("exit code = %d (err=%v); want %d\n%s", got, err, tc.wantCode, out)
+			}
+			if tc.wantCode == 0 && err != nil {
+				t.Fatalf("self-update: %v\n%s", err, out)
+			}
+			var wantCalls [][]string
+			if tc.wantRun != nil {
+				wantCalls = [][]string{tc.wantRun}
+			}
+			if !reflect.DeepEqual(*calls, wantCalls) {
+				t.Fatalf("ran %q; want %q", *calls, wantCalls)
+			}
+			// A failure's sentence is the error main.go prints.
+			if err != nil {
+				out += err.Error()
+			}
+			if !strings.Contains(out, tc.wantOut) {
+				t.Fatalf("output = %q; want %q", out, tc.wantOut)
 			}
 		})
 	}

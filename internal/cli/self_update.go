@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/updater"
@@ -23,6 +25,13 @@ var (
 	// selfUpdateInstall is a seam over updater.DownloadAndInstallBinary so a
 	// test can run the install path without replacing a binary.
 	selfUpdateInstall = updater.DownloadAndInstallBinary
+	// selfUpdateRunPackageManager runs a package manager's upgrade command on
+	// the user's terminal. It is a seam so a test never runs brew or mise.
+	selfUpdateRunPackageManager = func(argv []string, stdin io.Reader, stdout, stderr io.Writer) error {
+		run := exec.Command(argv[0], argv[1:]...)
+		run.Stdin, run.Stdout, run.Stderr = stdin, stdout, stderr
+		return run.Run()
+	}
 )
 
 func newSelfUpdateCmd() *cobra.Command {
@@ -32,6 +41,7 @@ func newSelfUpdateCmd() *cobra.Command {
 		flagForce   bool
 		flagDryRun  bool
 		flagJSON    bool
+		flagYes     bool
 	)
 
 	cmd := &cobra.Command{
@@ -43,9 +53,10 @@ func newSelfUpdateCmd() *cobra.Command {
 On an interactive terminal, other commands mention a newer release at most once a day.
 Set SKILLS_SKIP_SELF_UPDATE_CHECK=1 to skip that check. This command always talks to GitHub.
 
-A Homebrew, Scoop, or mise install refuses to replace itself and names that
-package manager's upgrade command instead; --check still reaches GitHub and
-reports the same command.`,
+A Homebrew or mise install is upgraded by running that package manager's
+upgrade command, once you confirm or pass --yes. A Scoop install names its
+command instead, since Scoop does not update an app while it runs. --check
+still reaches GitHub and reports the same command.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
@@ -56,9 +67,11 @@ reports the same command.`,
 			if pkgMgr != nil && !flagCheck {
 				// Homebrew's acceptance policy forbids a formula updating
 				// itself, a Scoop manifest owns the binary the same way, and
-				// mise tracks its own installs, so refuse before any network
-				// call: no check, no download.
-				return reportPackageManagerManagedInstall(out, pkgMgr, flagJSON)
+				// mise tracks its own installs, so never download: hand the
+				// upgrade to the package manager, or name its command
+				// (ADR-0011). The package manager decides whether there is
+				// anything to upgrade, so GitHub is not asked first.
+				return upgradeThroughPackageManager(cmd, pkgMgr, flagYes, flagDryRun, flagJSON, flagVersion != "")
 			}
 
 			if !flagJSON {
@@ -165,6 +178,7 @@ reports the same command.`,
 	cmd.Flags().BoolVar(&flagForce, "force", false, "Force re-download even if already up to date")
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview update without downloading")
 	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON")
+	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Run the package manager's upgrade command without asking")
 
 	return cmd
 }
@@ -187,6 +201,41 @@ func printSelfUpdateJSONError(out io.Writer, err error) {
 	fmt.Fprintln(out, string(data))
 }
 
+// upgradeThroughPackageManager runs pkgMgr's upgrade command on the user's
+// terminal once they agree. It only names the command when it cannot run it:
+// Scoop skips a running app, the command cannot install a pinned version,
+// and --json keeps stdout for its one document.
+func upgradeThroughPackageManager(cmd *cobra.Command, pkgMgr *updater.PackageManagerInstall, yes, dryRun, jsonOutput, pinned bool) error {
+	out := cmd.OutOrStdout()
+	if jsonOutput || pinned || !pkgMgr.UpgradesWhileRunning {
+		return reportPackageManagerManagedInstall(out, pkgMgr, jsonOutput)
+	}
+	if dryRun {
+		fmt.Fprintf(out, "%s[Dry-run]%s Would run '%s'.\n", colorCyan, colorReset, pkgMgr.Command)
+		return nil
+	}
+	if !yes {
+		p := newPrompter(cmd)
+		if !p.Interactive() {
+			return reportPackageManagerManagedInstall(out, pkgMgr, false)
+		}
+		confirmed, err := p.Confirm(fmt.Sprintf("%s manages this copy of skills-manager. Run '%s'?", pkgMgr.Name, pkgMgr.Command), false)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			// Declining before anything ran is backing out (ADR-0002).
+			fmt.Fprintf(out, "%sOperation cancelled.%s\n", colorYellow, colorReset)
+			return nil
+		}
+	}
+	fmt.Fprintf(out, "Running '%s'...\n", pkgMgr.Command)
+	if err := selfUpdateRunPackageManager(strings.Fields(pkgMgr.Command), cmd.InOrStdin(), out, cmd.ErrOrStderr()); err != nil {
+		return exitError{message: fmt.Sprintf("'%s' failed: %v", pkgMgr.Command, err), code: 2}
+	}
+	return nil
+}
+
 // reportPackageManagerManagedInstall states that pkgMgr already owns this
 // install, so self-update refuses to replace it, and names the command to
 // run instead. This is a state with a next action, not a failure (ADR-0002):
@@ -201,6 +250,9 @@ func reportPackageManagerManagedInstall(out io.Writer, pkgMgr *updater.PackageMa
 		fmt.Fprintln(out, string(data))
 	} else {
 		fmt.Fprintf(out, "\n%s%s%s manages this copy of skills-manager; self-update won't replace it.%s\n", colorBold, colorYellow, pkgMgr.Name, colorReset)
+		if !pkgMgr.UpgradesWhileRunning {
+			fmt.Fprintf(out, "%s does not update an app while it runs, so run it once skills has exited.\n", pkgMgr.Name)
+		}
 		fmt.Fprintf(out, "Next: run '%s'.\n\n", pkgMgr.Command)
 	}
 	return exitError{message: fmt.Sprintf("%s manages this install; run '%s' instead of self-update", pkgMgr.Name, pkgMgr.Command), code: 1}
