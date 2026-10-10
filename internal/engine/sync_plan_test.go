@@ -375,7 +375,7 @@ func TestPlanRemoteItem(t *testing.T) {
 		{name: "cache update", status: SkillCacheUpdateAvailable, wantWrite: true},
 		{name: "unknown baseline", status: SkillUnknownBaseline, wantWrite: true, wantBlock: SyncBlockUnknownBaseline},
 		{name: "local drift", status: SkillLocalDrift, wantBlock: SyncBlockLocalDrift},
-		{name: "unverified", status: SkillUnverified, wantBlock: SyncBlockCacheMissing},
+		{name: "not cached", status: SkillNotCached, wantBlock: SyncBlockCacheMissing},
 		{name: "error", status: SkillError, err: "boom", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

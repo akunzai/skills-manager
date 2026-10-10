@@ -91,7 +91,7 @@ func (s FreshnessSnapshot) Dispositions() []FreshnessDisposition {
 		}
 		for _, skill := range repository.Skills {
 			switch skill.Status {
-			case SkillMissing, SkillCacheUpdateAvailable, SkillUnknownBaseline, SkillUnverified, SkillRenamed:
+			case SkillMissing, SkillCacheUpdateAvailable, SkillUnknownBaseline, SkillNotCached, SkillRenamed:
 				add(FreshnessSync, string(skill.Status), repository.Source, skill.Name)
 			case SkillRemovedUpstream:
 				add(FreshnessInvestigate, string(skill.Status), repository.Source, skill.Name)
@@ -139,7 +139,7 @@ const (
 	SkillCacheUpdateAvailable SkillFreshnessStatus = "cache_update_available"
 	SkillLocalDrift           SkillFreshnessStatus = "local_drift"
 	SkillUnknownBaseline      SkillFreshnessStatus = "unknown_baseline"
-	SkillUnverified           SkillFreshnessStatus = "unverified"
+	SkillNotCached            SkillFreshnessStatus = "not_cached"
 	// SkillRenamed is a Skill its Source no longer has, while a Skill the
 	// Cache covers declares it replaces it (ADR 0007). Sync migrates it.
 	SkillRenamed SkillFreshnessStatus = "renamed"
@@ -225,18 +225,18 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 			applied, _ := baselines.Applied(name)
 			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cachePath, skillsDir, applied)
 			if snapshot.Repositories[i].LocalSHA != "" && coverageErr == nil && len(coverage.missing([]string{skill.Subpath})) > 0 {
-				skill.Status = SkillUnverified
+				skill.Status = SkillNotCached
 			}
 			if snapshot.Repositories[i].LocalSHA == "" {
-				skill.Status = SkillUnverified
+				skill.Status = SkillNotCached
 				skill.BaselineRecorded = false
 				skill.CacheDigests = nil
 			}
-			if stateErr != nil && skill.Status != SkillUnverified && skill.Status != SkillMissing && skill.Status != SkillError {
+			if stateErr != nil && skill.Status != SkillNotCached && skill.Status != SkillMissing && skill.Status != SkillError {
 				skill.Status = SkillUnknownBaseline
 				skill.BaselineRecorded = false
 			}
-			if skill.Status == SkillUnverified && snapshot.Repositories[i].LocalSHA != "" && !cache.atHead(skill.Subpath).exists() {
+			if skill.Status == SkillNotCached && snapshot.Repositories[i].LocalSHA != "" && !cache.atHead(skill.Subpath).exists() {
 				skill.Status = SkillRemovedUpstream
 				skill.ScopeCopy = baselines.CompareScopeCopy(name, skill.ScopePath)
 			}
@@ -348,7 +348,7 @@ func classifyRemoteSkill(source, name, subpath, cacheDir, skillsDir string, appl
 	result := SkillFreshness{Name: name, Source: source, Subpath: subpath, ScopePath: filepath.Join(skillsDir, name), CachePath: filepath.Join(cacheDir, filepath.FromSlash(subpath)), BaselineRecorded: applied.Source != ""}
 	cacheDigests, err := DigestSkillContent(result.CachePath)
 	if errors.Is(err, os.ErrNotExist) || os.IsNotExist(rootPathError(err)) {
-		result.Status = SkillUnverified
+		result.Status = SkillNotCached
 		return result
 	}
 	if err != nil {
@@ -415,7 +415,7 @@ func (skill SkillFreshness) appliedState(cacheIdentity, commit string) AppliedSk
 }
 
 func (skill SkillFreshness) validateCache() error {
-	if skill.Status == SkillUnverified {
+	if skill.Status == SkillNotCached {
 		return NextCommand{Reason: "Cache missing for Source " + skill.Source, Command: "update"}
 	}
 	if skill.Status == SkillError {
