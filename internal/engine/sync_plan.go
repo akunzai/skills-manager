@@ -244,7 +244,20 @@ func planRemoteItem(source string, cache Cache, skill SkillFreshness, drift Avai
 	switch skill.Status {
 	case SkillRemovedUpstream:
 		item.Block = SyncBlockRemovedUpstream
-		item.BlockReason = fmt.Sprintf("no longer in Source %s", source)
+		branch := cache.repo().Branch
+		branchDesc := ""
+		if branch != "" {
+			if cache.branch != "" || models.ParseRepoSource(source).Branch != "" {
+				branchDesc = fmt.Sprintf(" (branch %s)", branch)
+			} else {
+				branchDesc = fmt.Sprintf(" (default branch %s)", branch)
+			}
+		}
+		if skill.Subpath != "" && skill.Subpath != "." {
+			item.BlockReason = fmt.Sprintf("subpath %q not in Source %s%s", skill.Subpath, source, branchDesc)
+		} else {
+			item.BlockReason = fmt.Sprintf("no longer in Source %s%s", source, branchDesc)
+		}
 		item.BlockNext = "rm " + skill.Name
 		return item
 	case SkillRenamed:

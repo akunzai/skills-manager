@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -409,6 +410,43 @@ func TestPlanRemoteItem(t *testing.T) {
 				t.Fatalf("Err = %q; want empty", item.Err)
 			}
 		})
+	}
+}
+
+func TestPlanRemoteItemRemovedUpstreamReason(t *testing.T) {
+	cache, _ := refreshedCache(t)
+	drift := AvailabilityDrift{Skill: "sample"}
+	defaultBranch := cache.repo().Branch
+
+	// Case 1: subpath with auto-resolved default branch
+	freshnessDefault := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: "skills/sample", Status: SkillRemovedUpstream}
+	itemDefault := planRemoteItem("owner/repo", cache, freshnessDefault, drift)
+	if itemDefault.Block != SyncBlockRemovedUpstream {
+		t.Fatalf("Block = %q; want %q", itemDefault.Block, SyncBlockRemovedUpstream)
+	}
+	wantReasonDefault := fmt.Sprintf("subpath \"skills/sample\" not in Source owner/repo (default branch %s)", defaultBranch)
+	if itemDefault.BlockReason != wantReasonDefault {
+		t.Fatalf("BlockReason = %q; want %q", itemDefault.BlockReason, wantReasonDefault)
+	}
+	if itemDefault.BlockNext != "rm sample" {
+		t.Fatalf("BlockNext = %q; want %q", itemDefault.BlockNext, "rm sample")
+	}
+
+	// Case 2: subpath with explicitly configured branch
+	cacheExplicit := NewCache("owner/repo", cache.repo().URL, "feature-x", cache.cacheDir)
+	freshnessExplicit := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: "skills/sample", Status: SkillRemovedUpstream}
+	itemExplicit := planRemoteItem("owner/repo", cacheExplicit, freshnessExplicit, drift)
+	wantReasonExplicit := `subpath "skills/sample" not in Source owner/repo (branch feature-x)`
+	if itemExplicit.BlockReason != wantReasonExplicit {
+		t.Fatalf("BlockReason = %q; want %q", itemExplicit.BlockReason, wantReasonExplicit)
+	}
+
+	// Case 3: root subpath "." with explicit branch
+	freshnessRoot := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: ".", Status: SkillRemovedUpstream}
+	itemRoot := planRemoteItem("owner/repo", cacheExplicit, freshnessRoot, drift)
+	wantReasonRoot := `no longer in Source owner/repo (branch feature-x)`
+	if itemRoot.BlockReason != wantReasonRoot {
+		t.Fatalf("BlockReason = %q; want %q", itemRoot.BlockReason, wantReasonRoot)
 	}
 }
 
