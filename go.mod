@@ -3,7 +3,7 @@ module github.com/akunzai/skills-manager
 go 1.27.0
 
 require (
-	github.com/mattn/go-runewidth v0.0.30
+	github.com/mattn/go-runewidth v0.0.31
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.49.0
