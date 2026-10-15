@@ -33,7 +33,12 @@ func (c Cache) dir() string {
 
 // Refresh clones or fetches this Cache and covers paths in its sparse checkout.
 func (c Cache) Refresh(force bool, paths ...string) (string, error) {
-	return ensureGitRepo(c.key, c.url, c.branch, force, c.cacheDir, paths...)
+	return c.RefreshWithProgress(force, nil, paths...)
+}
+
+// RefreshWithProgress clones or fetches this Cache and covers paths while emitting progress.
+func (c Cache) RefreshWithProgress(force bool, progress UpdateProgress, paths ...string) (string, error) {
+	return ensureGitRepo(c.key, c.url, c.branch, force, c.cacheDir, progress, paths...)
 }
 
 // Cover adds paths to this Cache's sparse checkout without fetching a new commit.

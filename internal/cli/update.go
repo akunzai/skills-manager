@@ -110,6 +110,13 @@ func refreshSources(cmd *cobra.Command, out io.Writer, cfg *config.Config, targe
 func updateProgress(cmd *cobra.Command, out io.Writer, quiet bool) (engine.UpdateProgress, func()) {
 	var region *presentation.Region
 	errOut := cmd.ErrOrStderr()
+	emitAbove := func(fn func()) {
+		if region != nil {
+			region.Above(fn)
+		} else {
+			fn()
+		}
+	}
 	onProgress := func(ev engine.UpdateEvent) {
 		if quiet {
 			return
@@ -148,9 +155,17 @@ func updateProgress(cmd *cobra.Command, out io.Writer, quiet bool) (engine.Updat
 		case engine.UpdateTrustRootError:
 			// After the refresh, so no region is drawing.
 			fmt.Fprintf(out, "%sError: %s%s\n", colorRed, ev.Err, colorReset)
+		case engine.UpdateBranchMissingWarn:
+			emitAbove(func() {
+				fmt.Fprintf(out, "%sWarning: Source %s remote default branch changed from %q to %q, but declared skills are missing; keeping cached branch %q%s\n", colorYellow, ev.Source, ev.From, ev.To, ev.From, colorReset)
+			})
+		case engine.UpdateBranchChangedNotice:
+			emitAbove(func() {
+				fmt.Fprintf(out, "Notice: Source %s default branch changed from %q to %q\n", ev.Source, ev.From, ev.To)
+			})
 		case engine.UpdateRepoError:
 			region.Fail(ev.Source)
-			region.Above(func() {
+			emitAbove(func() {
 				fmt.Fprintf(out, "%sError updating %s: %s%s\n", colorRed, ev.Source, ev.Err, colorReset)
 			})
 		}
