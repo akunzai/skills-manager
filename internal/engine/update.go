@@ -63,7 +63,9 @@ const (
 	UpdateRenamed       = "renamed"
 	// UpdateTrustRootError is a Sigstore trust root the signed Skills of the
 	// selected Sources need and Update could not fetch.
-	UpdateTrustRootError = "trust_root_error"
+	UpdateTrustRootError      = "trust_root_error"
+	UpdateBranchMissingWarn   = "branch_missing_warn"
+	UpdateBranchChangedNotice = "branch_changed_notice"
 )
 
 type UpdateEvent struct {
@@ -174,7 +176,7 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		beforeDir := cache.dir()
 		beforeSHA := cache.head()
 		beforeTrees := declaredTrees()
-		dir, refreshErr := cache.Refresh(fetch, paths...)
+		dir, refreshErr := cache.RefreshWithProgress(fetch, progress, paths...)
 		if refreshErr != nil {
 			message := refreshErr.Error()
 			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})

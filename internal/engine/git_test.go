@@ -381,3 +381,104 @@ func TestCacheCoverageNamesMissingSubpaths(t *testing.T) {
 		t.Fatalf("covers alpha = %v, beta = %v; want true, false", coverage.covers("skills/alpha"), coverage.covers("skills/beta"))
 	}
 }
+
+func TestEnsureGitRepoDefaultBranchMigrationAdopted(t *testing.T) {
+	t.Parallel()
+	origin, url := writeSparseOrigin(t)
+	cacheDir := t.TempDir()
+	cache := NewCache("owner/repo", url, "", cacheDir)
+
+	initialBranch, err := remoteDefaultBranch("owner/repo", url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoDir, err := cache.Refresh(false, "skills/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cachedDefaultBranch("owner/repo", url, cacheDir); got != initialBranch {
+		t.Fatalf("cached default branch = %q; want %q", got, initialBranch)
+	}
+
+	// Create new branch "migrated" that still contains skills/alpha
+	mustGit(t, origin, "branch", "migrated", initialBranch)
+	mustGit(t, origin, "symbolic-ref", "HEAD", "refs/heads/migrated")
+
+	var events []UpdateEvent
+	onProgress := func(ev UpdateEvent) {
+		events = append(events, ev)
+	}
+	migratedDir, err := cache.RefreshWithProgress(true, onProgress, "skills/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cachedDefaultBranch("owner/repo", url, cacheDir); got != "migrated" {
+		t.Fatalf("cached default branch after migration = %q; want %q", got, "migrated")
+	}
+	if migratedDir == repoDir {
+		t.Fatalf("migratedDir should be nested under new branch, but got same %q", migratedDir)
+	}
+	noticeFound := false
+	for _, ev := range events {
+		if ev.Kind == UpdateBranchChangedNotice && ev.From == initialBranch && ev.To == "migrated" {
+			noticeFound = true
+		}
+	}
+	if !noticeFound {
+		t.Fatalf("events = %#v; want UpdateBranchChangedNotice from %q to migrated", events, initialBranch)
+	}
+}
+
+func TestEnsureGitRepoDefaultBranchMissingSkillsRejected(t *testing.T) {
+	t.Parallel()
+	origin, url := writeSparseOrigin(t)
+	cacheDir := t.TempDir()
+	cache := NewCache("owner/repo", url, "", cacheDir)
+
+	initialBranch, err := remoteDefaultBranch("owner/repo", url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoDir, err := cache.Refresh(false, "skills/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cachedDefaultBranch("owner/repo", url, cacheDir); got != initialBranch {
+		t.Fatalf("cached default branch = %q; want %q", got, initialBranch)
+	}
+
+	// Create an orphan branch "missing-branch" on origin lacking skills/alpha
+	mustGit(t, origin, "checkout", "--orphan", "missing-branch")
+	mustGit(t, origin, "rm", "-rf", ".")
+	mustWriteScopeStateTestFile(t, filepath.Join(origin, "README.md"), []byte("# Missing\n"))
+	mustGit(t, origin, "add", "README.md")
+	mustGit(t, origin, "commit", "-m", "missing commit")
+	mustGit(t, origin, "symbolic-ref", "HEAD", "refs/heads/missing-branch")
+
+	var events []UpdateEvent
+	onProgress := func(ev UpdateEvent) {
+		events = append(events, ev)
+	}
+	keptDir, err := cache.RefreshWithProgress(true, onProgress, "skills/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keptDir != repoDir {
+		t.Fatalf("keptDir = %q; want initial branch dir %q", keptDir, repoDir)
+	}
+	if got := cachedDefaultBranch("owner/repo", url, cacheDir); got != initialBranch {
+		t.Fatalf("cached default branch after rejected missing skills = %q; want initial %q", got, initialBranch)
+	}
+	warnFound := false
+	for _, ev := range events {
+		if ev.Kind == UpdateBranchMissingWarn && ev.From == initialBranch && ev.To == "missing-branch" {
+			warnFound = true
+		}
+	}
+	if !warnFound {
+		t.Fatalf("events = %#v; want UpdateBranchMissingWarn from %q to missing-branch", events, initialBranch)
+	}
+	if _, err := os.Stat(filepath.Join(keptDir, "skills", "alpha", "SKILL.md")); err != nil {
+		t.Fatalf("skills/alpha/SKILL.md missing in kept cache: %v", err)
+	}
+}

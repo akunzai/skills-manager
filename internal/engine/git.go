@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -168,33 +169,7 @@ func runGitRaw(cwd string, args ...string) ([]byte, string, error) {
 // declared Skill subpaths are in its sparse checkout. The Cache is a blobless,
 // sparse clone so paths no Scope declares are never written to disk; only
 // '.' (a Skill at the repository root) needs the whole tree.
-func ensureGitRepo(
-	source string,
-	url string,
-	branch string,
-	forceUpdate bool,
-	cacheDir string,
-	paths ...string,
-) (string, error) {
-	if err := checkGitVersion(); err != nil {
-		return "", err
-	}
-	parsed := models.ParseRepoSource(source)
-	requestedBranch := branch
-	if requestedBranch == "" {
-		requestedBranch = parsed.Branch
-	}
-	resolvedDefault := false
-	if requestedBranch == "" {
-		var err error
-		requestedBranch, err = remoteDefaultBranch(source, url)
-		if err != nil {
-			return "", err
-		}
-		resolvedDefault = true
-	}
-	repo := resolveCacheRepo(source, url, requestedBranch, cacheDir)
-
+func checkoutCacheRepo(repo cacheRepo, forceUpdate bool, paths []string) error {
 	gitDir := filepath.Join(repo.Dir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
 		if runtime.GOOS == "windows" {
@@ -205,7 +180,7 @@ func ensureGitRepo(
 			// a Cache cloned in full by an older release never checks out paths
 			// no Scope declares.
 			if err := normalizeSparseCheckout(repo.Dir, slices.Contains(cleanSparsePaths(paths), ".")); err != nil {
-				return "", fmt.Errorf("prepare sparse checkout of %s: %w", repo.URL, err)
+				return fmt.Errorf("prepare sparse checkout of %s: %w", repo.URL, err)
 			}
 			ref := repo.Branch
 			if ref == "" {
@@ -213,26 +188,21 @@ func ensureGitRepo(
 			}
 			stdout, stderr, err := runGit(repo.Dir, "fetch", "--depth", "1", "origin", ref)
 			if err != nil {
-				return "", gitOpErr("fetch", repo.URL, stdout, stderr, err)
+				return gitOpErr("fetch", repo.URL, stdout, stderr, err)
 			}
 			stdout, stderr, err = runGit(repo.Dir, "reset", "--hard", "FETCH_HEAD")
 			if err != nil {
-				return "", gitOpErr("reset", repo.URL, stdout, stderr, err)
+				return gitOpErr("reset", repo.URL, stdout, stderr, err)
 			}
 		}
 		if err := ensureSparsePaths(repo.Dir, paths); err != nil {
-			return "", fmt.Errorf("add Skills of %s to the Cache: %w", repo.URL, err)
+			return fmt.Errorf("add Skills of %s to the Cache: %w", repo.URL, err)
 		}
-		if resolvedDefault {
-			if err := recordDefaultBranch(source, repo.URL, cacheDir, requestedBranch); err != nil {
-				return "", fmt.Errorf("record default branch: %w", err)
-			}
-		}
-		return repo.Dir, nil
+		return nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(repo.Dir), 0755); err != nil {
-		return "", fmt.Errorf("failed to create cache directory: %w", err)
+		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 	_ = RemoveAll(repo.Dir)
 
@@ -251,20 +221,90 @@ func ensureGitRepo(
 
 	stdout, stderr, err := runGit("", cloneArgs...)
 	if err != nil {
-		return "", gitOpErr("clone", repo.URL, stdout, stderr, err)
+		return gitOpErr("clone", repo.URL, stdout, stderr, err)
 	}
 	if err := markSparseCache(repo.Dir); err != nil {
-		return "", err
+		return err
 	}
 	if err := ensureSparsePaths(repo.Dir, paths); err != nil {
-		return "", fmt.Errorf("add Skills of %s to the Cache: %w", repo.URL, err)
+		return fmt.Errorf("add Skills of %s to the Cache: %w", repo.URL, err)
+	}
+	return nil
+}
+
+func ensureGitRepo(
+	source string,
+	url string,
+	branch string,
+	forceUpdate bool,
+	cacheDir string,
+	progress UpdateProgress,
+	paths ...string,
+) (string, error) {
+	if err := checkGitVersion(); err != nil {
+		return "", err
+	}
+	parsed := models.ParseRepoSource(source)
+	repoURL := cmp.Or(url, parsed.URL)
+	requestedBranch := cmp.Or(branch, parsed.Branch)
+	resolvedDefault := false
+	previousDefault := ""
+	if requestedBranch == "" {
+		previousDefault = cachedDefaultBranch(parsed.SourceKey, repoURL, cacheDir)
+		var err error
+		requestedBranch, err = remoteDefaultBranch(parsed.SourceKey, repoURL)
+		if err != nil {
+			return "", err
+		}
+		resolvedDefault = true
+	}
+	repo := resolveCacheRepo(source, url, requestedBranch, cacheDir)
+
+	if resolvedDefault && previousDefault != "" && requestedBranch != previousDefault {
+		if err := checkoutCacheRepo(repo, forceUpdate, paths); err != nil {
+			return "", err
+		}
+		candidateCache := NewCache(source, repo.URL, requestedBranch, cacheDir)
+		missing := slices.ContainsFunc(paths, func(p string) bool {
+			return !candidateCache.atHead(p).exists()
+		})
+		if missing {
+			prevRepo := resolveCacheRepo(source, url, previousDefault, cacheDir)
+			if _, err := os.Stat(filepath.Join(prevRepo.Dir, ".git")); err == nil {
+				_ = RemoveAll(repo.Dir)
+				emitUpdate(progress, UpdateEvent{
+					Kind:   UpdateBranchMissingWarn,
+					Source: source,
+					From:   previousDefault,
+					To:     requestedBranch,
+				})
+				if err := checkoutCacheRepo(prevRepo, forceUpdate, paths); err != nil {
+					return "", err
+				}
+				return prevRepo.Dir, nil
+			}
+			return repo.Dir, nil
+		}
+		emitUpdate(progress, UpdateEvent{
+			Kind:   UpdateBranchChangedNotice,
+			Source: source,
+			From:   previousDefault,
+			To:     requestedBranch,
+		})
+		if err := recordDefaultBranch(source, repo.URL, cacheDir, requestedBranch); err != nil {
+			return "", fmt.Errorf("record default branch: %w", err)
+		}
+		return repo.Dir, nil
+	}
+
+	if err := checkoutCacheRepo(repo, forceUpdate, paths); err != nil {
+		return "", err
 	}
 	if resolvedDefault {
 		if err := recordDefaultBranch(source, repo.URL, cacheDir, requestedBranch); err != nil {
 			return "", fmt.Errorf("record default branch: %w", err)
 		}
 	}
-
 	return repo.Dir, nil
 }
 

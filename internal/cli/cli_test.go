@@ -1612,6 +1612,89 @@ func TestCLIUpdateDryRunWithAConvergedScopeAndAChangedSourceExitsOne(t *testing.
 	}
 }
 
+func TestCLIUpdateDefaultBranchMissingSkillsRejected(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	configFile := filepath.Join(root, "skills.json")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	skillsDir := filepath.Join(root, "skills")
+	cacheDir := filepath.Join(root, "cache")
+	args := []string{"update", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
+	if out, err := runCLI(t, args...); err != nil {
+		t.Fatalf("initial update failed: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatalf("sample skill missing after initial update: %v", err)
+	}
+
+	cliRunGit(t, origin, "checkout", "--orphan", "missing-branch")
+	cliRunGit(t, origin, "rm", "-rf", ".")
+	if err := os.WriteFile(filepath.Join(origin, "README.md"), []byte("# Missing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliRunGit(t, origin, "add", "README.md")
+	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "missing commit")
+	cliRunGit(t, origin, "symbolic-ref", "HEAD", "refs/heads/missing-branch")
+
+	out, err := runCLI(t, append(args, "--force")...)
+	if err != nil {
+		t.Fatalf("update with missing skills failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Warning: Source owner/repo remote default branch changed") ||
+		!strings.Contains(out, "missing-branch") ||
+		!strings.Contains(out, "keeping cached branch") {
+		t.Fatalf("expected warning in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "removed_upstream") {
+		t.Fatalf("skill should not be marked removed_upstream:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatalf("sample skill was deleted after missing branch change: %v", err)
+	}
+}
+
+func TestCLIUpdateDefaultBranchMigrationAdopted(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	configFile := filepath.Join(root, "skills.json")
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	skillsDir := filepath.Join(root, "skills")
+	cacheDir := filepath.Join(root, "cache")
+	args := []string{"update", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
+	if out, err := runCLI(t, args...); err != nil {
+		t.Fatalf("initial update failed: %v\n%s", err, out)
+	}
+
+	cliRunGit(t, origin, "branch", "migrated")
+	cliRunGit(t, origin, "symbolic-ref", "HEAD", "refs/heads/migrated")
+
+	out, err := runCLI(t, append(args, "--force")...)
+	if err != nil {
+		t.Fatalf("update with migration failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Notice: Source owner/repo default branch changed") ||
+		!strings.Contains(out, "migrated") {
+		t.Fatalf("expected branch changed notice in output, got:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "sample", "SKILL.md")); err != nil {
+		t.Fatalf("sample skill missing after migration: %v", err)
+	}
+}
+
 func TestCLIOutdatedJSONNestsScopeStatusAndReturnsNonZero(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
