@@ -3700,7 +3700,7 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	if ExitCode(err) != 1 {
 		t.Fatalf("the removed Skill still blocks, so sync exits 1: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Renamed old") || !strings.Contains(out, "no longer in Source owner/repo; run 'skills rm"+pathOverrideFlags(configFile, skillsDir, cacheDir)+" gone'") {
+	if !strings.Contains(out, "Renamed old") || !strings.Contains(out, `subpath "skills/gone" not in Source owner/repo (branch `+branch+"); run 'skills rm"+pathOverrideFlags(configFile, skillsDir, cacheDir)+" gone'") {
 		t.Fatalf("sync should rename old and name rm for gone:\n%s", out)
 	}
 	if strings.Contains(out, "--force") || strings.Contains(out, "run 'skills update' first") {
