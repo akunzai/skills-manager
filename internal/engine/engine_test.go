@@ -107,6 +107,25 @@ func TestDiscoverSkillsInRepoCanonicalizesEquivalentMirrors(t *testing.T) {
 	}
 }
 
+// A copy holding files Materialize would leave out is the same Skill.
+func TestDiscoverSkillsInRepoIgnoresFilesMaterializeLeavesOut(t *testing.T) {
+	tmpRepo := t.TempDir()
+	for _, dir := range []string{"skills/duplicate", "plugins/example/duplicate"} {
+		writeTestFile(t, filepath.Join(tmpRepo, dir, "SKILL.md"), []byte("---\nname: duplicate\n---\n"))
+	}
+	writeTestFile(t, filepath.Join(tmpRepo, "plugins/example/duplicate/__pycache__/helper.cpython-312.pyc"), []byte("bytecode"))
+	writeTestFile(t, filepath.Join(tmpRepo, "plugins/example/duplicate/helper.pyc"), []byte("bytecode"))
+	writeTestFile(t, filepath.Join(tmpRepo, "plugins/example/duplicate/.git/HEAD"), []byte("ref: refs/heads/main\n"))
+
+	discovered, _, err := DiscoverSkillsInRepo(tmpRepo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"skills/duplicate"}; !reflect.DeepEqual(discovered["duplicate"], want) {
+		t.Fatalf("duplicate paths = %v, want %v", discovered["duplicate"], want)
+	}
+}
+
 func TestDiscoverSkillsInRepoPreservesDivergentDuplicateCandidates(t *testing.T) {
 	tmpRepo := t.TempDir()
 	for path, content := range map[string]string{

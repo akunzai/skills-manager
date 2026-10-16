@@ -208,6 +208,16 @@ func DigestSkillTree(root string) (string, error) {
 	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
+// skillFileIgnored reports whether a file or directory inside a Skill is left
+// out of it: Materialize does not copy it, its digest does not cover it, and
+// discovery does not compare it.
+func skillFileIgnored(name string, isDir bool) bool {
+	if isDir {
+		return name == ".git" || name == "__pycache__"
+	}
+	return strings.HasSuffix(name, ".pyc")
+}
+
 // DigestSkillContent returns the complete relative path to SHA-256 map for a
 // materialized Skill. Symlinks hash their target strings and are not followed.
 func DigestSkillContent(root string) (map[string]string, error) {
@@ -219,11 +229,13 @@ func DigestSkillContent(root string) (map[string]string, error) {
 		if path == root {
 			return nil
 		}
-		name := entry.Name()
-		if entry.IsDir() && (name == ".git" || name == "__pycache__") {
-			return filepath.SkipDir
+		if skillFileIgnored(entry.Name(), entry.IsDir()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
-		if entry.IsDir() || strings.HasSuffix(name, ".pyc") {
+		if entry.IsDir() {
 			return nil
 		}
 

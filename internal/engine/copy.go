@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 )
 
 // RemoveAll removes path and its contents cleanly, resetting read-only permissions if needed on Windows.
@@ -70,17 +69,15 @@ func CopySkillFolder(srcDir, targetDir string) error {
 			return err
 		}
 
-		// Filter out ignored patterns
-		if info.IsDir() {
-			if info.Name() == ".git" || info.Name() == "__pycache__" {
+		if skillFileIgnored(info.Name(), info.IsDir()) {
+			if info.IsDir() {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if info.IsDir() {
 			destPath := filepath.Join(targetDir, relPath)
 			return os.MkdirAll(destPath, info.Mode()|0700)
-		}
-
-		if strings.HasSuffix(info.Name(), ".pyc") {
-			return nil
 		}
 
 		destPath := filepath.Join(targetDir, relPath)

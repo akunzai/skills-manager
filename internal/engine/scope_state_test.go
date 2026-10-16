@@ -56,6 +56,38 @@ func TestDigestSkillContentExcludesMaterializationNoise(t *testing.T) {
 	}
 }
 
+// Materialize copies exactly the files the digest covers, so a fresh copy is
+// never drift.
+func TestCopySkillFolderLeavesOutWhatTheDigestIgnores(t *testing.T) {
+	src := t.TempDir()
+	mustWriteScopeStateTestFile(t, filepath.Join(src, "SKILL.md"), []byte("---\nname: sample\n---\n"))
+	mustWriteScopeStateTestFile(t, filepath.Join(src, ".git", "config"), []byte("ignored"))
+	mustWriteScopeStateTestFile(t, filepath.Join(src, "pkg", "__pycache__", "cache"), []byte("ignored"))
+	mustWriteScopeStateTestFile(t, filepath.Join(src, "pkg", "compiled.pyc"), []byte("ignored"))
+	dst := filepath.Join(t.TempDir(), "sample")
+
+	if err := CopySkillFolder(src, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, rel := range []string{".git", "pkg/__pycache__", "pkg/compiled.pyc"} {
+		if _, err := os.Lstat(filepath.Join(dst, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("%s was copied (err = %v)", rel, err)
+		}
+	}
+	srcDigests, err := DigestSkillContent(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstDigests, err := DigestSkillContent(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(dstDigests, srcDigests) {
+		t.Fatalf("copy digests = %#v, want %#v", dstDigests, srcDigests)
+	}
+}
+
 func TestScopeStateStoreRoundTripsVersionedStateAtCanonicalScopeKey(t *testing.T) {
 	stateHome := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateHome)

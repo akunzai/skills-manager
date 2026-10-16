@@ -196,6 +196,12 @@ func readSkillBundle(root string) ([]bundleEntry, error) {
 		if err != nil || rel == "." {
 			return err
 		}
+		if skillFileIgnored(info.Name(), info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		entry := bundleEntry{path: filepath.ToSlash(rel), mode: info.Mode().Type() | (info.Mode() & 0o111)}
 		switch {
 		case info.Mode().IsRegular():
