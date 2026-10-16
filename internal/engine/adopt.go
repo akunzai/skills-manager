@@ -7,7 +7,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -291,7 +290,7 @@ func observeAgentCopy(path UnmanagedAgentPath, skillsDir string) (AgentCopy, boo
 }
 
 func (c AgentCopy) sameContent(other AgentCopy) bool {
-	return c.Problem == "" && other.Problem == "" && c.digests != nil && reflect.DeepEqual(c.digests, other.digests)
+	return c.Problem == "" && other.Problem == "" && c.digests != nil && maps.Equal(c.digests, other.digests)
 }
 
 // planAgentItem settles which copy of name is adopted and what becomes of the
@@ -858,7 +857,7 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 func sameSkillContent(a, b string) bool {
 	da, errA := DigestSkillContent(a)
 	db, errB := DigestSkillContent(b)
-	return errA == nil && errB == nil && reflect.DeepEqual(da, db)
+	return errA == nil && errB == nil && maps.Equal(da, db)
 }
 
 // declareAvailability records the item's Include and Exclude, so the Skill

@@ -3,8 +3,8 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
-	"reflect"
 	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -117,7 +117,7 @@ func (b *Baselines) CompareScopeCopy(name, scopePath string) ScopeCopy {
 	if err != nil || b.err != nil || applied.Source == "" {
 		return ScopeCopyUnknown
 	}
-	if reflect.DeepEqual(digests, applied.ContentDigests) {
+	if maps.Equal(digests, applied.ContentDigests) {
 		return ScopeCopyClean
 	}
 	return ScopeCopyDrift

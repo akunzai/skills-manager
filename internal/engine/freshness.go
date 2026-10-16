@@ -6,7 +6,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -366,11 +365,11 @@ func classifyRemoteSkill(source, name, subpath, cacheDir, skillsDir string, appl
 	}
 	result.ScopeDigests = scopeDigests
 	result.Changes = compareDigestMaps(scopeDigests, cacheDigests)
-	if reflect.DeepEqual(scopeDigests, cacheDigests) {
+	if maps.Equal(scopeDigests, cacheDigests) {
 		result.Status = SkillInSync
 	} else if !result.BaselineRecorded || applied.CacheIdentity != cacheDir {
 		result.Status = SkillUnknownBaseline
-	} else if applied.Source == source && reflect.DeepEqual(scopeDigests, applied.ContentDigests) {
+	} else if applied.Source == source && maps.Equal(scopeDigests, applied.ContentDigests) {
 		result.Status = SkillCacheUpdateAvailable
 	} else {
 		result.Status = SkillLocalDrift
