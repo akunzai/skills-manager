@@ -209,13 +209,7 @@ func (p *remotePlanner) recordSigner(source string) (*signing.Signer, bool) {
 	if !seen || !declared || repo.Signature.Pinned() {
 		return nil, false
 	}
-	policy := config.SignaturePolicy{}
-	if repo.Signature != nil {
-		policy = *repo.Signature
-	}
-	policy.Sigstore = &config.SigstoreSigner{Identity: signer.Identity, Issuer: signer.Issuer}
-	repo.Signature = &policy
-	p.cfg.Remote[source] = repo
+	config.PinSigstoreSigner(p.cfg, source, signer.Identity, signer.Issuer)
 	return &signer, true
 }
 

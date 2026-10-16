@@ -187,3 +187,39 @@ func TestSaveConfigDropsRemovedSettings(t *testing.T) {
 		}
 	}
 }
+
+// A signature policy is replaced, never changed in place, so a shallow copy
+// of Config, such as Adopt's undo snapshot, keeps the policy it had.
+func TestSignaturePolicyUpdatesLeaveACopiedConfigUnchanged(t *testing.T) {
+	original := &Config{Remote: map[string]RemoteRepo{"owner/repo": {
+		Signature: &SignaturePolicy{Require: true, Trusted: map[string]string{"kept": "tree-1", "revoked": "tree-2"}},
+	}}}
+	want := SignaturePolicy{Require: true, Trusted: map[string]string{"kept": "tree-1", "revoked": "tree-2"}}
+	shallow := *original
+	shallow.Remote = map[string]RemoteRepo{"owner/repo": original.Remote["owner/repo"]}
+
+	TrustContent(&shallow, "owner/repo", "added", "tree-3")
+	RevokeTrust(&shallow, "revoked")
+	PinSigstoreSigner(&shallow, "owner/repo", "https://example.com/signer", "https://issuer.example.com")
+	SetCertificateChainTrust(&shallow, "owner/repo", "root.pem")
+
+	if got := *original.Remote["owner/repo"].Signature; !reflect.DeepEqual(got, want) {
+		t.Fatalf("original policy = %#v; want %#v", got, want)
+	}
+	got := *shallow.Remote["owner/repo"].Signature
+	wantCopy := SignaturePolicy{Require: true, CertificateChain: "root.pem", Trusted: map[string]string{"kept": "tree-1", "added": "tree-3"}}
+	if !reflect.DeepEqual(got, wantCopy) {
+		t.Fatalf("copied policy = %#v; want %#v", got, wantCopy)
+	}
+}
+
+func TestPinSigstoreSignerOnASourceWithNoPolicyYet(t *testing.T) {
+	cfg := &Config{Remote: map[string]RemoteRepo{"owner/repo": {}}}
+
+	PinSigstoreSigner(cfg, "owner/repo", "https://example.com/signer", "https://issuer.example.com")
+
+	want := &SigstoreSigner{Identity: "https://example.com/signer", Issuer: "https://issuer.example.com"}
+	if got := cfg.Remote["owner/repo"].Signature; got == nil || !reflect.DeepEqual(got.Sigstore, want) {
+		t.Fatalf("policy = %#v; want Sigstore %#v", got, want)
+	}
+}

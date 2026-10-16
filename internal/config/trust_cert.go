@@ -55,12 +55,7 @@ func ResolveTrustCertPath(path, configPath string) string {
 // certificate chain at path, as StoreTrustCertPath returns it. Sigstore and
 // CertificateChain are exclusive, so any pinned Sigstore signer is cleared.
 func SetCertificateChainTrust(cfg *Config, source, path string) {
-	repo := cfg.Remote[source]
-	policy := SignaturePolicy{}
-	if repo.Signature != nil {
-		policy = *repo.Signature
-	}
-	policy.Sigstore, policy.CertificateChain = nil, path
-	repo.Signature = &policy
-	cfg.Remote[source] = repo
+	updateSignature(cfg, source, func(policy *SignaturePolicy) {
+		policy.Sigstore, policy.CertificateChain = nil, path
+	})
 }
