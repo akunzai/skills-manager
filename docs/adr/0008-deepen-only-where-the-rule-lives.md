@@ -31,6 +31,10 @@ Two more from those October reviews, rejected because they would scatter a rule 
 - **Split `internal/engine/adopt.go` by concern.** It is long, but it is one deep module: `BuildAdoptPlan`, the plan's `Select`, and its apply sit in front of a per-Skill transaction that undoes its moves and its Config change when a step fails before the declaration. Splitting it would spread that transaction across files without making the interface any smaller. Kept instead: one file.
 - **One command runner for load, plan, prompt, apply, and report.** Every command orders those steps the same way, but each step's prompt and report is that command's product, as the rejections above already say. A runner would move the order into a framework and leave every step behind as a callback. Kept instead: each command's `RunE`.
 
+A third October 2026 review proposed one more, rejected because only one rule was shared:
+
+- **One Skill bundle module walks a Skill for digesting, copying, and discovery.** `DigestSkillContent`, `CopySkillFolder`, and local discovery's `readSkillBundle` each walk a Skill, but they record different things on purpose: the digest leaves out file modes and writes symlink targets with forward slashes so Scope state is portable; the copy keeps modes and recreates links, with a Windows fallback; local discovery's identity keeps the executable bit and raw link target, as the Cache's tree ID does. A shared walker would take each of those as a callback. What all three must agree on is which files belong to a Skill, and local discovery did not. Kept instead: `skillFileIgnored`, read by all three walkers. Discovery from a Cache still compares candidates by their committed tree ID, which covers committed bytecode too; leaving it out there would mean hashing each tree's files instead, for Sources that rarely commit them.
+
 Revisit when a second frontend, such as a `--json` for doctor or prune, needs the same grouping or wording the CLI now owns. Presentation would then have two adapters, and a shared seam for it would be real.
 
 This does not reopen ADR-0001 (Add's Source kind switch) or ADR-0002 (exit codes express state).
