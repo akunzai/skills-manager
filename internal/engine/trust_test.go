@@ -70,7 +70,7 @@ func TestSyncBlocksTrustedContentOnceItChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustGit(t, origin, "commit", "-am", "change")
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(true, "sample"); err != nil {
+	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(true, "sample"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,7 +190,7 @@ func TestDoctorWarnsAboutTrustedContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustGit(t, origin, "commit", "-am", "change")
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(true, "sample"); err != nil {
+	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(true, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	outcome, err = NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(false, nil)

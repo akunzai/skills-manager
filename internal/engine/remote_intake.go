@@ -34,8 +34,7 @@ type RemoteIntake struct {
 func PrepareRemoteIntake(cfg *config.Config, spec models.ParsedRepoSource, cacheDir string) (*RemoteIntake, error) {
 	spec.Branch = cmp.Or(spec.Branch, cfg.Remote[spec.SourceKey].Branch)
 	cache := NewCache(spec.SourceKey, spec.URL, spec.Branch, cacheDir)
-	_, err := cache.Refresh(true)
-	if err != nil {
+	if err := cache.Refresh(true); err != nil {
 		return nil, fmt.Errorf("refresh Source %s: %w", spec.SourceKey, err)
 	}
 	discovered, descriptions, err := discoverRemoteSkills(cache, spec.Subpath)

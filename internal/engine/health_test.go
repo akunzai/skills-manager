@@ -538,7 +538,7 @@ func TestDoctorRunLeavesNonLegacyCacheUntouched(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	branch, err := remoteDefaultBranch("owner/repo", origin)
+	branch, _, err := NewCache("owner/repo", origin, "", "").remoteDefaultBranchCommit()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,11 +547,11 @@ func TestDoctorRunLeavesNonLegacyCacheUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	cacheDir := filepath.Join(root, "cache")
-	current, err := NewCache("owner/repo", origin, branch, cacheDir).Refresh(false)
-	if err != nil {
+	cache := NewCache("owner/repo", origin, branch, cacheDir)
+	if err := cache.Refresh(false); err != nil {
 		t.Fatal(err)
 	}
-	wantCommit := localRepoCommit(current)
+	wantCommit := cache.head()
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
@@ -566,7 +566,7 @@ func TestDoctorRunLeavesNonLegacyCacheUntouched(t *testing.T) {
 	if len(outcome.Report.CacheRemovals) != 0 {
 		t.Fatalf("CacheRemovals = %#v; want no removal of a non-legacy Cache", outcome.Report.CacheRemovals)
 	}
-	if got := localRepoCommit(current); got != wantCommit {
+	if got := cache.head(); got != wantCommit {
 		t.Fatalf("branch-aware Cache commit = %q; want %q unchanged", got, wantCommit)
 	}
 }

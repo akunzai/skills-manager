@@ -930,9 +930,9 @@ func TestObserveRemoteFreshnessSourceParsing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		res := NewCache(tt.source, "", "main", tmpCache).repo()
-		if filepath.Dir(res.Dir) != tt.expectedDest {
-			t.Errorf("Cache(%q).dir parent = %q; want %q", tt.source, filepath.Dir(res.Dir), tt.expectedDest)
+		dir := NewCache(tt.source, "", "main", tmpCache).dir()
+		if filepath.Dir(dir) != tt.expectedDest {
+			t.Errorf("Cache(%q).dir parent = %q; want %q", tt.source, filepath.Dir(dir), tt.expectedDest)
 		}
 	}
 }
@@ -961,31 +961,31 @@ func TestForEachBoundedRunsConcurrently(t *testing.T) {
 	<-done
 }
 
-func TestResolveCacheRepoDefaultsURLBranchAndDir(t *testing.T) {
+func TestNewCacheDefaultsURLBranchAndDir(t *testing.T) {
 	cache := t.TempDir()
-	repo := resolveCacheRepo("https://github.com/owner/repo/tree/dev", "", "", cache)
-	if repo.SourceKey != "owner/repo" {
-		t.Fatalf("SourceKey = %q", repo.SourceKey)
+	repo := NewCache("https://github.com/owner/repo/tree/dev", "", "", cache)
+	if repo.key != "owner/repo" {
+		t.Fatalf("key = %q", repo.key)
 	}
-	if repo.URL != "https://github.com/owner/repo.git" {
-		t.Fatalf("URL = %q", repo.URL)
+	if repo.url != "https://github.com/owner/repo.git" {
+		t.Fatalf("url = %q", repo.url)
 	}
-	if repo.Branch != "dev" {
-		t.Fatalf("Branch = %q", repo.Branch)
+	if repo.branch != "dev" {
+		t.Fatalf("branch = %q", repo.branch)
 	}
 	wantDir := filepath.Join(cache, "owner", "repo", cacheBranchKey("dev"))
-	if repo.Dir != wantDir {
-		t.Fatalf("Dir = %q; want %q", repo.Dir, wantDir)
+	if repo.dir() != wantDir {
+		t.Fatalf("dir = %q; want %q", repo.dir(), wantDir)
 	}
-	over := resolveCacheRepo("owner/repo", "https://example.com/r.git", "main", cache)
-	if over.URL != "https://example.com/r.git" || over.Branch != "main" {
+	over := NewCache("owner/repo", "https://example.com/r.git", "main", cache)
+	if over.url != "https://example.com/r.git" || over.branch != "main" {
 		t.Fatalf("overrides = %#v", over)
 	}
-	if over.Dir == repo.Dir {
+	if over.dir() == repo.dir() {
 		t.Fatal("different branches must have isolated Cache paths")
 	}
-	defaultBranch := resolveCacheRepo("owner/repo", "https://example.com/r.git", "", cache)
-	if defaultBranch.Dir == over.Dir {
+	defaultBranch := NewCache("owner/repo", "https://example.com/r.git", "", cache)
+	if defaultBranch.dir() == over.dir() {
 		t.Fatal("an unspecified branch must not share an explicit branch Cache")
 	}
 	if cacheDirOrDefault("") == "" {
@@ -993,25 +993,50 @@ func TestResolveCacheRepoDefaultsURLBranchAndDir(t *testing.T) {
 	}
 }
 
-func TestEnsureGitRepoRecordsResolvedDefaultBranchIdentity(t *testing.T) {
+func TestCacheRefreshRecordsResolvedDefaultBranchIdentity(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	branch, err := remoteDefaultBranch("owner/repo", origin)
-	if err != nil {
-		t.Fatal(err)
-	}
 	cacheDir := filepath.Join(root, "cache")
-	unspecified, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false)
+	cache := NewCache("owner/repo", origin, "", cacheDir)
+	branch, _, err := cache.remoteDefaultBranchCommit()
 	if err != nil {
 		t.Fatal(err)
 	}
-	explicit := resolveCacheRepo("owner/repo", origin, branch, cacheDir).Dir
+	if err := cache.Refresh(false); err != nil {
+		t.Fatal(err)
+	}
+	unspecified := cache.dir()
+	explicit := NewCache("owner/repo", origin, branch, cacheDir).dir()
 	if unspecified != explicit {
 		t.Fatalf("unspecified Cache = %q, explicit default = %q", unspecified, explicit)
 	}
-	if got := resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir; got != explicit {
+	if got := NewCache("owner/repo", origin, "", cacheDir).dir(); got != explicit {
 		t.Fatalf("recorded default Cache = %q", got)
+	}
+}
+
+func TestCacheReadsDefaultBranchOnlyFromItsOwnCacheDir(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeLocalGitSkill(t, origin, "sample")
+	t.Setenv("SKILLS_CACHE_DIR", filepath.Join(root, "default-cache"))
+	// The default Cache directory has recorded a default branch; the custom
+	// one has recorded none.
+	if err := NewCache("owner/repo", origin, "", "").recordDefaultBranch("decoy"); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := NewCache("owner/repo", origin, "", filepath.Join(root, "cache"))
+	if got, want := cache.dir(), cache.dirForBranch(""); got != want {
+		t.Fatalf("dir = %q; want %q, ignoring the default Cache directory", got, want)
+	}
+	got, err := cache.remoteCommit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := localRepoCommit(origin); got != want {
+		t.Fatalf("remote commit = %q; want remote HEAD %q", got, want)
 	}
 }
 
@@ -1023,7 +1048,7 @@ func TestRemoteDefaultBranchCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	branch, commit, err := getRemoteDefaultBranchCommit("owner/repo", origin)
+	branch, commit, err := NewCache("owner/repo", origin, "", "").remoteDefaultBranchCommit()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1035,7 +1060,7 @@ func TestRemoteDefaultBranchCommit(t *testing.T) {
 	}
 }
 
-func TestGetRemoteRepoCommitMatchesExactBranch(t *testing.T) {
+func TestCacheRemoteCommitMatchesExactBranch(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, "sample")
 	want := localRepoCommit(origin)
@@ -1051,7 +1076,7 @@ func TestGetRemoteRepoCommitMatchesExactBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := remoteRepoCommit("owner/repo", origin, branch)
+	got, err := NewCache("owner/repo", origin, branch, "").remoteCommit()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1066,10 +1091,11 @@ func TestUpdateDetectsChangedRemoteDefaultBranch(t *testing.T) {
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
 	cacheDir := filepath.Join(root, "cache")
-	first, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false)
-	if err != nil {
+	cache := NewCache("owner/repo", origin, "", cacheDir)
+	if err := cache.Refresh(false); err != nil {
 		t.Fatal(err)
 	}
+	first := cache.dir()
 	if _, _, err := runGit(origin, "checkout", "-b", "next"); err != nil {
 		t.Fatal(err)
 	}
@@ -1086,13 +1112,13 @@ func TestUpdateDetectsChangedRemoteDefaultBranch(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	status := observeRemoteSource("owner/repo", cfg.Remote["owner/repo"], cacheDir)
-	if status.RemoteStatus != RemoteNotCached || status.Branch != "next" {
+	if status.RemoteStatus != RemoteUpdateAvailable || status.Branch != "next" || status.CachePath != first {
 		t.Fatalf("status = %#v", status)
 	}
 	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
 		t.Fatal(err)
 	}
-	second := resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir
+	second := cache.dir()
 	if second == first {
 		t.Fatal("changed default branch reused the old Cache identity")
 	}
@@ -1172,7 +1198,7 @@ func TestUpdateRemoteSkillsDryRunTreatsRemoteErrorAsIntendedRefresh(t *testing.T
 		t.Fatal(err)
 	}
 	cacheDir := filepath.Join(root, "cache")
-	if _, err := NewCache("owner/current", origin, branch, cacheDir).Refresh(false, "other"); err != nil {
+	if err := NewCache("owner/current", origin, branch, cacheDir).Refresh(false, "other"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1291,10 +1317,11 @@ func TestUpdateRemoteSkillsDoesNotReconcileAvailability(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	cache := NewCache("owner/repo", origin, "", cacheDir)
+	if err := cache.Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
-	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
+	if err := MaterializeRemoteSkill("sample", "sample", cache.dir(), skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{".claude", ".continue"} {
@@ -1330,10 +1357,11 @@ func TestUpdateRemoteSkillsDryRunDoesNotApplyAvailabilityDrift(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	cache := NewCache("owner/repo", origin, "", cacheDir)
+	if err := cache.Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
-	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
+	if err := MaterializeRemoteSkill("sample", "sample", cache.dir(), skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{".claude", ".continue"} {
@@ -1360,10 +1388,11 @@ func TestUpdateRemoteSkillsIgnoresUnmanagedAvailabilityPath(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	cache := NewCache("owner/repo", origin, "", cacheDir)
+	if err := cache.Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
-	if err := MaterializeRemoteSkill("sample", "sample", resolveCacheRepo("owner/repo", origin, "", cacheDir).Dir, skillsDir); err != nil {
+	if err := MaterializeRemoteSkill("sample", "sample", cache.dir(), skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	unmanaged := filepath.Join(project, ".claude", "skills", "sample")
@@ -1424,7 +1453,7 @@ func TestSyncPlanApplyReportsLiveRemoteSourceLifecycle(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	var live []SyncEvent
@@ -1737,5 +1766,40 @@ func TestUpdateReportsSourceWhoseDeclaredSkillsDidNotChange(t *testing.T) {
 	}
 	if len(result.UpdatedRepos) != 1 || result.UpdatedRepos[0].NewSHA != head {
 		t.Fatalf("changed Skill was not reported as updated: %#v", result)
+	}
+}
+
+func TestUpdateReportsRejectedDefaultBranchFallbackAsUnchanged(t *testing.T) {
+	t.Parallel()
+	origin, url := writeSparseOrigin(t)
+	cacheDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: url, Skills: map[string]string{"alpha": "skills/alpha"}}
+	if _, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, nil); err != nil {
+		t.Fatal(err)
+	}
+	cache := NewCache("owner/repo", url, "", cacheDir)
+	initialSHA := cache.head()
+
+	mustGit(t, origin, "checkout", "--orphan", "missing-branch")
+	mustGit(t, origin, "rm", "-rf", ".")
+	mustWriteScopeStateTestFile(t, filepath.Join(origin, "README.md"), []byte("# Missing\n"))
+	mustGit(t, origin, "add", "README.md")
+	mustGit(t, origin, "commit", "-m", "missing commit")
+	mustGit(t, origin, "symbolic-ref", "HEAD", "refs/heads/missing-branch")
+
+	var kinds []string
+	result, err := UpdateRemoteSkills(cfg, nil, false, false, cacheDir, func(ev UpdateEvent) {
+		kinds = append(kinds, ev.Kind)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SkippedRepoInfo{{Source: "owner/repo", Reason: "up_to_date", LocalSHA: initialSHA}}
+	if len(result.UpdatedRepos) != 0 || !reflect.DeepEqual(result.SkippedRepos, want) {
+		t.Fatalf("update result = %#v; want only skipped %#v", result, want)
+	}
+	if !slices.Contains(kinds, UpdateBranchMissingWarn) || !slices.Contains(kinds, UpdateRepoUnchanged) || slices.Contains(kinds, UpdateRepoDone) {
+		t.Fatalf("event kinds = %v", kinds)
 	}
 }

@@ -23,6 +23,9 @@ type UpdatedRepoInfo struct {
 // left every declared Skill's tree as it was.
 const SkippedSkillsUnchanged = "skills_unchanged"
 
+// SkippedUpToDate is a Source whose Cache is already at the remote commit.
+const SkippedUpToDate = "up_to_date"
+
 type SkippedRepoInfo struct {
 	Source   string `json:"source"`
 	Reason   string `json:"reason"`
@@ -144,7 +147,7 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		source := status.Source
 		_, update := needsUpdate[source]
 		if !force && !update {
-			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: "up_to_date", LocalSHA: status.LocalSHA})
+			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: SkippedUpToDate, LocalSHA: status.LocalSHA})
 			continue
 		}
 		refresh = append(refresh, source)
@@ -176,16 +179,19 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		beforeDir := cache.dir()
 		beforeSHA := cache.head()
 		beforeTrees := declaredTrees()
-		dir, refreshErr := cache.RefreshWithProgress(fetch, progress, paths...)
-		if refreshErr != nil {
+		if refreshErr := cache.RefreshWithProgress(fetch, progress, paths...); refreshErr != nil {
 			message := refreshErr.Error()
 			result.Errors = append(result.Errors, UpdateErrorInfo{Source: source, Error: message})
 			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoError, Source: source, Err: message})
 			continue
 		}
 		sha := cache.head()
-		if beforeSHA != "" && dir == beforeDir && sha != beforeSHA && maps.Equal(beforeTrees, declaredTrees()) {
-			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: SkippedSkillsUnchanged, LocalSHA: sha})
+		if !incomplete[source] && beforeSHA != "" && cache.dir() == beforeDir && maps.Equal(beforeTrees, declaredTrees()) {
+			reason := SkippedSkillsUnchanged
+			if sha == beforeSHA {
+				reason = SkippedUpToDate
+			}
+			result.SkippedRepos = append(result.SkippedRepos, SkippedRepoInfo{Source: source, Reason: reason, LocalSHA: sha})
 			emitUpdate(progress, UpdateEvent{Kind: UpdateRepoUnchanged, Source: source, NewSHA: sha})
 			continue
 		}
@@ -197,16 +203,16 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 	}
 	if !dryRun {
 		followRenames(repositories, cacheDir, result, progress)
-		ensureUpdatedTrustRoot(repositories, cacheDir, result, progress)
+		ensureUpdatedTrustRoot(repositories, cacheDir, force, result, progress)
 	}
 	return result, nil
 }
 
 // ensureUpdatedTrustRoot fetches the trust root once for every selected
-// Source: a current one when a Source with a signed Skill was just updated,
-// and a missing one whatever was updated, so a Skill blocked because Add
+// Source: a current one when a Source with a signed Skill was just updated
+// or force re-fetched every Source, and a missing one whatever was updated, so a Skill blocked because Add
 // could not fetch it converges on the next plain Update.
-func ensureUpdatedTrustRoot(repositories map[string]config.RemoteRepo, cacheDir string, result *UpdateResult, progress UpdateProgress) {
+func ensureUpdatedTrustRoot(repositories map[string]config.RemoteRepo, cacheDir string, force bool, result *UpdateResult, progress UpdateProgress) {
 	var all, updated []string
 	for _, source := range slices.Sorted(maps.Keys(repositories)) {
 		repo := repositories[source]
@@ -222,7 +228,7 @@ func ensureUpdatedTrustRoot(repositories map[string]config.RemoteRepo, cacheDir 
 			updated = append(updated, dirs...)
 		}
 	}
-	if err := ensureTrustRoot(cacheDir, anySigned(updated...), all...); err != nil {
+	if err := ensureTrustRoot(cacheDir, force || anySigned(updated...), all...); err != nil {
 		result.Errors = append(result.Errors, UpdateErrorInfo{Error: err.Error()})
 		emitUpdate(progress, UpdateEvent{Kind: UpdateTrustRootError, Err: err.Error()})
 	}

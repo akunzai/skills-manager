@@ -46,7 +46,7 @@ func signatureFixture(t *testing.T) (cfg *config.Config, configPath, skillsDir, 
 	skillsDir, cacheDir = filepath.Join(root, "skills"), filepath.Join(root, "cache")
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	cfg = config.DefaultConfig()
@@ -578,5 +578,31 @@ func TestUpdateOfUnsignedSourceNeverFetchesTrustRoot(t *testing.T) {
 
 	if *fetches != 0 {
 		t.Fatalf("trust root fetched %d times for an unsigned Source", *fetches)
+	}
+}
+
+func TestForcedUpdateRefreshesTrustRootOfCurrentSignedSource(t *testing.T) {
+	cfg, configPath, skillsDir, cacheDir, intake := addSignedFixture(t)
+	fetches := stubTrustedRoot(t)
+	stubVerify(t, signedBy(testSigner))
+	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	if planErr != nil {
+		t.Fatal(planErr)
+	}
+	if _, err := ApplyAddPlan(plan, cfg, nil); err != nil {
+		t.Fatal(err)
+	}
+	before := *fetches
+
+	result, err := UpdateRemoteSkills(cfg, nil, true, false, cacheDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.UpdatedRepos) != 0 {
+		t.Fatalf("update result = %#v; want the unchanged Source skipped", result)
+	}
+	if *fetches != before+1 {
+		t.Fatalf("trust root fetched %d times by update --force; want 1", *fetches-before)
 	}
 }

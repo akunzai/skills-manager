@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestEnsureGitRepoConfiguresLongpathsOnWindows(t *testing.T) {
+func TestCacheRefreshConfiguresLongpathsOnWindows(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("skipping Windows-specific core.longpaths test on non-windows platform")
 	}
@@ -19,10 +19,11 @@ func TestEnsureGitRepoConfiguresLongpathsOnWindows(t *testing.T) {
 	writeLocalGitSkill(t, origin, "sample")
 
 	cacheDir := filepath.Join(root, "cache")
-	repoDir, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false)
-	if err != nil {
-		t.Fatalf("EnsureGitRepo failed: %v", err)
+	cache := NewCache("owner/repo", origin, "", cacheDir)
+	if err := cache.Refresh(false); err != nil {
+		t.Fatalf("Refresh failed: %v", err)
 	}
+	repoDir := cache.dir()
 
 	val, _, err := runGit(repoDir, "config", "--local", "--get", "core.longpaths")
 	if err != nil {
@@ -38,9 +39,9 @@ func TestEnsureGitRepoConfiguresLongpathsOnWindows(t *testing.T) {
 		t.Fatalf("failed to unset core.longpaths: %v", err)
 	}
 
-	// Calling EnsureGitRepo again should re-apply core.longpaths on Windows
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false); err != nil {
-		t.Fatalf("EnsureGitRepo update failed: %v", err)
+	// Refreshing again should re-apply core.longpaths on Windows
+	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false); err != nil {
+		t.Fatalf("Refresh of an existing Cache failed: %v", err)
 	}
 
 	valAfter, _, err := runGit(repoDir, "config", "--local", "--get", "core.longpaths")
@@ -128,7 +129,7 @@ func refreshedCache(t *testing.T) (Cache, string) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, "sample")
 	cache := NewCache("owner/repo", origin, "", t.TempDir())
-	if _, err := cache.Refresh(false, "sample"); err != nil {
+	if err := cache.Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	return cache, mustGit(t, origin, "rev-parse", "HEAD")
@@ -157,13 +158,14 @@ func assertCachePaths(t *testing.T, repoDir string, present, absent []string) {
 	}
 }
 
-func TestEnsureGitRepoChecksOutOnlyDeclaredSkills(t *testing.T) {
+func TestCacheRefreshChecksOutOnlyDeclaredSkills(t *testing.T) {
 	t.Parallel()
 	_, url := writeSparseOrigin(t)
-	repoDir, err := NewCache("owner/repo", url, "", t.TempDir()).Refresh(false, "skills/alpha")
-	if err != nil {
+	cache := NewCache("owner/repo", url, "", t.TempDir())
+	if err := cache.Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
+	repoDir := cache.dir()
 	assertCachePaths(t, repoDir,
 		[]string{"README.md", "skills/alpha/SKILL.md", "skills/alpha/notes.txt"},
 		[]string{"skills/beta", "mirror", "fixtures", longFixture, longInSkill})
@@ -180,65 +182,65 @@ func TestEnsureGitRepoChecksOutOnlyDeclaredSkills(t *testing.T) {
 
 // The Cache is shared by every Scope: a later Scope's paths join the sparse
 // checkout without evicting an earlier Scope's (ADR 0004).
-func TestEnsureGitRepoAddsSubpathsWithoutRemovingOthers(t *testing.T) {
+func TestCacheRefreshAddsSubpathsWithoutRemovingOthers(t *testing.T) {
 	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
-	if _, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/alpha"); err != nil {
+	cache := NewCache("owner/repo", url, "", cacheDir)
+	if err := cache.Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(true, "skills/beta/")
-	if err != nil {
+	if err := cache.Refresh(true, "skills/beta/"); err != nil {
 		t.Fatal(err)
 	}
-	assertCachePaths(t, repoDir,
+	assertCachePaths(t, cache.dir(),
 		[]string{"skills/alpha/notes.txt", "skills/beta/reference.txt"},
 		[]string{"mirror", "fixtures"})
 }
 
-func TestEnsureGitRepoChecksOutWholeTreeForRootSkill(t *testing.T) {
+func TestCacheRefreshChecksOutWholeTreeForRootSkill(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, ".")
 	cacheDir := t.TempDir()
-	repoDir, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, ".")
-	if err != nil {
+	cache := NewCache("owner/repo", origin, "", cacheDir)
+	if err := cache.Refresh(false, "."); err != nil {
 		t.Fatal(err)
 	}
-	assertCachePaths(t, repoDir, []string{"SKILL.md"}, nil)
-	if coverage, err := NewCache("owner/repo", origin, "", cacheDir).coverage(); err != nil || len(coverage.missing([]string{"."})) != 0 {
+	assertCachePaths(t, cache.dir(), []string{"SKILL.md"}, nil)
+	if coverage, err := cache.coverage(); err != nil || len(coverage.missing([]string{"."})) != 0 {
 		t.Fatalf("coverage = %+v, %v; want the root covered", coverage, err)
 	}
 }
 
 // A Cache cloned in full by an older release is narrowed on the next refresh
 // that fetches, before the new commit is written (ADR 0004).
-func TestEnsureGitRepoNarrowsFullCacheOnRefresh(t *testing.T) {
+func TestCacheRefreshNarrowsFullCache(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin")
 	writeLocalGitSkill(t, origin, "alpha")
 	writeLocalGitSkill(t, origin, "beta")
 	branch := mustGit(t, origin, "symbolic-ref", "--short", "HEAD")
 	cacheDir := t.TempDir()
-	cache := resolveCacheRepo("owner/repo", origin, branch, cacheDir)
-	if err := os.MkdirAll(filepath.Dir(cache.Dir), 0o755); err != nil {
+	cache := NewCache("owner/repo", origin, branch, cacheDir)
+	if err := os.MkdirAll(filepath.Dir(cache.dir()), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mustGit(t, "", "clone", origin, cache.Dir)
+	mustGit(t, "", "clone", origin, cache.dir())
 
-	repoDir, err := NewCache("owner/repo", origin, branch, cacheDir).Refresh(true, "alpha")
-	if err != nil {
+	if err := cache.Refresh(true, "alpha"); err != nil {
 		t.Fatal(err)
 	}
-	assertCachePaths(t, repoDir, []string{"alpha/SKILL.md"}, []string{"beta"})
+	assertCachePaths(t, cache.dir(), []string{"alpha/SKILL.md"}, []string{"beta"})
 }
 
 func TestWithSkillFilesChecksOutOnlySkillMDThenRestoresCone(t *testing.T) {
 	t.Parallel()
 	_, url := writeSparseOrigin(t)
-	repoDir, err := NewCache("owner/repo", url, "", t.TempDir()).Refresh(false, "skills/alpha")
-	if err != nil {
+	cache := NewCache("owner/repo", url, "", t.TempDir())
+	if err := cache.Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	err = withSkillFiles(repoDir, func() error {
+	repoDir := cache.dir()
+	err := withSkillFiles(repoDir, func() error {
 		assertCachePaths(t, repoDir,
 			[]string{"skills/alpha/notes.txt", "skills/beta/SKILL.md", "mirror/alpha/SKILL.md"},
 			[]string{"skills/beta/reference.txt", "mirror/alpha/notes.txt", "fixtures", longInSkill})
@@ -257,14 +259,15 @@ func TestWithSkillFilesChecksOutOnlySkillMDThenRestoresCone(t *testing.T) {
 
 // An add interrupted during discovery leaves the Cache in non-cone mode; the
 // next refresh restores the cone it had.
-func TestEnsureGitRepoRestoresConeAfterInterruptedDiscovery(t *testing.T) {
+func TestCacheRefreshRestoresConeAfterInterruptedDiscovery(t *testing.T) {
 	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
-	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/alpha")
-	if err != nil {
+	cache := NewCache("owner/repo", url, "", cacheDir)
+	if err := cache.Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
+	repoDir := cache.dir()
 	state, err := readSparseState(repoDir)
 	if err != nil {
 		t.Fatal(err)
@@ -273,7 +276,7 @@ func TestEnsureGitRepoRestoresConeAfterInterruptedDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "skills/beta"); err != nil {
+	if err := cache.Refresh(false, "skills/beta"); err != nil {
 		t.Fatal(err)
 	}
 	assertCachePaths(t, repoDir,
@@ -300,19 +303,19 @@ func TestDirPatternRoundTripsGlobCharacters(t *testing.T) {
 
 // A root Skill's full checkout is deliberate, not an earlier release's full
 // clone, so another Scope's fetching refresh leaves it whole (ADR 0004).
-func TestEnsureGitRepoKeepsRootSkillCheckoutForOtherScopes(t *testing.T) {
+func TestCacheRefreshKeepsRootSkillCheckoutForOtherScopes(t *testing.T) {
 	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
-	if _, err := NewCache("owner/repo", url, "", cacheDir).Refresh(false, "."); err != nil {
+	cache := NewCache("owner/repo", url, "", cacheDir)
+	if err := cache.Refresh(false, "."); err != nil {
 		t.Fatal(err)
 	}
-	repoDir, err := NewCache("owner/repo", url, "", cacheDir).Refresh(true, "skills/alpha")
-	if err != nil {
+	if err := cache.Refresh(true, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	assertCachePaths(t, repoDir, []string{"skills/beta/reference.txt", "fixtures/large/fixture.txt"}, nil)
-	if coverage, err := NewCache("owner/repo", url, "", cacheDir).coverage(); err != nil || len(coverage.missing([]string{"."})) != 0 {
+	assertCachePaths(t, cache.dir(), []string{"skills/beta/reference.txt", "fixtures/large/fixture.txt"}, nil)
+	if coverage, err := cache.coverage(); err != nil || len(coverage.missing([]string{"."})) != 0 {
 		t.Fatalf("coverage = %+v, %v; want the root covered", coverage, err)
 	}
 }
@@ -330,7 +333,7 @@ func TestCacheAnswersHeadAndSubpathsOffline(t *testing.T) {
 	if entry := cache.atHead("skills/alpha"); entry != (headEntry{}) {
 		t.Fatalf("atHead in an absent Cache = %+v; want none", entry)
 	}
-	if _, err := cache.Refresh(false, "skills/alpha"); err != nil {
+	if err := cache.Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -366,7 +369,7 @@ func TestCacheCoverageNamesMissingSubpaths(t *testing.T) {
 	t.Parallel()
 	_, url := writeSparseOrigin(t)
 	cache := NewCache("owner/repo", url, "", t.TempDir())
-	if _, err := cache.Refresh(false, "skills/alpha"); err != nil {
+	if err := cache.Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
 	coverage, err := cache.coverage()
@@ -382,21 +385,21 @@ func TestCacheCoverageNamesMissingSubpaths(t *testing.T) {
 	}
 }
 
-func TestEnsureGitRepoDefaultBranchMigrationAdopted(t *testing.T) {
+func TestCacheRefreshDefaultBranchMigrationAdopted(t *testing.T) {
 	t.Parallel()
 	origin, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
 	cache := NewCache("owner/repo", url, "", cacheDir)
 
-	initialBranch, err := remoteDefaultBranch("owner/repo", url)
+	initialBranch, _, err := cache.remoteDefaultBranchCommit()
 	if err != nil {
 		t.Fatal(err)
 	}
-	repoDir, err := cache.Refresh(false, "skills/alpha")
-	if err != nil {
+	if err := cache.Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	if got := cachedDefaultBranch("owner/repo", url, cacheDir); got != initialBranch {
+	repoDir := cache.dir()
+	if got := cache.cachedDefaultBranch(); got != initialBranch {
 		t.Fatalf("cached default branch = %q; want %q", got, initialBranch)
 	}
 
@@ -408,11 +411,11 @@ func TestEnsureGitRepoDefaultBranchMigrationAdopted(t *testing.T) {
 	onProgress := func(ev UpdateEvent) {
 		events = append(events, ev)
 	}
-	migratedDir, err := cache.RefreshWithProgress(true, onProgress, "skills/alpha")
-	if err != nil {
+	if err := cache.RefreshWithProgress(true, onProgress, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	if got := cachedDefaultBranch("owner/repo", url, cacheDir); got != "migrated" {
+	migratedDir := cache.dir()
+	if got := cache.cachedDefaultBranch(); got != "migrated" {
 		t.Fatalf("cached default branch after migration = %q; want %q", got, "migrated")
 	}
 	if migratedDir == repoDir {
@@ -429,21 +432,21 @@ func TestEnsureGitRepoDefaultBranchMigrationAdopted(t *testing.T) {
 	}
 }
 
-func TestEnsureGitRepoDefaultBranchMissingSkillsRejected(t *testing.T) {
+func TestCacheRefreshDefaultBranchMissingSkillsRejected(t *testing.T) {
 	t.Parallel()
 	origin, url := writeSparseOrigin(t)
 	cacheDir := t.TempDir()
 	cache := NewCache("owner/repo", url, "", cacheDir)
 
-	initialBranch, err := remoteDefaultBranch("owner/repo", url)
+	initialBranch, _, err := cache.remoteDefaultBranchCommit()
 	if err != nil {
 		t.Fatal(err)
 	}
-	repoDir, err := cache.Refresh(false, "skills/alpha")
-	if err != nil {
+	if err := cache.Refresh(false, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	if got := cachedDefaultBranch("owner/repo", url, cacheDir); got != initialBranch {
+	repoDir := cache.dir()
+	if got := cache.cachedDefaultBranch(); got != initialBranch {
 		t.Fatalf("cached default branch = %q; want %q", got, initialBranch)
 	}
 
@@ -459,14 +462,14 @@ func TestEnsureGitRepoDefaultBranchMissingSkillsRejected(t *testing.T) {
 	onProgress := func(ev UpdateEvent) {
 		events = append(events, ev)
 	}
-	keptDir, err := cache.RefreshWithProgress(true, onProgress, "skills/alpha")
-	if err != nil {
+	if err := cache.RefreshWithProgress(true, onProgress, "skills/alpha"); err != nil {
 		t.Fatal(err)
 	}
+	keptDir := cache.dir()
 	if keptDir != repoDir {
 		t.Fatalf("keptDir = %q; want initial branch dir %q", keptDir, repoDir)
 	}
-	if got := cachedDefaultBranch("owner/repo", url, cacheDir); got != initialBranch {
+	if got := cache.cachedDefaultBranch(); got != initialBranch {
 		t.Fatalf("cached default branch after rejected missing skills = %q; want initial %q", got, initialBranch)
 	}
 	warnFound := false

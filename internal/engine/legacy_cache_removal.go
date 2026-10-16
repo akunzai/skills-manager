@@ -40,8 +40,8 @@ func newLegacyCacheDetector(cfg *config.Config, cacheDir string) *legacyCacheDet
 
 // detectRoots finds a branchless Cache root — a `.git` directly at
 // <cache>/<SourceKey> — for each declared remote Source, in sorted order.
-// The branch-aware layout nests under this same path (resolveCacheRepo in
-// git.go), so removing a detected root also clears whatever branch-aware
+// The branch-aware layout nests under this same path (Cache.dir in
+// cache.go), so removing a detected root also clears whatever branch-aware
 // Cache had been rebuilt inside it; the next `skills update` refetches it.
 func (d *legacyCacheDetector) detectRoots() []string {
 	roots := make(map[string]struct{})

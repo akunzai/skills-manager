@@ -244,10 +244,10 @@ func planRemoteItem(source string, cache Cache, skill SkillFreshness, drift Avai
 	switch skill.Status {
 	case SkillRemovedUpstream:
 		item.Block = SyncBlockRemovedUpstream
-		branch := cache.repo().Branch
+		branch := cache.resolvedBranch()
 		branchDesc := ""
 		if branch != "" {
-			if cache.branch != "" || models.ParseRepoSource(source).Branch != "" {
+			if cache.branch != "" {
 				branchDesc = fmt.Sprintf(" (branch %s)", branch)
 			} else {
 				branchDesc = fmt.Sprintf(" (default branch %s)", branch)

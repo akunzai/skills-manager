@@ -61,7 +61,7 @@ func TestCLIDiffExitCodesAndReadOnly(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewCache("owner/repo", origin, repo.Branch, cacheDir).Refresh(false, "sample"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, repo.Branch, cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	paths := []string{"--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
@@ -138,7 +138,7 @@ func TestCLIDiffWithoutABaselineSaysWhy(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	// A copy that arrived without Sync, so no Baseline was recorded.

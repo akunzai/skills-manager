@@ -36,7 +36,7 @@ func unverifiableScope(t *testing.T) (args []string, configFile string) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	return []string{"--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}, configFile
