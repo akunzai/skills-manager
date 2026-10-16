@@ -12,33 +12,6 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-func TestParseSkillReplacesFromMD(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		want    []string
-	}{
-		{"block form", "---\nname: new\nmetadata:\n  replaces: old\n---\n# New\n", []string{"old"}},
-		{"several names", "---\nname: new\nmetadata:\n  author: someone\n  replaces: \"old, older\"\n---\n", []string{"old", "older"}},
-		{"CRLF", "---\r\nname: new\r\nmetadata:\r\n  replaces: old\r\n---\r\n", []string{"old"}},
-		{"replaces outside metadata", "---\nname: new\nreplaces: old\n---\n", nil},
-		{"metadata ends before replaces", "---\nmetadata:\n  author: someone\nreplaces: old\n---\n", nil},
-		{"replaces in the body", "---\nname: new\n---\nmetadata:\n  replaces: old\n", nil},
-		{"no frontmatter", "# New\n", nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "SKILL.md")
-			if err := os.WriteFile(path, []byte(tt.content), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if got := ParseSkillReplacesFromMD(path); !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("replaces = %#v; want %#v", got, tt.want)
-			}
-		})
-	}
-}
-
 // renameFixture is a Scope that declared "old" from a Source and synced it.
 type renameFixture struct {
 	origin, url, branch             string

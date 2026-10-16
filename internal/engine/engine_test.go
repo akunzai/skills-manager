@@ -15,47 +15,6 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-func TestParseSkillNameFromMD(t *testing.T) {
-	tmpDir := t.TempDir()
-	skillMd := filepath.Join(tmpDir, "SKILL.md")
-
-	content := `---
-name: my-awesome-skill
-description: Does awesome stuff
----
-
-# My Awesome Skill
-`
-	if err := os.WriteFile(skillMd, []byte(content), 0644); err != nil {
-		t.Fatalf("failed to write test SKILL.md: %v", err)
-	}
-
-	name := ParseSkillNameFromMD(skillMd)
-	if name != "my-awesome-skill" {
-		t.Errorf("expected my-awesome-skill, got %q", name)
-	}
-}
-
-func TestParseSkillDescriptionFromMD(t *testing.T) {
-	tmpDir := t.TempDir()
-	skillMd := filepath.Join(tmpDir, "SKILL.md")
-
-	content := `---
-name: my-awesome-skill
-description: Does awesome stuff
----
-
-# My Awesome Skill
-`
-	if err := os.WriteFile(skillMd, []byte(content), 0644); err != nil {
-		t.Fatalf("failed to write test SKILL.md: %v", err)
-	}
-
-	if got := ParseSkillDescriptionFromMD(skillMd); got != "Does awesome stuff" {
-		t.Errorf("expected %q, got %q", "Does awesome stuff", got)
-	}
-}
-
 // DiscoverSkillsInRepo returns each candidate's description, which Add's
 // --list shows.
 func TestDiscoverSkillsInRepoReadsDescriptions(t *testing.T) {

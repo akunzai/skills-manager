@@ -7,71 +7,9 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 )
-
-var (
-	frontmatterNameRegex        = regexp.MustCompile(`(?m)^name:\s*["']?([a-zA-Z0-9_\-\.]+)["']?`)
-	frontmatterDescriptionRegex = regexp.MustCompile(`(?m)^description:\s*["']?(.*?)["']?\s*$`)
-)
-
-// frontmatterBody returns a SKILL.md's leading `---`-delimited block, or ""
-// when the file cannot be read or has none.
-func frontmatterBody(skillMdPath string) string {
-	contentBytes, err := os.ReadFile(skillMdPath)
-	if err != nil {
-		return ""
-	}
-	content := string(contentBytes)
-	if !strings.HasPrefix(content, "---") {
-		return ""
-	}
-	parts := strings.SplitN(content, "---", 3)
-	if len(parts) < 3 {
-		return ""
-	}
-	return parts[1]
-}
-
-func ParseSkillNameFromMD(skillMdPath string) string {
-	match := frontmatterNameRegex.FindStringSubmatch(frontmatterBody(skillMdPath))
-	if len(match) > 1 {
-		return strings.TrimSpace(match[1])
-	}
-	return ""
-}
-
-// ParseSkillDescriptionFromMD reads a Skill's declared description from its
-// SKILL.md frontmatter, or "" when it has none.
-func ParseSkillDescriptionFromMD(skillMdPath string) string {
-	match := frontmatterDescriptionRegex.FindStringSubmatch(frontmatterBody(skillMdPath))
-	if len(match) > 1 {
-		return strings.TrimSpace(match[1])
-	}
-	return ""
-}
-
-const MaxScanDepth = 5
-
-var IgnoredScanDirs = map[string]bool{
-	".git":         true,
-	".hg":          true,
-	".svn":         true,
-	"node_modules": true,
-	"vendor":       true,
-	".venv":        true,
-	"venv":         true,
-	"__pycache__":  true,
-	"dist":         true,
-	"build":        true,
-	"target":       true,
-	".cache":       true,
-	".next":        true,
-	".nuxt":        true,
-	".turbo":       true,
-}
 
 type DiscoveredSkills map[string][]string
 
@@ -112,41 +50,25 @@ func discoverSkills(repoDir, scope string, identity bundleIdentity) (DiscoveredS
 	foundPaths := make(map[string][]string)
 	rawDescriptions := make(map[string]string)
 
-	err = filepath.Walk(scanRoot, func(path string, info os.FileInfo, err error) error {
+	err = walkSkillFiles(scanRoot, func(path string) error {
+		skillDir := filepath.Dir(path)
+		relPath, err := filepath.Rel(repoDir, skillDir)
 		if err != nil {
 			return nil
 		}
-		if info.IsDir() {
-			if IgnoredScanDirs[info.Name()] {
-				return filepath.SkipDir
-			}
-			rel, err := filepath.Rel(scanRoot, path)
-			if err == nil && rel != "." {
-				depth := len(strings.Split(filepath.ToSlash(rel), "/"))
-				if depth > MaxScanDepth {
-					return filepath.SkipDir
-				}
-			}
-		}
-		if !info.IsDir() && strings.EqualFold(info.Name(), "SKILL.md") {
-			skillDir := filepath.Dir(path)
-			relPath, err := filepath.Rel(repoDir, skillDir)
-			if err != nil {
-				return nil
-			}
-			relPathStr := filepath.ToSlash(relPath)
+		relPathStr := filepath.ToSlash(relPath)
 
-			name := ParseSkillNameFromMD(path)
-			if name == "" {
-				if relPathStr == "." {
-					name = filepath.Base(repoDir)
-				} else {
-					name = filepath.Base(skillDir)
-				}
+		frontmatter := readSkillFrontmatter(path)
+		name := frontmatter.Name
+		if name == "" {
+			if relPathStr == "." {
+				name = filepath.Base(repoDir)
+			} else {
+				name = filepath.Base(skillDir)
 			}
-			foundPaths[name] = append(foundPaths[name], relPathStr)
-			rawDescriptions[relPathStr] = ParseSkillDescriptionFromMD(path)
 		}
+		foundPaths[name] = append(foundPaths[name], relPathStr)
+		rawDescriptions[relPathStr] = frontmatter.Description
 		return nil
 	})
 
