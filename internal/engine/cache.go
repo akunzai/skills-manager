@@ -2,8 +2,13 @@ package engine
 
 import (
 	"cmp"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -13,32 +18,203 @@ import (
 // Cache is one remote Source's working copy. It stores Source identity, not
 // Config: callers pass the Skill subpaths each operation should cover.
 type Cache struct {
+	source   string
 	key      string
 	url      string
 	branch   string
 	cacheDir string
 }
 
-func NewCache(key, url, branch, cacheDir string) Cache {
-	return Cache{key: key, url: url, branch: branch, cacheDir: cacheDir}
+func NewCache(source, url, branch, cacheDir string) Cache {
+	parsed := models.ParseRepoSource(source)
+	return Cache{
+		source:   source,
+		key:      parsed.SourceKey,
+		url:      cmp.Or(url, parsed.URL),
+		branch:   cmp.Or(strings.TrimSpace(branch), parsed.Branch),
+		cacheDir: cacheDirOrDefault(cacheDir),
+	}
 }
 
-func (c Cache) repo() cacheRepo {
-	return resolveCacheRepo(c.key, c.url, c.branch, c.cacheDir)
+func cacheDirOrDefault(cacheDir string) string {
+	if cacheDir == "" {
+		return models.DefaultCacheDir()
+	}
+	return cacheDir
+}
+
+func cacheBranchKey(branch string) string {
+	if branch == "" {
+		branch = "HEAD"
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(branch)))[:16]
+}
+
+func (c Cache) withBranch(branch string) Cache {
+	c.branch = strings.TrimSpace(branch)
+	return c
+}
+
+func (c Cache) defaultBranchMarkerPath() string {
+	identity := c.key + "\x00" + c.url
+	sum := sha256.Sum256([]byte(identity))
+	return filepath.Join(c.cacheDir, ".branch-identities", fmt.Sprintf("%x", sum[:])[:24])
+}
+
+func (c Cache) cachedDefaultBranch() string {
+	data, err := os.ReadFile(c.defaultBranchMarkerPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func (c Cache) recordDefaultBranch(branch string) error {
+	path := c.defaultBranchMarkerPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(branch+"\n"), 0o644)
+}
+
+func (c Cache) resolvedBranch() string {
+	return cmp.Or(c.branch, c.cachedDefaultBranch())
+}
+
+func (c Cache) dirForBranch(branch string) string {
+	return filepath.Join(c.cacheDir, filepath.FromSlash(c.key), cacheBranchKey(branch))
 }
 
 func (c Cache) dir() string {
-	return c.repo().Dir
+	return c.dirForBranch(c.resolvedBranch())
 }
 
 // Refresh clones or fetches this Cache and covers paths in its sparse checkout.
-func (c Cache) Refresh(force bool, paths ...string) (string, error) {
+func (c Cache) Refresh(force bool, paths ...string) error {
 	return c.RefreshWithProgress(force, nil, paths...)
 }
 
 // RefreshWithProgress clones or fetches this Cache and covers paths while emitting progress.
-func (c Cache) RefreshWithProgress(force bool, progress UpdateProgress, paths ...string) (string, error) {
-	return ensureGitRepo(c.key, c.url, c.branch, force, c.cacheDir, progress, paths...)
+func (c Cache) RefreshWithProgress(force bool, progress UpdateProgress, paths ...string) error {
+	if err := checkGitVersion(); err != nil {
+		return err
+	}
+	if c.branch != "" {
+		return c.checkout(force, paths)
+	}
+	previousDefault := c.cachedDefaultBranch()
+	remoteDefault, _, err := c.remoteDefaultBranchCommit()
+	if err != nil {
+		return err
+	}
+	target := c.withBranch(remoteDefault)
+	if previousDefault != "" && remoteDefault != previousDefault {
+		if err := target.checkout(force, paths); err != nil {
+			return err
+		}
+		missing := slices.ContainsFunc(paths, func(p string) bool {
+			return !target.atHead(p).exists()
+		})
+		if missing {
+			prev := c.withBranch(previousDefault)
+			if _, err := os.Stat(filepath.Join(prev.dir(), ".git")); err == nil {
+				_ = RemoveAll(target.dir())
+				emitUpdate(progress, UpdateEvent{
+					Kind:   UpdateBranchMissingWarn,
+					Source: c.source,
+					From:   previousDefault,
+					To:     remoteDefault,
+				})
+				return prev.checkout(force, paths)
+			}
+			if err := c.recordDefaultBranch(remoteDefault); err != nil {
+				return fmt.Errorf("record default branch: %w", err)
+			}
+			return nil
+		}
+		emitUpdate(progress, UpdateEvent{
+			Kind:   UpdateBranchChangedNotice,
+			Source: c.source,
+			From:   previousDefault,
+			To:     remoteDefault,
+		})
+		if err := c.recordDefaultBranch(remoteDefault); err != nil {
+			return fmt.Errorf("record default branch: %w", err)
+		}
+		return nil
+	}
+	if err := target.checkout(force, paths); err != nil {
+		return err
+	}
+	if err := c.recordDefaultBranch(remoteDefault); err != nil {
+		return fmt.Errorf("record default branch: %w", err)
+	}
+	return nil
+}
+
+// checkout clones or refreshes one branch working copy of this Source's Cache
+// and makes sure the declared Skill subpaths are in its sparse checkout. The
+// Cache is a blobless, sparse clone so paths no Scope declares are never
+// written to disk; only '.' (a Skill at the repository root) needs the whole tree.
+func (c Cache) checkout(forceUpdate bool, paths []string) error {
+	repoDir := c.dir()
+	gitDir := filepath.Join(repoDir, ".git")
+	if _, err := os.Stat(gitDir); err == nil {
+		if runtime.GOOS == "windows" {
+			_, _, _ = runGit(repoDir, "config", "core.longpaths", "true")
+		}
+		if forceUpdate {
+			// Narrow the working tree before the reset writes a new commit, so
+			// a Cache cloned in full by an older release never checks out paths
+			// no Scope declares.
+			if err := normalizeSparseCheckout(repoDir, slices.Contains(cleanSparsePaths(paths), ".")); err != nil {
+				return fmt.Errorf("prepare sparse checkout of %s: %w", c.url, err)
+			}
+			ref := cmp.Or(c.resolvedBranch(), "HEAD")
+			stdout, stderr, err := runGit(repoDir, "fetch", "--depth", "1", "origin", ref)
+			if err != nil {
+				return gitOpErr("fetch", c.url, stdout, stderr, err)
+			}
+			stdout, stderr, err = runGit(repoDir, "reset", "--hard", "FETCH_HEAD")
+			if err != nil {
+				return gitOpErr("reset", c.url, stdout, stderr, err)
+			}
+		}
+		if err := ensureSparsePaths(repoDir, paths); err != nil {
+			return fmt.Errorf("add Skills of %s to the Cache: %w", c.url, err)
+		}
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
+		return fmt.Errorf("failed to create cache directory: %w", err)
+	}
+	_ = RemoveAll(repoDir)
+
+	// --filter=blob:none defers file contents until checkout needs them and
+	// --sparse starts the working tree at the root files only.
+	// https://git-scm.com/docs/partial-clone
+	// https://git-scm.com/docs/git-sparse-checkout
+	cloneArgs := []string{"clone", "--depth", "1", "--filter=blob:none", "--sparse"}
+	if runtime.GOOS == "windows" {
+		cloneArgs = append(cloneArgs, "-c", "core.longpaths=true")
+	}
+	if branch := c.resolvedBranch(); branch != "" {
+		cloneArgs = append(cloneArgs, "--branch", branch)
+	}
+	cloneArgs = append(cloneArgs, c.url, repoDir)
+
+	stdout, stderr, err := runGit("", cloneArgs...)
+	if err != nil {
+		return gitOpErr("clone", c.url, stdout, stderr, err)
+	}
+	if err := markSparseCache(repoDir); err != nil {
+		return err
+	}
+	if err := ensureSparsePaths(repoDir, paths); err != nil {
+		return fmt.Errorf("add Skills of %s to the Cache: %w", c.url, err)
+	}
+	return nil
 }
 
 // Cover adds paths to this Cache's sparse checkout without fetching a new commit.
@@ -98,48 +274,114 @@ func (c Cache) coverage() (sparseState, error) {
 	return readSparseState(c.dir())
 }
 
+func (c Cache) remoteDefaultBranchCommit() (string, string, error) {
+	stdout, stderr, err := runGit("", "ls-remote", "--symref", c.url, "HEAD")
+	if err != nil {
+		return "", "", gitOpErr("query default branch of", c.url, stdout, stderr, err)
+	}
+	branch := ""
+	commit := ""
+	for _, line := range strings.Split(stdout, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "ref:" && fields[2] == "HEAD" {
+			branch = strings.TrimPrefix(fields[1], "refs/heads/")
+		}
+		if len(fields) >= 2 && fields[1] == "HEAD" && fields[0] != "ref:" {
+			commit = fields[0]
+		}
+	}
+	if branch == "" {
+		return "", "", fmt.Errorf("default branch not found for %s", c.url)
+	}
+	if commit == "" {
+		return "", "", fmt.Errorf("default branch commit not found for %s", c.url)
+	}
+	return branch, commit, nil
+}
+
+func (c Cache) remoteCommit() (string, error) {
+	branch := c.resolvedBranch()
+	if branch == "" {
+		return lsRemoteCommit(c.url, "HEAD")
+	}
+	// A declared branch may name a tag (add --branch v1.2.0). A branch wins
+	// when both exist; an annotated tag is peeled to the commit the Cache
+	// checks out, so Freshness compares like with like.
+	refs, err := lsRemote(c.url, "refs/heads/"+branch, "refs/tags/"+branch, "refs/tags/"+branch+"^{}")
+	if err != nil {
+		return "", err
+	}
+	for _, ref := range []string{"refs/heads/" + branch, "refs/tags/" + branch + "^{}", "refs/tags/" + branch} {
+		if sha, ok := refs[ref]; ok {
+			return sha, nil
+		}
+	}
+	return "", fmt.Errorf("remote branch or tag %s not found in %s", branch, c.url)
+}
+
 type cacheFacts struct {
-	source    string
-	url       string
-	branch    string
-	dir       string
-	localSHA  string
-	remoteSHA string
-	missing   []string
-	err       string
-	// cache is the Cache observed, on the default branch it resolved to.
+	source        string
+	url           string
+	branch        string
+	dir           string
+	localSHA      string
+	remoteSHA     string
+	branchChanged bool
+	missing       []string
+	err           string
+	// cache is the Cache observed, on the branch its local checkout uses.
 	cache Cache
 }
 
 // observe reports git facts for this Cache. Classification into RemoteStatus
 // is Freshness, not Cache.
 func (c Cache) observe(paths ...string) cacheFacts {
-	facts := cacheFacts{source: c.key}
-	defaultRemoteSHA := ""
-	if c.branch == "" && models.ParseRepoSource(c.key).Branch == "" {
-		resolvedBranch, resolvedSHA, err := getRemoteDefaultBranchCommit(c.key, c.repo().URL)
+	facts := cacheFacts{source: c.source, url: c.url, cache: c}
+	if c.branch == "" {
+		cachedBranch := c.cachedDefaultBranch()
+		resolvedBranch, resolvedSHA, err := c.remoteDefaultBranchCommit()
 		if err != nil {
 			facts.err = err.Error()
-		} else {
-			c.branch = resolvedBranch
-			defaultRemoteSHA = resolvedSHA
-		}
-	}
-	repo := c.repo()
-	facts.url, facts.branch, facts.dir, facts.cache = repo.URL, cmp.Or(repo.Branch, "HEAD"), repo.Dir, c
-	facts.localSHA = c.head()
-	if facts.err != "" || facts.localSHA == "" {
-		return facts
-	}
-	facts.remoteSHA = defaultRemoteSHA
-	if facts.remoteSHA == "" {
-		remoteSHA, remoteErr := remoteRepoCommit(c.key, c.url, repo.Branch)
-		if remoteErr != nil {
-			facts.err = remoteErr.Error()
+			facts.branch = cmp.Or(cachedBranch, "HEAD")
+			facts.dir = c.dirForBranch(cachedBranch)
+			facts.localSHA = localRepoCommit(facts.dir)
 			return facts
 		}
-		facts.remoteSHA = remoteSHA
+		facts.branch = resolvedBranch
+		facts.remoteSHA = resolvedSHA
+		localBranch := resolvedBranch
+		if cachedBranch != "" && localRepoCommit(c.dirForBranch(cachedBranch)) != "" {
+			localBranch = cachedBranch
+			facts.branchChanged = cachedBranch != resolvedBranch
+		} else {
+			facts.cache = c.withBranch(resolvedBranch)
+		}
+		facts.dir = c.dirForBranch(localBranch)
+		facts.localSHA = localRepoCommit(facts.dir)
+		if facts.localSHA == "" || facts.localSHA != facts.remoteSHA || facts.branchChanged {
+			return facts
+		}
+		coverage, err := facts.cache.coverage()
+		if err != nil {
+			facts.err = err.Error()
+			return facts
+		}
+		facts.missing = coverage.missing(paths)
+		return facts
 	}
+
+	facts.branch = c.branch
+	facts.dir = c.dir()
+	facts.localSHA = c.head()
+	if facts.localSHA == "" {
+		return facts
+	}
+	remoteSHA, remoteErr := c.remoteCommit()
+	if remoteErr != nil {
+		facts.err = remoteErr.Error()
+		return facts
+	}
+	facts.remoteSHA = remoteSHA
 	if facts.localSHA != facts.remoteSHA {
 		return facts
 	}

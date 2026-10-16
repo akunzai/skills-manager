@@ -194,9 +194,8 @@ func InspectFreshness(cfg *config.Config, skillsDir, cacheDir string, options Fr
 		for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
 			repo := cfg.Remote[source]
 			cache := NewCache(source, repo.URL, repo.Branch, cacheDir)
-			resolved := cache.repo()
 			snapshot.Repositories = append(snapshot.Repositories, FreshnessRepository{
-				Source: source, URL: resolved.URL, Branch: resolved.Branch, CachePath: resolved.Dir, LocalSHA: cache.head(), cache: cache,
+				Source: source, URL: cache.url, Branch: cache.resolvedBranch(), CachePath: cache.dir(), LocalSHA: cache.head(), cache: cache,
 			})
 		}
 	}
@@ -324,7 +323,7 @@ func freshnessFromCache(f cacheFacts) FreshnessRepository {
 			status = RemoteNotCached
 		}
 	} else if status != RemoteError {
-		if f.localSHA != f.remoteSHA {
+		if f.localSHA != f.remoteSHA || f.branchChanged {
 			status = RemoteUpdateAvailable
 		}
 		if status == RemoteUpToDate && len(f.missing) > 0 {

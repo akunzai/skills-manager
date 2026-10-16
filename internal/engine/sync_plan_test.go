@@ -63,7 +63,7 @@ func planSyncFixture(t *testing.T) (cfg *config.Config, root, skillsDir, cacheDi
 	cacheDir = filepath.Join(root, "cache")
 	origin := filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "sample")
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -107,7 +107,7 @@ func TestSyncPlanResolvesEachDecision(t *testing.T) {
 	writeLocalGitSkill(t, origin, "drifted")
 	writeLocalGitSkill(t, origin, "unknown")
 	writeLocalGitSkill(t, origin, "missing")
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "drifted", "unknown", "missing"); err != nil {
+	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "drifted", "unknown", "missing"); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
@@ -416,7 +416,7 @@ func TestPlanRemoteItem(t *testing.T) {
 func TestPlanRemoteItemRemovedUpstreamReason(t *testing.T) {
 	cache, _ := refreshedCache(t)
 	drift := AvailabilityDrift{Skill: "sample"}
-	defaultBranch := cache.repo().Branch
+	defaultBranch := cache.resolvedBranch()
 
 	// Case 1: subpath with auto-resolved default branch
 	freshnessDefault := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: "skills/sample", Status: SkillRemovedUpstream}
@@ -433,7 +433,7 @@ func TestPlanRemoteItemRemovedUpstreamReason(t *testing.T) {
 	}
 
 	// Case 2: subpath with explicitly configured branch
-	cacheExplicit := NewCache("owner/repo", cache.repo().URL, "feature-x", cache.cacheDir)
+	cacheExplicit := NewCache("owner/repo", cache.url, "feature-x", cache.cacheDir)
 	freshnessExplicit := SkillFreshness{Name: "sample", Source: "owner/repo", Subpath: "skills/sample", Status: SkillRemovedUpstream}
 	itemExplicit := planRemoteItem("owner/repo", cacheExplicit, freshnessExplicit, drift)
 	wantReasonExplicit := `subpath "skills/sample" not in Source owner/repo (branch feature-x)`
@@ -482,7 +482,7 @@ func TestSyncReportSummaryUsesTheAppliedDecision(t *testing.T) {
 	root := t.TempDir()
 	skillsDir, cacheDir, origin := filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
 	writeLocalGitSkill(t, origin, "unknown")
-	if _, err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "unknown"); err != nil {
+	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "unknown"); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()

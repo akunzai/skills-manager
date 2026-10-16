@@ -553,7 +553,7 @@ func TestCLISyncDryRunReportsARefusedAgentPathAsFailed(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(project, ".claude", "skills", "sample"), 0o755); err != nil {
@@ -628,7 +628,7 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{"claude", "continue"} {
@@ -1643,7 +1643,7 @@ func TestCLIUpdateDefaultBranchMissingSkillsRejected(t *testing.T) {
 	cliRunGit(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "missing commit")
 	cliRunGit(t, origin, "symbolic-ref", "HEAD", "refs/heads/missing-branch")
 
-	out, err := runCLI(t, append(args, "--force")...)
+	out, err := runCLI(t, args...)
 	if err != nil {
 		t.Fatalf("update with missing skills failed: %v\n%s", err, out)
 	}
@@ -1651,6 +1651,9 @@ func TestCLIUpdateDefaultBranchMissingSkillsRejected(t *testing.T) {
 		!strings.Contains(out, "missing-branch") ||
 		!strings.Contains(out, "keeping cached branch") {
 		t.Fatalf("expected warning in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "Updated owner/repo") {
+		t.Fatalf("rejected branch migration should not claim Source was updated:\n%s", out)
 	}
 	if strings.Contains(out, "removed_upstream") {
 		t.Fatalf("skill should not be marked removed_upstream:\n%s", out)
@@ -1682,7 +1685,7 @@ func TestCLIUpdateDefaultBranchMigrationAdopted(t *testing.T) {
 	cliRunGit(t, origin, "branch", "migrated")
 	cliRunGit(t, origin, "symbolic-ref", "HEAD", "refs/heads/migrated")
 
-	out, err := runCLI(t, append(args, "--force")...)
+	out, err := runCLI(t, args...)
 	if err != nil {
 		t.Fatalf("update with migration failed: %v\n%s", err, out)
 	}
@@ -1764,7 +1767,7 @@ func TestCLISyncExitCodes(t *testing.T) {
 	}
 
 	// 0: everything declared is in place.
-	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
 	if out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
@@ -1822,7 +1825,7 @@ func TestCLISyncReportsEachSkillOnceWithoutATerminal(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample", "drifted"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample", "drifted"); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
@@ -1898,14 +1901,13 @@ func TestCLISyncInteractiveUnknownBaselineDeclineLeavesItBlocked(t *testing.T) {
 			if err := config.SaveConfig(cfg, configFile); err != nil {
 				t.Fatal(err)
 			}
-			cachePath, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := engine.MaterializeRemoteSkill("sample", "sample", cachePath, skillsDir); err != nil {
+			if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 				t.Fatal(err)
 			}
 			manualPath := filepath.Join(skillsDir, "sample", "SKILL.md")
+			if err := os.MkdirAll(filepath.Dir(manualPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(manualPath, []byte("manual\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -3572,7 +3574,7 @@ func copiedAvailabilityScope(t *testing.T) (configFile, skillsDir, cacheDir stri
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "alpha", "beta"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "alpha", "beta"); err != nil {
 		t.Fatal(err)
 	}
 	return configFile, skillsDir, cacheDir
@@ -3683,7 +3685,7 @@ func TestCLIOutdatedReportsIncompleteCache(t *testing.T) {
 	writeCLIGitSkill(t, origin, "alpha")
 	writeCLIGitSkill(t, origin, "beta")
 	branch := cliRunGit(t, origin, "symbolic-ref", "--short", "HEAD")
-	if _, err := engine.NewCache("owner/repo", origin, branch, cacheDir).Refresh(false, "alpha"); err != nil {
+	if err := engine.NewCache("owner/repo", origin, branch, cacheDir).Refresh(false, "alpha"); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
