@@ -204,12 +204,12 @@ func TestSignaturePolicyUpdatesLeaveACopiedConfigUnchanged(t *testing.T) {
 	SetCertificateChainTrust(&shallow, "owner/repo", "root.pem")
 
 	if got := *original.Remote["owner/repo"].Signature; !reflect.DeepEqual(got, want) {
-		t.Fatalf("original policy = %#v; want %#v", got, want)
+		t.Fatalf("original policy = %+v, want %+v", got, want)
 	}
 	got := *shallow.Remote["owner/repo"].Signature
 	wantCopy := SignaturePolicy{Require: true, CertificateChain: "root.pem", Trusted: map[string]string{"kept": "tree-1", "added": "tree-3"}}
 	if !reflect.DeepEqual(got, wantCopy) {
-		t.Fatalf("copied policy = %#v; want %#v", got, wantCopy)
+		t.Fatalf("copied policy = %+v, want %+v", got, wantCopy)
 	}
 }
 
@@ -220,6 +220,42 @@ func TestPinSigstoreSignerOnASourceWithNoPolicyYet(t *testing.T) {
 
 	want := &SigstoreSigner{Identity: "https://example.com/signer", Issuer: "https://issuer.example.com"}
 	if got := cfg.Remote["owner/repo"].Signature; got == nil || !reflect.DeepEqual(got.Sigstore, want) {
-		t.Fatalf("policy = %#v; want Sigstore %#v", got, want)
+		t.Fatalf("policy = %+v, want Sigstore %+v", got, want)
+	}
+}
+
+func TestSignaturePolicyUpdatesIgnoreAnUndeclaredSource(t *testing.T) {
+	cfg := &Config{Remote: map[string]RemoteRepo{}}
+
+	TrustContent(cfg, "owner/repo", "sample", "tree-1")
+	PinSigstoreSigner(cfg, "owner/repo", "https://example.com/signer", "https://issuer.example.com")
+	SetCertificateChainTrust(cfg, "owner/repo", "root.pem")
+
+	if len(cfg.Remote) != 0 {
+		t.Fatalf("Remote = %+v, want no Source declared", cfg.Remote)
+	}
+}
+
+// A name trusted under two Sources, as a Skill that moved Source leaves
+// behind, is revoked under both.
+func TestRevokeTrustRemovesTheNameFromEverySource(t *testing.T) {
+	cfg := &Config{Remote: map[string]RemoteRepo{
+		"old/repo": {Signature: &SignaturePolicy{Trusted: map[string]string{"sample": "tree-1"}}},
+		"new/repo": {Signature: &SignaturePolicy{Require: true, Trusted: map[string]string{"sample": "tree-2", "other": "tree-3"}}},
+	}}
+
+	if !RevokeTrust(cfg, "sample") {
+		t.Fatal("RevokeTrust = false, want true")
+	}
+
+	if got := cfg.Remote["old/repo"].Signature; got != nil {
+		t.Fatalf("old/repo policy = %+v, want none", got)
+	}
+	want := SignaturePolicy{Require: true, Trusted: map[string]string{"other": "tree-3"}}
+	if got := *cfg.Remote["new/repo"].Signature; !reflect.DeepEqual(got, want) {
+		t.Fatalf("new/repo policy = %+v, want %+v", got, want)
+	}
+	if RevokeTrust(cfg, "sample") {
+		t.Fatal("second RevokeTrust = true, want false")
 	}
 }
