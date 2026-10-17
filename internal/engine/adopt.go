@@ -886,6 +886,8 @@ func cloneConfig(cfg *config.Config) *config.Config {
 	if cfg.Remote != nil {
 		c.Remote = make(map[string]config.RemoteRepo, len(cfg.Remote))
 		for key, repo := range cfg.Remote {
+			// Signature is shared: Config replaces a policy rather than
+			// changing it in place.
 			repo.Skills = maps.Clone(repo.Skills)
 			c.Remote[key] = repo
 		}

@@ -55,44 +55,57 @@ func (p *SignaturePolicy) TrustedTree(name string) (string, bool) {
 	return tree, ok
 }
 
-// TrustContent records tree as the Trusted content of name, a Skill of
-// source.
-func TrustContent(cfg *Config, source, name, tree string) {
+// updateSignature applies change to a copy of source's signature policy and
+// stores the copy, dropping a policy the change leaves empty. A policy is
+// replaced, never changed in place, so a shallow copy of Config, such as
+// Adopt's undo snapshot, keeps the policy it had.
+func updateSignature(cfg *Config, source string, change func(*SignaturePolicy)) {
 	repo := cfg.Remote[source]
 	policy := SignaturePolicy{}
 	if repo.Signature != nil {
 		policy = *repo.Signature
 	}
 	policy.Trusted = maps.Clone(policy.Trusted)
-	if policy.Trusted == nil {
-		policy.Trusted = make(map[string]string)
+	change(&policy)
+	if len(policy.Trusted) == 0 {
+		policy.Trusted = nil
 	}
-	policy.Trusted[name] = tree
 	repo.Signature = &policy
+	if !policy.Require && policy.Sigstore == nil && policy.CertificateChain == "" && policy.Trusted == nil {
+		repo.Signature = nil
+	}
 	cfg.Remote[source] = repo
+}
+
+// TrustContent records tree as the Trusted content of name, a Skill of
+// source.
+func TrustContent(cfg *Config, source, name, tree string) {
+	updateSignature(cfg, source, func(policy *SignaturePolicy) {
+		if policy.Trusted == nil {
+			policy.Trusted = make(map[string]string)
+		}
+		policy.Trusted[name] = tree
+	})
 }
 
 // RevokeTrust removes name's Trusted content, dropping a signature policy it
 // leaves empty. It reports whether there was any.
 func RevokeTrust(cfg *Config, name string) bool {
 	for source, repo := range cfg.Remote {
-		if _, ok := repo.Signature.TrustedTree(name); !ok {
-			continue
+		if _, ok := repo.Signature.TrustedTree(name); ok {
+			updateSignature(cfg, source, func(policy *SignaturePolicy) { delete(policy.Trusted, name) })
+			return true
 		}
-		policy := *repo.Signature
-		policy.Trusted = maps.Clone(policy.Trusted)
-		delete(policy.Trusted, name)
-		if len(policy.Trusted) == 0 {
-			policy.Trusted = nil
-		}
-		repo.Signature = &policy
-		if !policy.Require && policy.Sigstore == nil && policy.CertificateChain == "" && policy.Trusted == nil {
-			repo.Signature = nil
-		}
-		cfg.Remote[source] = repo
-		return true
 	}
 	return false
+}
+
+// PinSigstoreSigner records the keyless signer source's Skills must be signed
+// by.
+func PinSigstoreSigner(cfg *Config, source, identity, issuer string) {
+	updateSignature(cfg, source, func(policy *SignaturePolicy) {
+		policy.Sigstore = &SigstoreSigner{Identity: identity, Issuer: issuer}
+	})
 }
 
 // SigstoreSigner is a Sigstore keyless identity, matched exactly.
