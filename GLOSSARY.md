@@ -13,7 +13,7 @@ Where a Skill is obtained: a git repository, a local directory, or a command.
 _Avoid_: repo (when you mean the Source key), origin, location
 
 **Scope**:
-The active Global or Project configuration, its skills directory, and the root that portable local Source paths and prune must not escape.
+The active Global or Project configuration, its skills directory, and the root that portable local Source paths and prune must not escape. Which of the two it is comes from `-p`/`-g`, never from where its skills directory is (ADR-0012).
 _Avoid_: mode, environment, workspace
 
 **Config**:
