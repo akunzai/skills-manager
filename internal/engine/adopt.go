@@ -873,7 +873,7 @@ func declareAvailability(cfg *config.Config, skillsDir string, item AdoptItem) e
 	return availability.Exclude(item.Name, item.Exclude...)
 }
 
-// cloneConfig is a copy of cfg that shares nothing mutable with it.
+// cloneConfig is a copy of cfg that shares nothing Config changes in place.
 func cloneConfig(cfg *config.Config) *config.Config {
 	c := *cfg
 	c.Settings.DefaultAgents = slices.Clone(cfg.Settings.DefaultAgents)

@@ -436,3 +436,19 @@ func TestAdoptOnUnreadableScopeStateIsIncompleteOnlyForARemoteSkill(t *testing.T
 		})
 	}
 }
+
+// Adopt's undo snapshot shares each Source's signature policy, so a policy
+// changed after the snapshot leaves the snapshot's as it was.
+func TestCloneConfigKeepsSignaturePolicyThroughLaterChanges(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{Type: "git", Signature: &config.SignaturePolicy{Trusted: map[string]string{"sample": "tree-1"}}}
+	snapshot := cloneConfig(cfg)
+
+	config.TrustContent(cfg, "owner/repo", "other", "tree-2")
+	config.RevokeTrust(cfg, "sample")
+
+	want := config.SignaturePolicy{Trusted: map[string]string{"sample": "tree-1"}}
+	if got := *snapshot.Remote["owner/repo"].Signature; !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshot policy = %+v, want %+v", got, want)
+	}
+}

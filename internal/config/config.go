@@ -58,9 +58,13 @@ func (p *SignaturePolicy) TrustedTree(name string) (string, bool) {
 // updateSignature applies change to a copy of source's signature policy and
 // stores the copy, dropping a policy the change leaves empty. A policy is
 // replaced, never changed in place, so a shallow copy of Config, such as
-// Adopt's undo snapshot, keeps the policy it had.
+// Adopt's undo snapshot, keeps the policy it had. A Source Config does not
+// declare is left undeclared.
 func updateSignature(cfg *Config, source string, change func(*SignaturePolicy)) {
-	repo := cfg.Remote[source]
+	repo, declared := cfg.Remote[source]
+	if !declared {
+		return
+	}
 	policy := SignaturePolicy{}
 	if repo.Signature != nil {
 		policy = *repo.Signature
@@ -88,16 +92,17 @@ func TrustContent(cfg *Config, source, name, tree string) {
 	})
 }
 
-// RevokeTrust removes name's Trusted content, dropping a signature policy it
-// leaves empty. It reports whether there was any.
+// RevokeTrust removes name's Trusted content from every Source, dropping a
+// signature policy it leaves empty. It reports whether there was any.
 func RevokeTrust(cfg *Config, name string) bool {
-	for source, repo := range cfg.Remote {
-		if _, ok := repo.Signature.TrustedTree(name); ok {
+	revoked := false
+	for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
+		if _, ok := cfg.Remote[source].Signature.TrustedTree(name); ok {
 			updateSignature(cfg, source, func(policy *SignaturePolicy) { delete(policy.Trusted, name) })
-			return true
+			revoked = true
 		}
 	}
-	return false
+	return revoked
 }
 
 // PinSigstoreSigner records the keyless signer source's Skills must be signed

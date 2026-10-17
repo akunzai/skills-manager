@@ -37,7 +37,9 @@ A third October 2026 review proposed one more, rejected because only one rule wa
 
 The same review proposed one more, rejected because the rule already lives in one place:
 
-- **`skills trust` verifies only the named Skills instead of planning a whole Sync.** Whether a Skill can be trusted is Sync's answer about it: a Skill another block stops first, such as Drift, is not one its signature blocks, and the tree to trust is the one `remotePlanner.verify` reaches after Freshness classifies the Skill. A narrower path would repeat that classification and `reconcile`'s order, and could then disagree with the Sync that Materializes the trusted copy; it would save one local digest and occupancy pass for a rarely run command. The same review's claim that signature policy changes escape Adopt's undo snapshot did not hold, since every change replaced the policy. Kept instead: `PlanTrust` over `PlanSync`, and Config's `updateSignature`, which makes that replacement the only way to change a policy.
+- **`skills trust` verifies only the named Skills instead of planning a whole Sync.** Whether a Skill can be trusted is Sync's answer about it: a Skill another block stops first, such as Drift, is not one its signature blocks, and the tree to trust is the one `remotePlanner.verify` reaches after Freshness classifies the Skill. A narrower path would repeat that classification and `reconcile`'s order, and could then disagree with the Sync that Materializes the trusted copy; it would save one local digest and occupancy pass for a rarely run command. Kept instead: `PlanTrust` over `PlanSync`.
+
+The same review also said signature policy changes escape Adopt's undo snapshot, which shares each policy through a shallow copy of Config. That did not hold: every change already replaced the policy rather than changing it in place. Config's mutators now share that step in `updateSignature`, and a test of `cloneConfig` pins it.
 
 Revisit when a second frontend, such as a `--json` for doctor or prune, needs the same grouping or wording the CLI now owns. Presentation would then have two adapters, and a shared seam for it would be real.
 
