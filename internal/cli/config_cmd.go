@@ -95,12 +95,12 @@ func newConfigSetCmd() *cobra.Command {
 			// failure is a runtime problem a usage dump would mislead about.
 			cmd.SilenceUsage = true
 			scope := ResolveScope(cmd)
-			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
+			configPath := scope.ConfigPath
 			cfg, err := config.LoadConfig(configPath)
 			if err != nil {
 				return err
 			}
-			availability := engine.NewAvailability(cfg, skillsDir)
+			availability := engine.NewAvailability(cfg, scope)
 			values := splitValues(args[1:])
 			switch args[0] {
 			case "defaultAgents":

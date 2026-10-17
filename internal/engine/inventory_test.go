@@ -52,7 +52,7 @@ func TestLoadInventoryClassifiesOccupancy(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	inv, err := LoadInventory(cfg, skillsDir)
+	inv, err := LoadInventory(cfg, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestLoadInventoryClassifiesKind(t *testing.T) {
 	config.AddLocalCommandEntry(cfg, "installed", "install-it", "", "")
 	cfg.Local["odd"] = config.LocalEntry{Type: "foo", Source: "/src/odd"}
 
-	inv, err := LoadInventory(cfg, skillsDir)
+	inv, err := LoadInventory(cfg, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestSkillItemsFillsSignedUnverifiedAndInstalledPathFromBaselines(t *testing
 		t.Fatal(err)
 	}
 
-	inv, err := LoadInventory(cfg, skillsDir)
+	inv, err := LoadInventory(cfg, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestAvailableToIncludesAutomaticAgentsAndDeclaredAvailability(t *testing.T)
 		t.Fatal(err)
 	}
 
-	inv, err := LoadInventory(cfg, skillsDir)
+	inv, err := LoadInventory(cfg, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

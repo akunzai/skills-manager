@@ -263,7 +263,7 @@ func TestAvailabilityCopiesThroughASymlinkedMasterSkill(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	config.AddLocalSymlinkEntry(cfg, "local", source, "")
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, projectScope("", skillsDir, ""))
 	availabilityPath := filepath.Join(root, ".claude", "skills", "local")
 
 	denyLinkCreation(t, ErrLinkPrivilegeNotHeld)

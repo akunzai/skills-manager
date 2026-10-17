@@ -47,12 +47,12 @@ type installerLockFile struct {
 }
 
 // InstallerLockPath is where an installer lock file records the Skills it
-// installed into skillsDir: at Global Scope $XDG_STATE_HOME/skills/.skill-lock.json
+// installed into scope: at Global Scope $XDG_STATE_HOME/skills/.skill-lock.json
 // when XDG_STATE_HOME is set, otherwise ~/.agents/.skill-lock.json; at Project
 // Scope skills-lock.json in the project root.
-func InstallerLockPath(skillsDir string) string {
-	if models.IsProjectScope(skillsDir) {
-		return filepath.Join(models.ScopeRoot(skillsDir), "skills-lock.json")
+func InstallerLockPath(scope models.Scope) string {
+	if scope.IsProject {
+		return filepath.Join(scope.RootDir(), "skills-lock.json")
 	}
 	if state := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); state != "" {
 		return filepath.Join(models.ExpandUser(state), "skills", ".skill-lock.json")

@@ -68,7 +68,7 @@ func TestRetireRemovesLinksCopyAndBaseline(t *testing.T) {
 	t.Parallel()
 	f := newRetireFixture(t)
 
-	retired, err := Retire(f.cfg, f.configPath, f.skillsDir, []string{"sample"}, OpenBaselines(f.skillsDir))
+	retired, err := Retire(f.cfg, projectScope(f.configPath, f.skillsDir, ""), []string{"sample"}, OpenBaselines(f.skillsDir))
 
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestRetireTouchesNothingWhenConfigCannotBeSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	retired, err := Retire(f.cfg, unwritable, f.skillsDir, []string{"sample"}, OpenBaselines(f.skillsDir))
+	retired, err := Retire(f.cfg, projectScope(unwritable, f.skillsDir, ""), []string{"sample"}, OpenBaselines(f.skillsDir))
 
 	if err == nil {
 		t.Fatalf("Retire saved a Config over a directory: %#v", retired)
@@ -120,7 +120,7 @@ func TestRetireCountsAMissingCopyAsRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	retired, err := Retire(f.cfg, f.configPath, f.skillsDir, []string{"sample"}, OpenBaselines(f.skillsDir))
+	retired, err := Retire(f.cfg, projectScope(f.configPath, f.skillsDir, ""), []string{"sample"}, OpenBaselines(f.skillsDir))
 
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestRetireReportsALinkItCouldNotRemove(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(agentDir, 0o755) })
 
-	retired, err := Retire(f.cfg, f.configPath, f.skillsDir, []string{"sample"}, OpenBaselines(f.skillsDir))
+	retired, err := Retire(f.cfg, projectScope(f.configPath, f.skillsDir, ""), []string{"sample"}, OpenBaselines(f.skillsDir))
 
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func TestRetireLeavesAnUnreadableScopeStateAlone(t *testing.T) {
 	f := newRetireFixture(t)
 	statePath, bad := writeUnreadableScopeState(t, f.skillsDir)
 
-	retired, err := Retire(f.cfg, f.configPath, f.skillsDir, []string{"sample"}, OpenBaselines(f.skillsDir))
+	retired, err := Retire(f.cfg, projectScope(f.configPath, f.skillsDir, ""), []string{"sample"}, OpenBaselines(f.skillsDir))
 
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +228,7 @@ func TestRetireRemovesOnlyWhatMaterializeWroteForTheKind(t *testing.T) {
 			tc.declare(cfg, skillsDir)
 			tc.plant(t, path)
 
-			retired, err := Retire(cfg, configPath, skillsDir, []string{"sample"}, OpenBaselines(skillsDir))
+			retired, err := Retire(cfg, projectScope(configPath, skillsDir, ""), []string{"sample"}, OpenBaselines(skillsDir))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,7 +252,7 @@ func TestRetireDropsASourceItLeavesEmpty(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/old", "sample", "sample", "git", "https://example.test/old.git")
 	config.AddRemoteSkillEntry(cfg, "owner/other", "kept", "kept", "git", "https://example.test/other.git")
 
-	if _, err := Retire(cfg, configPath, skillsDir, []string{"sample"}, OpenBaselines(skillsDir)); err != nil {
+	if _, err := Retire(cfg, projectScope(configPath, skillsDir, ""), []string{"sample"}, OpenBaselines(skillsDir)); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := config.LoadConfig(configPath)

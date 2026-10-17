@@ -64,7 +64,7 @@ func (f adoptFixture) lock(t *testing.T, skillPaths map[string]string) {
 }
 
 func (f adoptFixture) scope() models.Scope {
-	return models.Scope{ConfigPath: f.configPath, SkillsDir: f.skillsDir, CacheDir: f.cacheDir, IsProject: true}
+	return projectScope(f.configPath, f.skillsDir, f.cacheDir)
 }
 
 func (f adoptFixture) adopt(t *testing.T, cfg *config.Config, names ...string) AdoptResult {
@@ -86,7 +86,7 @@ func (f adoptFixture) syncSummary(t *testing.T) SyncSummary {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := PlanSync(cfg, f.configPath, f.skillsDir, f.cacheDir)
+	plan, err := PlanSync(cfg, projectScope(f.configPath, f.skillsDir, f.cacheDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func (f adoptFixture) untrackedNow(t *testing.T) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inv, err := LoadInventory(cfg, f.skillsDir)
+	inv, err := LoadInventory(cfg, projectScope("", f.skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,16 +366,16 @@ func TestInstallerLockPathFollowsTheScope(t *testing.T) {
 	t.Setenv("AGENTS_HOME", "")
 	project := filepath.Join(t.TempDir(), "demo")
 
-	if got, want := InstallerLockPath(filepath.Join(project, ".agents", "skills")), filepath.Join(project, "skills-lock.json"); got != want {
+	if got, want := InstallerLockPath(projectScope("", filepath.Join(project, ".agents", "skills"), "")), filepath.Join(project, "skills-lock.json"); got != want {
 		t.Errorf("Project lock = %s; want %s", got, want)
 	}
 	t.Setenv("XDG_STATE_HOME", "")
-	if got, want := InstallerLockPath(models.DefaultSkillsDir()), filepath.Join(home, ".agents", ".skill-lock.json"); got != want {
+	if got, want := InstallerLockPath(models.NewGlobalScope("", "", "")), filepath.Join(home, ".agents", ".skill-lock.json"); got != want {
 		t.Errorf("Global lock = %s; want %s", got, want)
 	}
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	if got, want := InstallerLockPath(models.DefaultSkillsDir()), filepath.Join(state, "skills", ".skill-lock.json"); got != want {
+	if got, want := InstallerLockPath(models.NewGlobalScope("", "", "")), filepath.Join(state, "skills", ".skill-lock.json"); got != want {
 		t.Errorf("Global lock with XDG_STATE_HOME = %s; want %s", got, want)
 	}
 }

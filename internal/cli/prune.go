@@ -49,15 +49,14 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 	}
 	p := newPrompter(cmd)
 	scope := ResolveScope(cmd)
-	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := config.LoadConfig(scope.ConfigPath)
 	if err != nil {
 		return err
 	}
 
 	includeSkills := !options.linksOnly
 	includeConfiguredLinks := !options.skillsOnly
-	plan, err := engine.BuildPrunePlan(cfg, skillsDir, includeSkills, includeConfiguredLinks)
+	plan, err := engine.BuildPrunePlan(cfg, scope, includeSkills, includeConfiguredLinks)
 	if err != nil {
 		return fmt.Errorf("build prune plan: %w", err)
 	}
@@ -112,7 +111,7 @@ func runPrune(cmd *cobra.Command, options pruneOptions) error {
 		return finish(nil)
 	}
 
-	result, applyErr := engine.ApplyPrunePlan(plan, skillsDir)
+	result, applyErr := engine.ApplyPrunePlan(plan, scope)
 	printPruneSummary(cmd, result)
 	printPruneSkippedReal(cmd, skippedReal)
 	if applyErr != nil {

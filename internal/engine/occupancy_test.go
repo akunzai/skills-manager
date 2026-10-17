@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // globalAgentDirs returns an Availability for the global Scope whose defaults
@@ -15,7 +16,7 @@ func globalAgentDirs(t *testing.T, skillsDir string, agents ...string) *Availabi
 	t.Helper()
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = agents
-	return NewAvailability(cfg, skillsDir)
+	return NewAvailability(cfg, models.NewGlobalScope("", skillsDir, ""))
 }
 
 func agentHealthFor(t *testing.T, observation Occupancy, agent string) AgentHealth {
@@ -210,7 +211,7 @@ func TestObserveOccupancyLeftoverReportsDanglingAutomaticallyAvailablePaths(t *t
 		t.Fatal(err)
 	}
 
-	occupancy := NewAvailability(config.DefaultConfig(), skillsDir).ObserveOccupancy().Leftover
+	occupancy := NewAvailability(config.DefaultConfig(), models.NewGlobalScope("", skillsDir, "")).ObserveOccupancy().Leftover
 	var dangling, live []string
 	for _, path := range occupancy.Paths {
 		if path.Agent != "gemini-cli" {
@@ -300,7 +301,7 @@ func TestObserveOccupancyReportsUnexpectedPathsOfDeclaredSkills(t *testing.T) {
 	plantManagedLink(t, skillsDir, continueDir, "sample")
 	undeclared := plantManagedLink(t, skillsDir, claude, "undeclared")
 
-	observation := NewAvailability(cfg, skillsDir).ObserveOccupancy()
+	observation := NewAvailability(cfg, projectScope("", skillsDir, "")).ObserveOccupancy()
 
 	want := []ManagedAgentPath{
 		{Agent: "claude-code", Skill: "missing", Path: missing},

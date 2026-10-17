@@ -236,7 +236,7 @@ func doctorFindings(p engine.DoctorReport, scopeFlags string) []Finding {
 func invalidNextAction(p engine.DoctorReport, invalid engine.InvalidSkill, flag string) string {
 	switch invalid.Kind {
 	case models.InventorySymlink:
-		source := models.ToTildePath(models.ResolveLocalSourcePath(invalid.Source, p.SkillsDir))
+		source := models.ToTildePath(invalid.SourcePath)
 		return fmt.Sprintf("Next: its source %s has no SKILL.md; fix the source, or undeclare it with 'skills rm%s %s'.", source, flag, invalid.Name)
 	case models.InventoryCommand:
 		return fmt.Sprintf("Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm%s %s'.", flag, invalid.Name)

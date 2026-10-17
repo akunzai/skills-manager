@@ -71,7 +71,7 @@ func (f adoptFixture) saved(t *testing.T) *config.Config {
 func (f adoptFixture) assertSettled(t *testing.T, name string) {
 	t.Helper()
 	cfg := f.saved(t)
-	plan, err := PlanSync(cfg, f.configPath, f.skillsDir, f.cacheDir)
+	plan, err := PlanSync(cfg, projectScope(f.configPath, f.skillsDir, f.cacheDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func (f adoptFixture) assertSettled(t *testing.T, name string) {
 	if summary := plan.Summary(SyncDecision{}); !summary.Converged() {
 		t.Fatalf("sync --dry-run = %#v; want converged", summary)
 	}
-	outcome, err := NewDoctorWithCache(cfg, f.skillsDir, f.cacheDir).Run(false, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", f.skillsDir, f.cacheDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

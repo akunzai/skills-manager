@@ -170,7 +170,8 @@ func BuildAdoptPlan(cfg *config.Config, scope models.Scope, options AdoptOptions
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	skillsDir := cmp.Or(scope.SkillsDir, models.DefaultSkillsDir())
+	scope = withScopeDefaults(scope)
+	skillsDir := scope.SkillsDir
 	moveDir, err := filepath.Abs(models.ExpandUser(cmp.Or(options.MoveDir, DefaultAdoptMoveDir(skillsDir))))
 	if err != nil {
 		return AdoptPlan{}, err
@@ -178,7 +179,7 @@ func BuildAdoptPlan(cfg *config.Config, scope models.Scope, options AdoptOptions
 	if models.LocalSourceInsideSkillsDir(moveDir, skillsDir) {
 		return AdoptPlan{}, fmt.Errorf("move directory %s is inside the skills directory", models.ToTildePath(moveDir))
 	}
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, scope)
 	from := ""
 	if options.From != "" {
 		from = models.NormalizeAgentName(options.From)
@@ -186,7 +187,7 @@ func BuildAdoptPlan(cfg *config.Config, scope models.Scope, options AdoptOptions
 			return AdoptPlan{}, fmt.Errorf("unknown agent %q for this scope", options.From)
 		}
 	}
-	inv, err := LoadInventory(cfg, skillsDir)
+	inv, err := LoadInventory(cfg, scope)
 	if err != nil {
 		return AdoptPlan{}, err
 	}
@@ -534,7 +535,7 @@ func ApplyAdoptPlan(plan AdoptPlan, cfg *config.Config, scope models.Scope) Adop
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	scope.SkillsDir = cmp.Or(scope.SkillsDir, models.DefaultSkillsDir())
+	scope = withScopeDefaults(scope)
 	scope.ConfigPath = cmp.Or(scope.ConfigPath, models.DefaultConfigFile())
 	var result AdoptResult
 	baselines := OpenBaselines(scope.SkillsDir)
@@ -545,7 +546,7 @@ func ApplyAdoptPlan(plan AdoptPlan, cfg *config.Config, scope models.Scope) Adop
 		outcome := a.run()
 		needsBaselines = needsBaselines || a.neededBaseline
 		if outcome.Declared {
-			outcome.Available = NewAvailability(cfg, scope.SkillsDir).ManagedAgents(item.Name)
+			outcome.Available = NewAvailability(cfg, scope).ManagedAgents(item.Name)
 		}
 		result.Skills = append(result.Skills, outcome)
 	}
@@ -698,7 +699,7 @@ func (a *adoption) stage() (content, skip string, err error) {
 			return adopted.Target, "", os.MkdirAll(a.scope.SkillsDir, 0o755)
 		}
 		if len(item.Include) > 0 || len(item.Exclude) > 0 {
-			if err := declareAvailability(a.cfg, a.scope.SkillsDir, item); err != nil {
+			if err := declareAvailability(a.cfg, a.scope, item); err != nil {
 				return "", "", err
 			}
 			if err := a.save(); err != nil {
@@ -752,9 +753,9 @@ func (a *adoption) declare(remote *remoteAdoption, content string) error {
 		}, AvailabilityDrift{})
 		a.planner.recordSigner(source)
 	} else {
-		config.AddLocalSymlinkEntry(a.cfg, item.Name, models.StoreLocalSourcePath(content, a.scope.SkillsDir), "")
+		config.AddLocalSymlinkEntry(a.cfg, item.Name, a.scope.StoreLocalSource(content), "")
 	}
-	if err := declareAvailability(a.cfg, a.scope.SkillsDir, item); err != nil {
+	if err := declareAvailability(a.cfg, a.scope, item); err != nil {
 		return err
 	}
 	return a.save()
@@ -815,13 +816,13 @@ func (a *adoption) apply(remote *remoteAdoption, content string) AdoptOutcome {
 		a.outcome.State, a.outcome.CopiesLeft = AdoptDeclaredWithCopiesLeft, left
 		return a.outcome
 	}
-	availability := NewAvailability(a.cfg, skillsDir)
+	availability := NewAvailability(a.cfg, a.scope)
 	drift := availability.ObserveOccupancy().Drift(name)
 	var applied SyncOutcome
 	var err error
 	switch {
 	case remote == nil:
-		applied, err = applyLocalItem(availability, skillsDir, planLocalItem(a.cfg, skillsDir, drift, name), nil)
+		applied, err = applyLocalItem(availability, skillsDir, planLocalItem(a.cfg, a.scope, drift, name), nil)
 	case !sameSkillContent(content, remote.cachePath()):
 		if _, err := availability.Apply(name); err != nil {
 			a.outcome.State, a.outcome.Err = AdoptFailed, err
@@ -862,11 +863,11 @@ func sameSkillContent(a, b string) bool {
 
 // declareAvailability records the item's Include and Exclude, so the Skill
 // stays available where it was found and a copy the user keeps is left out.
-func declareAvailability(cfg *config.Config, skillsDir string, item AdoptItem) error {
+func declareAvailability(cfg *config.Config, scope models.Scope, item AdoptItem) error {
 	if len(item.Include) == 0 && len(item.Exclude) == 0 {
 		return nil
 	}
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, scope)
 	if err := availability.Include(item.Name, item.Include...); err != nil {
 		return err
 	}

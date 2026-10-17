@@ -31,13 +31,12 @@ type AddSlot struct {
 // InspectAddSlot compares a proposed Skill with the Scope's declaration before
 // inspecting Untracked occupancy. A missing copy does not erase a declaration.
 // Errors inspecting occupancy are returned rather than treated as a free slot.
-func InspectAddSlot(cfg *config.Config, skillsDir string, source AddSource, name, subpath string) (AddSlot, error) {
+func InspectAddSlot(cfg *config.Config, scope models.Scope, source AddSource, name, subpath string) (AddSlot, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	if skillsDir == "" {
-		skillsDir = models.DefaultSkillsDir()
-	}
+	scope = withScopeDefaults(scope)
+	skillsDir := scope.SkillsDir
 	kind, srcKey, found := config.FindSkillSource(cfg, name)
 	if found {
 		entry := cfg.Local[name]
@@ -55,7 +54,7 @@ func InspectAddSlot(cfg *config.Config, skillsDir string, source AddSource, name
 			if subpath != "" && subpath != "." {
 				localSkillSource = filepath.Join(source.LocalPath, filepath.FromSlash(subpath))
 			}
-			stored := models.StoreLocalSourcePath(localSkillSource, skillsDir)
+			stored := scope.StoreLocalSource(localSkillSource)
 			current = fmt.Sprintf("[symlink] %s", models.ToTildePath(entry.Source))
 			same = source.Kind == AddSourceSymlink && (entry.Source == stored || models.ToTildePath(entry.Source) == models.ToTildePath(localSkillSource))
 		}

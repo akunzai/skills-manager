@@ -7,6 +7,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -17,12 +18,11 @@ func newAgentsCmd() *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			scope := ResolveScope(cmd)
-			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
-			cfg, err := config.LoadConfig(configPath)
+			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
 			}
-			availability := engine.NewAvailability(cfg, skillsDir)
+			availability := engine.NewAvailability(cfg, scope)
 			if len(args) == 0 {
 				return printAllAvailability(cmd, cfg)
 			}
@@ -32,7 +32,7 @@ func newAgentsCmd() *cobra.Command {
 				return err
 			}
 			if len(args) == 1 {
-				return printSkillAvailability(cmd, cfg, skill, source, skillsDir)
+				return printSkillAvailability(cmd, cfg, skill, source, scope)
 			}
 
 			action := args[1]
@@ -66,12 +66,12 @@ func newAgentsCmd() *cobra.Command {
 			}
 			// Past here every failure is a runtime problem, not misuse.
 			cmd.SilenceUsage = true
-			if err := config.SaveConfig(cfg, configPath); err != nil {
+			if err := config.SaveConfig(cfg, scope.ConfigPath); err != nil {
 				return err
 			}
 			outcomes := availability.Reconcile(skill)
 			fmt.Fprintf(cmd.OutOrStdout(), "Updated availability for %s.\n", skill)
-			if err := printSkillAvailability(cmd, cfg, skill, source, skillsDir); err != nil {
+			if err := printSkillAvailability(cmd, cfg, skill, source, scope); err != nil {
 				return err
 			}
 			return reportReconciled(cmd.OutOrStdout(), outcomes, scopeFlagsOf(cmd, scope))
@@ -132,13 +132,13 @@ func printAllAvailability(cmd *cobra.Command, cfg *config.Config) error {
 	return nil
 }
 
-func printSkillAvailability(cmd *cobra.Command, cfg *config.Config, skill, source, skillsDir string) error {
+func printSkillAvailability(cmd *cobra.Command, cfg *config.Config, skill, source string, scope models.Scope) error {
 	override, customized := cfg.Settings.Availability[skill]
 	policy := "follow defaults"
 	if customized {
 		policy = fmt.Sprintf("include [%s]; exclude [%s]", strings.Join(override.Include, ", "), strings.Join(override.Exclude, ", "))
 	}
-	availability := engine.NewAvailability(cfg, skillsDir)
+	availability := engine.NewAvailability(cfg, scope)
 	fmt.Fprintf(cmd.OutOrStdout(), "Skill: %s\nPolicy: %s\nLinked by policy: %s\nAutomatically available: %s\n", skill, policy, displayList(availability.ManagedAgents(skill)), displayList(availability.AutomaticallyAvailable()))
 	return nil
 }

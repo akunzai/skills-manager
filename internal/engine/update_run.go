@@ -1,6 +1,9 @@
 package engine
 
-import "github.com/akunzai/skills-manager/internal/config"
+import (
+	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
+)
 
 // UpdateOptions controls Source refresh. Force does not override Sync's
 // protection of local edits; DryRun observes remote refs without refreshing.
@@ -55,7 +58,7 @@ type UpdateOutcome struct {
 // PrepareUpdate refreshes the selected Sources, then plans the whole Scope
 // from the resulting Cache. Source failures are data and do not prevent Sync
 // planning; errors that prevent preparation return immediately.
-func PrepareUpdate(cfg *config.Config, configPath, skillsDir, cacheDir string, options UpdateOptions, progress UpdateProgress) (*PreparedUpdate, error) {
+func PrepareUpdate(cfg *config.Config, scope models.Scope, options UpdateOptions, progress UpdateProgress) (*PreparedUpdate, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
@@ -63,12 +66,12 @@ func PrepareUpdate(cfg *config.Config, configPath, skillsDir, cacheDir string, o
 	// Validate named targets even when no remote Sources are declared.
 	if len(cfg.Remote) > 0 || len(options.Targets) > 0 {
 		var err error
-		refresh, err = UpdateRemoteSkills(cfg, options.Targets, options.Force, options.DryRun, cacheDir, progress)
+		refresh, err = UpdateRemoteSkills(cfg, options.Targets, options.Force, options.DryRun, scope.CacheDir, progress)
 		if err != nil {
 			return nil, err
 		}
 	}
-	plan, err := PlanSync(cfg, configPath, skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, scope)
 	if err != nil {
 		return nil, err
 	}

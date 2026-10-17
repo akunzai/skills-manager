@@ -19,6 +19,7 @@ func TestCLISyncAvailabilityRemediesUseTheSameScope(t *testing.T) {
 			t.Run(fmt.Sprintf("foreign=%t/dry-run=%t", foreign, dryRun), func(t *testing.T) {
 				isolateHome(t)
 				root := t.TempDir()
+				t.Chdir(root)
 				skillsDir := filepath.Join(root, ".agents", "skills")
 				configPath := filepath.Join(root, ".agents", "skills.json")
 				cacheDir := filepath.Join(root, "cache")
@@ -125,6 +126,7 @@ func TestReportReconciledPreservesEveryJoinedNextCommand(t *testing.T) {
 func TestCLIGuideAvailabilityFailureCarriesScopedRemedy(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
+	t.Chdir(root)
 	configPath := filepath.Join(root, ".agents", "skills.json")
 	skillsDir := filepath.Join(root, ".agents", "skills")
 	occupied := filepath.Join(root, ".claude", "skills", "skills-manager")
@@ -151,6 +153,7 @@ func TestCLIGuideAvailabilityFailureCarriesScopedRemedy(t *testing.T) {
 func TestCLIAdoptRetainsAvailabilityRemedyAfterDeclaration(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
+	t.Chdir(root)
 	configPath := filepath.Join(root, ".agents", "skills.json")
 	skillsDir := filepath.Join(root, ".agents", "skills")
 	original := filepath.Join(skillsDir, "sample")
@@ -188,6 +191,7 @@ func TestCLIAdoptRetainsAvailabilityRemedyAfterDeclaration(t *testing.T) {
 func TestCLIDoctorFailureDoesNotSuggestRepeatingItsRepair(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
+	t.Chdir(root)
 	configPath := filepath.Join(root, ".agents", "skills.json")
 	skillsDir := filepath.Join(root, ".agents", "skills")
 	source := writeCLILocalSkill(t, root, "sample")

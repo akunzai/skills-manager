@@ -46,7 +46,7 @@ func TestDoctorRunCountsLeftoverButNotUntracked(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, "")).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestDoctorRunCountsWorkingLeftoverOccupancy(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddLocalSymlinkEntry(cfg, "sample", source, "")
-	if _, err := NewAvailability(cfg, skillsDir).Apply("sample"); err != nil {
+	if _, err := NewAvailability(cfg, projectScope("", skillsDir, "")).Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
 	codex := filepath.Join(project, ".codex", "skills")
@@ -92,7 +92,7 @@ func TestDoctorRunCountsWorkingLeftoverOccupancy(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	doctor := NewDoctor(cfg, skillsDir)
+	doctor := NewDoctor(cfg, projectScope("", skillsDir, ""))
 	outcome, err := doctor.Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestDoctorRunCountsForeignDirectoryOnDeclaredPathOnce(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", ".", "github", "")
 
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, "")).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestDoctorRunReportsUnexpectedLinkOfAbsentSkill(t *testing.T) {
 			tt.declare(t, cfg, skillsDir)
 			link := plantManagedLink(t, skillsDir, filepath.Join(project, ".continue", "skills"), "sample")
 
-			doctor := NewDoctor(cfg, skillsDir)
+			doctor := NewDoctor(cfg, projectScope("", skillsDir, ""))
 			outcome, err := doctor.Run(false, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -216,7 +216,7 @@ func TestDoctorRunReportsUnexpectedLinkOfAbsentSkill(t *testing.T) {
 				t.Fatalf("Remaining = %d; want 2 (the absent Skill and its unexpected link)", outcome.Remaining)
 			}
 
-			plan, err := BuildPrunePlan(cfg, skillsDir, true, true)
+			plan, err := BuildPrunePlan(cfg, projectScope("", skillsDir, ""), true, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -272,14 +272,14 @@ func TestStaleBaselinesAreEntriesNotDeclaredRemote(t *testing.T) {
 	}
 	want := []string{"gone", "local"}
 
-	plan, err := BuildPrunePlan(cfg, skillsDir, true, true)
+	plan, err := BuildPrunePlan(cfg, projectScope("", skillsDir, ""), true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(plan.StateSkills, want) {
 		t.Fatalf("prune StateSkills = %v; want %v", plan.StateSkills, want)
 	}
-	doctor := NewDoctor(cfg, skillsDir)
+	doctor := NewDoctor(cfg, projectScope("", skillsDir, ""))
 	outcome, err := doctor.Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -316,7 +316,7 @@ func TestDoctorRunCountsUntrackedLinksAsWarnings(t *testing.T) {
 	}
 
 	for _, fix := range []bool{false, true} {
-		outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(fix, nil)
+		outcome, err := NewDoctor(config.DefaultConfig(), projectScope("", skillsDir, "")).Run(fix, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -347,7 +347,7 @@ func TestDoctorRunReportsMissingAndInvalidInventory(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "missing", ".", "github", "")
 	config.AddLocalSymlinkEntry(cfg, "broken", source, "")
 
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, "")).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestDoctorRunFixesThenRediagnosesFilesystem(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	outcome, err := NewDoctor(cfg, skillsDir).Run(true, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, "")).Run(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func newLegacyCacheTestFixture(t *testing.T) (cfg *config.Config, skillsDir, cac
 func TestDoctorRunFixRemovesLegacyBranchlessCacheRoot(t *testing.T) {
 	cfg, skillsDir, cacheDir, legacyRoot := newLegacyCacheTestFixture(t)
 
-	before, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(false, nil)
+	before, err := NewDoctor(cfg, projectScope("", skillsDir, cacheDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +436,7 @@ func TestDoctorRunFixRemovesLegacyBranchlessCacheRoot(t *testing.T) {
 		t.Fatal("a legacy branchless Cache root must count as an issue")
 	}
 
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, cacheDir)).Run(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestDoctorRunFixRemovesCacheRecoveryArtifacts(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 
-	before, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(false, nil)
+	before, err := NewDoctor(cfg, projectScope("", skillsDir, cacheDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestDoctorRunFixRemovesCacheRecoveryArtifacts(t *testing.T) {
 		t.Fatalf("CacheRecovery = %#v; want both artifacts", before.Report.CacheRecovery)
 	}
 
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, cacheDir)).Run(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestDoctorRunFixRemovesCacheRecoveryArtifacts(t *testing.T) {
 // success.
 func TestDoctorRunReportsLegacyCacheRemovalFailure(t *testing.T) {
 	cfg, skillsDir, cacheDir, legacyRoot := newLegacyCacheTestFixture(t)
-	doctor := NewDoctorWithCache(cfg, skillsDir, cacheDir)
+	doctor := NewDoctor(cfg, projectScope("", skillsDir, cacheDir))
 	doctor.cacheDetector.removeAll = func(path string) error {
 		return fmt.Errorf("injected removal failure")
 	}
@@ -556,7 +556,7 @@ func TestDoctorRunLeavesNonLegacyCacheUntouched(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(true, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, cacheDir)).Run(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +580,7 @@ func TestDoctorRunWithoutFixOnlyReportsLegacyCacheArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(false, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, cacheDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +624,7 @@ func TestDoctorRunLeavesUnknownAgentReferencesForUser(t *testing.T) {
 		Include: []string{"also-fake"},
 	}
 
-	doctor := NewDoctor(cfg, skillsDir)
+	doctor := NewDoctor(cfg, projectScope("", skillsDir, ""))
 	before, err := doctor.Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -657,7 +657,7 @@ func TestDoctorRunPropagatesInventoryErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	outcome, err := NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil)
+	outcome, err := NewDoctor(config.DefaultConfig(), projectScope("", skillsDir, "")).Run(false, nil)
 	if err == nil {
 		t.Fatal("expected inventory error")
 	}
@@ -696,7 +696,7 @@ func TestDoctorReportsGitThatCannotMaintainTheCache(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, filepath.Join(project, "cache")).Run(false, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, filepath.Join(project, "cache"))).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -705,7 +705,7 @@ func TestDoctorReportsGitThatCannotMaintainTheCache(t *testing.T) {
 	}
 
 	cfg.Remote["owner/repo"] = config.RemoteRepo{Skills: map[string]string{}}
-	outcome, err = NewDoctorWithCache(cfg, skillsDir, filepath.Join(project, "cache")).Run(false, nil)
+	outcome, err = NewDoctor(cfg, projectScope("", skillsDir, filepath.Join(project, "cache"))).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -863,7 +863,7 @@ func TestDoctorRunReportsUnmanagedAgentDirectoryButNotAsIssue(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	outcome, err := NewDoctor(cfg, skillsDir).Run(false, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, "")).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -951,7 +951,7 @@ func TestDoctorFixLeavesAgentReservedNameAlone(t *testing.T) {
 		return true, nil
 	}
 
-	outcome, err := NewDoctor(cfg, skillsDir).Run(true, approveAll)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, "")).Run(true, approveAll)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -983,7 +983,7 @@ func TestLeftoverManagedLinkOnAReservedNameIsCleanedUp(t *testing.T) {
 		cfg.Settings.DefaultAgents = []string{"claude"}
 		config.AddRemoteSkillEntry(cfg, "owner/repo", "synced", "synced", "github", "main")
 		link := plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "synced")
-		leftover := NewAvailability(cfg, skillsDir).ObserveOccupancy().Leftover.Paths
+		leftover := NewAvailability(cfg, projectScope("", skillsDir, "")).ObserveOccupancy().Leftover.Paths
 		if len(leftover) != 1 || leftover[0].Path != link || leftover[0].Agent != "claude-code" || leftover[0].Skill != "synced" {
 			t.Fatalf("Leftover = %#v; want the old managed synced link", leftover)
 		}
@@ -1001,21 +1001,21 @@ func TestLeftoverManagedLinkOnAReservedNameIsCleanedUp(t *testing.T) {
 
 	t.Run("doctor --fix", func(t *testing.T) {
 		cfg, skillsDir, link := scope(t)
-		if _, err := NewDoctor(cfg, skillsDir).Run(true, nil); err != nil {
+		if _, err := NewDoctor(cfg, projectScope("", skillsDir, "")).Run(true, nil); err != nil {
 			t.Fatal(err)
 		}
 		assertRemoved(t, skillsDir, link)
 	})
 	t.Run("prune", func(t *testing.T) {
 		cfg, skillsDir, link := scope(t)
-		plan, err := BuildPrunePlan(cfg, skillsDir, true, true)
+		plan, err := BuildPrunePlan(cfg, projectScope("", skillsDir, ""), true, true)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(plan.Unconfigured) != 1 || plan.Unconfigured[0].Path != link {
 			t.Fatalf("prune Unconfigured = %#v; want the old managed synced link", plan.Unconfigured)
 		}
-		if _, err := ApplyPrunePlan(plan, skillsDir); err != nil {
+		if _, err := ApplyPrunePlan(plan, projectScope("", skillsDir, "")); err != nil {
 			t.Fatal(err)
 		}
 		assertRemoved(t, skillsDir, link)
@@ -1071,7 +1071,7 @@ func TestDoctorRepairSaysSkippedForAPathChangedSinceDiagnosis(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	outcome, err := NewDoctor(cfg, skillsDir).Run(true, func([]ForeignAvailabilityPath) (bool, error) {
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, "")).Run(true, func([]ForeignAvailabilityPath) (bool, error) {
 		if err := os.Remove(link); err != nil {
 			return false, err
 		}

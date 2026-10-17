@@ -17,7 +17,7 @@ func tampered(string, signing.Trust) (signing.Result, error) {
 
 func trustOnce(t *testing.T, cfg *config.Config, configPath, skillsDir, cacheDir string, names ...string) []TrustItem {
 	t.Helper()
-	items, err := PlanTrust(cfg, configPath, skillsDir, cacheDir, names)
+	items, err := PlanTrust(cfg, projectScope(configPath, skillsDir, cacheDir), names)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestPlanTrustRefusesWhatIsNotBlockedBySignature(t *testing.T) {
 	cfg, configPath, skillsDir, cacheDir := signatureFixture(t)
 	stubVerify(t, unsigned)
 
-	items, err := PlanTrust(cfg, configPath, skillsDir, cacheDir, []string{"sample", "missing"})
+	items, err := PlanTrust(cfg, projectScope(configPath, skillsDir, cacheDir), []string{"sample", "missing"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestPlanTrustRefusesAMissingTrustRoot(t *testing.T) {
 		return signing.Result{}, signing.ErrNoTrustRoot
 	})
 
-	items, err := PlanTrust(cfg, configPath, skillsDir, cacheDir, []string{"sample"})
+	items, err := PlanTrust(cfg, projectScope(configPath, skillsDir, cacheDir), []string{"sample"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestRetireRemovesTrustedContent(t *testing.T) {
 	trustOnce(t, cfg, configPath, skillsDir, cacheDir, "sample")
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "other", "sample", "git", cfg.Remote["owner/repo"].URL)
 
-	if _, err := Retire(cfg, configPath, skillsDir, []string{"sample"}, OpenBaselines(skillsDir)); err != nil {
+	if _, err := Retire(cfg, projectScope(configPath, skillsDir, ""), []string{"sample"}, OpenBaselines(skillsDir)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -171,7 +171,7 @@ func TestDoctorWarnsAboutTrustedContent(t *testing.T) {
 	trustOnce(t, cfg, configPath, skillsDir, cacheDir, "sample")
 	syncOnce(t, cfg, configPath, skillsDir, cacheDir, SyncDecision{})
 
-	outcome, err := NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(false, nil)
+	outcome, err := NewDoctor(cfg, projectScope("", skillsDir, cacheDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestDoctorWarnsAboutTrustedContent(t *testing.T) {
 	if err := NewCache("owner/repo", origin, "", cacheDir).Refresh(true, "sample"); err != nil {
 		t.Fatal(err)
 	}
-	outcome, err = NewDoctorWithCache(cfg, skillsDir, cacheDir).Run(false, nil)
+	outcome, err = NewDoctor(cfg, projectScope("", skillsDir, cacheDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

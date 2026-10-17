@@ -157,7 +157,7 @@ func TestAgentSelectionBaseline(t *testing.T) {
 	t.Run("single skill reports its own Availability", func(t *testing.T) {
 		cfg := config.DefaultConfig()
 		cfg.Settings.DefaultAgents = []string{"claude"}
-		availability := engine.NewAvailability(cfg, skillsDir)
+		availability := engine.NewAvailability(cfg, projectScopeOf(skillsDir))
 
 		baseline, ok := agentSelectionBaseline(availability, []string{"only"})
 		if !ok {
@@ -171,7 +171,7 @@ func TestAgentSelectionBaseline(t *testing.T) {
 	t.Run("agreeing skills report the shared Availability", func(t *testing.T) {
 		cfg := config.DefaultConfig()
 		cfg.Settings.DefaultAgents = []string{"claude", "continue"}
-		availability := engine.NewAvailability(cfg, skillsDir)
+		availability := engine.NewAvailability(cfg, projectScopeOf(skillsDir))
 
 		baseline, ok := agentSelectionBaseline(availability, []string{"a", "b"})
 		if !ok {
@@ -187,7 +187,7 @@ func TestAgentSelectionBaseline(t *testing.T) {
 		cfg := config.DefaultConfig()
 		cfg.Settings.DefaultAgents = []string{"claude"}
 		cfg.Settings.Availability["b"] = config.AvailabilityOverride{Include: []string{"continue"}}
-		availability := engine.NewAvailability(cfg, skillsDir)
+		availability := engine.NewAvailability(cfg, projectScopeOf(skillsDir))
 
 		baseline, ok := agentSelectionBaseline(availability, []string{"a", "b"})
 		if ok {

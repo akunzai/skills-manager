@@ -390,7 +390,7 @@ func TestInventoryClassifiesConfigVsSkillsDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := LoadInventory(cfg, skillsDir)
+	items, err := LoadInventory(cfg, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestInventoryIgnoresAgentDirEntries(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "github", "")
 
-	items, err := LoadInventory(cfg, skillsDir)
+	items, err := LoadInventory(cfg, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestEnsureAndRemoveAgentSymlinksProjectAndGlobal(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, projectScope("", skillsDir, ""))
 
 	// 1. Apply creates the project-level symlink for claude-code
 	if _, err := availability.Apply("test-skill"); err != nil {
@@ -500,7 +500,7 @@ func TestAvailabilityManagedAgentsApplyPerSkillPolicy(t *testing.T) {
 		Exclude: []string{"claude"},
 	}
 
-	got := NewAvailability(cfg, skillsDir).ManagedAgents("sample")
+	got := NewAvailability(cfg, projectScope("", skillsDir, "")).ManagedAgents("sample")
 	if !reflect.DeepEqual(got, []string{"continue"}) {
 		t.Fatalf("target agents = %#v, want continue", got)
 	}
@@ -519,7 +519,7 @@ func TestAvailabilityApplyMatchesDeclaredPolicy(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "github", "")
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, projectScope("", skillsDir, ""))
 	if _, err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +576,7 @@ func TestAvailabilityApplyPreservesUnmanagedTarget(t *testing.T) {
 	if err := os.Symlink(unmanagedTarget, unmanaged); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewAvailability(config.DefaultConfig(), skillsDir).Apply("sample"); err == nil {
+	if _, err := NewAvailability(config.DefaultConfig(), projectScope("", skillsDir, "")).Apply("sample"); err == nil {
 		t.Fatal("expected unmanaged target conflict")
 	}
 	if _, err := os.Stat(marker); err != nil {
@@ -612,7 +612,7 @@ func TestAvailabilityApplyRemovesManagedCopy(t *testing.T) {
 		t.Fatal("copy marker was not recognized")
 	}
 	cfg := config.DefaultConfig()
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, projectScope("", skillsDir, ""))
 	if _, err := availability.Apply("sample"); err != nil {
 		t.Fatal(err)
 	}
@@ -670,14 +670,14 @@ func TestApplyRemovePlanDropsConfigBeforeMaster(t *testing.T) {
 	}
 	plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "sample")
 
-	plan, err := BuildRemovePlan(cfg, skillsDir, []string{"sample"})
+	plan, err := BuildRemovePlan(cfg, projectScope("", skillsDir, ""), []string{"sample"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(plan.Skills) != 1 || !plan.Skills[0].InConfig || !plan.Skills[0].MasterExists {
 		t.Fatalf("plan = %#v", plan)
 	}
-	result, err := ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+	result, err := ApplyRemovePlan(plan, cfg, projectScope(configPath, skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,14 +715,14 @@ func TestApplyRemovePlanSavesConfigWhenMasterMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := BuildRemovePlan(cfg, skillsDir, []string{"ghost"})
+	plan, err := BuildRemovePlan(cfg, projectScope("", skillsDir, ""), []string{"ghost"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !plan.Skills[0].InConfig || plan.Skills[0].MasterExists {
 		t.Fatalf("plan = %#v", plan.Skills[0])
 	}
-	result, err := ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+	result, err := ApplyRemovePlan(plan, cfg, projectScope(configPath, skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -748,7 +748,7 @@ func TestBuildPrunePlanProceedsPastUnreadableScopeState(t *testing.T) {
 	link := plantManagedLink(t, skillsDir, filepath.Join(project, ".claude", "skills"), "orphan")
 	statePath, bad := writeUnreadableScopeState(t, skillsDir)
 
-	plan, err := BuildPrunePlan(config.DefaultConfig(), skillsDir, true, true)
+	plan, err := BuildPrunePlan(config.DefaultConfig(), projectScope("", skillsDir, ""), true, true)
 	if err != nil {
 		t.Fatalf("BuildPrunePlan error = %v; an unreadable Scope state must not stop prune", err)
 	}
@@ -758,7 +758,7 @@ func TestBuildPrunePlanProceedsPastUnreadableScopeState(t *testing.T) {
 	if len(plan.Unconfigured) != 1 || plan.Unconfigured[0].Path != link {
 		t.Fatalf("Unconfigured = %#v; want the leftover link", plan.Unconfigured)
 	}
-	if _, err := ApplyPrunePlan(plan, skillsDir); err != nil {
+	if _, err := ApplyPrunePlan(plan, projectScope("", skillsDir, "")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(link); !os.IsNotExist(err) {
@@ -791,7 +791,7 @@ func TestApplyPrunePlanLeavesLinkReplacedAfterPlanning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := ApplyPrunePlan(plan, skillsDir); err != nil {
+	if _, err := ApplyPrunePlan(plan, projectScope("", skillsDir, "")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(link); err != nil {
@@ -814,7 +814,7 @@ func TestBuildPrunePlanListsLeftoverEmptyAgentDirOnlyWithConfiguredLinks(t *test
 	}
 	cfg := config.DefaultConfig()
 
-	plan, err := BuildPrunePlan(cfg, skillsDir, true, true)
+	plan, err := BuildPrunePlan(cfg, projectScope("", skillsDir, ""), true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -822,7 +822,7 @@ func TestBuildPrunePlanListsLeftoverEmptyAgentDirOnlyWithConfiguredLinks(t *test
 		t.Fatalf("EmptyAgentDirs = %#v; want %#v", plan.EmptyAgentDirs, want)
 	}
 
-	skillsOnly, err := BuildPrunePlan(cfg, skillsDir, true, false)
+	skillsOnly, err := BuildPrunePlan(cfg, projectScope("", skillsDir, ""), true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -840,7 +840,7 @@ func TestApplyPrunePlanRemovesLeftoverEmptyAgentDir(t *testing.T) {
 	}
 	plan := PrunePlan{EmptyAgentDirs: []AgentDir{{Name: "continue", Dir: continueDir}}}
 
-	result, err := ApplyPrunePlan(plan, skillsDir)
+	result, err := ApplyPrunePlan(plan, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -867,7 +867,7 @@ func TestApplyPrunePlanSkipsEmptyAgentDirThatGainedEntryAfterPlanning(t *testing
 		t.Fatal(err)
 	}
 
-	result, err := ApplyPrunePlan(plan, skillsDir)
+	result, err := ApplyPrunePlan(plan, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1249,7 +1249,7 @@ func TestMaterializeLocalSymlinkRefusesSourceInsideSkillsDir(t *testing.T) {
 	if err := os.WriteFile(skillMd, []byte("# Mine\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	target := models.LocalSymlinkTarget(dest, skillsDir)
+	target := projectScope("", skillsDir, "").LocalSymlinkTarget(dest)
 	if err := MaterializeLocalSymlink("mine", target, skillsDir); err == nil {
 		t.Fatal("expected refusal of a Source inside the skills directory")
 	}
@@ -1415,7 +1415,7 @@ func applyPlan(t *testing.T, cfg *config.Config, skillsDir, cacheDir string, dec
 	if os.Getenv("XDG_STATE_HOME") == "" {
 		t.Setenv("XDG_STATE_HOME", t.TempDir())
 	}
-	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, projectScope("", skillsDir, cacheDir))
 	if err != nil {
 		t.Fatalf("PlanSync: %v", err)
 	}
@@ -1585,7 +1585,7 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 		plantManagedLink(t, skillsDir, filepath.Join(project, agent, "skills"), "sample")
 	}
 
-	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, projectScope(configPath, skillsDir, ""), NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, AddAvailabilityIntent{})
 	if planErr != nil {
 		t.Fatal(planErr)
 	}
@@ -1622,7 +1622,7 @@ func TestAddPlanSymlinkDeclaresAndMaterializes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewSymlinkAddSource(source, "local sample"), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, projectScope(configPath, skillsDir, ""), NewSymlinkAddSource(source, "local sample"), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	if planErr != nil {
 		t.Fatal(planErr)
 	}
@@ -1654,7 +1654,7 @@ func TestAddPlanRemoteDeclaresAndMaterializes(t *testing.T) {
 	}
 
 	intake := mustPrepareRemoteIntake(t, cfg, remoteSpec(origin, "", ""), filepath.Join(project, "cache"))
-	plan, planErr := BuildAddPlan(cfg, configPath, skillsDir, NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, projectScope(configPath, skillsDir, ""), NewRemoteAddSource(intake), map[string]string{"sample": "sample"}, AddAvailabilityIntent{})
 	if planErr != nil {
 		t.Fatal(planErr)
 	}

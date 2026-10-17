@@ -33,9 +33,7 @@ func newDoctorCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			p := newPrompter(cmd)
 			scope := ResolveScope(cmd)
-			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
-
-			cfg, err := config.LoadConfig(configPath)
+			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
 			}
@@ -46,7 +44,7 @@ func newDoctorCmd() *cobra.Command {
 					return promptReplaceForeignAvailability(p, out, paths)
 				}
 			}
-			outcome, runErr := engine.NewDoctorWithCache(cfg, skillsDir, scope.CacheDir).Run(flagFix, approve)
+			outcome, runErr := engine.NewDoctor(cfg, scope).Run(flagFix, approve)
 			printHealthReport(out, doctorFindings(outcome.Report, scopeFlagsOf(cmd, scope)))
 			if runErr != nil {
 				return runErr

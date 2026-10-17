@@ -127,19 +127,6 @@ func DefaultCacheDir() string {
 	return filepath.Join(stateHome, "skills-manager", "repo-cache")
 }
 
-// GetProjectRootFromSkillsDir derives the project root directory from a project-scoped skillsDir.
-func GetProjectRootFromSkillsDir(skillsDir string) string {
-	clean := filepath.Clean(skillsDir)
-	parent := filepath.Dir(clean)
-	if filepath.Base(clean) == "skills" && filepath.Base(parent) == ".agents" {
-		return filepath.Dir(parent)
-	}
-	if filepath.Base(clean) == "skills" {
-		return parent
-	}
-	return parent
-}
-
 // projectKnownAgents returns mapping of agent names to their project-level
 // skills directory. Cursor is not here: it reads project .agents/skills
 // directly, same as at Global Scope (cursor.com/docs/skills#skill-directories).
@@ -158,16 +145,6 @@ func projectKnownAgents(projectRoot string) map[string]string {
 	}
 }
 
-// IsGlobalSkillsDir reports whether skillsDir is the global skills directory.
-func IsGlobalSkillsDir(skillsDir string) bool {
-	if skillsDir == "" {
-		return true
-	}
-	absSkills, _ := filepath.Abs(skillsDir)
-	absGlobal, _ := filepath.Abs(DefaultSkillsDir())
-	return filepath.Clean(absSkills) == filepath.Clean(absGlobal)
-}
-
 // Agents is the Agent directory knowledge for one Scope: linkable known
 // directories, Automatically available Agents, and leftover roots earlier
 // versions may have written.
@@ -175,24 +152,6 @@ type Agents struct {
 	known     map[string]string
 	automatic []string
 	leftover  map[string]string
-}
-
-// ForSkillsDir returns Agent knowledge for the Scope that skillsDir belongs to.
-func ForSkillsDir(skillsDir string) Agents {
-	if skillsDir == "" {
-		skillsDir = DefaultSkillsDir()
-	}
-	var known map[string]string
-	if IsGlobalSkillsDir(skillsDir) {
-		known = knownAgents()
-	} else {
-		known = projectKnownAgents(GetProjectRootFromSkillsDir(skillsDir))
-	}
-	leftover := leftoverAgentSkillDirs(skillsDir)
-	for agent := range known {
-		delete(leftover, agent)
-	}
-	return Agents{known: known, automatic: automaticallyAvailableAgents(skillsDir), leftover: leftover}
 }
 
 func (a Agents) KnownDirs() map[string]string {
@@ -239,12 +198,8 @@ func (a Agents) IsReserved(agent, name string) bool {
 // These paths are conventions, not guarantees. Callers must only ever act on a
 // symlink that resolves into the master skills directory, so a path that turns
 // out to be wrong simply matches nothing.
-func leftoverAgentSkillDirs(skillsDir string) map[string]string {
-	if skillsDir == "" {
-		skillsDir = DefaultSkillsDir()
-	}
-	if !IsGlobalSkillsDir(skillsDir) {
-		root := GetProjectRootFromSkillsDir(skillsDir)
+func leftoverAgentSkillDirs(isProject bool, root string) map[string]string {
+	if isProject {
 		return map[string]string{
 			"codex": filepath.Join(root, ".codex", "skills"),
 		}
@@ -264,10 +219,10 @@ func leftoverAgentSkillDirs(skillsDir string) map[string]string {
 	}
 }
 
-func automaticallyAvailableAgents(skillsDir string) []string {
-	want := scopeProject
-	if IsGlobalSkillsDir(skillsDir) {
-		want = scopeGlobal
+func automaticallyAvailableAgents(isProject bool) []string {
+	want := scopeGlobal
+	if isProject {
+		want = scopeProject
 	}
 	agents := make([]string, 0, len(universalAgentScopes))
 	for agent, scopes := range universalAgentScopes {

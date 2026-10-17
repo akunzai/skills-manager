@@ -166,30 +166,30 @@ type SyncPlan struct {
 	StateError string
 
 	cfg          *config.Config
-	configPath   string
-	skillsDir    string
+	scope        models.Scope
 	availability *Availability
 	planner      *remotePlanner
 }
 
 // PlanSync observes the Scope and derives what Sync would do. It writes
 // nothing, and runs no Skill-supplied command. Apply saves Config to
-// configPath when it migrates a renamed Skill.
-func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*SyncPlan, error) {
+// the Scope's ConfigPath when it migrates a renamed Skill.
+func PlanSync(cfg *config.Config, scope models.Scope) (*SyncPlan, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
+	scope = withScopeDefaults(scope)
+	configPath, skillsDir, cacheDir := scope.ConfigPath, scope.SkillsDir, scope.CacheDir
 	snapshot, err := InspectFreshness(cfg, skillsDir, cacheDir, FreshnessOptions{ObserveScope: true})
 	if err != nil {
 		return nil, err
 	}
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, scope)
 	occupancy := availability.ObserveOccupancy()
 	plan := &SyncPlan{
 		StateError:   snapshot.StateError,
 		cfg:          cfg,
-		configPath:   configPath,
-		skillsDir:    skillsDir,
+		scope:        scope,
 		availability: availability,
 		planner:      newRemotePlanner(cfg, configPath, cacheDir, OpenBaselines(skillsDir)),
 	}
@@ -203,13 +203,13 @@ func PlanSync(cfg *config.Config, configPath, skillsDir, cacheDir string) (*Sync
 		if cfg.Local[name].Type != "symlink" {
 			continue
 		}
-		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, occupancy.Drift(name), name))
+		plan.Items = append(plan.Items, planLocalItem(cfg, scope, occupancy.Drift(name), name))
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Local)) {
 		if cfg.Local[name].Type != "command" {
 			continue
 		}
-		plan.Items = append(plan.Items, planLocalItem(cfg, skillsDir, occupancy.Drift(name), name))
+		plan.Items = append(plan.Items, planLocalItem(cfg, scope, occupancy.Drift(name), name))
 	}
 	return plan, nil
 }
@@ -301,11 +301,12 @@ func planRename(cfg *config.Config, skillsDir string, item SyncPlanItem) SyncPla
 // planLocalItem observes one declared local Skill. Add reuses it so a newly
 // declared Skill is Materialized exactly the way Sync would.
 //
-// It takes the Config, the skills directory and the observed Drift rather than
-// an *Availability, because it needs none of that type's behavior: it used to
+// It takes the Config, the Scope and the observed Drift rather than an
+// *Availability, because it needs none of that type's behavior: it used to
 // take one and reach through it for cfg and skillsDir, which read as a
 // dependency it does not have.
-func planLocalItem(cfg *config.Config, skillsDir string, drift AvailabilityDrift, name string) SyncPlanItem {
+func planLocalItem(cfg *config.Config, scope models.Scope, drift AvailabilityDrift, name string) SyncPlanItem {
+	skillsDir := scope.SkillsDir
 	info := cfg.Local[name]
 	item := SyncPlanItem{
 		Name:   name,
@@ -320,11 +321,11 @@ func planLocalItem(cfg *config.Config, skillsDir string, drift AvailabilityDrift
 		item.Installed = err == nil
 		return item
 	}
-	absSource := models.ResolveLocalSourcePath(info.Source, skillsDir)
+	absSource := scope.ResolveLocalSource(info.Source)
 	item.Kind = config.SkillSymlink
 	item.SourcePath = absSource
 	item.LinkPath = filepath.Join(skillsDir, name)
-	item.LinkTarget = models.LocalSymlinkTarget(absSource, skillsDir)
+	item.LinkTarget = scope.LocalSymlinkTarget(absSource)
 	if _, err := os.Stat(absSource); err != nil {
 		item.Block = SyncBlockSourceMissing
 		return item

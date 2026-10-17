@@ -97,7 +97,7 @@ completed.`,
 func prepareUpdate(cmd *cobra.Command, out io.Writer, cfg *config.Config, scope Scope, options engine.UpdateOptions, quiet bool) (*engine.PreparedUpdate, error) {
 	progress, stop := updateProgress(cmd, out, quiet)
 	defer stop()
-	return engine.PrepareUpdate(cfg, scope.ConfigPath, scope.SkillsDir, scope.CacheDir, options, progress)
+	return engine.PrepareUpdate(cfg, scope, options, progress)
 }
 
 // refreshSources is the refresh-only adapter used by diff --fetch.

@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // TrustItem is one Skill `skills trust` was asked to trust: the Source it is
@@ -21,8 +22,8 @@ type TrustItem struct {
 // PlanTrust observes the Scope as Sync would and says, for each of names,
 // what trusting it would record. Only a Skill its signature blocks can be
 // trusted; a missing trust root is not a verdict, and Update clears it.
-func PlanTrust(cfg *config.Config, configPath, skillsDir, cacheDir string, names []string) ([]TrustItem, error) {
-	plan, err := PlanSync(cfg, configPath, skillsDir, cacheDir)
+func PlanTrust(cfg *config.Config, scope models.Scope, names []string) ([]TrustItem, error) {
+	plan, err := PlanSync(cfg, scope)
 	if err != nil {
 		return nil, err
 	}

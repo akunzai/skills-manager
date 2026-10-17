@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -24,9 +25,9 @@ func agentSet(agents []string) map[string]struct{} {
 // Availability owns Config policy interpretation and managed filesystem state
 // for one Scope. Callers create it once and reuse it across Skills.
 type Availability struct {
-	cfg       *config.Config
-	skillsDir string
-	agents    models.Agents
+	cfg    *config.Config
+	scope  models.Scope
+	agents models.Agents
 }
 
 // Field values for UnknownAgentReference match the skills.json key each names.
@@ -44,17 +45,26 @@ type UnknownAgentReference struct {
 	Agent string
 }
 
-func NewAvailability(cfg *config.Config, skillsDir string) *Availability {
+// withScopeDefaults is scope with an empty skills or Cache directory set to
+// the default one. Every engine entrypoint that takes a Scope applies it
+// first, so no step past that point sees either empty. An empty ConfigPath
+// is left alone: Sync reads it as nowhere to record a rename, and only Add
+// and Adopt, which always save Config, default it.
+func withScopeDefaults(scope models.Scope) models.Scope {
+	scope.SkillsDir = cmp.Or(scope.SkillsDir, models.DefaultSkillsDir())
+	scope.CacheDir = cacheDirOrDefault(scope.CacheDir)
+	return scope
+}
+
+func NewAvailability(cfg *config.Config, scope models.Scope) *Availability {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	if skillsDir == "" {
-		skillsDir = models.DefaultSkillsDir()
-	}
+	scope = withScopeDefaults(scope)
 	return &Availability{
-		cfg:       cfg,
-		skillsDir: skillsDir,
-		agents:    models.ForSkillsDir(skillsDir),
+		cfg:    cfg,
+		scope:  scope,
+		agents: scope.Agents(),
 	}
 }
 
@@ -289,7 +299,7 @@ func (a *Availability) state(skillName string) availabilityState {
 		skillName: skillName,
 		desired:   desired,
 		known:     known,
-		skillsDir: a.skillsDir,
+		skillsDir: a.scope.SkillsDir,
 	}
 }
 
@@ -425,7 +435,7 @@ func (a *Availability) Reconcile(skills ...string) []AvailabilityOutcome {
 	}
 	var outcomes []AvailabilityOutcome
 	for _, skill := range skills {
-		if _, err := os.Lstat(filepath.Join(a.skillsDir, skill)); err != nil {
+		if _, err := os.Lstat(filepath.Join(a.scope.SkillsDir, skill)); err != nil {
 			continue
 		}
 		copied, err := a.Apply(skill)
