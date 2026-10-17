@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 type AddSelectionKind uint8
@@ -34,17 +35,17 @@ type AddSelectionRequest struct {
 	Occupancy *AddSlotInspector
 }
 
-// AddSlotInspector inspects a Skill's occupancy against the Config, skills
-// directory, and Source an Add's plan is built from.
+// AddSlotInspector inspects a Skill's occupancy against the Config, Scope,
+// and Source an Add's plan is built from.
 type AddSlotInspector struct {
-	Config    *config.Config
-	SkillsDir string
-	Source    AddSource
+	Config *config.Config
+	Scope  models.Scope
+	Source AddSource
 }
 
 // Inspect is name's occupancy were it added from subpath.
 func (i *AddSlotInspector) Inspect(name, subpath string) (AddSlot, error) {
-	return InspectAddSlot(i.Config, i.SkillsDir, i.Source, name, subpath)
+	return InspectAddSlot(i.Config, i.Scope, i.Source, name, subpath)
 }
 
 type AddSelectionAnswers struct {

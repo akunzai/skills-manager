@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // treeSnapshot records every path under root with its content or link target,
@@ -82,7 +83,7 @@ func TestPlanSyncWritesNothing(t *testing.T) {
 	cfg, root, skillsDir, cacheDir, checkMarker := planSyncFixture(t)
 	before := treeSnapshot(t, root)
 
-	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, projectScope("", skillsDir, cacheDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestSyncPlanResolvesEachDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, projectScope("", skillsDir, cacheDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,8 +239,8 @@ func TestSyncApplyContinuesAfterMaterializeFailure(t *testing.T) {
 			},
 		},
 		cfg:          cfg,
-		skillsDir:    skillsDir,
-		availability: NewAvailability(cfg, skillsDir),
+		scope:        projectScope("", skillsDir, ""),
+		availability: NewAvailability(cfg, projectScope("", skillsDir, "")),
 	}
 	var kinds []string
 	report, err := plan.Apply(SyncDecision{}, func(ev SyncEvent) { kinds = append(kinds, ev.Kind) })
@@ -277,8 +278,8 @@ func TestSyncApplyReportsScopeStateUnreadableSincePlanning(t *testing.T) {
 			Freshness: SkillFreshness{Name: "good", Source: "owner/repo", Subpath: "good", ScopePath: filepath.Join(skillsDir, "good")},
 		}},
 		cfg:          cfg,
-		skillsDir:    skillsDir,
-		availability: NewAvailability(cfg, skillsDir),
+		scope:        projectScope("", skillsDir, ""),
+		availability: NewAvailability(cfg, projectScope("", skillsDir, "")),
 	}
 	statePath, bad := writeUnreadableScopeState(t, skillsDir)
 
@@ -312,7 +313,7 @@ func TestSyncApplyWarnsOnUnreadableScopeStateWithoutRemoteSkills(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddLocalSymlinkEntry(cfg, "local", local, "")
 	writeUnreadableScopeState(t, skillsDir)
-	plan, err := PlanSync(cfg, "", skillsDir, filepath.Join(root, "cache"))
+	plan, err := PlanSync(cfg, projectScope("", skillsDir, filepath.Join(root, "cache")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +342,7 @@ func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"codex"}
 	config.AddLocalCommandEntry(cfg, "tool", "install-tool", "which tool", "")
 
-	plan, err := PlanSync(cfg, "", skillsDir, t.TempDir())
+	plan, err := PlanSync(cfg, projectScope("", skillsDir, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +351,7 @@ func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 	}
 
 	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "tool", "SKILL.md"), []byte("# Tool\n"))
-	plan, err = PlanSync(cfg, "", skillsDir, t.TempDir())
+	plan, err = PlanSync(cfg, projectScope("", skillsDir, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +506,7 @@ func TestSyncReportSummaryUsesTheAppliedDecision(t *testing.T) {
 	if err := store.Save(state); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := PlanSync(cfg, "", skillsDir, cacheDir)
+	plan, err := PlanSync(cfg, projectScope("", skillsDir, cacheDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +545,7 @@ func TestSyncPreviewRetainsRefusalSnapshotWhileApplyReadsCurrentPaths(t *testing
 	if err := os.WriteFile(blocked, []byte("blocked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := PlanSync(cfg, configPath, skillsDir, filepath.Join(root, "cache"))
+	plan, err := PlanSync(cfg, projectScope(configPath, skillsDir, filepath.Join(root, "cache")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,5 +567,36 @@ func TestSyncPreviewRetainsRefusalSnapshotWhileApplyReadsCurrentPaths(t *testing
 	report, err := plan.Apply(SyncDecision{}, nil)
 	if err != nil || report.Failed != 0 {
 		t.Fatalf("report=%v err=%v; Apply must use current paths", report, err)
+	}
+}
+
+// Scope kind is the flag choice (ADR-0012): a Global Scope whose skills
+// directory was moved with --skills-dir still links its home's Agent
+// directories, never ones beside the moved directory.
+func TestSyncAtGlobalScopeWithMovedSkillsDirLinksTheHomeAgentDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AGENTS_HOME", "")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	work := filepath.Join(home, "work")
+	mustWriteScopeStateTestFile(t, filepath.Join(work, "src", "mine", "SKILL.md"), []byte("---\nname: mine\ndescription: Mine\n---\n"))
+	cfg := config.DefaultConfig()
+	cfg.Local["mine"] = config.LocalEntry{Type: "symlink", Source: "~/work/src/mine"}
+	scope := models.NewGlobalScope(filepath.Join(work, "skills.json"), filepath.Join(work, "skills"), t.TempDir())
+
+	plan, err := PlanSync(cfg, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plan.Apply(SyncDecision{}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "mine", "SKILL.md")); err != nil {
+		t.Errorf("Claude Code's home directory does not read mine: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(work, ".claude")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Sync wrote an Agent directory beside the moved skills directory: %v", err)
 	}
 }

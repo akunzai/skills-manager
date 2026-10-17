@@ -148,7 +148,7 @@ func TestResolveSkillsToAddFlagsPromptForDivergentCandidates(t *testing.T) {
 		{name: "skill", skills: []string{"duplicate"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, &engine.AddSlotInspector{Config: config.DefaultConfig(), SkillsDir: t.TempDir(), Source: src.source})
+			got, cancelled, err := resolveSkillsToAdd(testCmd(), discovered, src, tc.all, tc.skills, prompter, true, &engine.AddSlotInspector{Config: config.DefaultConfig(), Scope: Scope{SkillsDir: t.TempDir()}, Source: src.source})
 			if err != nil || cancelled || got["duplicate"] != "skills/duplicate" {
 				t.Fatalf("got=%v cancelled=%v err=%v; want selected Source path", got, cancelled, err)
 			}
@@ -409,7 +409,7 @@ func TestAddRunAsksScopeAndAvailabilityThenAdds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := engine.NewAvailability(cfg, scope.globalSkills).ManagedAgents("alpha"); !reflect.DeepEqual(got, []string{"claude-code"}) {
+		if got := engine.NewAvailability(cfg, Scope{ConfigPath: scope.globalConfig, SkillsDir: scope.globalSkills}).ManagedAgents("alpha"); !reflect.DeepEqual(got, []string{"claude-code"}) {
 			t.Fatalf("alpha's Agents = %v; want [claude-code]", got)
 		}
 	})
@@ -553,7 +553,7 @@ func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
 		"fresh":     {"skills/fresh"},
 	}
 
-	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, &engine.AddSlotInspector{Config: cfg, SkillsDir: skillsDir, Source: engine.NewCommandAddSource("true", "", "")})
+	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, &engine.AddSlotInspector{Config: cfg, Scope: Scope{SkillsDir: skillsDir}, Source: engine.NewCommandAddSource("true", "", "")})
 	if err != nil {
 		t.Fatal(err)
 	}

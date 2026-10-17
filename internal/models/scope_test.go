@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestStoreLocalSourcePathGlobalScopeUsesTildePath(t *testing.T) {
+func TestStoreLocalSourceGlobalScopeUsesTildePath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -14,12 +14,12 @@ func TestStoreLocalSourcePathGlobalScopeUsesTildePath(t *testing.T) {
 	globalSkills := filepath.Join(home, ".agents", "skills")
 	absSource := filepath.Join(home, "code", "my-skill")
 
-	if got, want := StoreLocalSourcePath(absSource, globalSkills), "~/code/my-skill"; got != want {
-		t.Errorf("StoreLocalSourcePath(global) = %q; want %q", got, want)
+	if got, want := (Scope{SkillsDir: globalSkills, Root: home}).StoreLocalSource(absSource), "~/code/my-skill"; got != want {
+		t.Errorf("StoreLocalSource(global) = %q; want %q", got, want)
 	}
 }
 
-func TestStoreLocalSourcePathProjectScopeInsideProjectIsRelative(t *testing.T) {
+func TestStoreLocalSourceProjectScopeInsideProjectIsRelative(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -29,12 +29,12 @@ func TestStoreLocalSourcePathProjectScopeInsideProjectIsRelative(t *testing.T) {
 	skillsDir := filepath.Join(projectRoot, ".agents", "skills")
 	absSource := filepath.Join(projectRoot, "my-skill")
 
-	if got, want := StoreLocalSourcePath(absSource, skillsDir), "my-skill"; got != want {
-		t.Errorf("StoreLocalSourcePath(inside project) = %q; want %q", got, want)
+	if got, want := (Scope{SkillsDir: skillsDir, IsProject: true, Root: projectRoot}).StoreLocalSource(absSource), "my-skill"; got != want {
+		t.Errorf("StoreLocalSource(inside project) = %q; want %q", got, want)
 	}
 }
 
-func TestStoreLocalSourcePathProjectScopeOutsideProjectUsesTildePath(t *testing.T) {
+func TestStoreLocalSourceProjectScopeOutsideProjectUsesTildePath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -44,8 +44,8 @@ func TestStoreLocalSourcePathProjectScopeOutsideProjectUsesTildePath(t *testing.
 	skillsDir := filepath.Join(projectRoot, ".agents", "skills")
 	absSource := filepath.Join(home, "elsewhere", "my-skill")
 
-	if got, want := StoreLocalSourcePath(absSource, skillsDir), "~/elsewhere/my-skill"; got != want {
-		t.Errorf("StoreLocalSourcePath(outside project) = %q; want %q", got, want)
+	if got, want := (Scope{SkillsDir: skillsDir, IsProject: true, Root: projectRoot}).StoreLocalSource(absSource), "~/elsewhere/my-skill"; got != want {
+		t.Errorf("StoreLocalSource(outside project) = %q; want %q", got, want)
 	}
 }
 
@@ -59,7 +59,7 @@ func TestLocalSymlinkTargetProjectScopeInsideProjectIsRelative(t *testing.T) {
 	skillsDir := filepath.Join(projectRoot, ".agents", "skills")
 	absSource := filepath.Join(projectRoot, "my-skill")
 
-	if got, want := LocalSymlinkTarget(absSource, skillsDir), filepath.Join("..", "..", "my-skill"); got != want {
+	if got, want := (Scope{SkillsDir: skillsDir, IsProject: true, Root: projectRoot}).LocalSymlinkTarget(absSource), filepath.Join("..", "..", "my-skill"); got != want {
 		t.Errorf("LocalSymlinkTarget(inside project) = %q; want %q", got, want)
 	}
 }
@@ -73,38 +73,36 @@ func TestLocalSymlinkTargetGlobalScopeStaysAbsolute(t *testing.T) {
 	globalSkills := filepath.Join(home, ".agents", "skills")
 	absSource := filepath.Join(home, "code", "my-skill")
 
-	if got := LocalSymlinkTarget(absSource, globalSkills); got != absSource {
+	if got := (Scope{SkillsDir: globalSkills, Root: home}).LocalSymlinkTarget(absSource); got != absSource {
 		t.Errorf("LocalSymlinkTarget(global) = %q; want %q", got, absSource)
 	}
 }
 
-func TestResolveLocalSourcePathAbsoluteSourceReturnedAsIs(t *testing.T) {
+func TestResolveLocalSourceAbsoluteSourceReturnedAsIs(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "my-skill")
-	if got := ResolveLocalSourcePath(abs, "/anything"); got != abs {
-		t.Errorf("ResolveLocalSourcePath(absolute) = %q; want %q", got, abs)
+	if got := (Scope{IsProject: true, Root: "/anything"}).ResolveLocalSource(abs); got != abs {
+		t.Errorf("ResolveLocalSource(absolute) = %q; want %q", got, abs)
 	}
 }
 
-func TestResolveLocalSourcePathRelativeSourceResolvesAgainstProjectRoot(t *testing.T) {
+func TestResolveLocalSourceRelativeSourceResolvesAgainstProjectRoot(t *testing.T) {
 	projectRoot := filepath.Join(t.TempDir(), "demo")
-	skillsDir := filepath.Join(projectRoot, ".agents", "skills")
-
-	got := ResolveLocalSourcePath("my-skill", skillsDir)
+	got := (Scope{IsProject: true, Root: projectRoot}).ResolveLocalSource("my-skill")
 	want := filepath.Join(projectRoot, "my-skill")
 	if got != want {
-		t.Errorf("ResolveLocalSourcePath(relative) = %q; want %q", got, want)
+		t.Errorf("ResolveLocalSource(relative) = %q; want %q", got, want)
 	}
 }
 
-func TestResolveLocalSourcePathTildeSourceExpandsToHome(t *testing.T) {
+func TestResolveLocalSourceTildeSourceExpandsToHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	got := ResolveLocalSourcePath("~/elsewhere/my-skill", "/anything")
+	got := (Scope{IsProject: true, Root: "/anything"}).ResolveLocalSource("~/elsewhere/my-skill")
 	want := filepath.Join(home, "elsewhere", "my-skill")
 	if got != want {
-		t.Errorf("ResolveLocalSourcePath(tilde) = %q; want %q", got, want)
+		t.Errorf("ResolveLocalSource(tilde) = %q; want %q", got, want)
 	}
 }
 
@@ -135,21 +133,54 @@ func TestLocalSourceInsideSkillsDir(t *testing.T) {
 	}
 }
 
-func TestScopeRootProjectIsCheckout(t *testing.T) {
-	project := filepath.FromSlash("/path/to/my-project")
-	skillsDir := filepath.Join(project, ".agents", "skills")
-	if got := ScopeRoot(skillsDir); got != project {
-		t.Errorf("ScopeRoot(project) = %q; want %q", got, project)
-	}
-}
-
-func TestScopeRootGlobalIsHome(t *testing.T) {
+// Scope kind is the flag choice (ADR-0012): a Global Scope whose skills
+// directory was moved with --skills-dir still links its home's Agent
+// directories and stores local Sources as it would at the default path.
+func TestGlobalScopeWithMovedSkillsDirStaysGlobal(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("AGENTS_HOME", filepath.Join(home, ".agents"))
-	skillsDir := filepath.Join(home, ".agents", "skills")
-	if got := ScopeRoot(skillsDir); got != home {
-		t.Errorf("ScopeRoot(global) = %q; want %q", got, home)
+	work := filepath.Join(home, "work")
+	scope := NewGlobalScope("", filepath.Join(work, "skills"), "")
+
+	if got, want := scope.Agents().KnownDirs()["claude-code"], filepath.Join(home, ".claude", "skills"); got != want {
+		t.Errorf("claude-code dir = %q, want %q", got, want)
 	}
+	if got, want := scope.StoreLocalSource(filepath.Join(work, "my-skill")), "~/work/my-skill"; got != want {
+		t.Errorf("StoreLocalSource = %q, want %q", got, want)
+	}
+	if scope.Root != home {
+		t.Errorf("Root = %q, want %q", scope.Root, home)
+	}
+}
+
+// A Project Scope whose skills directory was moved with --skills-dir keeps
+// its Agent directories and relative Sources in the project it runs in.
+func TestProjectScopeWithMovedSkillsDirStaysInItsProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AGENTS_HOME", filepath.Join(home, ".agents"))
+	project := filepath.Join(home, "workspace", "demo")
+	scope := NewProjectScope(project, "", filepath.Join(home, ".agents", "skills"), "")
+
+	if got, want := scope.Agents().KnownDirs()["claude-code"], filepath.Join(project, ".claude", "skills"); got != want {
+		t.Errorf("claude-code dir = %q, want %q", got, want)
+	}
+	if got, want := scope.StoreLocalSource(filepath.Join(project, "my-skill")), "my-skill"; got != want {
+		t.Errorf("StoreLocalSource = %q, want %q", got, want)
+	}
+	if scope.Root != project {
+		t.Errorf("Root = %q, want %q", scope.Root, project)
+	}
+}
+
+func TestProjectScopeWithoutRootPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("RootDir of a Project Scope with no Root must panic, not resolve against the working directory")
+		}
+	}()
+	(Scope{IsProject: true}).RootDir()
 }

@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // ManagedAgentPath is one managed Availability path on an Agent directory.
@@ -150,7 +148,7 @@ func (a *Availability) ObserveOccupancy() Occupancy {
 				continue
 			}
 			path := filepath.Join(dir, name)
-			if !isManagedSkillPath(path, name, a.skillsDir) {
+			if !isManagedSkillPath(path, name, a.scope.SkillsDir) {
 				continue
 			}
 			if _, dup := seen[path]; dup {
@@ -271,9 +269,9 @@ func (a *Availability) unmanaged(agent, path string, declared map[string]struct{
 	}
 	switch {
 	case fi.Mode()&os.ModeSymlink != 0:
-		return true, !isManagedSkillLink(path, name, a.skillsDir)
+		return true, !isManagedSkillLink(path, name, a.scope.SkillsDir)
 	case fi.IsDir():
-		return false, !isManagedSkillCopy(path, name, a.skillsDir)
+		return false, !isManagedSkillCopy(path, name, a.scope.SkillsDir)
 	}
 	return false, false
 }
@@ -286,10 +284,10 @@ func (a *Availability) RemoveLeftover(occupancy LeftoverOccupancy) LeftoverOccup
 	for i, path := range removed.Paths {
 		paths[i] = path.ManagedAgentPath
 	}
-	for i, repair := range removeManagedPaths(a.skillsDir, paths) {
+	for i, repair := range removeManagedPaths(a.scope.SkillsDir, paths) {
 		removed.Paths[i].Repair = repair
 	}
-	for i, repair := range removeEmptyAgentDirs(a.skillsDir, removed.Empty) {
+	for i, repair := range removeEmptyAgentDirs(a.scope.RootDir(), removed.Empty) {
 		removed.Empty[i].Repair = repair
 	}
 	return removed
@@ -320,9 +318,8 @@ func removeManagedPaths(skillsDir string, paths []ManagedAgentPath) []ItemRepair
 // the empty parents it leaves, without escaping the Scope. One that is gone
 // or has gained an entry is Skipped: whatever changed since the observation
 // owns it now. The repairs are in the order of dirs.
-func removeEmptyAgentDirs(skillsDir string, dirs []AgentDir) []ItemRepair {
+func removeEmptyAgentDirs(stopAt string, dirs []AgentDir) []ItemRepair {
 	repairs := make([]ItemRepair, len(dirs))
-	stopAt := models.ScopeRoot(skillsDir)
 	for i, dir := range dirs {
 		if empty, err := isDirEffectivelyEmpty(dir.Dir); err != nil || !empty {
 			repairs[i] = ItemRepair{Status: RepairSkipped}

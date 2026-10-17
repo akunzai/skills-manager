@@ -179,7 +179,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	// Only a prompt marks occupancy; without one nothing is offered.
 	var occupancy *engine.AddSlotInspector
 	if interactive {
-		occupancy = &engine.AddSlotInspector{Config: req.cfg, SkillsDir: req.scope.SkillsDir, Source: intake.source}
+		occupancy = &engine.AddSlotInspector{Config: req.cfg, Scope: req.scope, Source: intake.source}
 	}
 
 	skillsToAdd, noneChosen, err := resolveSkillsToAdd(cmd, intake.discovered, intake, req.all, req.skills, prompter, interactive, occupancy)
@@ -194,18 +194,18 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	}
 
 	scope, cfg := req.scope, req.cfg
-	configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
+	skillsDir := scope.SkillsDir
 	if len(req.agents) > 0 {
-		if req.agents, err = engine.NewAvailability(cfg, skillsDir).ValidateManagedAgents(req.agents); err != nil {
+		if req.agents, err = engine.NewAvailability(cfg, scope).ValidateManagedAgents(req.agents); err != nil {
 			return err
 		}
 	}
-	intent, err := promptAddAvailability(cfg, skillsToAdd, skillsDir, prompter, interactive, req.agents)
+	intent, err := promptAddAvailability(cfg, skillsToAdd, scope, prompter, interactive, req.agents)
 	if err != nil {
 		return err
 	}
 
-	plan, err := engine.BuildAddPlan(cfg, configPath, skillsDir, intake.source, skillsToAdd, intent)
+	plan, err := engine.BuildAddPlan(cfg, scope, intake.source, skillsToAdd, intent)
 	if err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	if err != nil {
 		return err
 	}
-	return reportAddOutcome(out, result, filepath.Base(configPath), scopeFlagsOf(cmd, scope))
+	return reportAddOutcome(out, result, filepath.Base(scope.ConfigPath), scopeFlagsOf(cmd, scope))
 }
 
 // reportAddOutcome says why any Skill could not be applied, in Sync's words,

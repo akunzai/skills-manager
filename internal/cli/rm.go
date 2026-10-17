@@ -30,9 +30,7 @@ func newRmCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			p := newPrompter(cmd)
 			scope := ResolveScope(cmd)
-			configPath, skillsDir := scope.ConfigPath, scope.SkillsDir
-
-			cfg, err := config.LoadConfig(configPath)
+			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
 			}
@@ -41,7 +39,7 @@ func newRmCmd() *cobra.Command {
 
 			if len(skillsToRemove) == 0 {
 				if p.Interactive() && !flagYes {
-					inv, err := engine.LoadInventory(cfg, skillsDir)
+					inv, err := engine.LoadInventory(cfg, scope)
 					if err != nil {
 						return err
 					}
@@ -80,7 +78,7 @@ func newRmCmd() *cobra.Command {
 				}
 			}
 
-			plan, err := engine.BuildRemovePlan(cfg, skillsDir, skillsToRemove)
+			plan, err := engine.BuildRemovePlan(cfg, scope, skillsToRemove)
 			if err != nil {
 				return err
 			}
@@ -107,7 +105,7 @@ func newRmCmd() *cobra.Command {
 				}
 				plan = plan.ApproveUntrackedDirectories()
 			}
-			result, err := engine.ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+			result, err := engine.ApplyRemovePlan(plan, cfg, scope)
 			if err != nil {
 				return err
 			}

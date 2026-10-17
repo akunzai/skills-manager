@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 func TestAvailabilityConfiguredAgentDirsSelectsDefaultsOnly(t *testing.T) {
@@ -13,7 +14,7 @@ func TestAvailabilityConfiguredAgentDirsSelectsDefaultsOnly(t *testing.T) {
 	skillsDir := filepath.Join(proj, ".agents", "skills")
 
 	cfg := config.DefaultConfig()
-	got := NewAvailability(cfg, skillsDir).ConfiguredAgentDirs()
+	got := NewAvailability(cfg, projectScope("", skillsDir, "")).ConfiguredAgentDirs()
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 configured agent, got %d: %v", len(got), got)
@@ -35,7 +36,7 @@ func TestAvailabilityConfiguredAgentDirsHonorsInclude(t *testing.T) {
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Include: []string{"continue"}}
 
-	got := NewAvailability(cfg, skillsDir).ConfiguredAgentDirs()
+	got := NewAvailability(cfg, projectScope("", skillsDir, "")).ConfiguredAgentDirs()
 	if _, ok := got["continue"]; !ok {
 		t.Fatal("included continue should be configured")
 	}
@@ -247,7 +248,7 @@ func TestRemoveLeftoverClearsAutomaticallyAvailableManagedPaths(t *testing.T) {
 		}
 	}
 
-	availability := NewAvailability(config.DefaultConfig(), skillsDir)
+	availability := NewAvailability(config.DefaultConfig(), models.NewGlobalScope("", skillsDir, ""))
 	result := availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"alpha"}).WithoutEmpty())
 
 	for _, dir := range []string{codex, cursor} {
@@ -295,7 +296,7 @@ func TestRemoveAgentSymlinksLeavesUnmanagedEntriesAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	availability := NewAvailability(config.DefaultConfig(), skillsDir)
+	availability := NewAvailability(config.DefaultConfig(), models.NewGlobalScope("", skillsDir, ""))
 	availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills([]string{"alpha", "beta"}).WithoutEmpty())
 
 	if _, err := os.Stat(keep); err != nil {
@@ -349,7 +350,7 @@ func TestAvailabilityApplyCreatesAndClearsLinkableAgentPath(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, models.NewGlobalScope("", skillsDir, ""))
 
 	if _, err := availability.Apply("alpha"); err != nil {
 		t.Fatal(err)
@@ -359,7 +360,7 @@ func TestAvailabilityApplyCreatesAndClearsLinkableAgentPath(t *testing.T) {
 		t.Error("expected claudeLink to be a managed link")
 	}
 	cfg.Settings.DefaultAgents = []string{"continue"}
-	availability = NewAvailability(cfg, skillsDir)
+	availability = NewAvailability(cfg, models.NewGlobalScope("", skillsDir, ""))
 	if _, err := availability.Apply("alpha"); err != nil {
 		t.Fatal(err)
 	}

@@ -189,8 +189,7 @@ type AddPlan struct {
 	Skills       map[string]string // skill name -> subpath
 	Conflicts    []AddConflict
 	Availability AddAvailabilityIntent
-	ConfigPath   string
-	SkillsDir    string
+	Scope        models.Scope
 	// TrustCert is the PEM trust anchor a remote Source's Skills must be
 	// signed with, as it is stored in Config; empty keeps what Config has.
 	TrustCert string
@@ -210,8 +209,7 @@ func (p AddPlan) ApproveConflicts() AddPlan {
 // skill replacements and build an AddPlan.
 func BuildAddPlan(
 	cfg *config.Config,
-	configPath string,
-	skillsDir string,
+	scope models.Scope,
 	source AddSource,
 	skills map[string]string,
 	availability AddAvailabilityIntent,
@@ -219,24 +217,20 @@ func BuildAddPlan(
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	if skillsDir == "" {
-		skillsDir = models.DefaultSkillsDir()
-	}
-	if configPath == "" {
-		configPath = models.DefaultConfigFile()
-	}
+	scope = withScopeDefaults(scope)
+	scope.ConfigPath = cmp.Or(scope.ConfigPath, models.DefaultConfigFile())
+	skillsDir := scope.SkillsDir
 
 	plan := AddPlan{
 		Source:       source,
 		Skills:       skills,
 		Availability: availability,
-		ConfigPath:   configPath,
-		SkillsDir:    skillsDir,
+		Scope:        scope,
 	}
 
 	for _, name := range sortedSkillKeys(skills) {
 		subpath := skills[name]
-		slot, err := InspectAddSlot(cfg, skillsDir, source, name, subpath)
+		slot, err := InspectAddSlot(cfg, scope, source, name, subpath)
 		if err != nil {
 			return AddPlan{}, err
 		}
@@ -302,7 +296,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	availability := NewAvailability(cfg, plan.SkillsDir)
+	availability := NewAvailability(cfg, plan.Scope)
 	names := sortedSkillKeys(plan.Skills)
 
 	resolvedLocal := func(subpath string) string {
@@ -315,13 +309,13 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	if plan.Source.Kind == AddSourceSymlink {
 		for _, name := range names {
 			resolved := resolvedLocal(plan.Skills[name])
-			if models.LocalSourceInsideSkillsDir(resolved, plan.SkillsDir) {
+			if models.LocalSourceInsideSkillsDir(resolved, plan.Scope.SkillsDir) {
 				return AddResult{}, fmt.Errorf("local source %s is inside the skills directory", models.ToTildePath(resolved))
 			}
 		}
 	}
 
-	baselines := OpenBaselines(plan.SkillsDir)
+	baselines := OpenBaselines(plan.Scope.SkillsDir)
 	// planned carries each remote Skill, verified before Config is saved, so
 	// the signer it records is saved with the Skills.
 	planned := make(map[string]SyncPlanItem)
@@ -334,13 +328,13 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		if plan.TrustCert != "" {
 			config.SetCertificateChainTrust(cfg, key, plan.TrustCert)
 		}
-		planner := newRemotePlanner(cfg, plan.ConfigPath, plan.Source.Remote.cache.cacheDir, baselines)
+		planner := newRemotePlanner(cfg, plan.Scope.ConfigPath, plan.Source.Remote.cache.cacheDir, baselines)
 		for _, name := range names {
 			planned[name] = planner.declared(key, plan.Source.Remote.cache, SkillFreshness{
 				Name:      name,
 				Source:    key,
 				Subpath:   plan.Skills[name],
-				ScopePath: filepath.Join(plan.SkillsDir, name),
+				ScopePath: filepath.Join(plan.Scope.SkillsDir, name),
 			}, AvailabilityDrift{})
 		}
 		if signer, changed := planner.recordSigner(key); changed {
@@ -352,7 +346,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		subpath := plan.Skills[name]
 		switch plan.Source.Kind {
 		case AddSourceSymlink:
-			config.AddLocalSymlinkEntry(cfg, name, models.StoreLocalSourcePath(resolvedLocal(subpath), plan.SkillsDir), plan.Source.Description)
+			config.AddLocalSymlinkEntry(cfg, name, plan.Scope.StoreLocalSource(resolvedLocal(subpath)), plan.Source.Description)
 		case AddSourceCommand:
 			config.AddLocalCommandEntry(cfg, name, plan.Source.Command, plan.Source.Check, plan.Source.Description)
 		}
@@ -370,12 +364,12 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		}
 	}
 
-	if err := config.SaveConfig(cfg, plan.ConfigPath); err != nil {
+	if err := config.SaveConfig(cfg, plan.Scope.ConfigPath); err != nil {
 		return AddResult{}, err
 	}
 
 	occupancy := availability.ObserveOccupancy()
-	result := AddResult{AddedSkills: names, ConfigPath: plan.ConfigPath}
+	result := AddResult{AddedSkills: names, ConfigPath: plan.Scope.ConfigPath}
 	emit := func(ev SyncEvent) { result.Events = append(result.Events, ev) }
 	if signerRecorded != nil {
 		emit(*signerRecorded)
@@ -406,9 +400,9 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 			item = planned[name]
 			item.Drift = occupancy.Drift(name)
 		case AddSourceSymlink, AddSourceCommand:
-			item = planLocalItem(cfg, plan.SkillsDir, occupancy.Drift(name), name)
+			item = planLocalItem(cfg, plan.Scope, occupancy.Drift(name), name)
 		}
-		outcome := applyItem(availability, plan.SkillsDir, item, SyncDecision{}, baselines, emit)
+		outcome := applyItem(availability, plan.Scope.SkillsDir, item, SyncDecision{}, baselines, emit)
 		result.tally(outcome)
 		if onProgress != nil {
 			event.Outcome = outcome

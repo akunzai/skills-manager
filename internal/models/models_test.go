@@ -31,7 +31,7 @@ func TestNormalizeAgentName(t *testing.T) {
 }
 
 func TestIsAutomatic(t *testing.T) {
-	global := ForSkillsDir("")
+	global := (Scope{}).Agents()
 	if !global.IsAutomatic("gemini") {
 		t.Errorf("expected gemini to be Automatically available at Global Scope")
 	}
@@ -49,9 +49,8 @@ func TestIsAutomatic(t *testing.T) {
 }
 
 func TestIsAutomaticIsScopeAware(t *testing.T) {
-	projectSkillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
-	project := ForSkillsDir(projectSkillsDir)
-	global := ForSkillsDir("")
+	project := (Scope{IsProject: true, Root: t.TempDir()}).Agents()
+	global := (Scope{}).Agents()
 
 	for _, agent := range []string{"antigravity-cli", "replit"} {
 		if global.IsAutomatic(agent) {
@@ -82,7 +81,7 @@ func TestIsAutomaticIsScopeAware(t *testing.T) {
 }
 
 func TestAutomaticAgentsAreScopeAwareAndSorted(t *testing.T) {
-	project := ForSkillsDir(filepath.Join(t.TempDir(), ".agents", "skills")).Automatic()
+	project := (Scope{IsProject: true, Root: t.TempDir()}).Agents().Automatic()
 	for _, want := range []string{"antigravity-cli", "codex", "muse-code", "replit"} {
 		if !slices.Contains(project, want) {
 			t.Fatalf("Project Automatically available Agents missing %q: %#v", want, project)
@@ -98,7 +97,7 @@ func TestAutomaticAgentsAreScopeAwareAndSorted(t *testing.T) {
 		t.Fatalf("Agents are not sorted: %#v", project)
 	}
 
-	global := ForSkillsDir("").Automatic()
+	global := (Scope{}).Agents().Automatic()
 	for _, want := range []string{"codex", "grok", "muse-code"} {
 		if !slices.Contains(global, want) {
 			t.Fatalf("Global Automatically available Agents missing %q: %#v", want, global)
@@ -113,7 +112,7 @@ func TestAutomaticAgentsAreScopeAwareAndSorted(t *testing.T) {
 // directory and no error anywhere in the call chain. Every alias must land
 // on a Global agent that is known or Automatically available, never both.
 func TestAgentAliasesResolveToExactlyOneKnownOrAutomaticGlobalAgent(t *testing.T) {
-	global := ForSkillsDir("")
+	global := (Scope{}).Agents()
 	known := global.KnownDirs()
 	for alias, canonical := range agentAliases {
 		_, isKnown := known[canonical]
@@ -132,15 +131,14 @@ func TestAgentAliasesResolveToExactlyOneKnownOrAutomaticGlobalAgent(t *testing.T
 // bug this registry fixes. Project Scope only supports a subset of Agents, so
 // unlike the Global check this does not require every alias to resolve.
 func TestNoAgentIsBothKnownAndAutomaticInSameScope(t *testing.T) {
-	projectSkillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
-	project := ForSkillsDir(projectSkillsDir)
+	project := (Scope{IsProject: true, Root: t.TempDir()}).Agents()
 	for agent := range project.KnownDirs() {
 		if project.IsAutomatic(agent) {
 			t.Errorf("%s is both a known Project agent dir and Automatically available at Project Scope", agent)
 		}
 	}
 
-	global := ForSkillsDir("")
+	global := (Scope{}).Agents()
 	for agent := range global.KnownDirs() {
 		if global.IsAutomatic(agent) {
 			t.Errorf("%s is both a known Global agent dir and Automatically available at Global Scope", agent)
@@ -153,7 +151,7 @@ func TestKnownDirsExpandsPlainTemplatesUnderHome(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	got := ForSkillsDir("").KnownDirs()
+	got := (Scope{}).Agents().KnownDirs()
 	want := filepath.Join(home, ".adal", "skills")
 	if got["adal"] != want {
 		t.Errorf(`KnownDirs()["adal"] = %q; want %q`, got["adal"], want)
@@ -171,7 +169,7 @@ func TestKnownDirsIncludesReclassifiedGlobalAgents(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	got := ForSkillsDir("").KnownDirs()
+	got := (Scope{}).Agents().KnownDirs()
 	for agent, want := range map[string]string{
 		"cline":           filepath.Join(home, ".cline", "skills"),
 		"antigravity-cli": filepath.Join(home, ".gemini", "antigravity-cli", "skills"),
@@ -194,7 +192,7 @@ func TestKnownDirsIncludesReclassifiedGlobalAgents(t *testing.T) {
 
 func TestProjectKnownDirsOmitCursorButIncludeFirebender(t *testing.T) {
 	projectRoot := filepath.FromSlash("/path/to/my-project")
-	agents := ForSkillsDir(filepath.Join(projectRoot, ".agents", "skills")).KnownDirs()
+	agents := (Scope{IsProject: true, Root: projectRoot}).Agents().KnownDirs()
 
 	if _, ok := agents["cursor"]; ok {
 		t.Errorf("cursor should not be a Project linkable dir; it reads .agents/skills directly in both Scopes")
@@ -219,7 +217,7 @@ func TestKnownDirsHonorPerAgentEnvOverrides(t *testing.T) {
 	claudeDir := filepath.Join(home, "custom-claude")
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
 
-	got := ForSkillsDir("").KnownDirs()
+	got := (Scope{}).Agents().KnownDirs()
 	want := filepath.Join(claudeDir, "skills")
 	if got["claude-code"] != want {
 		t.Errorf(`KnownDirs()["claude-code"] = %q; want %q`, got["claude-code"], want)
@@ -235,7 +233,7 @@ func TestLeftoverRootsHonorGrokAndMuseRoots(t *testing.T) {
 	grokHome := filepath.Join(home, "custom-grok")
 	t.Setenv("GROK_HOME", grokHome)
 
-	got := ForSkillsDir("").LeftoverRoots()
+	got := (Scope{}).Agents().LeftoverRoots()
 	if got["grok"] != filepath.Join(grokHome, "skills") {
 		t.Errorf(`LeftoverRoots()["grok"] = %q; want under GROK_HOME`, got["grok"])
 	}
@@ -244,8 +242,8 @@ func TestLeftoverRootsHonorGrokAndMuseRoots(t *testing.T) {
 	}
 }
 
-func TestForSkillsDirLeftoverRootsOmitKnownDirs(t *testing.T) {
-	global := ForSkillsDir("").LeftoverRoots()
+func TestScopeAgentsLeftoverRootsOmitKnownDirs(t *testing.T) {
+	global := (Scope{}).Agents().LeftoverRoots()
 	if _, ok := global["grok"]; !ok {
 		t.Fatal("Global Grok leftover root missing")
 	}
@@ -253,8 +251,7 @@ func TestForSkillsDirLeftoverRootsOmitKnownDirs(t *testing.T) {
 		t.Fatal("linkable Global Agent must not be a leftover root")
 	}
 
-	projectSkillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
-	project := ForSkillsDir(projectSkillsDir)
+	project := (Scope{IsProject: true, Root: t.TempDir()}).Agents()
 	if _, ok := project.KnownDirs()["grok"]; !ok {
 		t.Fatal("Project Grok is a known dir")
 	}
@@ -271,14 +268,14 @@ func TestKnownDirsProbeOpenclawForks(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	if got, want := ForSkillsDir("").KnownDirs()["openclaw"], filepath.Join(home, ".openclaw", "skills"); got != want {
+	if got, want := (Scope{}).Agents().KnownDirs()["openclaw"], filepath.Join(home, ".openclaw", "skills"); got != want {
 		t.Errorf("openclaw with no fork installed = %q; want %q", got, want)
 	}
 
 	if err := os.MkdirAll(filepath.Join(home, ".clawdbot"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := ForSkillsDir("").KnownDirs()["openclaw"], filepath.Join(home, ".clawdbot", "skills"); got != want {
+	if got, want := (Scope{}).Agents().KnownDirs()["openclaw"], filepath.Join(home, ".clawdbot", "skills"); got != want {
 		t.Errorf("openclaw with clawdbot installed = %q; want %q", got, want)
 	}
 }
@@ -368,16 +365,10 @@ func TestDefaultCacheDir(t *testing.T) {
 	}
 }
 
-func TestProjectRootAndKnownDirs(t *testing.T) {
+func TestProjectScopeKnownDirsAreUnderItsRoot(t *testing.T) {
 	projDir := filepath.FromSlash("/path/to/my-project")
-	skillsDir := filepath.Join(projDir, ".agents", "skills")
 
-	root := GetProjectRootFromSkillsDir(skillsDir)
-	if root != projDir {
-		t.Errorf("GetProjectRootFromSkillsDir(%q) = %q; want %q", skillsDir, root, projDir)
-	}
-
-	agents := ForSkillsDir(skillsDir).KnownDirs()
+	agents := (Scope{IsProject: true, Root: projDir}).Agents().KnownDirs()
 	claudePath, ok := agents["claude-code"]
 	if !ok {
 		t.Fatalf("expected claude-code in project agents")
@@ -385,24 +376,6 @@ func TestProjectRootAndKnownDirs(t *testing.T) {
 	expectedClaude := filepath.Join(projDir, ".claude", "skills")
 	if claudePath != expectedClaude {
 		t.Errorf("claudePath = %q; want %q", claudePath, expectedClaude)
-	}
-}
-
-func TestIsGlobalSkillsDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("AGENTS_HOME", filepath.Join(home, ".agents"))
-	globalSkills := filepath.Join(home, ".agents", "skills")
-
-	if !IsGlobalSkillsDir("") {
-		t.Error(`IsGlobalSkillsDir("") = false; want true`)
-	}
-	if !IsGlobalSkillsDir(globalSkills) {
-		t.Errorf("IsGlobalSkillsDir(%q) = false; want true", globalSkills)
-	}
-
-	projectSkills := filepath.Join(home, "my-project", ".agents", "skills")
-	if IsGlobalSkillsDir(projectSkills) {
-		t.Errorf("IsGlobalSkillsDir(%q) = true; want false", projectSkills)
 	}
 }
 

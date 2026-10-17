@@ -154,7 +154,7 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 	// Scope-level preconditions once, up front: without a skills directory
 	// every Skill below would fail for the same reason.
 	if len(plan.Items) > 0 {
-		if err := os.MkdirAll(plan.skillsDir, 0o755); err != nil {
+		if err := os.MkdirAll(plan.scope.SkillsDir, 0o755); err != nil {
 			return report, fmt.Errorf("failed to create skills dir: %w", err)
 		}
 	}
@@ -183,7 +183,7 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 		emit(SyncEvent{Kind: SyncRepoStart, Source: source, Skills: itemNames(items)})
 		if signer, changed := plan.planner.recordSigner(source); changed {
 			// Recording a signer is, like a Rename, a Config write Sync makes.
-			if err := config.SaveConfig(plan.cfg, plan.configPath); err != nil {
+			if err := config.SaveConfig(plan.cfg, plan.scope.ConfigPath); err != nil {
 				emit(SyncEvent{Kind: SyncSignerFailed, Source: source, Target: signer.Identity, Err: err})
 				report.tally(SyncFailed)
 			} else {
@@ -201,14 +201,14 @@ func (plan *SyncPlan) Apply(decision SyncDecision, onProgress func(SyncEvent)) (
 				report.Configured = config.GetConfiguredSkillNames(plan.cfg)
 				continue
 			}
-			finish(item, applyItem(plan.availability, plan.skillsDir, item, decision, baselines, emit))
+			finish(item, applyItem(plan.availability, plan.scope.SkillsDir, item, decision, baselines, emit))
 		}
 	}
 
 	for _, item := range plan.LocalItems() {
 		action, _ := item.Resolve(decision)
 		progress(SyncEvent{Kind: SyncItemStart, Skill: item.Name, Action: action})
-		finish(item, applyItem(plan.availability, plan.skillsDir, item, decision, baselines, emit))
+		finish(item, applyItem(plan.availability, plan.scope.SkillsDir, item, decision, baselines, emit))
 	}
 	return report, nil
 }
@@ -290,7 +290,7 @@ func (plan *SyncPlan) openBaselines() *Baselines {
 	if plan.StateError != "" {
 		return plan.plannedBaselines()
 	}
-	return OpenBaselines(plan.skillsDir)
+	return OpenBaselines(plan.scope.SkillsDir)
 }
 
 // plannedBaselines is the Scope state as far as the plan observed it: only
@@ -364,7 +364,7 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 		emitSync(emit, SyncEvent{Kind: SyncRenameFailed, Source: item.Source, Skill: old, Target: skill.RenamedTo, Err: err})
 		return SyncFailed
 	}
-	if plan.configPath == "" {
+	if plan.scope.ConfigPath == "" {
 		return fail(errors.New("no Config path to record the rename in"))
 	}
 	// Declare the new name and carry the old one's override over; Retire
@@ -379,11 +379,11 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 			}
 		}
 	}
-	retired, err := Retire(plan.cfg, plan.configPath, plan.skillsDir, []string{old}, baselines)
+	retired, err := Retire(plan.cfg, plan.scope, []string{old}, baselines)
 	if err != nil {
 		return fail(err)
 	}
-	plan.availability = NewAvailability(plan.cfg, plan.skillsDir)
+	plan.availability = NewAvailability(plan.cfg, plan.scope)
 	if err := retired[0].Err(); err != nil {
 		return fail(err)
 	}
@@ -393,5 +393,5 @@ func (plan *SyncPlan) applyRename(item SyncPlanItem, baselines *Baselines, emit 
 	}
 	renamed := *item.renamed
 	renamed.Drift = plan.availability.ObserveOccupancy().Drift(skill.RenamedTo)
-	return applyItem(plan.availability, plan.skillsDir, renamed, SyncDecision{}, baselines, emit)
+	return applyItem(plan.availability, plan.scope.SkillsDir, renamed, SyncDecision{}, baselines, emit)
 }

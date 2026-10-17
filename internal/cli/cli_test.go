@@ -264,6 +264,7 @@ func TestCLIRmReportsAnAvailabilityLinkItCouldNotRemove(t *testing.T) {
 	}
 	isolateHome(t)
 	project := t.TempDir()
+	t.Chdir(project)
 	configFile := filepath.Join(project, ".agents", "skills.json")
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	writeCLILocalSkill(t, filepath.Dir(skillsDir), "sample")
@@ -273,7 +274,7 @@ func TestCLIRmReportsAnAvailabilityLinkItCouldNotRemove(t *testing.T) {
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+	if out, err := runCLI(t, "sync", "-p", "--config", configFile, "--skills-dir", skillsDir); err != nil {
 		t.Fatalf("sync: %v\n%s", err, out)
 	}
 	agentDir := filepath.Join(project, ".claude", "skills")
@@ -286,7 +287,7 @@ func TestCLIRmReportsAnAvailabilityLinkItCouldNotRemove(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(agentDir, 0o755) })
 
-	out, err := runCLI(t, "rm", "sample", "-y", "--config", configFile, "--skills-dir", skillsDir)
+	out, err := runCLI(t, "rm", "sample", "-y", "-p", "--config", configFile, "--skills-dir", skillsDir)
 
 	if exit := exitCodeOf(err); exit != 2 {
 		t.Fatalf("rm error = %v (exit %d); want exit 2\n%s", err, exit, out)
@@ -542,6 +543,7 @@ func TestCLISyncPrintsCommandFailed(t *testing.T) {
 func TestCLISyncDryRunReportsARefusedAgentPathAsFailed(t *testing.T) {
 	isolateHome(t)
 	project := t.TempDir()
+	t.Chdir(project)
 	configFile := filepath.Join(project, ".agents", "skills.json")
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cacheDir := filepath.Join(project, "cache")
@@ -559,7 +561,7 @@ func TestCLISyncDryRunReportsARefusedAgentPathAsFailed(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, ".claude", "skills", "sample"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
+	args := []string{"sync", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir}
 
 	out, err := runCLI(t, append(args, "--dry-run")...)
 	if ExitCode(err) != 2 {
@@ -585,6 +587,7 @@ func TestCLISyncDryRunReportsARefusedAgentPathAsFailed(t *testing.T) {
 func TestCLIAddPointsAtDoctorForARefusedAgentPath(t *testing.T) {
 	isolateHome(t)
 	project := t.TempDir()
+	t.Chdir(project)
 	source := filepath.Join(project, "src", "sample")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
@@ -597,7 +600,7 @@ func TestCLIAddPointsAtDoctorForARefusedAgentPath(t *testing.T) {
 	}
 
 	out, err := runCLI(t, "add", "--symlink", source, "--agent", "claude-code", "--yes", "--project",
-		"--config", filepath.Join(project, ".agents", "skills.json"), "--skills-dir", filepath.Join(project, ".agents", "skills"), "--cache-dir", filepath.Join(project, "cache"))
+		"-p", "--config", filepath.Join(project, ".agents", "skills.json"), "--skills-dir", filepath.Join(project, ".agents", "skills"), "--cache-dir", filepath.Join(project, "cache"))
 	if ExitCode(err) != 2 {
 		t.Fatalf("add = %v; want exit 2:\n%s", err, out)
 	}
@@ -609,6 +612,7 @@ func TestCLIAddPointsAtDoctorForARefusedAgentPath(t *testing.T) {
 func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 	isolateHome(t)
 	project := t.TempDir()
+	t.Chdir(project)
 	configFile := filepath.Join(project, ".agents", "skills.json")
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cacheDir := filepath.Join(project, "cache")
@@ -632,12 +636,12 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, agent := range []string{"claude", "continue"} {
-		plantManagedAgentLink(t, skillsDir, "sample", agent)
+		plantManagedAgentLink(t, projectScopeOf(skillsDir), "sample", agent)
 	}
 	claudeLink := filepath.Join(project, ".claude", "skills", "sample")
 	continueLink := filepath.Join(project, ".continue", "skills", "sample")
 
-	if _, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+	if _, err := runCLI(t, "sync", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
@@ -647,19 +651,19 @@ func TestCLISyncReconcilesAvailabilityAndDryRunDoesNotMutate(t *testing.T) {
 		t.Fatal("Continue link should remain")
 	}
 
-	plantManagedAgentLink(t, skillsDir, "sample", "claude")
-	dryRunOut, _ := runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	plantManagedAgentLink(t, projectScopeOf(skillsDir), "sample", "claude")
+	dryRunOut, _ := runCLI(t, "sync", "--dry-run", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if !strings.Contains(dryRunOut, "Would unlink sample from claude-code") {
 		t.Fatalf("dry-run did not preview availability drift:\n%s", dryRunOut)
 	}
 	if !isSymlink(claudeLink) {
 		t.Fatal("dry-run removed an excluded link")
 	}
-	doctorOut, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	doctorOut, err := runCLI(t, "doctor", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err == nil || !strings.Contains(doctorOut, "unexpected links: claude-code") {
 		t.Fatalf("doctor did not report availability drift: err=%v\n%s", err, doctorOut)
 	}
-	if out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+	if out, err := runCLI(t, "doctor", "--fix", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("doctor --fix: %v\n%s", err, out)
 	}
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
@@ -687,9 +691,9 @@ func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
 	}
 
 	for _, agent := range []string{"claude", "augment"} {
-		plantManagedAgentLink(t, skillsDir, "configured", agent)
+		plantManagedAgentLink(t, globalScopeOf(skillsDir), "configured", agent)
 	}
-	plantManagedAgentLink(t, skillsDir, "orphan", "augment")
+	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "augment")
 	independent := filepath.Join(home, ".continue", "skills", "configured")
 	if err := os.MkdirAll(independent, 0755); err != nil {
 		t.Fatal(err)
@@ -745,8 +749,8 @@ func TestCLIPruneSkillsOnlyKeepsConfiguredSkillLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	plantManagedAgentLink(t, skillsDir, "configured", "augment")
-	plantManagedAgentLink(t, skillsDir, "orphan", "augment")
+	plantManagedAgentLink(t, globalScopeOf(skillsDir), "configured", "augment")
+	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "augment")
 
 	if _, err := runCLI(t, "prune", "--skills-only", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
 		t.Fatal(err)
@@ -1159,9 +1163,27 @@ func isolateHome(t *testing.T) string {
 	return home
 }
 
-func plantManagedAgentLink(t *testing.T, skillsDir, skill, agent string) {
+// projectScopeOf is the Project Scope of a fixture laid out as
+// <project>/.agents/skills or <project>/skills, rooted at <project>. It
+// matches the engine tests' projectScope; production code never derives a
+// Scope from its skills directory (ADR-0012).
+func projectScopeOf(skillsDir string) Scope {
+	root := filepath.Dir(filepath.Clean(skillsDir))
+	if filepath.Base(skillsDir) == "skills" && filepath.Base(root) == ".agents" {
+		root = filepath.Dir(root)
+	}
+	return models.NewProjectScope(root, "", skillsDir, "")
+}
+
+// globalScopeOf is the Global Scope whose skills directory is skillsDir.
+func globalScopeOf(skillsDir string) Scope {
+	return models.NewGlobalScope("", skillsDir, "")
+}
+
+func plantManagedAgentLink(t *testing.T, scope Scope, skill, agent string) {
 	t.Helper()
-	agents := models.ForSkillsDir(skillsDir).KnownDirs()
+	skillsDir := scope.SkillsDir
+	agents := scope.Agents().KnownDirs()
 	dir, ok := agents[models.NormalizeAgentName(agent)]
 	if !ok {
 		t.Fatalf("unknown agent %q", agent)
@@ -1752,6 +1774,7 @@ func TestOutdatedStatusStyling(t *testing.T) {
 func TestCLISyncExitCodes(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
+	t.Chdir(root)
 	configFile, skillsDir, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
 	writeCLIGitSkill(t, origin, "sample")
 	cfg := config.DefaultConfig()
@@ -1761,7 +1784,7 @@ func TestCLISyncExitCodes(t *testing.T) {
 	}
 
 	// 1: the Cache was never fetched, so Sync cannot converge on its own.
-	out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	out, err := runCLI(t, "sync", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err == nil || ExitCode(err) != 1 {
 		t.Fatalf("uncached Source should exit 1, got err=%v:\n%s", err, out)
 	}
@@ -1770,10 +1793,10 @@ func TestCLISyncExitCodes(t *testing.T) {
 	if err := engine.NewCache("owner/repo", origin, "", cacheDir).Refresh(false, "sample"); err != nil {
 		t.Fatal(err)
 	}
-	if out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+	if out, err = runCLI(t, "sync", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("converged Sync should exit 0: %v\n%s", err, out)
 	}
-	if out, err = runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+	if out, err = runCLI(t, "sync", "--dry-run", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("converged dry-run should exit 0: %v\n%s", err, out)
 	}
 
@@ -1781,7 +1804,7 @@ func TestCLISyncExitCodes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillsDir, "sample", "SKILL.md"), []byte("manual\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	out, err = runCLI(t, "sync", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err == nil || ExitCode(err) != 1 {
 		t.Fatalf("local drift should exit 1, got err=%v:\n%s", err, out)
 	}
@@ -1790,11 +1813,11 @@ func TestCLISyncExitCodes(t *testing.T) {
 	}
 
 	// 2: something is actually broken — an Agent path Sync does not manage.
-	if out, err = runCLI(t, "sync", "--force", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
+	if out, err = runCLI(t, "sync", "--force", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir); err != nil {
 		t.Fatalf("force Sync should converge: %v\n%s", err, out)
 	}
-	// A custom --skills-dir is Project-scoped, so the Agent directory lives
-	// beside it rather than under the user's home.
+	// At Project Scope the Agent directory lives in the project rather than
+	// under the user's home.
 	foreign := filepath.Join(root, ".claude", "skills", "sample")
 	if err := os.RemoveAll(foreign); err != nil {
 		t.Fatal(err)
@@ -1802,7 +1825,7 @@ func TestCLISyncExitCodes(t *testing.T) {
 	if err := os.MkdirAll(foreign, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	out, err = runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	out, err = runCLI(t, "sync", "-p", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
 	if err == nil || ExitCode(err) != 2 {
 		t.Fatalf("an unmanaged Agent path should exit 2, got err=%v:\n%s", err, out)
 	}
@@ -2399,7 +2422,7 @@ func TestCLIDoctorFixDoesNotReportRepairedIssues(t *testing.T) {
 	}
 
 	claudeSkills := filepath.Join(project, ".claude", "skills")
-	plantManagedAgentLink(t, skillsDir, "alpha", "claude")
+	plantManagedAgentLink(t, projectScopeOf(skillsDir), "alpha", "claude")
 	// A healthy managed link and a dangling symlink.
 	brokenTarget, err := filepath.Rel(claudeSkills, filepath.Join(skillsDir, "broken"))
 	if err != nil {
@@ -3344,7 +3367,7 @@ func TestCLIPruneInteractivePickerSelectsMasterWithLinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(orphan, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	plantManagedAgentLink(t, skillsDir, "orphan", "augment")
+	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "augment")
 	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
 		t.Fatal(err)
 	}
@@ -3560,7 +3583,7 @@ func denyLinkPrivilege(t *testing.T) {
 // a Scope with more than one Skill can show that the copy notice is said once.
 func copiedAvailabilityScope(t *testing.T) (configFile, skillsDir, cacheDir string) {
 	t.Helper()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	isolateHome(t)
 	root := t.TempDir()
 	configFile = filepath.Join(root, ".agents", "skills.json")
 	skillsDir = filepath.Join(root, ".agents", "skills")
@@ -3756,14 +3779,16 @@ func TestCLIFollowsASkillRenamedUpstream(t *testing.T) {
 	writeSkill("new", "metadata:\n  replaces: old\n")
 	commit("rename old, remove gone")
 
-	// Another Scope declaring the same Source updates the shared Cache. Its
-	// update follows the rename in that Scope and leaves this one to Sync.
+	// Another Scope declaring the same Source, a project's, updates the
+	// shared Cache. Its update follows the rename in that Scope and leaves
+	// this one to Sync.
 	otherConfig, otherSkills := filepath.Join(root, "other", "skills.json"), filepath.Join(root, "other", "skills")
 	if err := config.SaveConfig(cfg, otherConfig); err != nil {
 		t.Fatal(err)
 	}
-	out, err := runCLI(t, "update", "--config", otherConfig, "--skills-dir", otherSkills, "--cache-dir", cacheDir)
-	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed old") || !strings.Contains(out, "run 'skills rm"+pathOverrideFlags(otherConfig, otherSkills, cacheDir)+" gone'") {
+	t.Chdir(filepath.Join(root, "other"))
+	out, err := runCLI(t, "update", "-p", "--config", otherConfig, "--skills-dir", otherSkills, "--cache-dir", cacheDir)
+	if ExitCode(err) != 1 || !strings.Contains(out, "Renamed old") || !strings.Contains(out, "run 'skills rm -p"+pathOverrideFlags(otherConfig, otherSkills, cacheDir)+" gone'") {
 		t.Fatalf("update should follow the rename and leave gone blocked: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(otherSkills, "new", "SKILL.md")); err != nil {

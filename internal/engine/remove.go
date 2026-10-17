@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // RemoveItem is one Skill selected for removal.
@@ -100,8 +101,9 @@ func (r RemoveResult) NotFullyRemoved() []string {
 // BuildRemovePlan records whether each name is in Config, whether its master
 // Skill exists, and whether it is an untracked directory, as Inventory
 // classifies it. It does not look at leftover empty agent dirs.
-func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) (RemovePlan, error) {
-	inv, err := LoadInventory(cfg, skillsDir)
+func BuildRemovePlan(cfg *config.Config, scope models.Scope, names []string) (RemovePlan, error) {
+	scope = withScopeDefaults(scope)
+	inv, err := LoadInventory(cfg, scope)
 	if err != nil {
 		return RemovePlan{}, err
 	}
@@ -112,7 +114,7 @@ func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) (Remo
 			continue
 		}
 		kind, _, inConfig := config.FindSkillSource(cfg, name)
-		_, err := os.Lstat(filepath.Join(skillsDir, name))
+		_, err := os.Lstat(filepath.Join(scope.SkillsDir, name))
 		plan.Skills = append(plan.Skills, RemoveItem{
 			Name:               name,
 			InConfig:           inConfig,
@@ -128,13 +130,14 @@ func BuildRemovePlan(cfg *config.Config, skillsDir string, names []string) (Remo
 // among them if the plan approves them. A Config that cannot
 // be saved is the error, with nothing on disk changed; everything Retire could
 // not remove is in the result.
-func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, configPath, skillsDir string) (RemoveResult, error) {
+func ApplyRemovePlan(plan RemovePlan, cfg *config.Config, scope models.Scope) (RemoveResult, error) {
+	scope = withScopeDefaults(scope)
 	names := make([]string, len(plan.Skills))
 	for i, item := range plan.Skills {
 		names[i] = item.Name
 	}
-	baselines := OpenBaselines(skillsDir)
-	retired, err := Retire(cfg, configPath, skillsDir, names, baselines)
+	baselines := OpenBaselines(scope.SkillsDir)
+	retired, err := Retire(cfg, scope, names, baselines)
 	if err != nil {
 		return RemoveResult{}, err
 	}

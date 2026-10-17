@@ -118,7 +118,7 @@ func slotInspectorFixture(t *testing.T, declaredPath string) *AddSlotInspector {
 	source := t.TempDir()
 	cfg := config.DefaultConfig()
 	cfg.Local["alpha"] = config.LocalEntry{Type: "symlink", Source: filepath.Join(source, filepath.FromSlash(declaredPath))}
-	return &AddSlotInspector{Config: cfg, SkillsDir: t.TempDir(), Source: NewSymlinkAddSource(source, "")}
+	return &AddSlotInspector{Config: cfg, Scope: projectScope("", t.TempDir(), ""), Source: NewSymlinkAddSource(source, "")}
 }
 
 // The Skills the prompt offers carry the occupancy the plan will act on.

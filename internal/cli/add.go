@@ -361,7 +361,7 @@ func newAddCmd() *cobra.Command {
 	return cmd
 }
 
-func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsDir string, prompter addPrompter, interactive bool, explicitAgents []string) (engine.AddAvailabilityIntent, error) {
+func promptAddAvailability(cfg *config.Config, skills map[string]string, scope models.Scope, prompter addPrompter, interactive bool, explicitAgents []string) (engine.AddAvailabilityIntent, error) {
 	if len(explicitAgents) > 0 {
 		return engine.AddAvailabilityIntent{Kind: engine.AddAvailabilityInclude, Agents: explicitAgents}, nil
 	}
@@ -376,7 +376,7 @@ func promptAddAvailability(cfg *config.Config, skills map[string]string, skillsD
 		return engine.AddAvailabilityIntent{Kind: engine.AddAvailabilityFollowDefaults}, nil
 	}
 
-	availability := engine.NewAvailability(cfg, skillsDir)
+	availability := engine.NewAvailability(cfg, scope)
 	agents := availability.ManageableAgents()
 	skillNames := slices.Sorted(maps.Keys(skills))
 	baseline, ok := agentSelectionBaseline(availability, skillNames)

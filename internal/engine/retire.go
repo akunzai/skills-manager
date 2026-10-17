@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // RetiredSkill is what Retire did to one Skill.
@@ -64,7 +65,9 @@ func (s RetiredSkill) Err() error {
 // as is one Config never declared. A failure on one Skill does not stop the
 // rest: an interrupted Retire leaves Config saved, so what remains is Leftover
 // occupancy and Untracked content, not a declared Skill Sync never wrote.
-func Retire(cfg *config.Config, configPath, skillsDir string, names []string, baselines *Baselines) ([]RetiredSkill, error) {
+func Retire(cfg *config.Config, scope models.Scope, names []string, baselines *Baselines) ([]RetiredSkill, error) {
+	scope = withScopeDefaults(scope)
+	skillsDir := scope.SkillsDir
 	retired := make([]RetiredSkill, len(names))
 	index := make(map[string]int, len(names))
 	wroteCopy := make([]bool, len(names))
@@ -74,11 +77,11 @@ func Retire(cfg *config.Config, configPath, skillsDir string, names []string, ba
 		retired[i] = RetiredSkill{Name: name, Undeclared: config.RemoveSkillEntry(cfg, name), CopyPath: filepath.Join(skillsDir, name)}
 		index[name] = i
 	}
-	if err := config.SaveConfig(cfg, configPath); err != nil {
+	if err := config.SaveConfig(cfg, scope.ConfigPath); err != nil {
 		return nil, err
 	}
 
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, scope)
 	links := availability.RemoveLeftover(availability.ObserveOccupancy().Leftover.ForSkills(names).WithoutEmpty())
 	for _, link := range links.Paths {
 		skill := &retired[index[link.Skill]]

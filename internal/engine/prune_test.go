@@ -86,14 +86,14 @@ func TestApplyPrunePlanNeverRemovesAnUnapprovedRealDirectory(t *testing.T) {
 	if err := os.Symlink(source, filepath.Join(skillsDir, "orphan")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	plan, err := BuildPrunePlan(config.DefaultConfig(), skillsDir, true, false)
+	plan, err := BuildPrunePlan(config.DefaultConfig(), projectScope("", skillsDir, ""), true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	plan = plan.Select(PruneSelection{Masters: []string{"orphan", "approved"}})
 	plan.UntrackedSkills = append(plan.UntrackedSkills, "mine")
 
-	result, err := ApplyPrunePlan(plan, skillsDir)
+	result, err := ApplyPrunePlan(plan, projectScope("", skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

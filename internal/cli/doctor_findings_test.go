@@ -34,7 +34,7 @@ func TestFindingsLeftoverWordingCoversWholePolicyNotJustDefaults(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil)
+	outcome, err := engine.NewDoctor(cfg, projectScopeOf(skillsDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestDoctorRunFindingsReflectFixOutcome(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	doctor := engine.NewDoctor(cfg, skillsDir)
+	doctor := engine.NewDoctor(cfg, projectScopeOf(skillsDir))
 	beforeOutcome, err := doctor.Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +249,7 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(true, nil)
+	outcome, err := engine.NewDoctor(cfg, projectScopeOf(skillsDir)).Run(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 		writeUntracked(t, skillsDir)
 
-		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil)
+		outcome, err := engine.NewDoctor(config.DefaultConfig(), projectScopeOf(skillsDir)).Run(false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -374,18 +374,18 @@ func TestFindingsUntrackedNamesBothWaysOutForItsScope(t *testing.T) {
 		}
 		writeUntracked(t, skillsDir)
 
-		outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil)
+		outcome, err := engine.NewDoctor(config.DefaultConfig(), models.NewGlobalScope("", "", "")).Run(false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if containsMessage(findingsFor(outcome.Report), "skills add") {
-			t.Fatalf("untracked real directory must not suggest add: %#v", findingsFor(outcome.Report))
+		if containsMessage(doctorFindings(outcome.Report, ""), "skills add") {
+			t.Fatalf("untracked real directory must not suggest add: %#v", doctorFindings(outcome.Report, ""))
 		}
-		if !containsMessage(findingsFor(outcome.Report), "Not in Config; left as-is. Declare it with 'skills adopt', or remove it with a TTY prune; 'skills prune --yes' will not.") {
-			t.Fatalf("untracked finding has no Global-scoped next action: %#v", findingsFor(outcome.Report))
+		if !containsMessage(doctorFindings(outcome.Report, ""), "Not in Config; left as-is. Declare it with 'skills adopt', or remove it with a TTY prune; 'skills prune --yes' will not.") {
+			t.Fatalf("untracked finding has no Global-scoped next action: %#v", doctorFindings(outcome.Report, ""))
 		}
-		if containsMessage(findingsFor(outcome.Report), "skills prune -p") {
-			t.Errorf("Global finding suggested a Project command: %#v", findingsFor(outcome.Report))
+		if containsMessage(doctorFindings(outcome.Report, ""), "skills prune -p") {
+			t.Errorf("Global finding suggested a Project command: %#v", doctorFindings(outcome.Report, ""))
 		}
 	})
 }
@@ -407,7 +407,7 @@ func TestFindingsLeftoverMasterSymlinkNamesPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	outcome, err := engine.NewDoctor(config.DefaultConfig(), skillsDir).Run(false, nil)
+	outcome, err := engine.NewDoctor(config.DefaultConfig(), projectScopeOf(skillsDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "linked", source, "")
 	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "")
 
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil)
+	outcome, err := engine.NewDoctor(cfg, projectScopeOf(skillsDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddLocalSymlinkEntry(cfg, "alpha", filepath.Join(filepath.Dir(skillsDir), "local-src", "alpha"), "")
 
-	availability := engine.NewAvailability(cfg, skillsDir)
+	availability := engine.NewAvailability(cfg, projectScopeOf(skillsDir))
 	drift := availability.ObserveOccupancy().Drift("alpha")
 	if drift.Empty() {
 		t.Fatal("an unreadable availability path must not observe as no drift")
@@ -505,7 +505,7 @@ func TestFindingsReportAvailabilityPathsThatCannotBeObserved(t *testing.T) {
 		t.Errorf("an unreadable path is neither missing nor foreign: %#v", drift)
 	}
 
-	outcome, err := engine.NewDoctor(cfg, skillsDir).Run(false, nil)
+	outcome, err := engine.NewDoctor(cfg, projectScopeOf(skillsDir)).Run(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,12 +657,8 @@ func TestEveryDoctorWarningKindIsWorded(t *testing.T) {
 	}
 }
 
-// findingsFor words p as doctor does for a Scope chosen with -p alone, the
-// only Scope flag these reports need.
+// findingsFor words p as doctor does for a Project Scope chosen with -p
+// alone, the only Scope flag these reports need.
 func findingsFor(p engine.DoctorReport) []Finding {
-	flags := ""
-	if models.IsProjectScope(p.SkillsDir) {
-		flags = " -p"
-	}
-	return doctorFindings(p, flags)
+	return doctorFindings(p, " -p")
 }

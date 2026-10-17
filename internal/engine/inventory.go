@@ -24,7 +24,7 @@ type Inventory struct {
 	illegalLocal   []IllegalLocalSource
 	present        []presentSkill
 	items          []models.SkillItem
-	skillsDir      string
+	scope          models.Scope
 }
 
 type presentSkill struct {
@@ -74,7 +74,7 @@ func (inv Inventory) SkillItems(baselines *Baselines) []models.SkillItem {
 // whose Availability names it.
 func (inv Inventory) AvailableTo(agent string) []models.SkillItem {
 	filterAgent := models.NormalizeAgentName(agent)
-	agents := models.ForSkillsDir(inv.skillsDir)
+	agents := inv.scope.Agents()
 	seesEveryInstalled := agents.IsAutomatic(filterAgent)
 	var out []models.SkillItem
 	for _, item := range inv.items {
@@ -94,12 +94,10 @@ func (inv Inventory) declaredPresent() []presentSkill { return inv.present }
 
 // LoadInventory observes Config and the skills directory once and classifies
 // occupancy. Go does not allow a function named Inventory beside the type.
-func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
-	baseSkills := skillsDir
-	if baseSkills == "" {
-		baseSkills = models.DefaultSkillsDir()
-	}
-	availability := NewAvailability(cfg, baseSkills)
+func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
+	scope = withScopeDefaults(scope)
+	baseSkills := scope.SkillsDir
+	availability := NewAvailability(cfg, scope)
 
 	items := make(map[string]*models.SkillItem)
 
@@ -209,7 +207,7 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 		)
 	})
 
-	inv := Inventory{items: result, skillsDir: baseSkills}
+	inv := Inventory{items: result, scope: scope}
 	for i := range result {
 		item := &result[i]
 		mode := kind[item.Name]
@@ -226,7 +224,7 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 			if mode.IsDir() {
 				inv.untrackedDirs = append(inv.untrackedDirs, item.Name)
 			}
-		case item.Kind == models.InventorySymlink && models.LocalSourceInsideSkillsDir(models.ResolveLocalSourcePath(item.Source, baseSkills), baseSkills) && mode&os.ModeSymlink == 0 && mode != 0:
+		case item.Kind == models.InventorySymlink && models.LocalSourceInsideSkillsDir(scope.ResolveLocalSource(item.Source), baseSkills) && mode&os.ModeSymlink == 0 && mode != 0:
 			item.Status = models.SkillStatusIllegalLocal
 			inv.illegalLocal = append(inv.illegalLocal, IllegalLocalSource{Name: item.Name, Source: item.Source})
 		case item.Kind == models.InventorySymlink && mode.IsRegular():
@@ -235,7 +233,11 @@ func LoadInventory(cfg *config.Config, skillsDir string) (Inventory, error) {
 			inv.present = append(inv.present, presentSkill{Name: item.Name, Source: item.Source})
 		case !item.IsValidSkill:
 			item.Status = models.SkillStatusInvalid
-			inv.invalid = append(inv.invalid, InvalidSkill{Name: item.Name, Kind: item.Kind, Source: item.Source})
+			invalid := InvalidSkill{Name: item.Name, Kind: item.Kind, Source: item.Source}
+			if item.Kind == models.InventorySymlink {
+				invalid.SourcePath = scope.ResolveLocalSource(item.Source)
+			}
+			inv.invalid = append(inv.invalid, invalid)
 			inv.present = append(inv.present, presentSkill{Name: item.Name, Source: item.Source})
 		default:
 			item.Status = models.SkillStatusPresent

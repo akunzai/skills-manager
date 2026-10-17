@@ -31,7 +31,8 @@ func ExitCode(err error) int {
 // invocation: its Config path, skills directory, and git Cache directory.
 // Every command decides its Scope once, at the top of RunE via ResolveScope;
 // nothing past that point re-derives it from flags. IsProject is the flag
-// choice, not the skills-dir path shape.
+// choice, not the skills-dir path shape, and the engine reads it from here
+// (ADR-0012).
 type Scope = models.Scope
 
 // resolveScope is ResolveScope's pure core: given whether this invocation is

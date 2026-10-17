@@ -57,6 +57,9 @@ type InvalidSkill struct {
 	Name   string
 	Kind   models.InventoryKind
 	Source string
+	// SourcePath is where a symlinked Skill's Source resolves in its Scope;
+	// empty for other kinds.
+	SourcePath string
 }
 
 // IllegalLocalSource is a declared local symlink whose Source resolves inside
@@ -115,9 +118,8 @@ type DoctorReport struct {
 // and Availability health.
 type Doctor struct {
 	cfg           *config.Config
-	skillsDir     string
+	scope         models.Scope
 	availability  *Availability
-	cacheDir      string
 	cacheDetector *legacyCacheDetector
 }
 
@@ -166,24 +168,19 @@ func (o DoctorOutcome) Convergence() Convergence {
 
 type DoctorReplaceForeign func([]ForeignAvailabilityPath) (bool, error)
 
-func NewDoctor(cfg *config.Config, skillsDir string) *Doctor {
-	return NewDoctorWithCache(cfg, skillsDir, "")
-}
-
-func NewDoctorWithCache(cfg *config.Config, skillsDir, cacheDir string) *Doctor {
-	// Doctor reads cfg and skillsDir back off the Availability it just built
+func NewDoctor(cfg *config.Config, scope models.Scope) *Doctor {
+	// Doctor reads cfg and the Scope back off the Availability it just built
 	// rather than off its own arguments: NewAvailability is what defaults a nil
 	// Config and an empty skills directory, and a Doctor diagnosing a different
 	// pair from the one its Availability applies would report Drift that is not
 	// there. Deliberate reuse, not a Config carried around inside Availability.
-	availability := NewAvailability(cfg, skillsDir)
+	availability := NewAvailability(cfg, scope)
 	doctor := &Doctor{
 		cfg:          availability.cfg,
-		skillsDir:    availability.skillsDir,
+		scope:        availability.scope,
 		availability: availability,
-		cacheDir:     cacheDirOrDefault(cacheDir),
 	}
-	doctor.cacheDetector = newLegacyCacheDetector(doctor.cfg, doctor.cacheDir)
+	doctor.cacheDetector = newLegacyCacheDetector(doctor.cfg, doctor.scope.CacheDir)
 	return doctor
 }
 
@@ -269,8 +266,8 @@ func (p DoctorReport) foreignAvailabilityPaths() []ForeignAvailabilityPath {
 // diagnose records untracked Skills as warnings. Missing Skills and invalid
 // folders are issues but are not repaired.
 func (d *Doctor) diagnose() (DoctorReport, error) {
-	plan := DoctorReport{SkillsDir: d.skillsDir}
-	plan.baselines = OpenBaselines(d.skillsDir)
+	plan := DoctorReport{SkillsDir: d.scope.SkillsDir}
+	plan.baselines = OpenBaselines(d.scope.SkillsDir)
 	if err := plan.baselines.Err(); err != nil {
 		plan.StateError = err.Error()
 	} else {
@@ -299,7 +296,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	}
 	plan.legacyCache = d.cacheDetector.detectRoots()
 	plan.CacheRecovery = cacheRecovery
-	if _, err := os.Stat(d.skillsDir); os.IsNotExist(err) {
+	if _, err := os.Stat(d.scope.SkillsDir); os.IsNotExist(err) {
 		plan.MasterMissing = true
 	}
 
@@ -313,7 +310,7 @@ func (d *Doctor) diagnose() (DoctorReport, error) {
 	plan.UnknownAgents = d.availability.UnknownAgentReferences()
 	plan.ReservedNames = d.availability.ReservedAvailability()
 
-	inv, err := LoadInventory(d.cfg, d.skillsDir)
+	inv, err := LoadInventory(d.cfg, d.scope)
 	if err != nil {
 		return DoctorReport{}, err
 	}
@@ -367,7 +364,7 @@ func (d *Doctor) trust(baselines *Baselines) (unverified []UnverifiedSkill, stal
 		if repo.Signature == nil {
 			continue
 		}
-		cache := NewCache(source, repo.URL, repo.Branch, d.cacheDir)
+		cache := NewCache(source, repo.URL, repo.Branch, d.scope.CacheDir)
 		for _, name := range slices.Sorted(maps.Keys(repo.Signature.Trusted)) {
 			subpath, declared := repo.Skills[name]
 			if !declared {
@@ -421,7 +418,7 @@ func (d *Doctor) repair(plan *DoctorReport, replaceForeign bool) {
 			continue
 		}
 		if len(drift.absentUnexpected) > 0 {
-			plan.Drift[i].Repair = combineRepairs(removeManagedPaths(d.skillsDir, drift.absentUnexpected))
+			plan.Drift[i].Repair = combineRepairs(removeManagedPaths(d.scope.SkillsDir, drift.absentUnexpected))
 			continue
 		}
 		if len(drift.Foreign) > 0 && replaceForeign {

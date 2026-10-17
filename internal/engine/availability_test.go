@@ -14,7 +14,7 @@ import (
 
 func TestAvailabilitySetManagedAgentsStoresMinimalOverride(t *testing.T) {
 	cfg := config.DefaultConfig()
-	availability := NewAvailability(cfg, filepath.Join(t.TempDir(), ".agents", "skills"))
+	availability := NewAvailability(cfg, projectScope("", filepath.Join(t.TempDir(), ".agents", "skills"), ""))
 
 	if err := availability.SetManagedAgents("sample", []string{"continue"}); err != nil {
 		t.Fatal(err)
@@ -30,7 +30,7 @@ func TestAvailabilitySetManagedAgentsStoresMinimalOverride(t *testing.T) {
 
 func TestAvailabilityMutationsRemainConflictFree(t *testing.T) {
 	cfg := config.DefaultConfig()
-	availability := NewAvailability(cfg, filepath.Join(t.TempDir(), ".agents", "skills"))
+	availability := NewAvailability(cfg, projectScope("", filepath.Join(t.TempDir(), ".agents", "skills"), ""))
 	if err := availability.Exclude("sample", "claude"); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAvailabilityUnknownAgentReferencesIncludesPolicyFields(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"codex", "mystery"}
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Include: []string{"wat"}, Exclude: []string{"ghost"}}
-	availability := NewAvailability(cfg, filepath.Join(t.TempDir(), ".agents", "skills"))
+	availability := NewAvailability(cfg, projectScope("", filepath.Join(t.TempDir(), ".agents", "skills"), ""))
 
 	want := []UnknownAgentReference{
 		{Field: AgentRefDefaultAgents, Agent: "mystery"},
@@ -71,7 +71,7 @@ func TestAvailabilityUnknownAgentReferencesIncludesPolicyFields(t *testing.T) {
 
 func TestAvailabilitySetManagedAgentsRejectsAutomaticallyAvailableAgent(t *testing.T) {
 	cfg := config.DefaultConfig()
-	availability := NewAvailability(cfg, filepath.Join(t.TempDir(), ".agents", "skills"))
+	availability := NewAvailability(cfg, projectScope("", filepath.Join(t.TempDir(), ".agents", "skills"), ""))
 
 	if err := availability.SetManagedAgents("sample", []string{"codex"}); err == nil {
 		t.Fatal("Automatically available Agent must not become a managed selection")
@@ -80,7 +80,7 @@ func TestAvailabilitySetManagedAgentsRejectsAutomaticallyAvailableAgent(t *testi
 
 func TestAvailabilityMutationsRejectUnknownAgent(t *testing.T) {
 	cfg := config.DefaultConfig()
-	availability := NewAvailability(cfg, filepath.Join(t.TempDir(), ".agents", "skills"))
+	availability := NewAvailability(cfg, projectScope("", filepath.Join(t.TempDir(), ".agents", "skills"), ""))
 
 	if err := availability.Include("sample", "mystery"); err == nil {
 		t.Fatal("expected unknown Agent mutation to fail")
@@ -102,7 +102,7 @@ func projectAvailability(t *testing.T, skill string) (*Availability, string, str
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
 	config.AddLocalSymlinkEntry(cfg, skill, filepath.Join(skillsDir, skill), "")
-	return NewAvailability(cfg, skillsDir), filepath.Join(project, ".claude", "skills", skill), skillsDir
+	return NewAvailability(cfg, projectScope("", skillsDir, "")), filepath.Join(project, ".claude", "skills", skill), skillsDir
 }
 
 // The Drift branches doctor and sync act on differently: a missing link is
@@ -444,7 +444,7 @@ func reservedNameScope(t *testing.T) (*Availability, *config.Config, string, str
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "synced", "synced", "github", "main")
-	return NewAvailability(cfg, skillsDir), cfg, skillsDir, claudeFile
+	return NewAvailability(cfg, projectScope("", skillsDir, "")), cfg, skillsDir, claudeFile
 }
 
 func assertClaudeReservedDirIntact(t *testing.T, claudeFile string) {

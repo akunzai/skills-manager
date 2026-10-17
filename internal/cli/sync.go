@@ -60,14 +60,12 @@ completed.`,
 			cmd.SilenceUsage = true
 			out := cmd.OutOrStdout()
 			scope := ResolveScope(cmd)
-			configPath, skillsDir, cacheDir := scope.ConfigPath, scope.SkillsDir, scope.CacheDir
-
-			cfg, err := config.LoadConfig(configPath)
+			cfg, err := config.LoadConfig(scope.ConfigPath)
 			if err != nil {
 				return err
 			}
 
-			plan, err := engine.PlanSync(cfg, configPath, skillsDir, cacheDir)
+			plan, err := engine.PlanSync(cfg, scope)
 			if err != nil {
 				return err
 			}

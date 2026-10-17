@@ -71,7 +71,7 @@ With --install, materializes the skill to the Scope skills directory, registers 
 				return fmt.Errorf("save config %s: %w", models.ToTildePath(scope.ConfigPath), err)
 			}
 
-			availability := engine.NewAvailability(cfg, scope.SkillsDir)
+			availability := engine.NewAvailability(cfg, scope)
 			if _, err := availability.Apply("skills-manager"); err != nil {
 				fmt.Fprintf(cmd.OutOrStdout(), "Failed to apply availability for skills-manager: %s\n", errorReasons(err))
 				printNextCommands(cmd.OutOrStdout(), scopeFlagsOf(cmd, scope), err)

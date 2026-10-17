@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
-	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // renameFixture is a Scope that declared "old" from a Source and synced it.
@@ -101,7 +100,7 @@ func (f *renameFixture) plan(t *testing.T) *SyncPlan {
 		t.Fatal(err)
 	}
 	f.cfg = cfg
-	plan, err := PlanSync(cfg, f.configPath, f.skillsDir, f.cacheDir)
+	plan, err := PlanSync(cfg, projectScope(f.configPath, f.skillsDir, f.cacheDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +283,7 @@ func TestSyncRenameFailsOnAnOldLinkItCannotRemove(t *testing.T) {
 	}
 	t.Parallel()
 	f := newRenameFixture(t)
-	agentDir := models.ForSkillsDir(f.skillsDir).KnownDirs()["continue"]
+	agentDir := projectScope("", f.skillsDir, "").Agents().KnownDirs()["continue"]
 	link := plantManagedLink(t, f.skillsDir, agentDir, "old")
 	if err := os.Chmod(agentDir, 0o555); err != nil {
 		t.Fatal(err)

@@ -107,7 +107,7 @@ func newLsCmd() *cobra.Command {
 				return err
 			}
 
-			inv, err := engine.LoadInventory(cfg, skillsDir)
+			inv, err := engine.LoadInventory(cfg, resolvedScope)
 			if err != nil {
 				return err
 			}

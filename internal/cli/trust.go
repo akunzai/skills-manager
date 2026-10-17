@@ -48,7 +48,7 @@ skill applied this way as unverified.`,
 				return nil
 			}
 
-			items, err := engine.PlanTrust(cfg, scope.ConfigPath, scope.SkillsDir, scope.CacheDir, args)
+			items, err := engine.PlanTrust(cfg, scope, args)
 			if err != nil {
 				return err
 			}

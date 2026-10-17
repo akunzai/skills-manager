@@ -124,15 +124,14 @@ type PruneResult struct {
 // selected only when they are managed links into the master skills directory.
 // Untracked real directories on the master are listed so a TTY prune can
 // offer them; only Select can approve one for removal.
-func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, includeConfiguredLinks bool) (PrunePlan, error) {
+func BuildPrunePlan(cfg *config.Config, scope models.Scope, includeSkills, includeConfiguredLinks bool) (PrunePlan, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	if skillsDir == "" {
-		skillsDir = models.DefaultSkillsDir()
-	}
+	scope = withScopeDefaults(scope)
+	skillsDir := scope.SkillsDir
 
-	inv, err := LoadInventory(cfg, skillsDir)
+	inv, err := LoadInventory(cfg, scope)
 	if err != nil {
 		return PrunePlan{}, err
 	}
@@ -155,7 +154,7 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 		// The Agent directory observation is the same answer Doctor reports:
 		// Unexpected paths of declared Skills and leftover occupancy, never
 		// the same path in both.
-		observation := NewAvailability(cfg, skillsDir).ObserveOccupancy()
+		observation := NewAvailability(cfg, scope).ObserveOccupancy()
 		leftover := observation.Leftover.WithoutEmpty()
 		if includeConfiguredLinks {
 			plan.Unconfigured = append(plan.Unconfigured, observation.Unexpected...)
@@ -179,10 +178,9 @@ func BuildPrunePlan(cfg *config.Config, skillsDir string, includeSkills, include
 // ApplyPrunePlan removes every planned entry, continuing after failures. Each
 // managed link is revalidated immediately before removal, since it can change
 // while an interactive confirmation prompt is open.
-func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
-	if skillsDir == "" {
-		skillsDir = models.DefaultSkillsDir()
-	}
+func ApplyPrunePlan(plan PrunePlan, scope models.Scope) (PruneResult, error) {
+	scope = withScopeDefaults(scope)
+	skillsDir := scope.SkillsDir
 	result := PruneResult{}
 	var errs []error
 	for i, repair := range removeManagedPaths(skillsDir, plan.Unconfigured) {
@@ -218,7 +216,7 @@ func ApplyPrunePlan(plan PrunePlan, skillsDir string) (PruneResult, error) {
 	for _, dir := range plan.approvedDirs {
 		remove(dir)
 	}
-	for i, repair := range removeEmptyAgentDirs(skillsDir, plan.EmptyAgentDirs) {
+	for i, repair := range removeEmptyAgentDirs(scope.RootDir(), plan.EmptyAgentDirs) {
 		dir := plan.EmptyAgentDirs[i]
 		switch repair.Status {
 		case RepairSkipped:

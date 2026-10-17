@@ -4,15 +4,21 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 // TestMain points XDG_STATE_HOME at a throwaway directory for the whole
 // package, so a test that forgets t.Setenv cannot write Scope state for its
 // temporary Scope into the developer's real state directory, where doctor
-// then reports it as a missing path.
+// then reports it as a missing path. HOME goes there too: a Global Scope
+// links its home's Agent directories whatever its skills directory
+// (ADR-0012), so a test that forgets its own home would otherwise write into
+// the developer's.
 //
 // It also hides the developer's global and system git config and stops git
 // guessing an identity from the machine, so tests see git the way CI does: a
@@ -25,6 +31,12 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("XDG_STATE_HOME", state)
+	for _, name := range []string{"HOME", "USERPROFILE"} {
+		os.Setenv(name, filepath.Join(state, "home"))
+	}
+	for _, name := range []string{"XDG_CONFIG_HOME", "AGENTS_HOME", "CLAUDE_CONFIG_DIR"} {
+		os.Unsetenv(name)
+	}
 	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	// core.autocrlf=false: with the global config hidden, a Windows runner's
@@ -63,4 +75,16 @@ func setGitConfig(t *testing.T, key, value string) {
 	t.Setenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", n), key)
 	t.Setenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", n), value)
 	t.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(n+1))
+}
+
+// projectScope is the Project Scope of a fixture laid out as
+// <project>/.agents/skills or <project>/skills, rooted at <project>. Production
+// code never derives a Scope from its skills directory (ADR-0012); a test whose
+// Scope must be Global builds one with models.NewGlobalScope instead.
+func projectScope(configPath, skillsDir, cacheDir string) models.Scope {
+	root := filepath.Dir(filepath.Clean(skillsDir))
+	if filepath.Base(skillsDir) == "skills" && filepath.Base(root) == ".agents" {
+		root = filepath.Dir(root)
+	}
+	return models.Scope{ConfigPath: configPath, SkillsDir: skillsDir, CacheDir: cacheDir, IsProject: true, Root: root}
 }

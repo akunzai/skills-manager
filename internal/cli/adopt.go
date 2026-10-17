@@ -72,7 +72,7 @@ func runAdopt(cmd *cobra.Command, names []string, options adoptOptions) error {
 		return err
 	}
 	plan, err := engine.BuildAdoptPlan(cfg, scope, engine.AdoptOptions{
-		LockPath: engine.InstallerLockPath(scope.SkillsDir),
+		LockPath: engine.InstallerLockPath(scope),
 		MoveDir:  options.to,
 		From:     options.from,
 	})

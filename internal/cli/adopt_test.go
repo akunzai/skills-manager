@@ -11,14 +11,15 @@ import (
 	"github.com/akunzai/skills-manager/internal/engine"
 )
 
-// adoptCLIScope is a scratch Scope: a custom --skills-dir is Project-scoped,
-// so its installer lock file is skills-lock.json in root and moved Skills go
-// to root/skills-local.
+// adoptCLIScope is a scratch Project Scope run from root, so its installer
+// lock file is skills-lock.json in root and moved Skills go to
+// root/skills-local.
 func adoptCLIScope(t *testing.T) (root string, args []string) {
 	t.Helper()
 	isolateHome(t)
 	root = t.TempDir()
-	args = []string{"--config", filepath.Join(root, "skills.json"), "--skills-dir", filepath.Join(root, "skills"), "--cache-dir", filepath.Join(root, "cache")}
+	t.Chdir(root)
+	args = []string{"-p", "--config", filepath.Join(root, "skills.json"), "--skills-dir", filepath.Join(root, "skills"), "--cache-dir", filepath.Join(root, "cache")}
 	return root, args
 }
 

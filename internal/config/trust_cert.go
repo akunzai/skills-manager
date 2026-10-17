@@ -14,7 +14,7 @@ import (
 // as Config stores a Source's certificate-chain trust anchor: relative to the
 // directory holding Config when inside it, so a Project Config stays
 // portable, and absolute otherwise. It is the trust-certificate counterpart
-// of models.StoreLocalSourcePath / models.ResolveLocalSourcePath, and the
+// of models.Scope's StoreLocalSource / ResolveLocalSource, and the
 // PEM is validated here, once, rather than again when it is read back.
 func StoreTrustCertPath(path, configPath string) (string, error) {
 	if path == "" {

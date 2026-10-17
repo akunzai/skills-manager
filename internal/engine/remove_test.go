@@ -18,7 +18,7 @@ func untrackedRemoveFixture(t *testing.T) (cfg *config.Config, configPath, skill
 	loose = filepath.Join(skillsDir, "loose")
 	mustWriteScopeStateTestFile(t, filepath.Join(loose, "SKILL.md"), []byte("# Loose\n"))
 	cfg = config.DefaultConfig()
-	plan, err := BuildRemovePlan(cfg, skillsDir, []string{"loose"})
+	plan, err := BuildRemovePlan(cfg, projectScope("", skillsDir, ""), []string{"loose"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func untrackedRemoveFixture(t *testing.T) (cfg *config.Config, configPath, skill
 func TestApplyRemovePlanKeepsAnUnapprovedUntrackedDirectory(t *testing.T) {
 	cfg, configPath, skillsDir, loose, plan := untrackedRemoveFixture(t)
 
-	result, err := ApplyRemovePlan(plan, cfg, configPath, skillsDir)
+	result, err := ApplyRemovePlan(plan, cfg, projectScope(configPath, skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestApplyRemovePlanKeepsAnUnapprovedUntrackedDirectory(t *testing.T) {
 func TestApplyRemovePlanRemovesAnApprovedUntrackedDirectory(t *testing.T) {
 	cfg, configPath, skillsDir, loose, plan := untrackedRemoveFixture(t)
 
-	result, err := ApplyRemovePlan(plan.ApproveUntrackedDirectories(), cfg, configPath, skillsDir)
+	result, err := ApplyRemovePlan(plan.ApproveUntrackedDirectories(), cfg, projectScope(configPath, skillsDir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestApplyRemovePlanSkipsAnApprovedPathThatChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := ApplyRemovePlan(approved, cfg, configPath, skillsDir); err != nil {
+	if _, err := ApplyRemovePlan(approved, cfg, projectScope(configPath, skillsDir, "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,12 +132,12 @@ func TestApplyRemovePlanOnUnreadableScopeStateIsIncompleteOnlyWhenABaselineIsNee
 				t.Fatal(err)
 			}
 			statePath, bad := writeUnreadableScopeState(t, skillsDir)
-			plan, err := BuildRemovePlan(cfg, skillsDir, []string{"sample"})
+			plan, err := BuildRemovePlan(cfg, projectScope("", skillsDir, ""), []string{"sample"})
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			result, err := ApplyRemovePlan(plan.ApproveUntrackedDirectories(), cfg, configPath, skillsDir)
+			result, err := ApplyRemovePlan(plan.ApproveUntrackedDirectories(), cfg, projectScope(configPath, skillsDir, ""))
 
 			if err != nil {
 				t.Fatal(err)

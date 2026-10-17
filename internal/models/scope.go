@@ -7,12 +7,19 @@ import (
 )
 
 // Scope represents the active Global or Project configuration, its skills
-// directory, Cache directory, Scope root boundary, and its Agent directory registry.
+// directory, Cache directory, Scope root boundary, and its Agent directory
+// registry. Its kind is the flag choice, never the shape of SkillsDir
+// (ADR-0012).
 type Scope struct {
 	ConfigPath string
 	SkillsDir  string
 	CacheDir   string
 	IsProject  bool
+	// Root is the directory the Scope belongs to: the project checkout at
+	// Project Scope, the user's home at Global Scope. Project Agent
+	// directories, relative local Sources, the installer lock, and the
+	// boundary parent cleanup stops at are all under it.
+	Root string
 }
 
 // GetProjectPaths resolves the config path and skills directory for a project workspace.
@@ -48,6 +55,7 @@ func NewGlobalScope(configOverride, skillsDirOverride, cacheDirOverride string) 
 		SkillsDir:  skillsDir,
 		CacheDir:   cacheDir,
 		IsProject:  false,
+		Root:       UserHomeDir(),
 	}
 }
 
@@ -70,6 +78,7 @@ func NewProjectScope(cwd, configOverride, skillsDirOverride, cacheDirOverride st
 		SkillsDir:  skillsDir,
 		CacheDir:   cacheDir,
 		IsProject:  true,
+		Root:       cwd,
 	}
 }
 
@@ -81,29 +90,45 @@ func ResolveScope(isProject bool, cwd, configOverride, skillsDirOverride, cacheD
 	return NewGlobalScope(configOverride, skillsDirOverride, cacheDirOverride)
 }
 
-// IsProjectScope reports whether skillsDir is project-scoped rather than the
-// global skills directory.
-func IsProjectScope(skillsDir string) bool {
-	return !IsGlobalSkillsDir(skillsDir)
+// RootDir is Root, or the user's home for a Global Scope built without one.
+// A Project Scope has no such default: guessing one would put its Agent
+// directories and relative Sources wherever the process happens to run, so
+// it panics instead.
+func (s Scope) RootDir() string {
+	switch {
+	case s.Root != "":
+		return s.Root
+	case s.IsProject:
+		panic("models: Project Scope has no Root")
+	default:
+		return UserHomeDir()
+	}
 }
 
-// ScopeRoot is the directory parent cleanup must not escape: the project
-// checkout in project Scope, the user's home when skillsDir is the global
-// skills directory.
-func ScopeRoot(skillsDir string) string {
-	return GetProjectRootFromSkillsDir(skillsDir)
+// Agents is the Agent directory knowledge for this Scope.
+func (s Scope) Agents() Agents {
+	var known map[string]string
+	if s.IsProject {
+		known = projectKnownAgents(s.RootDir())
+	} else {
+		known = knownAgents()
+	}
+	leftover := leftoverAgentSkillDirs(s.IsProject, s.RootDir())
+	for agent := range known {
+		delete(leftover, agent)
+	}
+	return Agents{known: known, automatic: automaticallyAvailableAgents(s.IsProject), leftover: leftover}
 }
 
-// StoreLocalSourcePath renders a local Skill Source for skills.json. Inside a
+// StoreLocalSource renders a local Skill Source for skills.json. Inside a
 // project it returns a path relative to the project root, so the committed
 // Config resolves on a teammate's checkout. Anything outside the project, and
-// all of global Scope, uses ~/ if inside the user's home, or the absolute path.
-func StoreLocalSourcePath(absSource string, skillsDir string) string {
-	if !IsProjectScope(skillsDir) {
+// all of Global Scope, uses ~/ if inside the user's home, or the absolute path.
+func (s Scope) StoreLocalSource(absSource string) string {
+	if !s.IsProject {
 		return ToTildePath(absSource)
 	}
-	projectRoot := GetProjectRootFromSkillsDir(skillsDir)
-	absRoot, err := filepath.Abs(projectRoot)
+	absRoot, err := filepath.Abs(s.RootDir())
 	if err != nil {
 		return ToTildePath(absSource)
 	}
@@ -136,25 +161,24 @@ func LocalSourceInsideSkillsDir(absSource, skillsDir string) bool {
 // LocalSymlinkTarget returns what the skills-dir symlink should point at. A
 // Source inside the project is linked relatively so the checkout survives
 // being cloned elsewhere; anything else stays absolute.
-func LocalSymlinkTarget(absSource string, skillsDir string) string {
-	stored := StoreLocalSourcePath(absSource, skillsDir)
+func (s Scope) LocalSymlinkTarget(absSource string) string {
+	stored := s.StoreLocalSource(absSource)
 	if strings.HasPrefix(stored, "~") || filepath.IsAbs(stored) {
 		return absSource
 	}
-	rel, err := filepath.Rel(skillsDir, absSource)
+	rel, err := filepath.Rel(s.SkillsDir, absSource)
 	if err != nil {
 		return absSource
 	}
 	return rel
 }
 
-// ResolveLocalSourcePath turns a skills.json Source back into a usable path,
-// interpreting a relative one against the project root.
-func ResolveLocalSourcePath(source string, skillsDir string) string {
+// ResolveLocalSource turns a skills.json Source back into a usable path,
+// interpreting a relative one against Root.
+func (s Scope) ResolveLocalSource(source string) string {
 	expanded := ExpandUser(source)
 	if filepath.IsAbs(expanded) {
 		return expanded
 	}
-	base := GetProjectRootFromSkillsDir(skillsDir)
-	return filepath.Join(base, filepath.FromSlash(expanded))
+	return filepath.Join(s.RootDir(), filepath.FromSlash(expanded))
 }
