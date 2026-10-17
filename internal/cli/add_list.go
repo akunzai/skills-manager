@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -38,19 +36,14 @@ func runAddList(cmd *cobra.Command, kind engine.AddSourceKind, source, flagPath,
 }
 
 func listLocalSkills(cmd *cobra.Command, localPath, selectionPath string, jsonOutput bool) error {
-	sourcePath := models.ExpandUser(localPath)
-	absSourcePath, err := filepath.Abs(sourcePath)
+	absSourcePath, displayPath, err := localSourceDir(localPath)
 	if err != nil {
-		absSourcePath = sourcePath
-	}
-	stat, err := os.Stat(absSourcePath)
-	if err != nil || !stat.IsDir() {
-		return fmt.Errorf("local source path does not exist or is not a directory: %s", models.ToTildePath(sourcePath))
+		return err
 	}
 
 	discovered, descriptions, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
 	if err != nil {
-		return fmt.Errorf("discover skills in %s: %w", models.ToTildePath(sourcePath), err)
+		return fmt.Errorf("discover skills in %s: %w", displayPath, err)
 	}
 	return printAddList(cmd, models.ToTildePath(absSourcePath), discovered, descriptions, jsonOutput)
 }

@@ -126,20 +126,32 @@ func discoveryResult(discovered engine.DiscoveredSkills, err error, sourceKey st
 	return discovered, nil
 }
 
-func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath string) (*addIntake, error) {
+// localSourceDir is localPath as an absolute directory, and as the
+// unresolved path messages name it in, or an error naming that path when it
+// is not a directory.
+func localSourceDir(localPath string) (abs, display string, err error) {
 	sourcePath := models.ExpandUser(localPath)
-	absSourcePath, err := filepath.Abs(sourcePath)
+	display = models.ToTildePath(sourcePath)
+	abs, err = filepath.Abs(sourcePath)
 	if err != nil {
-		absSourcePath = sourcePath
+		abs = sourcePath
 	}
-	stat, err := os.Stat(absSourcePath)
+	stat, err := os.Stat(abs)
 	if err != nil || !stat.IsDir() {
-		return nil, fmt.Errorf("local source path does not exist or is not a directory: %s", models.ToTildePath(sourcePath))
+		return "", "", fmt.Errorf("local source path does not exist or is not a directory: %s", display)
+	}
+	return abs, display, nil
+}
+
+func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath string) (*addIntake, error) {
+	absSourcePath, displayPath, err := localSourceDir(localPath)
+	if err != nil {
+		return nil, err
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%sScanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
 	discovered, _, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
-	discovered, err = discoveryResult(discovered, err, models.ToTildePath(sourcePath))
+	discovered, err = discoveryResult(discovered, err, displayPath)
 	if err != nil {
 		return nil, err
 	}
