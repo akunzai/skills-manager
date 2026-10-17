@@ -3994,6 +3994,49 @@ func TestCLIAddBranchIsDeclaredAndKept(t *testing.T) {
 	}
 }
 
+// A Source declared on another branch is refused before Add fetches
+// anything or asks a question: the Source here cannot even be fetched, and
+// the refusal is still the branch, with no Cache left behind.
+func TestCLIAddRefusesAnotherBranchBeforeFetching(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, skillsDir, cacheDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills"), filepath.Join(root, "cache")
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{Type: "git", URL: filepath.Join(root, "missing"), Branch: "dev", Skills: map[string]string{"sample": "sample"}}
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "add", "owner/repo", "--url", filepath.Join(root, "missing"), "--branch", "v1.0.0", "--skill", "sample", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err == nil || !strings.Contains(err.Error(), `already declared on branch "dev"`) || !strings.Contains(err.Error(), "run 'skills rm"+pathOverrideFlags(configFile, skillsDir, cacheDir)+" sample'") {
+		t.Fatalf("add = %v; want the branch refused before any fetch, naming the rm that resolves it:\n%s", err, out)
+	}
+	if entries, _ := os.ReadDir(cacheDir); len(entries) > 0 {
+		t.Fatalf("a refused add left a Cache behind: %v", entries)
+	}
+}
+
+// Browsing is not declaring: add --list reads any branch of a Source Config
+// declares on another one.
+func TestCLIAddListBrowsesAnotherBranchOfADeclaredSource(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	configFile, cacheDir, origin := filepath.Join(root, "skills.json"), filepath.Join(root, "cache"), filepath.Join(root, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	defaultBranch := cliRunGit(t, origin, "symbolic-ref", "--short", "HEAD")
+	cliRunGit(t, origin, "branch", "dev")
+	cfg := config.DefaultConfig()
+	cfg.Remote["owner/repo"] = config.RemoteRepo{Type: "git", URL: origin, Branch: "dev", Skills: map[string]string{"sample": "sample"}}
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "add", "owner/repo", "--url", origin, "--branch", defaultBranch, "--list", "--config", configFile, "--cache-dir", cacheDir)
+	if err != nil || !strings.Contains(out, "sample") {
+		t.Fatalf("add --list on another branch = %v; want sample listed:\n%s", err, out)
+	}
+}
+
 // pathOverrideFlags is what a suggested command carries for the path
 // overrides a test passed, as scopeFlagsOf renders them.
 func pathOverrideFlags(configFile, skillsDir, cacheDir string) string {

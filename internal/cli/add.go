@@ -177,34 +177,45 @@ func newCommandIntake(skillName, command, check, description string) *addIntake 
 	}
 }
 
-// fetchRemoteIntake parses a remote Source argument and its flags, then
-// prepares it through Remote intake under a progress region, on the branch
-// cfg declares for it. It returns the Source key for display.
-func fetchRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*engine.RemoteIntake, string, error) {
+// remoteSpec parses a remote Source argument and lets its flags override
+// what the argument names.
+func remoteSpec(rawSource, flagURL, flagBranch, flagPath string) models.ParsedRepoSource {
 	spec := models.ParseRepoSource(rawSource)
 	spec.URL = cmp.Or(flagURL, spec.URL)
 	spec.Branch = cmp.Or(flagBranch, spec.Branch)
 	spec.Subpath = cmp.Or(flagPath, spec.Subpath)
+	return spec
+}
 
+// fetchRemoteIntake prepares spec through Remote intake under a progress
+// region, on the branch cfg declares for it unless spec names another.
+func fetchRemoteIntake(cmd *cobra.Command, cfg *config.Config, spec models.ParsedRepoSource, cacheDir string) (*engine.RemoteIntake, error) {
 	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
 	region.Start(presentation.Job{Name: spec.SourceKey, Label: "Fetching " + spec.SourceKey})
 	intake, err := engine.PrepareRemoteIntake(cfg, spec, cacheDir)
 	if err != nil {
 		region.Fail(spec.SourceKey)
 		region.Stop()
-		return nil, "", err
+		return nil, err
 	}
 	region.Done(spec.SourceKey)
 	region.Stop()
-	return intake, spec.SourceKey, nil
+	return intake, nil
 }
 
 func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
-	intake, key, err := fetchRemoteIntake(cmd, cfg, rawSource, flagURL, flagBranch, flagPath, cacheDir)
+	spec := remoteSpec(rawSource, flagURL, flagBranch, flagPath)
+	// A Source Config declares on another branch is refused before anything
+	// is fetched or asked; Declare would refuse it only after both. add --list
+	// declares nothing, so it browses any branch.
+	if _, err := engine.AddBranch(cfg, spec.SourceKey, spec.Branch); err != nil {
+		return nil, err
+	}
+	intake, err := fetchRemoteIntake(cmd, cfg, spec, cacheDir)
 	if err != nil {
 		return nil, err
 	}
-	discovered, err := discoveryResult(intake.Discovered, nil, key)
+	discovered, err := discoveryResult(intake.Discovered, nil, spec.SourceKey)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +223,7 @@ func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL,
 		source:     engine.NewRemoteAddSource(intake),
 		discovered: discovered,
 		labels: sourceLabels{
-			displayName:  key,
+			displayName:  spec.SourceKey,
 			resourceNoun: "Repository",
 		},
 		progressLine: func(name, subpath string) string {

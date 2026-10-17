@@ -60,11 +60,12 @@ func listRemoteSkills(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPa
 	if err != nil {
 		return err
 	}
-	intake, key, err := fetchRemoteIntake(cmd, cfg, rawSource, flagURL, flagBranch, flagPath, cacheDir)
+	spec := remoteSpec(rawSource, flagURL, flagBranch, flagPath)
+	intake, err := fetchRemoteIntake(cmd, cfg, spec, cacheDir)
 	if err != nil {
 		return err
 	}
-	return printAddList(cmd, key, intake.Discovered, intake.Descriptions, jsonOutput)
+	return printAddList(cmd, spec.SourceKey, intake.Discovered, intake.Descriptions, jsonOutput)
 }
 
 // printAddList flattens discovered into a stable, name-then-path-sorted row
