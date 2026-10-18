@@ -215,7 +215,7 @@ func unquote(value string) string {
 	return value
 }
 
-const MaxScanDepth = 5
+const MaxScanDepth = 7
 
 var IgnoredScanDirs = map[string]bool{
 	".git":         true,
@@ -238,7 +238,10 @@ var IgnoredScanDirs = map[string]bool{
 // walkSkillFiles calls visit with the path of each SKILL.md under root,
 // skipping the directories IgnoredScanDirs names and any more than
 // MaxScanDepth levels below root. Entries that cannot be read are skipped.
-func walkSkillFiles(root string, visit func(path string) error) error {
+// remote skips a SKILL.md that is a symlink: in a Cache it is an editor's
+// mirror of a Skill elsewhere, cannot be verified (ADR-0010), and breaks once
+// Materialized. A local Source is linked in place, so its symlink still works.
+func walkSkillFiles(root string, remote bool, visit func(path string) error) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -253,6 +256,9 @@ func walkSkillFiles(root string, visit func(path string) error) error {
 			return nil
 		}
 		if !strings.EqualFold(info.Name(), "SKILL.md") {
+			return nil
+		}
+		if remote && info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
 		return visit(path)

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -314,4 +315,101 @@ func TestCLIAddListUsageErrors(t *testing.T) {
 			t.Fatal("expected --list combined with --command to be a usage error")
 		}
 	})
+}
+
+// A monorepo keeps its Skill deep in a package and mirrors it for an editor
+// through a symlinked SKILL.md; only the real Skill is offered.
+func TestCLIAddListFindsADeepSkillAndSkipsItsSymlinkedMirror(t *testing.T) {
+	home := isolateHome(t)
+	scope := []string{"--config", filepath.Join(home, ".agents", "skills.json"), "--skills-dir", filepath.Join(home, ".agents", "skills"), "--cache-dir", filepath.Join(home, ".agents", "cache")}
+
+	origin := filepath.Join(home, "origin")
+	real := filepath.Join(origin, "packages", "cli", "plugins", "sentry-cli", "skills", "sentry-cli")
+	mirror := filepath.Join(origin, "packages", "cli", ".cursor", "skills", "sentry-cli")
+	for _, dir := range []string{real, mirror} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(real, "SKILL.md"), []byte("---\nname: sentry-cli\ndescription: Use the Sentry CLI.\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../../plugins/sentry-cli/skills/sentry-cli/SKILL.md", filepath.Join(mirror, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	commitCLIGitRepo(t, origin)
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs(append([]string{"add", "owner/repo", "--url", origin, "--list", "--json"}, scope...))
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("add --list --json: %v\n%s%s", err, stdout.String(), stderr.String())
+	}
+	var rows []map[string]string
+	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
+		t.Fatalf("--json output did not parse: %v\n%s", err, stdout.String())
+	}
+	want := []map[string]string{{"name": "sentry-cli", "path": "packages/cli/plugins/sentry-cli/skills/sentry-cli", "description": "Use the Sentry CLI."}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("rows = %#v; want %#v", rows, want)
+	}
+}
+
+// A local Source is linked, not copied or verified, so a Skill whose SKILL.md
+// is a symlink (a dotfiles layout) still works and is still offered.
+func TestCLIAddListOffersALocalSkillWhoseSkillFileIsASymlink(t *testing.T) {
+	home := isolateHome(t)
+	scope := []string{"--config", filepath.Join(home, ".agents", "skills.json"), "--skills-dir", filepath.Join(home, ".agents", "skills"), "--cache-dir", filepath.Join(home, ".agents", "cache")}
+
+	dotfiles := filepath.Join(home, "dotfiles")
+	if err := os.MkdirAll(dotfiles, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dotfiles, "notes.md"), []byte("---\nname: notes\ndescription: Keep notes.\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(home, "src", "notes")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dotfiles, "notes.md"), filepath.Join(source, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, append([]string{"add", "--symlink", source, "--list"}, scope...)...)
+	if err != nil {
+		t.Fatalf("add --list: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "notes") || !strings.Contains(out, "Keep notes.") {
+		t.Fatalf("expected the symlinked local Skill listed, got:\n%s", out)
+	}
+}
+
+// MaxScanDepth counts from --path, so a Skill too deep for the Source root is
+// found once --path narrows discovery toward it.
+func TestCLIAddListMeasuresDepthFromPath(t *testing.T) {
+	home := isolateHome(t)
+	scope := []string{"--config", filepath.Join(home, ".agents", "skills.json"), "--skills-dir", filepath.Join(home, ".agents", "skills"), "--cache-dir", filepath.Join(home, ".agents", "cache")}
+
+	root := filepath.Join(home, "repo")
+	skill := filepath.Join(root, "a", "b", "c", "d", "e", "f", "g", "h", "deep")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: deep\ndescription: Nine levels down.\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, err := runCLI(t, append([]string{"add", "--symlink", root, "--list"}, scope...)...); ExitCode(err) != 1 {
+		t.Fatalf("listing the root: exit %d; want 1 (nine levels is past MaxScanDepth)\n%s", ExitCode(err), out)
+	}
+	out, err := runCLI(t, append([]string{"add", "--symlink", root, "--path", "a/b", "--list"}, scope...)...)
+	if err != nil {
+		t.Fatalf("listing --path a/b: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "a/b/c/d/e/f/g/h/deep") {
+		t.Fatalf("expected the Skill seven levels below --path listed, got:\n%s", out)
+	}
 }

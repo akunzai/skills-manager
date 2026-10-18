@@ -63,7 +63,7 @@ func TestReadSkillFrontmatter(t *testing.T) {
 // directories and Skills nested deeper than MaxScanDepth.
 func TestDiscoveryAndRenameWalkTheSameSkills(t *testing.T) {
 	repo := t.TempDir()
-	for _, subpath := range []string{"skills/kept", "node_modules/ignored", "a/b/c/d/e", "a/b/c/d/e/too-deep"} {
+	for _, subpath := range []string{"skills/kept", "node_modules/ignored", "a/b/c/d/e/f/g", "a/b/c/d/e/f/g/too-deep"} {
 		content := "---\nname: " + filepath.Base(subpath) + "\nmetadata:\n  replaces: old\n---\n"
 		writeTestFile(t, filepath.Join(repo, filepath.FromSlash(subpath), "SKILL.md"), []byte(content))
 	}
@@ -77,7 +77,7 @@ func TestDiscoveryAndRenameWalkTheSameSkills(t *testing.T) {
 		discoveredPaths = append(discoveredPaths, paths...)
 	}
 	slices.Sort(discoveredPaths)
-	if want := []string{"a/b/c/d/e", "skills/kept"}; !reflect.DeepEqual(discoveredPaths, want) {
+	if want := []string{"a/b/c/d/e/f/g", "skills/kept"}; !reflect.DeepEqual(discoveredPaths, want) {
 		t.Fatalf("discovered = %v; want %v", discoveredPaths, want)
 	}
 

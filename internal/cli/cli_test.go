@@ -2011,6 +2011,13 @@ func writeCLIGitSkill(t *testing.T, repo, name string) {
 	if err := os.WriteFile(filepath.Join(repo, name, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	commitCLIGitRepo(t, repo)
+}
+
+// commitCLIGitRepo makes repo a git repository with everything in it
+// committed, for a fixture laid out by hand.
+func commitCLIGitRepo(t *testing.T, repo string) {
+	t.Helper()
 	for _, args := range [][]string{{"init"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"}} {
 		cliRunGit(t, repo, args...)
 	}

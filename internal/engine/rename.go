@@ -21,7 +21,7 @@ func findReplacements(repoDir string, removed []string, accept func(subpath stri
 	if len(removed) == 0 {
 		return found
 	}
-	_ = walkSkillFiles(repoDir, func(path string) error {
+	_ = walkSkillFiles(repoDir, true, func(path string) error {
 		frontmatter := readSkillFrontmatter(path)
 		if len(frontmatter.Replaces) == 0 {
 			return nil
