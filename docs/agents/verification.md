@@ -66,9 +66,7 @@ where it is, and drive the binary there:
 herdr pane split --current --direction right --cwd "$PWD" --no-focus
 # read the new id from .result.pane.pane_id
 herdr pane run <pane> "cd <scratch> && clear"
-herdr pane run <pane> "./skills add --symlink ./src --config ./scope/skills.json --skills-dir ./scope/skills --cache-dir ./scope/cache"
-herdr pane wait-output <pane> --source visible --match "Choose a scope" --timeout 20000
-herdr pane send-keys <pane> enter
+herdr pane run <pane> "./skills add --symlink ./src -p --cache-dir ./cache"
 herdr pane wait-output <pane> --source visible --match "Space to toggle" --timeout 20000
 herdr pane send-text <pane> " "
 herdr pane send-keys <pane> down
@@ -79,12 +77,14 @@ herdr pane send-keys <pane> enter
 
 Four things this repo has already been caught by:
 
-- **Always pass `--config`, `--skills-dir` and `--cache-dir` into a
-  scratch directory.** A prompt driven without them writes to the
-  developer's real `~/.agents/skills.json` and links into their real
-  agent directories. A skills directory outside the global one is
-  Project Scope, so the agent links land beside it rather than under
-  `$HOME`.
+- **Always pass `-p` from a scratch working directory, plus
+  `--cache-dir` into it.** The Scope kind comes only from `-p`/`-g`
+  (ADR-0012), and without either Add asks with Global as the default.
+  A Global Scope links into the developer's real agent directories under
+  `$HOME` even when `--config` and `--skills-dir` point into a scratch
+  directory; a Project Scope rooted at the scratch directory keeps every
+  link inside it. The same applies to a non-interactive run such as
+  `skills add <source> -y`.
 - **Wait on `--source visible`, not the default.** `wait-output`
   searches the snapshot immediately and matches output that is already
   there, so a previous run's prompt in scrollback satisfies the wait and
@@ -93,9 +93,9 @@ Four things this repo has already been caught by:
   absolute path fills the viewport and hides the prompt.
 - **`Space` goes through `pane send-text " "`.** `pane send-keys <pane>
   space` returns success but does not toggle the checkbox.
-- **Wait for each prompt, not for the final line.** `skills add` asks
-  three questions in sequence — Scope, skill selection, Agent
-  availability. Waiting for `Added` alone times out while an unanswered
+- **Wait for each prompt, not for the final line.** With `-p`,
+  `skills add` asks two questions in sequence — skill selection, then
+  Agent availability. Waiting for `Added` alone times out while an unanswered
   prompt sits on screen.
 
 Close the pane when done, and verify the result on disk rather than from
