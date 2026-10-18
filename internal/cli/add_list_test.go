@@ -318,42 +318,51 @@ func TestCLIAddListUsageErrors(t *testing.T) {
 }
 
 // A monorepo keeps its Skill deep in a package and mirrors it for an editor
-// through a symlinked SKILL.md; only the real Skill is offered.
+// through a symlinked SKILL.md; only the real Skill is offered, also where git
+// checks a symlink out as a plain file holding its target (core.symlinks=false,
+// the Windows default).
 func TestCLIAddListFindsADeepSkillAndSkipsItsSymlinkedMirror(t *testing.T) {
-	home := isolateHome(t)
-	scope := []string{"--config", filepath.Join(home, ".agents", "skills.json"), "--skills-dir", filepath.Join(home, ".agents", "skills"), "--cache-dir", filepath.Join(home, ".agents", "cache")}
+	for _, symlinks := range []string{"true", "false"} {
+		t.Run("core.symlinks="+symlinks, func(t *testing.T) {
+			home := isolateHome(t)
+			scope := []string{"--config", filepath.Join(home, ".agents", "skills.json"), "--skills-dir", filepath.Join(home, ".agents", "skills"), "--cache-dir", filepath.Join(home, ".agents", "cache")}
 
-	origin := filepath.Join(home, "origin")
-	real := filepath.Join(origin, "packages", "cli", "plugins", "sentry-cli", "skills", "sentry-cli")
-	mirror := filepath.Join(origin, "packages", "cli", ".cursor", "skills", "sentry-cli")
-	for _, dir := range []string{real, mirror} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(real, "SKILL.md"), []byte("---\nname: sentry-cli\ndescription: Use the Sentry CLI.\n---\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("../../../plugins/sentry-cli/skills/sentry-cli/SKILL.md", filepath.Join(mirror, "SKILL.md")); err != nil {
-		t.Fatal(err)
-	}
-	commitCLIGitRepo(t, origin)
+			origin := filepath.Join(home, "origin")
+			real := filepath.Join(origin, "packages", "cli", "plugins", "sentry-cli", "skills", "sentry-cli")
+			mirror := filepath.Join(origin, "packages", "cli", ".cursor", "skills", "sentry-cli")
+			for _, dir := range []string{real, mirror} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(real, "SKILL.md"), []byte("---\nname: sentry-cli\ndescription: Use the Sentry CLI.\n---\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("../../../plugins/sentry-cli/skills/sentry-cli/SKILL.md", filepath.Join(mirror, "SKILL.md")); err != nil {
+				t.Fatal(err)
+			}
+			commitCLIGitRepo(t, origin)
+			t.Setenv("GIT_CONFIG_COUNT", "1")
+			t.Setenv("GIT_CONFIG_KEY_0", "core.symlinks")
+			t.Setenv("GIT_CONFIG_VALUE_0", symlinks)
 
-	var stdout, stderr bytes.Buffer
-	cmd := newRootCmd()
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs(append([]string{"add", "owner/repo", "--url", origin, "--list", "--json"}, scope...))
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("add --list --json: %v\n%s%s", err, stdout.String(), stderr.String())
-	}
-	var rows []map[string]string
-	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
-		t.Fatalf("--json output did not parse: %v\n%s", err, stdout.String())
-	}
-	want := []map[string]string{{"name": "sentry-cli", "path": "packages/cli/plugins/sentry-cli/skills/sentry-cli", "description": "Use the Sentry CLI."}}
-	if !reflect.DeepEqual(rows, want) {
-		t.Fatalf("rows = %#v; want %#v", rows, want)
+			var stdout, stderr bytes.Buffer
+			cmd := newRootCmd()
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			cmd.SetArgs(append([]string{"add", "owner/repo", "--url", origin, "--list", "--json"}, scope...))
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("add --list --json: %v\n%s%s", err, stdout.String(), stderr.String())
+			}
+			var rows []map[string]string
+			if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
+				t.Fatalf("--json output did not parse: %v\n%s", err, stdout.String())
+			}
+			want := []map[string]string{{"name": "sentry-cli", "path": "packages/cli/plugins/sentry-cli/skills/sentry-cli", "description": "Use the Sentry CLI."}}
+			if !reflect.DeepEqual(rows, want) {
+				t.Fatalf("rows = %#v; want %#v", rows, want)
+			}
+		})
 	}
 }
 

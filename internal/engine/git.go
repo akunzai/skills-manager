@@ -315,6 +315,30 @@ func ensureSparsePaths(repoDir string, paths []string) error {
 	return nil
 }
 
+// committedSymlinks reports a SKILL.md under repoDir that its head commit
+// records as a symlink. Such a file is an editor's mirror of a Skill
+// elsewhere: it cannot be verified (ADR-0010) and breaks once Materialized.
+// The commit decides rather than the file on disk, because with
+// core.symlinks=false (the Windows default) git checks a symlink out as a
+// plain file holding its target. It reads trees only, so it stays offline.
+func committedSymlinks(repoDir string) func(path string) bool {
+	links := make(map[string]bool)
+	// Each entry is "<mode> <type> <id>\t<path>"; -z leaves the path unquoted.
+	stdout, _, err := runGit(repoDir, "ls-tree", "-r", "-z", "HEAD")
+	if err == nil {
+		for entry := range strings.SplitSeq(stdout, "\x00") {
+			meta, name, ok := strings.Cut(entry, "\t")
+			if ok && strings.HasPrefix(meta, "120000 ") && strings.EqualFold(path.Base(name), "SKILL.md") {
+				links[name] = true
+			}
+		}
+	}
+	return func(file string) bool {
+		rel, err := filepath.Rel(repoDir, file)
+		return err == nil && links[filepath.ToSlash(rel)]
+	}
+}
+
 // checkOutSkillFiles switches the Cache to non-cone mode: its root files,
 // the cone directories it had, and every SKILL.md. readSparseState recovers
 // those cone directories if the switch back never happens.

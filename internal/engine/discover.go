@@ -21,7 +21,7 @@ type DiscoveredSkillDescriptions map[string]string
 // DiscoverSkillsInRepo discovers the Skills in a local directory, with each
 // candidate's description.
 func DiscoverSkillsInRepo(repoDir, scope string) (DiscoveredSkills, DiscoveredSkillDescriptions, error) {
-	return discoverSkills(repoDir, scope, false, fileBundleIdentity(repoDir))
+	return discoverSkills(repoDir, scope, nil, fileBundleIdentity(repoDir))
 }
 
 // discoverRemoteSkills discovers Skills in a Cache whose sparse checkout holds
@@ -32,7 +32,7 @@ func discoverRemoteSkills(cache Cache, scope string) (DiscoveredSkills, Discover
 	var descriptions DiscoveredSkillDescriptions
 	err := cache.withSkillFiles(func(repoDir string) error {
 		var err error
-		found, descriptions, err = discoverSkills(repoDir, scope, true, cacheTreeIdentity(cache))
+		found, descriptions, err = discoverSkills(repoDir, scope, committedSymlinks(repoDir), cacheTreeIdentity(cache))
 		// A committed directory holding no SKILL.md is not on disk at all.
 		if errors.Is(err, os.ErrNotExist) && cache.atHead(scope).dir {
 			found, descriptions, err = DiscoveredSkills{}, DiscoveredSkillDescriptions{}, nil
@@ -42,7 +42,7 @@ func discoverRemoteSkills(cache Cache, scope string) (DiscoveredSkills, Discover
 	return found, descriptions, err
 }
 
-func discoverSkills(repoDir, scope string, remote bool, identity bundleIdentity) (DiscoveredSkills, DiscoveredSkillDescriptions, error) {
+func discoverSkills(repoDir, scope string, skip func(path string) bool, identity bundleIdentity) (DiscoveredSkills, DiscoveredSkillDescriptions, error) {
 	scanRoot, err := discoveryRoot(repoDir, scope)
 	if err != nil {
 		return nil, nil, err
@@ -50,7 +50,7 @@ func discoverSkills(repoDir, scope string, remote bool, identity bundleIdentity)
 	foundPaths := make(map[string][]string)
 	rawDescriptions := make(map[string]string)
 
-	err = walkSkillFiles(scanRoot, remote, func(path string) error {
+	err = walkSkillFiles(scanRoot, skip, func(path string) error {
 		skillDir := filepath.Dir(path)
 		relPath, err := filepath.Rel(repoDir, skillDir)
 		if err != nil {
