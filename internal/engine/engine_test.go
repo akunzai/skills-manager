@@ -59,8 +59,8 @@ func TestDiscoverSkillsInRepo(t *testing.T) {
 	_ = os.MkdirAll(nodeModulesDir, 0755)
 	_ = os.WriteFile(filepath.Join(nodeModulesDir, "SKILL.md"), []byte("---\nname: ignored-skill\n---\n"), 0644)
 
-	// Create skill exceeding MaxScanDepth (depth 7, should be ignored)
-	deepDir := filepath.Join(tmpRepo, "d1", "d2", "d3", "d4", "d5", "d6", "deep-skill")
+	// Create skill exceeding MaxScanDepth (depth 8, should be ignored)
+	deepDir := filepath.Join(tmpRepo, "d1", "d2", "d3", "d4", "d5", "d6", "d7", "deep-skill")
 	_ = os.MkdirAll(deepDir, 0755)
 	_ = os.WriteFile(filepath.Join(deepDir, "SKILL.md"), []byte("---\nname: deep-skill\n---\n"), 0644)
 

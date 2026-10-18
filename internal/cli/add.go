@@ -3,6 +3,7 @@ package cli
 import (
 	"cmp"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -150,11 +151,12 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%sScanning local directory: %s%s%s...\n", colorCyan, colorBold, models.ToTildePath(absSourcePath), colorReset)
-	discovered, _, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
+	discovered, descriptions, err := engine.DiscoverSkillsInRepo(absSourcePath, selectionPath)
 	discovered, err = discoveryResult(discovered, err, displayPath)
 	if err != nil {
 		return nil, err
 	}
+	announceLoneSkill(cmd.OutOrStdout(), discovered, descriptions)
 
 	resolvedPath := func(subpath string) string {
 		if subpath != "" && subpath != "." {
@@ -173,6 +175,21 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 			return fmt.Sprintf("Linking local skill: %s -> %s", name, models.ToTildePath(resolvedPath(subpath)))
 		},
 	}, nil
+}
+
+// announceLoneSkill names the one Skill a Source offers, which selection then
+// takes without a prompt, so the user sees what Add is about to declare.
+func announceLoneSkill(out io.Writer, discovered engine.DiscoveredSkills, descriptions engine.DiscoveredSkillDescriptions) {
+	if len(discovered) != 1 {
+		return
+	}
+	for name, paths := range discovered {
+		if len(paths) != 1 {
+			return
+		}
+		description := cmp.Or(descriptions[paths[0]], "(no description)")
+		fmt.Fprintf(out, "Found %s%s%s %s(%s)%s: %s\n", colorBold, name, colorReset, colorDim, paths[0], colorReset, description)
+	}
 }
 
 func newCommandIntake(skillName, command, check, description string) *addIntake {
@@ -231,6 +248,7 @@ func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL,
 	if err != nil {
 		return nil, err
 	}
+	announceLoneSkill(cmd.OutOrStdout(), discovered, intake.Descriptions)
 	return &addIntake{
 		source:     engine.NewRemoteAddSource(intake),
 		discovered: discovered,

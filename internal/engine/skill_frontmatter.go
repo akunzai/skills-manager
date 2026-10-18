@@ -215,7 +215,7 @@ func unquote(value string) string {
 	return value
 }
 
-const MaxScanDepth = 5
+const MaxScanDepth = 7
 
 var IgnoredScanDirs = map[string]bool{
 	".git":         true,
@@ -237,8 +237,9 @@ var IgnoredScanDirs = map[string]bool{
 
 // walkSkillFiles calls visit with the path of each SKILL.md under root,
 // skipping the directories IgnoredScanDirs names and any more than
-// MaxScanDepth levels below root. Entries that cannot be read are skipped.
-func walkSkillFiles(root string, visit func(path string) error) error {
+// MaxScanDepth levels below root. Entries that cannot be read are skipped, and
+// so is any SKILL.md that skip, when given, reports.
+func walkSkillFiles(root string, skip func(path string) bool, visit func(path string) error) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -253,6 +254,9 @@ func walkSkillFiles(root string, visit func(path string) error) error {
 			return nil
 		}
 		if !strings.EqualFold(info.Name(), "SKILL.md") {
+			return nil
+		}
+		if skip != nil && skip(path) {
 			return nil
 		}
 		return visit(path)

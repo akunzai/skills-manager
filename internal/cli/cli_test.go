@@ -2011,6 +2011,13 @@ func writeCLIGitSkill(t *testing.T, repo, name string) {
 	if err := os.WriteFile(filepath.Join(repo, name, "SKILL.md"), []byte("# Sample\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	commitCLIGitRepo(t, repo)
+}
+
+// commitCLIGitRepo makes repo a git repository with everything in it
+// committed, for a fixture laid out by hand.
+func commitCLIGitRepo(t *testing.T, repo string) {
+	t.Helper()
 	for _, args := range [][]string{{"init"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"}} {
 		cliRunGit(t, repo, args...)
 	}
@@ -3897,8 +3904,9 @@ func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 	}
 }
 
-// Without a terminal, Add leaves one "ok" line for the fetched Source and one
-// per Skill it applied, then its summary.
+// Without a terminal, Add leaves one "ok" line for the fetched Source, names
+// the lone Skill it found, one "ok" line per Skill it applied, then its
+// summary.
 func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
@@ -3910,6 +3918,7 @@ func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
 		t.Fatalf("add: %v\n%s", err, out)
 	}
 	want := "ok  owner/repo\n" +
+		"Found sample (sample): (no description)\n" +
 		"ok  sample\n" +
 		"Added 1 skill(s) [sample] and updated skills.json.\n"
 	if out != want {
