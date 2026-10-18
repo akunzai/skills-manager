@@ -198,3 +198,40 @@ func TestAgentSelectionBaseline(t *testing.T) {
 		}
 	})
 }
+
+// A Source holding one Skill is chosen without a prompt, so Add names what it
+// found before Availability is configured.
+func TestCLIAddNamesALoneSkillBeforeAddingIt(t *testing.T) {
+	for _, flags := range [][]string{{}, {"-y"}, {"--skill", "sentry-cli", "-y"}} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			home := isolateHome(t)
+			configFile := filepath.Join(home, ".agents", "skills.json")
+			scope := []string{"--config", configFile, "--skills-dir", filepath.Join(home, ".agents", "skills"), "--cache-dir", filepath.Join(home, ".agents", "cache")}
+
+			origin := filepath.Join(home, "origin")
+			skill := filepath.Join(origin, "packages", "cli", "skills", "sentry-cli")
+			if err := os.MkdirAll(skill, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: sentry-cli\ndescription: Use the Sentry CLI.\n---\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			commitCLIGitRepo(t, origin)
+
+			out, err := runCLI(t, append(append([]string{"add", "owner/repo", "--url", origin, "--path", "packages/cli"}, flags...), scope...)...)
+			if err != nil {
+				t.Fatalf("add: %v\n%s", err, out)
+			}
+			if !strings.Contains(out, "Found sentry-cli (packages/cli/skills/sentry-cli): Use the Sentry CLI.") {
+				t.Fatalf("expected the lone Skill named, got:\n%s", out)
+			}
+			cfg, err := config.LoadConfig(configFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Remote["owner/repo"].Skills["sentry-cli"]; got != "packages/cli/skills/sentry-cli" {
+				t.Fatalf("declared subpath = %q; want packages/cli/skills/sentry-cli", got)
+			}
+		})
+	}
+}

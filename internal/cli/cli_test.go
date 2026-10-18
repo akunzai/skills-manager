@@ -3904,8 +3904,9 @@ func TestCLIAddReportsUnreadableScopeState(t *testing.T) {
 	}
 }
 
-// Without a terminal, Add leaves one "ok" line for the fetched Source and one
-// per Skill it applied, then its summary.
+// Without a terminal, Add leaves one "ok" line for the fetched Source, names
+// the lone Skill it found, one "ok" line per Skill it applied, then its
+// summary.
 func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
@@ -3917,6 +3918,7 @@ func TestCLIAddReportsFetchAndEachSkillOnceWithoutATerminal(t *testing.T) {
 		t.Fatalf("add: %v\n%s", err, out)
 	}
 	want := "ok  owner/repo\n" +
+		"Found sample (sample): (no description)\n" +
 		"ok  sample\n" +
 		"Added 1 skill(s) [sample] and updated skills.json.\n"
 	if out != want {
