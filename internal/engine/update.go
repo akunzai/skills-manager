@@ -165,7 +165,7 @@ func UpdateRemoteSkills(cfg *config.Config, targets []string, force, dryRun bool
 		// A Cache that only lacks a declared Skill is already at the remote
 		// commit; adding the path is enough.
 		fetch := force || !incomplete[source]
-		cache := NewCache(source, repositories[source].URL, repositories[source].Branch, cacheDir)
+		cache := openSourceCache(source, repositories[source], cacheDir)
 		paths := declaredSubpaths(repositories[source])
 		// Comparing tree IDs needs no file contents, so a commit elsewhere in
 		// the Source is told apart from one that changed a declared Skill.
@@ -222,7 +222,7 @@ func ensureUpdatedTrustRoot(repositories map[string]config.RemoteRepo, cacheDir 
 				paths = append(paths, renamed.Subpath)
 			}
 		}
-		dirs := skillDirs(NewCache(source, repo.URL, repo.Branch, cacheDir), paths)
+		dirs := skillDirs(openSourceCache(source, repo, cacheDir), paths)
 		all = append(all, dirs...)
 		if slices.ContainsFunc(result.UpdatedRepos, func(info UpdatedRepoInfo) bool { return info.Source == source }) {
 			updated = append(updated, dirs...)
@@ -244,7 +244,7 @@ func followRenames(repositories map[string]config.RemoteRepo, cacheDir string, r
 	}
 	for _, source := range slices.Sorted(maps.Keys(repositories)) {
 		repo := repositories[source]
-		cache := NewCache(source, repo.URL, repo.Branch, cacheDir)
+		cache := openSourceCache(source, repo, cacheDir)
 		if failed[source] || cache.head() == "" {
 			continue
 		}

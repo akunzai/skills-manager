@@ -21,9 +21,13 @@ type RemoteIntake struct {
 	// TrustRootErr is why Declare could not fetch the trust root its signed
 	// Skills need.
 	TrustRootErr error
+	// Skipped is why each Skill a well-known index lists could not be
+	// offered, such as an unknown type.
+	Skipped []string
 
-	spec  models.ParsedRepoSource // Branch is the one fetched
-	cache Cache
+	spec     models.ParsedRepoSource // Branch is the one fetched
+	cache    sourceCache
+	cacheDir string
 }
 
 // PrepareRemoteIntake refreshes spec's Source into its Cache and discovers its
@@ -41,7 +45,34 @@ func PrepareRemoteIntake(cfg *config.Config, spec models.ParsedRepoSource, cache
 	if err != nil {
 		return nil, fmt.Errorf("discover Skills in %s: %w", spec.SourceKey, err)
 	}
-	return &RemoteIntake{Discovered: discovered, Descriptions: descriptions, spec: spec, cache: cache}, nil
+	return &RemoteIntake{Discovered: discovered, Descriptions: descriptions, spec: spec, cache: cache, cacheDir: cacheDir}, nil
+}
+
+// PrepareWellKnownIntake fetches source's well-known index into its Cache and
+// offers each Skill it lists under the name the index gives it. Skills are
+// downloaded only once declared. It prints nothing and changes no Config.
+func PrepareWellKnownIntake(source models.WellKnownSource, cacheDir string) (*RemoteIntake, error) {
+	cache := NewWellKnownCache(source.SourceKey, source.URL, cacheDir)
+	if err := cache.Refresh(true); err != nil {
+		return nil, err
+	}
+	entries, skipped, err := cache.wellKnownEntries()
+	if err != nil {
+		return nil, fmt.Errorf("read index of %s: %w", source.SourceKey, err)
+	}
+	intake := &RemoteIntake{
+		Discovered:   make(DiscoveredSkills, len(entries)),
+		Descriptions: make(DiscoveredSkillDescriptions, len(entries)),
+		Skipped:      skipped,
+		spec:         models.ParsedRepoSource{SourceKey: source.SourceKey, URL: source.URL, RepoType: config.WellKnownType},
+		cache:        cache,
+		cacheDir:     cacheDir,
+	}
+	for _, entry := range entries {
+		intake.Discovered[entry.Name] = []string{entry.Name}
+		intake.Descriptions[entry.Name] = entry.Description
+	}
+	return intake, nil
 }
 
 // Declare records skills (name to subpath) from this Source in cfg, with the
@@ -53,6 +84,9 @@ func PrepareRemoteIntake(cfg *config.Config, spec models.ParsedRepoSource, cache
 // caller saves it.
 func (in *RemoteIntake) Declare(cfg *config.Config, skills map[string]string) error {
 	key := in.spec.SourceKey
+	if declared, ok := cfg.Remote[key]; ok && (declared.Type == config.WellKnownType) != (in.spec.RepoType == config.WellKnownType) {
+		return fmt.Errorf("Source %s is already declared as a %s Source; remove its Skills before adding it again", key, sourceKindName(declared.Type))
+	}
 	branch, err := AddBranch(cfg, key, in.spec.Branch)
 	if err != nil {
 		return err
@@ -70,8 +104,11 @@ func (in *RemoteIntake) Declare(cfg *config.Config, skills map[string]string) er
 	}
 	// A trust root that cannot be fetched now leaves the signed Skills
 	// blocked, not undeclared; Add reports it, and Update fetches it later.
-	in.TrustRootErr = ensureTrustRoot(in.cache.cacheDir, true, skillDirs(in.cache, subpaths)...)
-	url := storedRemoteURL(key, in.spec.URL)
+	in.TrustRootErr = ensureTrustRoot(in.cacheDir, true, skillDirs(in.cache, subpaths)...)
+	url := in.spec.URL
+	if in.spec.RepoType != config.WellKnownType {
+		url = storedRemoteURL(key, url)
+	}
 	for _, name := range names {
 		config.AddRemoteSkillEntry(cfg, key, name, skills[name], in.spec.RepoType, url)
 	}
@@ -104,6 +141,14 @@ func normalizeRemoteURL(raw string) string {
 		return u.String()
 	}
 	return s
+}
+
+// sourceKindName is how a message names a Source of RemoteRepo type t.
+func sourceKindName(t string) string {
+	if t == config.WellKnownType {
+		return "well-known"
+	}
+	return "git"
 }
 
 func declaredSubpaths(repo config.RemoteRepo) []string {

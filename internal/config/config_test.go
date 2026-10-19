@@ -259,3 +259,19 @@ func TestRevokeTrustRemovesTheNameFromEverySource(t *testing.T) {
 		t.Fatal("second RevokeTrust = true, want false")
 	}
 }
+
+func TestLoadConfigRefusesAWellKnownSourceWithABranchOrNoURL(t *testing.T) {
+	for name, repo := range map[string]string{
+		"branch": `{"type": "well-known", "url": "https://redocly.com", "branch": "main", "skills": {"a": "a"}}`,
+		"no url": `{"type": "well-known", "skills": {"a": "a"}}`,
+	} {
+		path := filepath.Join(t.TempDir(), "skills.json")
+		data := `{"version": 1, "remote": {"redocly.com": ` + repo + `}}`
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConfig(path); err == nil {
+			t.Errorf("%s: LoadConfig accepted %s", name, repo)
+		}
+	}
+}

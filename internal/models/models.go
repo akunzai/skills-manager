@@ -669,7 +669,8 @@ const (
 type SkillItem struct {
 	Name string
 	Kind InventoryKind
-	// RepoType is a remote Skill's forge: "github", "gitlab", or "git".
+	// RepoType is a remote Skill's Source type: "github", "gitlab", "git", or
+	// "well-known".
 	RepoType string
 	Source   string
 	Subpath  string

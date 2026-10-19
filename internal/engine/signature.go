@@ -95,7 +95,7 @@ func ensureTrustRoot(cacheDir string, refresh bool, dirs ...string) error {
 }
 
 // skillDirs is where each of subpaths sits in cache's working copy.
-func skillDirs(cache Cache, subpaths []string) []string {
+func skillDirs(cache sourceCache, subpaths []string) []string {
 	dirs := make([]string, 0, len(subpaths))
 	for _, subpath := range subpaths {
 		dirs = append(dirs, filepath.Join(cache.dir(), filepath.FromSlash(subpath)))
@@ -145,7 +145,7 @@ func newRemotePlanner(cfg *config.Config, configPath, cacheDir string, baselines
 // Sync reconciling an existing declaration. A renamed Skill carries its new
 // Skill, verified now, so a rename to a Skill that does not verify is blocked
 // before the old one is Retired.
-func (p *remotePlanner) reconcile(skillsDir, source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+func (p *remotePlanner) reconcile(skillsDir, source string, cache sourceCache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	item := planRemoteItem(source, cache, skill, drift)
 	if skill.Status != SkillRenamed {
 		// A Skill blocked or failed already is not read, so it keeps that
@@ -180,7 +180,7 @@ func (p *remotePlanner) reconcile(skillsDir, source string, cache Cache, skill S
 // neither Drift nor a missing Baseline does, because Add asked before
 // overwriting and a Rename already protected the old copy. skill carries no
 // Freshness status.
-func (p *remotePlanner) declared(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+func (p *remotePlanner) declared(source string, cache sourceCache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	item := baseRemoteItem(source, cache, skill, drift)
 	item.NeedsWrite = true
 	p.verify(&item)
@@ -190,7 +190,7 @@ func (p *remotePlanner) declared(source string, cache Cache, skill SkillFreshnes
 // recorded plans a remote Skill whose copy on the Scope skills directory
 // already matches the Cache, as Adopt finds one: applying it writes nothing
 // and records the Baseline.
-func (p *remotePlanner) recorded(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+func (p *remotePlanner) recorded(source string, cache sourceCache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	item := baseRemoteItem(source, cache, skill, drift)
 	p.verify(&item)
 	return item

@@ -330,7 +330,7 @@ type cacheFacts struct {
 	missing       []string
 	err           string
 	// cache is the Cache observed, on the branch its local checkout uses.
-	cache Cache
+	cache sourceCache
 }
 
 // observe reports git facts for this Cache. Classification into RemoteStatus

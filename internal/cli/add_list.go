@@ -61,6 +61,16 @@ func listRemoteSkills(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPa
 	return printAddList(cmd, spec.SourceKey, intake.Discovered, intake.Descriptions, jsonOutput)
 }
 
+// listWellKnownSkills lists the Skills a well-known index offers. Like Add,
+// it refreshes the index in the Cache, and downloads no Skill.
+func listWellKnownSkills(cmd *cobra.Command, source models.WellKnownSource, cacheDir string, jsonOutput bool) error {
+	intake, err := fetchWellKnownIntake(cmd, source, cacheDir)
+	if err != nil {
+		return err
+	}
+	return printAddList(cmd, source.SourceKey, intake.Discovered, intake.Descriptions, jsonOutput)
+}
+
 // printAddList flattens discovered into a stable, name-then-path-sorted row
 // list and prints it, following ADR-0002's codes for a read-only browse: 0
 // with at least one Skill listed, 1 with none. A discovery or fetch failure

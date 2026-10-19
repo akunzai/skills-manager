@@ -45,7 +45,7 @@ func InspectAddSlot(cfg *config.Config, scope models.Scope, source AddSource, na
 		switch kind {
 		case config.SkillRemote:
 			current = fmt.Sprintf("[remote] %s", srcKey)
-			same = source.Kind == AddSourceRemote && srcKey == source.Key
+			same = source.remote() && srcKey == source.Key
 		case config.SkillCommand:
 			current = fmt.Sprintf("[command] %s", entry.Command)
 			same = source.Kind == AddSourceCommand && entry.Command == source.Command

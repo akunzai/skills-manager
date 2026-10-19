@@ -18,6 +18,9 @@ const (
 	AddSourceRemote  AddSourceKind = "remote"
 	AddSourceSymlink AddSourceKind = "symlink"
 	AddSourceCommand AddSourceKind = "command"
+	// AddSourceWellKnown is a Source served through a well-known index. Its
+	// Skills are remote Skills, declared through a RemoteIntake (ADR-0013).
+	AddSourceWellKnown AddSourceKind = "well-known"
 )
 
 // AddSource describes where a Skill is obtained and how it should be configured.
@@ -50,6 +53,9 @@ func ClassifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
 	}
 	if spec.Positional == "" {
 		return "", "", fmt.Errorf("source repository or --symlink/--command required")
+	}
+	if _, ok := models.ParseWellKnownSource(spec.Positional); ok {
+		return AddSourceWellKnown, spec.Positional, nil
 	}
 	return AddSourceRemote, spec.Positional, nil
 }
@@ -120,6 +126,21 @@ func NewRemoteAddSource(intake *RemoteIntake) AddSource {
 	}
 }
 
+// NewWellKnownAddSource is the Source a well-known RemoteIntake read.
+func NewWellKnownAddSource(intake *RemoteIntake) AddSource {
+	return AddSource{
+		Kind:   AddSourceWellKnown,
+		Key:    intake.spec.SourceKey,
+		Remote: intake,
+	}
+}
+
+// remote reports whether the Source's Skills are remote Skills, declared
+// through a RemoteIntake and Materialized from a Cache.
+func (s AddSource) remote() bool {
+	return s.Kind == AddSourceRemote || s.Kind == AddSourceWellKnown
+}
+
 func NewSymlinkAddSource(absPath, description string) AddSource {
 	return AddSource{
 		Kind:        AddSourceSymlink,
@@ -149,6 +170,8 @@ func (s AddSource) proposedDisplay(subpath, skillsDir string) string {
 			p = filepath.Join(s.LocalPath, filepath.FromSlash(subpath))
 		}
 		return fmt.Sprintf("[symlink] %s", models.ToTildePath(p))
+	case AddSourceWellKnown:
+		return fmt.Sprintf("[well-known] %s (%s)", s.Key, subpath)
 	default:
 		if subpath != "" && subpath != "." {
 			return fmt.Sprintf("[remote] %s (%s)", s.Key, subpath)
@@ -320,7 +343,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	// the signer it records is saved with the Skills.
 	planned := make(map[string]SyncPlanItem)
 	var signerRecorded *SyncEvent
-	if plan.Source.Kind == AddSourceRemote {
+	if plan.Source.remote() {
 		if err := plan.Source.Remote.Declare(cfg, plan.Skills); err != nil {
 			return AddResult{}, err
 		}
@@ -328,7 +351,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		if plan.TrustCert != "" {
 			config.SetCertificateChainTrust(cfg, key, plan.TrustCert)
 		}
-		planner := newRemotePlanner(cfg, plan.Scope.ConfigPath, plan.Source.Remote.cache.cacheDir, baselines)
+		planner := newRemotePlanner(cfg, plan.Scope.ConfigPath, plan.Source.Remote.cacheDir, baselines)
 		for _, name := range names {
 			planned[name] = planner.declared(key, plan.Source.Remote.cache, SkillFreshness{
 				Name:      name,
@@ -374,7 +397,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	if signerRecorded != nil {
 		emit(*signerRecorded)
 	}
-	if plan.Source.Kind == AddSourceRemote && plan.Source.Remote.TrustRootErr != nil {
+	if plan.Source.remote() && plan.Source.Remote.TrustRootErr != nil {
 		emit(SyncEvent{Kind: SyncTrustRootFailed, Source: plan.Source.Key, Err: plan.Source.Remote.TrustRootErr, Next: "update"})
 	}
 	for _, name := range names {
@@ -396,7 +419,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		}
 		var item SyncPlanItem
 		switch plan.Source.Kind {
-		case AddSourceRemote:
+		case AddSourceRemote, AddSourceWellKnown:
 			item = planned[name]
 			item.Drift = occupancy.Drift(name)
 		case AddSourceSymlink, AddSourceCommand:
@@ -411,6 +434,6 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	}
 
 	// Only a remote Skill has a Baseline to record.
-	result.State = baselines.Outcome(plan.Source.Kind == AddSourceRemote)
+	result.State = baselines.Outcome(plan.Source.remote())
 	return result, nil
 }
