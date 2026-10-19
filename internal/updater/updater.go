@@ -23,7 +23,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
-var Version = "0.25.0"
+var Version = "0.26.0"
 var GitHubRepo = "akunzai/skills-manager"
 
 // gitHubAPI is the GitHub REST root releases are read from; a test points it
