@@ -227,3 +227,43 @@ func TestCLIAddPinsATrustCertForAWellKnownSource(t *testing.T) {
 		t.Fatalf("signature policy = %+v; want the certificate chain pinned", policy)
 	}
 }
+
+func TestCLIAddBlocksATamperedWellKnownArchiveAndWritesNothing(t *testing.T) {
+	offlineTrustRoot(t)
+	server := newWellKnownServer(t, miseArchive(t, "---\nname: mise\ndescription: tampered\n---\n", true))
+	scope := newWellKnownScope(t)
+
+	out, err := scope.run(t, "add", server.URL, "--skill", "mise", "-y")
+	if ExitCode(err) != 1 || !strings.Contains(out, "Skipped mise: signature:") {
+		t.Fatalf("add = %v (exit %d); want a signature block (exit 1)\n%s", err, ExitCode(err), out)
+	}
+	if _, err := os.Stat(filepath.Join(scope.skills, "mise")); !os.IsNotExist(err) {
+		t.Fatalf("a blocked add wrote the Scope copy: %v", err)
+	}
+}
+
+func TestCLISyncRefusesAWellKnownSkillSignedByAnotherSigner(t *testing.T) {
+	offlineTrustRoot(t)
+	server := newWellKnownServer(t, miseArchive(t, "", true))
+	scope := newWellKnownScope(t)
+	if out, err := scope.run(t, "add", server.URL, "--skill", "mise", "-y"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	cfg, err := config.LoadConfig(scope.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := strings.TrimPrefix(server.URL, "https://")
+	cfg.Remote[key].Signature.Sigstore.Identity = "https://github.com/someone/else/.github/workflows/sign.yml@refs/heads/main"
+	if err := config.SaveConfig(cfg, scope.config); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(scope.skills, "mise")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := scope.run(t, "sync")
+	if ExitCode(err) != 1 || !strings.Contains(out, "Skipped mise: signature:") {
+		t.Fatalf("sync = %v (exit %d); want a Skill from another Signer blocked\n%s", err, ExitCode(err), out)
+	}
+}

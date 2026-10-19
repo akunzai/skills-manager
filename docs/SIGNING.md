@@ -11,4 +11,4 @@ A Source can sign each Skill with an [OpenSSF Model Signing](https://github.com/
 
 `skills update` fetches the Sigstore trust root next to the Cache, so `skills sync` verifies offline.
 
-A [well-known Source](USAGE.md#well-known-sources) is verified the same way when an archive entry carries `skill.oms.sig` at its root, and takes `--trust-cert` like a git Source. A `skill-md` entry is a single `SKILL.md` with nowhere to carry a signature, so it is always unsigned, and `"require": true` refuses it.
+A [well-known Source](USAGE.md#well-known-sources) is verified the same way when an archive entry carries `skill.oms.sig` at its root, and `skills add` takes `--trust-cert` for it as for a git Source. A `skill-md` entry is a single `SKILL.md` with nowhere to carry a signature, so it is always unsigned, and `"require": true` refuses it.
