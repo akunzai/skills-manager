@@ -381,7 +381,7 @@
     <div class="compare">
       <div>
         <h3>Against <code>npx skills</code>: Zero runtime dependencies</h3>
-        <p><code>npx skills</code> runs on Node.js and executes via npm/npx. Skills Manager compiles to a single native Go binary with zero language runtime dependencies. It starts in milliseconds, works in minimal environments (containers, servers, CI), and uses system <code>git</code> only for remote updates.</p>
+        <p><code>npx skills</code> runs on Node.js and executes via npm/npx. Skills Manager compiles to a single native Go binary with zero language runtime dependencies. It starts in milliseconds, works in minimal environments (containers, servers, CI), and uses system <code>git</code> only to update git Sources.</p>
       </div>
       <div>
         <h3>Against <code>npx skills</code>: Local symlinks and live authoring</h3>
@@ -398,6 +398,10 @@
       <div>
         <h3>Offline sync and drift diagnosis</h3>
         <p>Network fetching is isolated to <code>skills update</code>, which then reconciles the Scope; <code>skills sync</code> reconciles disk 100% offline from a shared cache. <code>skills doctor --fix</code> diagnoses broken symlinks, physical collisions, and drift, repairing manageable state safely.</p>
+      </div>
+      <div>
+        <h3>Well-known Sources over HTTPS</h3>
+        <p>A publisher that serves an <a href="https://github.com/cloudflare/agent-skills-discovery-rfc">Agent Skills Discovery</a> index is a Source too: <code>skills add https://developers.cloudflare.com</code>. Each skill is downloaded only once declared and checked against the digest its index names, with no <code>git</code> involved. <code>skills outdated</code> revalidates the index, and <code>skills sync</code> stays offline as for a git Source.</p>
       </div>
       <div>
         <h3>Signed skills verified before install</h3>
@@ -420,7 +424,7 @@
     <input class="screen-pick" type="radio" name="workflow" id="pick-project" />
 
     <div class="tabs">
-      <label for="pick-remote">(<i>1</i>)Remote Git</label>
+      <label for="pick-remote">(<i>1</i>)Remote</label>
       <label for="pick-symlink">(<i>2</i>)Local Symlink</label>
       <label for="pick-command">(<i>3</i>)Command Tool</label>
       <label for="pick-project">(<i>4</i>)Team Project</label>
@@ -429,15 +433,18 @@
     <div class="panels">
       <div class="panel" id="panel-remote">
         <div class="term">
-          <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>Remote Git discovery</span></div>
+          <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>Remote Git and well-known discovery</span></div>
 <pre><span class="comment"># Add a skill from GitHub shorthand</span>
 <span class="prompt">$ </span><span class="cmd">skills add akunzai/agent-skills --skill agents-md</span>
 
 <span class="comment"># Target specific agents with persistent policy</span>
-<span class="prompt">$ </span><span class="cmd">skills add anthropics/skills --agent claude,antigravity --yes</span></pre>
+<span class="prompt">$ </span><span class="cmd">skills add anthropics/skills --agent claude,antigravity --yes</span>
+
+<span class="comment"># Add a skill from a publisher's well-known index, no git needed</span>
+<span class="prompt">$ </span><span class="cmd">skills add https://developers.cloudflare.com --skill agents-sdk</span></pre>
         </div>
         <p style="margin-top: 10px; font-size: 14px; color: var(--muted);">
-          Remote sources are cached locally; duplicate copies are deduplicated automatically.
+          Remote sources are cached locally; duplicate copies are deduplicated automatically. A site URL is read as an <a href="https://github.com/cloudflare/agent-skills-discovery-rfc">Agent Skills Discovery</a> index over HTTPS.
         </p>
       </div>
 
@@ -542,7 +549,7 @@
           </tr>
           <tr>
             <td><code>skills add</code></td>
-            <td>Declare skills from Git, local symlink, or command</td>
+            <td>Declare skills from Git, a well-known index, local symlink, or command</td>
             <td><code>0</code> added, <code>1</code> blocked</td>
           </tr>
           <tr>
@@ -682,7 +689,7 @@
     <ul class="plain">
       <li><b>Operating Systems:</b> macOS (Intel &amp; Apple Silicon), Linux (x86_64, ARM64), and Windows (x64, ARM64).</li>
       <li><b>Zero Language Runtimes:</b> Standalone binary. No Node.js, npm, npx, Python, or Ruby required.</li>
-      <li><b>System Git:</b> Standard <code>git</code> command line tool for cloning remote repositories into cache.</li>
+      <li><b>System Git:</b> <code>git</code> 2.35 or newer, only for git Sources; well-known Sources are read over HTTPS without it.</li>
     </ul>
   </div>
 </section>
