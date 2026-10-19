@@ -1,232 +1,29 @@
 package cli
 
 import (
-	"archive/tar"
-	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/wellknowntest"
 )
 
-// wellKnownEntry is one artifact a wellKnownServer serves, and the index
-// entry naming it.
-type wellKnownEntry struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	URL         string `json:"url"`
-	Digest      string `json:"digest"`
-
-	body        []byte
-	contentType string
-}
-
-// wellKnownServer is a publisher of an Agent Skills Discovery index over
-// TLS. Its index and artifacts may change between requests.
-type wellKnownServer struct {
-	*httptest.Server
-	mu      sync.Mutex
-	schema  string
-	entries []wellKnownEntry
-	// extra serves additional paths, such as a redirect.
-	extra map[string]http.HandlerFunc
-	// requests logs each request as "<method> <path> <status>".
-	requests []string
-}
-
-// requested is the logged requests whose path has prefix, then clears the log.
-func (s *wellKnownServer) requested(prefix string) []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var matched []string
-	for _, r := range s.requests {
-		if strings.HasPrefix(strings.Fields(r)[1], prefix) {
-			matched = append(matched, r)
-		}
-	}
-	s.requests = nil
-	return matched
-}
-
-const wellKnownSchema = "https://schemas.agentskills.io/discovery/0.2.0/schema.json"
-
-func newWellKnownServer(t *testing.T, entries ...wellKnownEntry) *wellKnownServer {
+// newWellKnownServer publishes entries over TLS and points the engine's
+// well-known client at it for the rest of the test.
+func newWellKnownServer(t *testing.T, entries ...wellknowntest.Entry) *wellknowntest.Server {
 	t.Helper()
-	s := &wellKnownServer{schema: wellKnownSchema, extra: map[string]http.HandlerFunc{}}
-	s.setEntries(entries...)
-	s.Server = httptest.NewTLSServer(http.HandlerFunc(s.serve))
-	t.Cleanup(s.Close)
+	s := wellknowntest.NewServer(t, entries...)
 	previous := engine.WellKnownHTTPClient
 	engine.WellKnownHTTPClient = s.Client()
 	t.Cleanup(func() { engine.WellKnownHTTPClient = previous })
 	return s
-}
-
-// setEntries replaces what the server publishes. An entry with no Digest
-// gets the digest of its body; one with no URL is served at the conventional
-// path.
-func (s *wellKnownServer) setEntries(entries ...wellKnownEntry) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range entries {
-		if entries[i].Digest == "" {
-			sum := sha256.Sum256(entries[i].body)
-			entries[i].Digest = "sha256:" + hex.EncodeToString(sum[:])
-		}
-		if entries[i].URL == "" {
-			entries[i].URL = "/.well-known/agent-skills/" + entries[i].Name + artifactExtension(entries[i])
-		}
-	}
-	s.entries = entries
-}
-
-func artifactExtension(entry wellKnownEntry) string {
-	switch {
-	case entry.Type == "skill-md":
-		return "/SKILL.md"
-	case entry.contentType == "application/zip":
-		return ".zip"
-	default:
-		return ".tar.gz"
-	}
-}
-
-func (s *wellKnownServer) serve(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if handler, ok := s.extra[r.URL.Path]; ok {
-		handler(w, r)
-		return
-	}
-	if r.URL.Path == "/.well-known/agent-skills/index.json" {
-		index := map[string]any{"skills": s.entries}
-		if s.schema != "" {
-			index["$schema"] = s.schema
-		}
-		data, _ := json.Marshal(index)
-		sum := sha256.Sum256(data)
-		etag := `"` + hex.EncodeToString(sum[:8]) + `"`
-		// A max-age the client must not take as leave to skip asking.
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-		w.Header().Set("ETag", etag)
-		if r.Header.Get("If-None-Match") == etag {
-			s.requests = append(s.requests, r.Method+" "+r.URL.Path+" 304")
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-		s.requests = append(s.requests, r.Method+" "+r.URL.Path+" 200")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(data)
-		return
-	}
-	s.requests = append(s.requests, r.Method+" "+r.URL.Path)
-	for _, entry := range s.entries {
-		if entry.URL == r.URL.Path {
-			if entry.contentType != "" {
-				w.Header().Set("Content-Type", entry.contentType)
-			}
-			_, _ = w.Write(entry.body)
-			return
-		}
-	}
-	http.NotFound(w, r)
-}
-
-func skillMDEntry(name, description string) wellKnownEntry {
-	return skillMDBody(name, description, "---\nname: "+name+"\ndescription: "+description+"\n---\n# "+name+"\n")
-}
-
-func skillMDBody(name, description, body string) wellKnownEntry {
-	return wellKnownEntry{Name: name, Type: "skill-md", Description: description, body: []byte(body), contentType: "text/markdown"}
-}
-
-// tarEntry is one member of a test archive. A Linkname makes it a symlink.
-type tarEntry struct {
-	Name, Body, Linkname string
-	Mode                 int64
-	// Hard makes a Linkname a hard link.
-	Hard bool
-}
-
-func tarGzEntry(t *testing.T, name, description string, files ...tarEntry) wellKnownEntry {
-	t.Helper()
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	for _, f := range files {
-		header := &tar.Header{Name: f.Name, Mode: cmpMode(f.Mode), Size: int64(len(f.Body)), Typeflag: tar.TypeReg}
-		if f.Linkname != "" {
-			header.Typeflag, header.Linkname, header.Size = tar.TypeSymlink, f.Linkname, 0
-			if f.Hard {
-				header.Typeflag = tar.TypeLink
-			}
-		}
-		if strings.HasSuffix(f.Name, "/") {
-			header.Typeflag, header.Size, header.Mode = tar.TypeDir, 0, 0o755
-		}
-		if err := tw.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-		if header.Typeflag == tar.TypeReg {
-			if _, err := tw.Write([]byte(f.Body)); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return wellKnownEntry{Name: name, Type: "archive", Description: description, body: buf.Bytes(), contentType: "application/gzip"}
-}
-
-func zipEntry(t *testing.T, name, description string, files ...tarEntry) wellKnownEntry {
-	t.Helper()
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	for _, f := range files {
-		header := &zip.FileHeader{Name: f.Name, Method: zip.Deflate}
-		body := f.Body
-		if f.Linkname != "" {
-			header.SetMode(os.ModeSymlink | 0o777)
-			body = f.Linkname
-		}
-		w, err := zw.CreateHeader(header)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Write([]byte(body)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return wellKnownEntry{Name: name, Type: "archive", Description: description, body: buf.Bytes(), contentType: "application/zip"}
-}
-
-func cmpMode(mode int64) int64 {
-	if mode == 0 {
-		return 0o644
-	}
-	return mode
-}
-
-func skillDoc(name string) string {
-	return "---\nname: " + name + "\ndescription: " + name + " skill\n---\n# " + name + "\n"
 }
 
 // wellKnownScope is a Project Scope in a scratch directory, with its own
@@ -274,8 +71,8 @@ func (s wellKnownScope) stdout(t *testing.T, args ...string) (string, error) {
 
 func TestCLIAddListShowsTheSkillsAWellKnownIndexOffers(t *testing.T) {
 	server := newWellKnownServer(t,
-		skillMDEntry("recheck-lint", "Lint Markdown"),
-		tarGzEntry(t, "agents-sdk", "Build agents", tarEntry{Name: "SKILL.md", Body: skillDoc("agents-sdk")}),
+		wellknowntest.SkillMD("recheck-lint", "Lint Markdown"),
+		wellknowntest.TarGz(t, "agents-sdk", "Build agents", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("agents-sdk")}),
 	)
 	scope := newWellKnownScope(t)
 
@@ -308,14 +105,14 @@ func TestCLIAddListShowsTheSkillsAWellKnownIndexOffers(t *testing.T) {
 
 func TestCLIAddDeclaresAndMaterializesWellKnownSkillsThatSyncKeepsOffline(t *testing.T) {
 	server := newWellKnownServer(t,
-		skillMDEntry("recheck-lint", "Lint Markdown"),
-		tarGzEntry(t, "agents-sdk", "Build agents",
-			tarEntry{Name: "./"},
-			tarEntry{Name: "./SKILL.md", Body: skillDoc("agents-sdk")},
-			tarEntry{Name: "./references/api.md", Body: "# API\n"},
-			tarEntry{Name: "./scripts/run.sh", Body: "#!/bin/sh\n", Mode: 0o755},
+		wellknowntest.SkillMD("recheck-lint", "Lint Markdown"),
+		wellknowntest.TarGz(t, "agents-sdk", "Build agents",
+			wellknowntest.File{Name: "./"},
+			wellknowntest.File{Name: "./SKILL.md", Body: wellknowntest.SkillDoc("agents-sdk")},
+			wellknowntest.File{Name: "./references/api.md", Body: "# API\n"},
+			wellknowntest.File{Name: "./scripts/run.sh", Body: "#!/bin/sh\n", Mode: 0o755},
 		),
-		zipEntry(t, "zipped", "Zipped skill", tarEntry{Name: "SKILL.md", Body: skillDoc("zipped")}, tarEntry{Name: "notes/a.md", Body: "a\n"}),
+		wellknowntest.Zip(t, "zipped", "Zipped skill", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("zipped")}, wellknowntest.File{Name: "notes/a.md", Body: "a\n"}),
 	)
 	scope := newWellKnownScope(t)
 
@@ -324,9 +121,9 @@ func TestCLIAddDeclaresAndMaterializesWellKnownSkillsThatSyncKeepsOffline(t *tes
 		t.Fatalf("add --all: %v\n%s", err, out)
 	}
 	for path, want := range map[string]string{
-		"agents-sdk/SKILL.md":          skillDoc("agents-sdk"),
+		"agents-sdk/SKILL.md":          wellknowntest.SkillDoc("agents-sdk"),
 		"agents-sdk/references/api.md": "# API\n",
-		"recheck-lint/SKILL.md":        string(skillMDEntry("recheck-lint", "Lint Markdown").body),
+		"recheck-lint/SKILL.md":        string(wellknowntest.SkillMD("recheck-lint", "Lint Markdown").Body),
 		"zipped/notes/a.md":            "a\n",
 	} {
 		got, err := os.ReadFile(filepath.Join(scope.skills, filepath.FromSlash(path)))
@@ -357,7 +154,7 @@ func TestCLIAddDeclaresAndMaterializesWellKnownSkillsThatSyncKeepsOffline(t *tes
 
 	baselines := engine.OpenBaselines(scope.skills)
 	applied, ok := baselines.Applied("agents-sdk")
-	sum := sha256.Sum256(server.entries[1].body)
+	sum := sha256.Sum256(server.Entries[1].Body)
 	if !ok || applied.CacheIdentity != server.URL || applied.AppliedCommit != "sha256:"+hex.EncodeToString(sum[:]) {
 		t.Fatalf("Baseline = %+v, %v; want CacheIdentity %s and the entry digest", applied, ok, server.URL)
 	}
@@ -391,33 +188,37 @@ func TestCLIAddRefusesAWellKnownArtifactItCannotVerify(t *testing.T) {
 	zeros := strings.Repeat("\x00", 101<<20)
 	cases := []struct {
 		name  string
-		entry wellKnownEntry
+		entry wellknowntest.Entry
 		want  string
 	}{
-		{"digest mismatch", func() wellKnownEntry {
-			e := skillMDEntry("bad", "Bad")
+		{"digest mismatch", func() wellknowntest.Entry {
+			e := wellknowntest.SkillMD("bad", "Bad")
 			e.Digest = "sha256:" + strings.Repeat("0", 64)
 			return e
 		}(), "does not match its digest"},
-		{"path traversal", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "../escape.md", Body: "x"}), "climbs out"},
-		{"absolute path", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "/etc/escape.md", Body: "x"}), "not a relative path"},
-		{"symlink", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "link", Linkname: "SKILL.md"}), "not a regular file"},
-		{"hardlink", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "link", Linkname: "SKILL.md", Hard: true}), "not a regular file"},
-		{"zip traversal", zipEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "../escape.md", Body: "x"}), "climbs out"},
-		{"zip symlink", zipEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "link", Linkname: "SKILL.md"}), "not a regular file"},
-		{"no SKILL.md", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "nested/SKILL.md", Body: skillDoc("bad")}), "no SKILL.md at the archive root"},
-		{"oversized", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "big.bin", Body: zeros}), "exceeds 100 MiB"},
-		{"http redirect", func() wellKnownEntry { e := skillMDEntry("bad", "Bad"); e.URL = "/redirect-http"; return e }(), "only https:// is followed"},
-		{"unknown archive", func() wellKnownEntry {
-			e := skillMDEntry("bad", "Bad")
-			e.Type, e.contentType, e.URL = "archive", "text/plain", "/bad.bin"
+		{"path traversal", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "../escape.md", Body: "x"}), "climbs out"},
+		{"absolute path", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "/etc/escape.md", Body: "x"}), "not a relative path"},
+		{"symlink", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "link", Linkname: "SKILL.md"}), "not a regular file"},
+		{"hardlink", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "link", Linkname: "SKILL.md", Hard: true}), "not a regular file"},
+		{"zip traversal", wellknowntest.Zip(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "../escape.md", Body: "x"}), "climbs out"},
+		{"zip symlink", wellknowntest.Zip(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "link", Linkname: "SKILL.md"}), "not a regular file"},
+		{"no SKILL.md", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "nested/SKILL.md", Body: wellknowntest.SkillDoc("bad")}), "no SKILL.md at the archive root"},
+		{"oversized", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "big.bin", Body: zeros}), "exceeds 100 MiB"},
+		{"http redirect", func() wellknowntest.Entry {
+			e := wellknowntest.SkillMD("bad", "Bad")
+			e.URL = "/redirect-http"
+			return e
+		}(), "only https:// is followed"},
+		{"unknown archive", func() wellknowntest.Entry {
+			e := wellknowntest.SkillMD("bad", "Bad")
+			e.Type, e.ContentType, e.URL = "archive", "text/plain", "/bad.bin"
 			return e
 		}(), "neither .tar.gz nor .zip"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			server := newWellKnownServer(t, tc.entry)
-			server.extra["/redirect-http"] = func(w http.ResponseWriter, r *http.Request) {
+			server.Extra["/redirect-http"] = func(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "http://"+r.Host+"/.well-known/agent-skills/bad/SKILL.md", http.StatusFound)
 			}
 			scope := newWellKnownScope(t)
@@ -444,18 +245,18 @@ func TestCLIAddRefusesAWellKnownArtifactItCannotVerify(t *testing.T) {
 // only when the type is absent or generic; a redirect to https:// is
 // followed.
 func TestCLIAddReadsAWellKnownArchiveByContentTypeThenExtension(t *testing.T) {
-	zipped := zipEntry(t, "zipped", "Zipped", tarEntry{Name: "SKILL.md", Body: skillDoc("zipped")})
+	zipped := wellknowntest.Zip(t, "zipped", "Zipped", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("zipped")})
 	zipped.URL = "/.well-known/agent-skills/zipped.tar.gz"
-	generic := tarGzEntry(t, "generic", "Generic", tarEntry{Name: "SKILL.md", Body: skillDoc("generic")})
-	generic.contentType = "application/octet-stream"
-	moved := skillMDEntry("moved", "Moved")
+	generic := wellknowntest.TarGz(t, "generic", "Generic", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("generic")})
+	generic.ContentType = "application/octet-stream"
+	moved := wellknowntest.SkillMD("moved", "Moved")
 	moved.URL = "/redirect-https"
 	server := newWellKnownServer(t, zipped, generic, moved)
-	server.extra["/redirect-https"] = func(w http.ResponseWriter, r *http.Request) {
+	server.Extra["/redirect-https"] = func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/.well-known/agent-skills/moved/SKILL.md", http.StatusFound)
 	}
-	server.extra["/.well-known/agent-skills/moved/SKILL.md"] = func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(moved.body)
+	server.Extra["/.well-known/agent-skills/moved/SKILL.md"] = func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(moved.Body)
 	}
 	scope := newWellKnownScope(t)
 
@@ -475,7 +276,7 @@ func TestCLIAddReadsAWellKnownArchiveByContentTypeThenExtension(t *testing.T) {
 }
 
 func TestCLIAddRefusesWellKnownSourcesItDoesNotRead(t *testing.T) {
-	server := newWellKnownServer(t, skillMDEntry("one", "One"))
+	server := newWellKnownServer(t, wellknowntest.SkillMD("one", "One"))
 	scope := newWellKnownScope(t)
 
 	for _, tc := range []struct {
@@ -493,7 +294,7 @@ func TestCLIAddRefusesWellKnownSourcesItDoesNotRead(t *testing.T) {
 		}
 	}
 
-	server.schema = ""
+	server.Schema = ""
 	out, err := scope.run(t, "add", server.URL, "--list")
 	if ExitCode(err) != 1 || !strings.Contains(out, "v0.1.0") || !strings.Contains(out, "git repository") {
 		t.Fatalf("v0.1.0 index: add = %v (exit %d); want exit 1 naming the git Source\n%s", err, ExitCode(err), out)
@@ -501,9 +302,9 @@ func TestCLIAddRefusesWellKnownSourcesItDoesNotRead(t *testing.T) {
 }
 
 func TestCLIAddSkipsWellKnownEntriesOfAnUnknownType(t *testing.T) {
-	odd := skillMDEntry("odd", "Odd")
+	odd := wellknowntest.SkillMD("odd", "Odd")
 	odd.Type = "bundle"
-	server := newWellKnownServer(t, skillMDEntry("one", "One"), odd)
+	server := newWellKnownServer(t, wellknowntest.SkillMD("one", "One"), odd)
 	scope := newWellKnownScope(t)
 
 	out, err := scope.run(t, "add", server.URL, "--list")
@@ -516,12 +317,12 @@ func TestCLIAddSkipsWellKnownEntriesOfAnUnknownType(t *testing.T) {
 }
 
 func TestCLIOutdatedAndUpdateFollowAWellKnownSkillsDigest(t *testing.T) {
-	server := newWellKnownServer(t, skillMDEntry("one", "One"), skillMDEntry("other", "Other"))
+	server := newWellKnownServer(t, wellknowntest.SkillMD("one", "One"), wellknowntest.SkillMD("other", "Other"))
 	scope := newWellKnownScope(t)
 	if out, err := scope.run(t, "add", server.URL, "--skill", "one", "-y"); err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
 	}
-	server.requested("")
+	server.Requested("")
 
 	// An unchanged index is revalidated, whatever its max-age says, and
 	// answered 304.
@@ -529,12 +330,12 @@ func TestCLIOutdatedAndUpdateFollowAWellKnownSkillsDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outdated on an unchanged index = %v (exit %d)\n%s", err, ExitCode(err), out)
 	}
-	if got := server.requested("/"); len(got) != 1 || got[0] != "GET /.well-known/agent-skills/index.json 304" {
+	if got := server.Requested("/"); len(got) != 1 || got[0] != "GET /.well-known/agent-skills/index.json 304" {
 		t.Fatalf("outdated requests = %v; want one conditional index request answered 304", got)
 	}
 
 	// A new digest is outdated, and update brings it in.
-	server.setEntries(skillMDBody("one", "One", "# one, revised\n"), skillMDEntry("other", "Other, revised"))
+	server.SetEntries(wellknowntest.SkillMDBody("one", "One", "# one, revised\n"), wellknowntest.SkillMD("other", "Other, revised"))
 	out, err = scope.run(t, "outdated")
 	if ExitCode(err) != 1 || !strings.Contains(out, "one") || !strings.Contains(out, "changed upstream") {
 		t.Fatalf("outdated after a new digest = %v (exit %d); want exit 1 naming one\n%s", err, ExitCode(err), out)
@@ -546,12 +347,12 @@ func TestCLIOutdatedAndUpdateFollowAWellKnownSkillsDigest(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(scope.skills, "one", "SKILL.md")); string(got) != "# one, revised\n" {
 		t.Fatalf("one after update = %q\n%s", got, out)
 	}
-	for _, r := range server.requested("/.well-known/agent-skills/other") {
+	for _, r := range server.Requested("/.well-known/agent-skills/other") {
 		t.Errorf("update downloaded an undeclared Skill: %s", r)
 	}
 	applied, _ := engine.OpenBaselines(scope.skills).Applied("one")
-	if applied.AppliedCommit != server.entries[0].Digest {
-		t.Fatalf("Baseline commit = %s; want %s", applied.AppliedCommit, server.entries[0].Digest)
+	if applied.AppliedCommit != server.Entries[0].Digest {
+		t.Fatalf("Baseline commit = %s; want %s", applied.AppliedCommit, server.Entries[0].Digest)
 	}
 	if out, err := scope.run(t, "outdated"); err != nil {
 		t.Fatalf("outdated after update = %v (exit %d)\n%s", err, ExitCode(err), out)
@@ -559,12 +360,12 @@ func TestCLIOutdatedAndUpdateFollowAWellKnownSkillsDigest(t *testing.T) {
 }
 
 func TestCLIUpdateProtectsADriftedWellKnownSkillAndDiffShowsTheChange(t *testing.T) {
-	server := newWellKnownServer(t, skillMDBody("one", "One", "line one\n"))
+	server := newWellKnownServer(t, wellknowntest.SkillMDBody("one", "One", "line one\n"))
 	scope := newWellKnownScope(t)
 	if out, err := scope.run(t, "add", server.URL, "--all", "-y"); err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
 	}
-	server.setEntries(skillMDBody("one", "One", "line one\nline two\n"))
+	server.SetEntries(wellknowntest.SkillMDBody("one", "One", "line one\nline two\n"))
 
 	out, err := scope.run(t, "diff", "one", "--fetch")
 	if ExitCode(err) != 1 || !strings.Contains(out, "+line two") {
@@ -601,13 +402,13 @@ func TestCLIUpdateProtectsADriftedWellKnownSkillAndDiffShowsTheChange(t *testing
 }
 
 func TestCLIUpdateFollowsAWellKnownRenameOrReportsTheRemoval(t *testing.T) {
-	server := newWellKnownServer(t, skillMDEntry("old", "Old"), skillMDEntry("gone", "Gone"), skillMDEntry("bystander", "Bystander"))
+	server := newWellKnownServer(t, wellknowntest.SkillMD("old", "Old"), wellknowntest.SkillMD("gone", "Gone"), wellknowntest.SkillMD("bystander", "Bystander"))
 	scope := newWellKnownScope(t)
 	if out, err := scope.run(t, "add", server.URL, "--skill", "old", "--skill", "gone", "-y"); err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
 	}
-	successor := skillMDBody("new", "New", "---\nname: new\ndescription: New\nmetadata:\n  replaces: old\n---\n# new\n")
-	server.setEntries(successor, skillMDEntry("bystander", "Bystander"))
+	successor := wellknowntest.SkillMDBody("new", "New", "---\nname: new\ndescription: New\nmetadata:\n  replaces: old\n---\n# new\n")
+	server.SetEntries(successor, wellknowntest.SkillMD("bystander", "Bystander"))
 
 	out, err := scope.run(t, "update")
 	if ExitCode(err) != 1 || !strings.Contains(out, "removed_upstream") || !strings.Contains(out, "skills rm -p --cache-dir ~/cache gone") {
@@ -628,12 +429,12 @@ func TestCLIUpdateFollowsAWellKnownRenameOrReportsTheRemoval(t *testing.T) {
 	if out, err := scope.run(t, "rm", "gone"); err != nil {
 		t.Fatalf("rm gone: %v\n%s", err, out)
 	}
-	server.setEntries(successor, skillMDBody("bystander", "Bystander", "# changed\n"))
-	server.requested("")
+	server.SetEntries(successor, wellknowntest.SkillMDBody("bystander", "Bystander", "# changed\n"))
+	server.Requested("")
 	if out, err := scope.run(t, "update"); err != nil {
 		t.Fatalf("update: %v\n%s", err, out)
 	}
-	for _, r := range server.requested("/.well-known/agent-skills/bystander") {
+	for _, r := range server.Requested("/.well-known/agent-skills/bystander") {
 		t.Errorf("update downloaded an undeclared Skill with nothing to rename: %s", r)
 	}
 }
