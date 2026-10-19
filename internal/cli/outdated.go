@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -68,11 +69,14 @@ func printOutdatedReport(cmd *cobra.Command, report *engine.FreshnessSnapshot, s
 		fmt.Fprintln(out)
 		for _, skill := range repository.Skills {
 			note := ""
+			if slices.Contains(repository.Changed, skill.Subpath) {
+				note = fmt.Sprintf(" %s(changed upstream)%s", colorDim, colorReset)
+			}
 			switch {
 			case skill.Status == engine.SkillInSync && !skill.BaselineRecorded:
-				note = fmt.Sprintf(" %s(baseline not recorded)%s", colorDim, colorReset)
+				note += fmt.Sprintf(" %s(baseline not recorded)%s", colorDim, colorReset)
 			case skill.Status == engine.SkillRenamed:
-				note = fmt.Sprintf(" → %s%s%s", colorBold, skill.RenamedTo, colorReset)
+				note += fmt.Sprintf(" → %s%s%s", colorBold, skill.RenamedTo, colorReset)
 				if skill.ScopeCopy == engine.ScopeCopyDrift {
 					note += fmt.Sprintf(" %s(local changes to %s)%s", colorDim, skill.Name, colorReset)
 				}

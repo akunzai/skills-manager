@@ -31,7 +31,7 @@ type sourceCache interface {
 	// Cover puts paths on disk without fetching a new snapshot of the Source.
 	Cover(paths ...string) error
 	// withSkillFiles calls fn with a directory holding the SKILL.md of every
-	// Skill in the snapshot that is on disk.
+	// Skill in the snapshot, putting them there first if it must.
 	withSkillFiles(fn func(repoDir string) error) error
 }
 

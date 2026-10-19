@@ -101,6 +101,8 @@ func printSkillDiff(out io.Writer, d *engine.SkillDiff, stat, fetched bool, scop
 			fmt.Fprintf(out, "%sWithout the Scope state, upstream and local changes to %s cannot be told apart.%s\n", colorDim, d.Skill, colorReset)
 		case engine.NoBaselineOtherCache:
 			fmt.Fprintf(out, "%sThe Baseline of %s was applied from another Source or branch, so upstream and local changes cannot be told apart.%s\n", colorDim, d.Skill, colorReset)
+		case engine.NoBaselineNoHistory:
+			fmt.Fprintf(out, "%s%s keeps only the latest version of %s, so upstream and local changes cannot be told apart.%s\n", colorDim, d.Source, d.Skill, colorReset)
 		default:
 			fmt.Fprintf(out, "%sNo Baseline is recorded for %s, so upstream and local changes cannot be told apart.%s\n", colorDim, d.Skill, colorReset)
 		}
@@ -114,7 +116,10 @@ func printSkillDiff(out io.Writer, d *engine.SkillDiff, stat, fetched bool, scop
 	printFileDiffs(out, d.Local, stat)
 }
 
+// shortCommit abbreviates a commit, or the hex of a well-known Skill's
+// sha256 digest.
 func shortCommit(sha string) string {
+	sha = strings.TrimPrefix(sha, "sha256:")
 	return sha[:min(7, len(sha))]
 }
 

@@ -49,6 +49,16 @@ an index without `$schema` (v0.1.0, which carries no digests), `--path`,
 `--branch`, and `--url` are refused too. `skills sync` then works from the
 Cache without network access, as for a git Source.
 
+`skills outdated` revalidates the index on every run (with `If-None-Match` /
+`If-Modified-Since` when the publisher sent validators; a `max-age` never
+skips the request) and marks each declared Skill whose digest changed.
+`skills update` downloads only those, and `skills diff <skill>` compares the
+Scope copy with the refreshed Cache copy; the Cache keeps only the latest
+artifact, so upstream and local changes are not told apart. When a declared
+Skill leaves the index, Update reads the other entries' `SKILL.md` for one
+whose `metadata.replaces` names it and follows that Rename; with none, the
+Skill is reported as removed upstream and `skills rm` is the way out.
+
 ## Global or project-local
 
 Global is the default. Project mode keeps the declaration beside the code so a team can reproduce it after cloning.

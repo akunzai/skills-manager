@@ -24,6 +24,10 @@ const (
 	// NoBaselineOtherCache is a Baseline applied from another Source or
 	// Cache, whose commit this Cache need not have.
 	NoBaselineOtherCache NoBaselineReason = "other_cache"
+	// NoBaselineNoHistory is a Baseline from a Cache that keeps no earlier
+	// version to diff from: a well-known Source's holds only its latest
+	// artifact.
+	NoBaselineNoHistory NoBaselineReason = "no_history"
 )
 
 // FileDiff is one file's part of a unified patch.
@@ -73,7 +77,7 @@ func DiffSkill(cfg *config.Config, name, skillsDir, cacheDir string) (*SkillDiff
 	}
 	repo := cfg.Remote[source]
 	subpath := repo.Skills[name]
-	cache := NewCache(source, repo.URL, repo.Branch, cacheDir)
+	cache := openSourceCache(source, repo, cacheDir)
 	cacheRepoDir := cache.dir()
 	head := cache.head()
 	if head == "" {
@@ -85,7 +89,8 @@ func DiffSkill(cfg *config.Config, name, skillsDir, cacheDir string) (*SkillDiff
 		return nil, NextCommand{Reason: fmt.Sprintf("Cache for Source %s does not cover %s", source, name), Command: "diff --fetch " + name}
 	}
 
-	d := &SkillDiff{Skill: name, Source: source, Subpath: subpath, ScopePath: filepath.Join(skillsDir, name), CacheCommit: head}
+	d := &SkillDiff{Skill: name, Source: source, Subpath: subpath, ScopePath: filepath.Join(skillsDir, name), CacheCommit: cache.appliedCommit(subpath)}
+	git, versioned := cache.(Cache)
 	baselines := OpenBaselines(skillsDir)
 	applied, recorded := baselines.Applied(name)
 	switch {
@@ -93,8 +98,10 @@ func DiffSkill(cfg *config.Config, name, skillsDir, cacheDir string) (*SkillDiff
 		d.NoBaseline, d.StateError = NoBaselineStateUnreadable, baselines.Err().Error()
 	case !recorded || applied.AppliedCommit == "":
 		d.NoBaseline = NoBaselineNotRecorded
-	case applied.Source != source || applied.CacheIdentity != cacheRepoDir:
+	case applied.Source != source || applied.CacheIdentity != cache.identity():
 		d.NoBaseline = NoBaselineOtherCache
+	case !versioned:
+		d.NoBaseline = NoBaselineNoHistory
 	default:
 		d.BaselineCommit = applied.AppliedCommit
 	}
@@ -114,12 +121,12 @@ func DiffSkill(cfg *config.Config, name, skillsDir, cacheDir string) (*SkillDiff
 		return d, err
 	}
 
-	patch, err := cache.diffCommits(d.BaselineCommit, head, subpath)
+	patch, err := git.diffCommits(d.BaselineCommit, head, subpath)
 	if err != nil {
 		return nil, err
 	}
 	d.Upstream = parsePatch(patch)
-	fromBaseline := func(rel string) ([]byte, error) { return cache.readBlob(d.BaselineCommit, path.Join(subpath, rel)) }
+	fromBaseline := func(rel string) ([]byte, error) { return git.readBlob(d.BaselineCommit, path.Join(subpath, rel)) }
 	d.Local, err = diffFiles(applied.ContentDigests, fromBaseline, scope, fromScope)
 	return d, err
 }

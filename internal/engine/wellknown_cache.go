@@ -67,11 +67,13 @@ type wellKnownIndex struct {
 }
 
 // wellKnownState is what a WellKnownCache knows beyond the index: the digest
-// of the index it holds, and of the artifact each Skill on disk was unpacked
-// from.
+// of the index it holds and the validators its response carried, and the
+// digest of the artifact each Skill on disk was unpacked from.
 type wellKnownState struct {
-	Index   string            `json:"index"`
-	Covered map[string]string `json:"covered,omitempty"`
+	Index        string            `json:"index"`
+	ETag         string            `json:"etag,omitempty"`
+	LastModified string            `json:"last_modified,omitempty"`
+	Covered      map[string]string `json:"covered,omitempty"`
 }
 
 // WellKnownCache is one well-known Source's Cache: its last index, and the
@@ -184,11 +186,65 @@ func (c WellKnownCache) appliedCommit(subpath string) string {
 
 func (c WellKnownCache) where() string { return "" }
 
-func (c WellKnownCache) observe(...string) cacheFacts {
-	return cacheFacts{source: c.source, url: c.base, dir: c.dir(), localSHA: c.head(), cache: c, err: "observing a well-known Source is not supported yet"}
+// observe asks the publisher for its index, revalidating the one this Cache
+// holds. Only the Skills of paths are compared: localSHA and remoteSHA
+// fingerprint their digests on disk and in the index, and changed names
+// those that differ. It writes nothing.
+func (c WellKnownCache) observe(paths ...string) cacheFacts {
+	facts := cacheFacts{source: c.source, url: c.base, dir: c.dir(), cache: c}
+	if c.head() == "" {
+		return facts
+	}
+	state := c.state()
+	facts.localSHA = digestFingerprint(paths, state.Covered)
+	remote, err := c.fetchIndex(false)
+	if err != nil {
+		facts.err = err.Error()
+		return facts
+	}
+	entries := remote.entries
+	if remote.notModified {
+		entries, _ = c.index()
+	}
+	digests := make(map[string]string, len(entries))
+	for name, entry := range entries {
+		digests[name] = entry.Digest
+	}
+	facts.remoteSHA = digestFingerprint(paths, digests)
+	// A Skill not on disk yet is missing, not changed.
+	for _, name := range slices.Sorted(slices.Values(paths)) {
+		if covered, ok := state.Covered[name]; ok && covered != digests[name] {
+			facts.changed = append(facts.changed, name)
+		}
+	}
+	if coverage, err := c.coverage(); err == nil {
+		facts.missing = coverage.missing(paths)
+	}
+	return facts
 }
 
+// digestFingerprint names the digests of the Skills of paths, one in digests
+// each, as one value: two fingerprints differ when any of those digests do.
+func digestFingerprint(paths []string, digests map[string]string) string {
+	h := sha256.New()
+	for _, name := range slices.Sorted(slices.Values(paths)) {
+		fmt.Fprintf(h, "%s\x00%s\n", name, digests[name])
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// withSkillFiles covers every Skill the index lists, so a Rename the
+// publisher declares in any of them can be found, then calls fn with the
+// directory they are on. Only Update calls it, and only once a declared
+// Skill has left the index (ADR-0007).
 func (c WellKnownCache) withSkillFiles(fn func(repoDir string) error) error {
+	entries, ok := c.index()
+	if !ok {
+		return fmt.Errorf("no index cached for %s", c.source)
+	}
+	if err := c.Cover(slices.Sorted(maps.Keys(entries))...); err != nil {
+		return err
+	}
 	return fn(c.dir())
 }
 
@@ -197,23 +253,78 @@ func (c WellKnownCache) Refresh(force bool, paths ...string) error {
 	return c.RefreshWithProgress(force, nil, paths...)
 }
 
-func (c WellKnownCache) RefreshWithProgress(_ bool, _ UpdateProgress, paths ...string) error {
-	body, err := wellKnownGet(c.indexURL(), wellKnownIndexLimit)
+// RefreshWithProgress revalidates the index, unless force asks for it whole,
+// stores a changed one, drops the Skills it no longer lists, and covers
+// paths. A Cache-Control max-age never skips the request: an explicit
+// command always asks the publisher.
+func (c WellKnownCache) RefreshWithProgress(force bool, _ UpdateProgress, paths ...string) error {
+	remote, err := c.fetchIndex(force)
 	if err != nil {
-		return fmt.Errorf("fetch index of %s: %w", c.source, err)
-	}
-	if err := parseWellKnownIndex(c.indexURL(), body.data); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(c.indexPath(), body.data); err != nil {
-		return err
-	}
-	state := c.state()
-	state.Index = artifactDigest(body.data)
-	if err := c.saveState(state); err != nil {
-		return err
+	if !remote.notModified {
+		if err := writeFileAtomic(c.indexPath(), remote.data); err != nil {
+			return err
+		}
+		state := c.state()
+		state.Index = artifactDigest(remote.data)
+		state.ETag, state.LastModified = remote.etag, remote.lastModified
+		for name := range state.Covered {
+			if _, listed := remote.entries[name]; !listed {
+				if err := RemoveAll(filepath.Join(c.dir(), name)); err != nil {
+					return err
+				}
+				delete(state.Covered, name)
+			}
+		}
+		if err := c.saveState(state); err != nil {
+			return err
+		}
 	}
 	return c.Cover(paths...)
+}
+
+// remoteIndex is the publisher's answer to an index request: notModified
+// when it confirmed the cached index, else the index it sent, its usable
+// entries by name, and its validators.
+type remoteIndex struct {
+	notModified        bool
+	data               []byte
+	entries            map[string]wellKnownEntry
+	etag, lastModified string
+}
+
+// fetchIndex requests the index, conditionally on the validators of the one
+// this Cache holds unless unconditional.
+func (c WellKnownCache) fetchIndex(unconditional bool) (remoteIndex, error) {
+	header := http.Header{}
+	if state := c.state(); !unconditional && c.head() != "" {
+		if state.ETag != "" {
+			header.Set("If-None-Match", state.ETag)
+		}
+		if state.LastModified != "" {
+			header.Set("If-Modified-Since", state.LastModified)
+		}
+	}
+	body, err := wellKnownRequest(c.indexURL(), wellKnownIndexLimit, header)
+	if err != nil {
+		return remoteIndex{}, fmt.Errorf("fetch index of %s: %w", c.source, err)
+	}
+	if body.notModified {
+		return remoteIndex{notModified: true}, nil
+	}
+	if err := parseWellKnownIndex(c.indexURL(), body.data); err != nil {
+		return remoteIndex{}, err
+	}
+	usable, _, err := parseWellKnownEntries(body.data)
+	if err != nil {
+		return remoteIndex{}, err
+	}
+	entries := make(map[string]wellKnownEntry, len(usable))
+	for _, entry := range usable {
+		entries[entry.Name] = entry
+	}
+	return remoteIndex{data: body.data, entries: entries, etag: body.etag, lastModified: body.lastModified}, nil
 }
 
 // Cover downloads, verifies, and unpacks each entry of paths the index names
@@ -351,6 +462,12 @@ func (c WellKnownCache) wellKnownEntries() ([]wellKnownEntry, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	return parseWellKnownEntries(data)
+}
+
+// parseWellKnownEntries is the usable entries of an index, the first of each
+// name, and why each other one was skipped.
+func parseWellKnownEntries(data []byte) ([]wellKnownEntry, []string, error) {
 	var index wellKnownIndex
 	if err := json.Unmarshal(data, &index); err != nil {
 		return nil, nil, err
@@ -393,11 +510,19 @@ func resolveWellKnownURL(indexURL, ref string) (string, error) {
 type wellKnownBody struct {
 	data        []byte
 	contentType string
+	// notModified is a 304 to a conditional request, with no body.
+	notModified        bool
+	etag, lastModified string
 }
 
 // wellKnownGet fetches rawURL, refusing a body over limit bytes and a
 // redirect anywhere but https://.
 func wellKnownGet(rawURL string, limit int64) (wellKnownBody, error) {
+	return wellKnownRequest(rawURL, limit, nil)
+}
+
+// wellKnownRequest is wellKnownGet with header added to the request.
+func wellKnownRequest(rawURL string, limit int64, header http.Header) (wellKnownBody, error) {
 	client := *WellKnownHTTPClient
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != "https" {
@@ -408,11 +533,19 @@ func wellKnownGet(rawURL string, limit int64) (wellKnownBody, error) {
 		}
 		return nil
 	}
-	resp, err := client.Get(rawURL)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return wellKnownBody{}, err
+	}
+	maps.Copy(req.Header, header)
+	resp, err := client.Do(req)
 	if err != nil {
 		return wellKnownBody{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotModified && len(header) > 0 {
+		return wellKnownBody{notModified: true}, nil
+	}
 	if resp.StatusCode != http.StatusOK {
 		return wellKnownBody{}, fmt.Errorf("GET %s: %s", rawURL, resp.Status)
 	}
@@ -423,7 +556,7 @@ func wellKnownGet(rawURL string, limit int64) (wellKnownBody, error) {
 	if int64(len(data)) > limit {
 		return wellKnownBody{}, refuse("GET %s: larger than %d MiB", rawURL, limit>>20)
 	}
-	return wellKnownBody{data: data, contentType: resp.Header.Get("Content-Type")}, nil
+	return wellKnownBody{data: data, contentType: resp.Header.Get("Content-Type"), etag: resp.Header.Get("ETag"), lastModified: resp.Header.Get("Last-Modified")}, nil
 }
 
 // archiveFormat is "tar.gz" or "zip": from the Content-Type, else, when it
