@@ -167,6 +167,13 @@ func (c WellKnownCache) atHead(subpath string) headEntry {
 	return headEntry{id: entry.Digest, dir: true}
 }
 
+// unsignable reports whether the entry named subpath is a single SKILL.md,
+// which has nowhere to carry a signature.
+func (c WellKnownCache) unsignable(subpath string) bool {
+	entries, _ := c.index()
+	return entries[subpath].Type == "skill-md"
+}
+
 // coverage covers the Skills unpacked on disk.
 func (c WellKnownCache) coverage() (sparseState, error) {
 	state := sparseState{enabled: true, cone: true}

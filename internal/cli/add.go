@@ -267,7 +267,7 @@ func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL,
 // is refused (exit 1) before the network is reached.
 func wellKnownSource(cmd *cobra.Command, raw string) (models.WellKnownSource, error) {
 	source, _ := models.ParseWellKnownSource(raw)
-	for _, flag := range []string{"path", "branch", "url", "trust-cert"} {
+	for _, flag := range []string{"path", "branch", "url"} {
 		if cmd.Flags().Changed(flag) {
 			return source, refuseAdd(cmd, fmt.Sprintf("--%s does not apply to a well-known Source", flag), "")
 		}
@@ -410,7 +410,7 @@ func newAddCmd() *cobra.Command {
 				return err
 			}
 
-			if flagTrustCert != "" && (kind != engine.AddSourceRemote || flagList) {
+			if flagTrustCert != "" && ((kind != engine.AddSourceRemote && kind != engine.AddSourceWellKnown) || flagList) {
 				cmd.SilenceUsage = false
 				return fmt.Errorf("--trust-cert applies only when adding Skills from a remote Source")
 			}
@@ -471,11 +471,15 @@ func newAddCmd() *cobra.Command {
 				}
 				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, cfg: cfg, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert}), scopeFlagsOf(cmd, scope))
 			case engine.AddSourceWellKnown:
+				trustCert, err := config.StoreTrustCertPath(flagTrustCert, scope.ConfigPath)
+				if err != nil {
+					return err
+				}
 				intake, err := newWellKnownIntake(cmd, wellKnown, cacheDir)
 				if err != nil {
 					return err
 				}
-				err = intake.run(cmd, addRequest{scope: scope, cfg: cfg, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents})
+				err = intake.run(cmd, addRequest{scope: scope, cfg: cfg, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert})
 				return withScopeFlags(wellKnownRefusal(cmd, err), scopeFlagsOf(cmd, scope))
 			default:
 				return fmt.Errorf("unsupported Add Source kind %q", kind)
