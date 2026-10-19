@@ -74,9 +74,9 @@ func printOutdatedReport(cmd *cobra.Command, report *engine.FreshnessSnapshot, s
 			}
 			switch {
 			case skill.Status == engine.SkillInSync && !skill.BaselineRecorded:
-				note = fmt.Sprintf(" %s(baseline not recorded)%s", colorDim, colorReset)
+				note += fmt.Sprintf(" %s(baseline not recorded)%s", colorDim, colorReset)
 			case skill.Status == engine.SkillRenamed:
-				note = fmt.Sprintf(" → %s%s%s", colorBold, skill.RenamedTo, colorReset)
+				note += fmt.Sprintf(" → %s%s%s", colorBold, skill.RenamedTo, colorReset)
 				if skill.ScopeCopy == engine.ScopeCopyDrift {
 					note += fmt.Sprintf(" %s(local changes to %s)%s", colorDim, skill.Name, colorReset)
 				}

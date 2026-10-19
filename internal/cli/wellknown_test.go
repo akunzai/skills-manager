@@ -582,13 +582,21 @@ func TestCLIUpdateProtectsADriftedWellKnownSkillAndDiffShowsTheChange(t *testing
 	if got, _ := os.ReadFile(scopeCopy); string(got) != "my edit\n" {
 		t.Fatalf("update overwrote the Drifted copy: %q", got)
 	}
-	// As for a git Source, only Sync's --force overwrites a local edit.
+	// As for a git Source, Update's --force refetches but keeps a local
+	// edit; only Sync's --force overwrites it.
+	out, err = scope.run(t, "update", "--force")
+	if ExitCode(err) != 1 {
+		t.Fatalf("update --force over Drift = %v (exit %d); want exit 1\n%s", err, ExitCode(err), out)
+	}
+	if got, _ := os.ReadFile(scopeCopy); string(got) != "my edit\n" {
+		t.Fatalf("update --force overwrote the Drifted copy: %q", got)
+	}
 	out, err = scope.run(t, "sync", "--force")
 	if err != nil {
 		t.Fatalf("sync --force: %v\n%s", err, out)
 	}
 	if got, _ := os.ReadFile(scopeCopy); string(got) != "line one\nline two\n" {
-		t.Fatalf("one after update --force = %q", got)
+		t.Fatalf("one after sync --force = %q", got)
 	}
 }
 

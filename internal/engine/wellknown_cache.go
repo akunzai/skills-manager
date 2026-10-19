@@ -211,8 +211,9 @@ func (c WellKnownCache) observe(paths ...string) cacheFacts {
 		digests[name] = entry.Digest
 	}
 	facts.remoteSHA = digestFingerprint(paths, digests)
+	// A Skill not on disk yet is missing, not changed.
 	for _, name := range slices.Sorted(slices.Values(paths)) {
-		if state.Covered[name] != digests[name] {
+		if covered, ok := state.Covered[name]; ok && covered != digests[name] {
 			facts.changed = append(facts.changed, name)
 		}
 	}
