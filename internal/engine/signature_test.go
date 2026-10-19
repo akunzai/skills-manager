@@ -257,12 +257,12 @@ func addSignedFixture(t *testing.T) (cfg *config.Config, configPath, skillsDir, 
 func stubTrustedRoot(t *testing.T) *int {
 	t.Helper()
 	fetches := 0
-	previous := fetchTrustedRoot
-	fetchTrustedRoot = func(string) ([]byte, error) {
+	previous := FetchTrustedRoot
+	FetchTrustedRoot = func(string) ([]byte, error) {
 		fetches++
 		return []byte(`{"mediaType":"application/vnd.dev.sigstore.trustedroot+json;version=0.1"}`), nil
 	}
-	t.Cleanup(func() { fetchTrustedRoot = previous })
+	t.Cleanup(func() { FetchTrustedRoot = previous })
 	return &fetches
 }
 
@@ -489,12 +489,12 @@ func TestSyncBlocksARenameToAnUnverifiedSkill(t *testing.T) {
 func failingTrustedRoot(t *testing.T) (reachable func(), fetches *int) {
 	t.Helper()
 	fetches = stubTrustedRoot(t)
-	succeed := fetchTrustedRoot
-	fetchTrustedRoot = func(cacheDir string) ([]byte, error) {
+	succeed := FetchTrustedRoot
+	FetchTrustedRoot = func(cacheDir string) ([]byte, error) {
 		*fetches++
 		return nil, errors.New("tuf.sigstore.dev unreachable")
 	}
-	return func() { fetchTrustedRoot = succeed }, fetches
+	return func() { FetchTrustedRoot = succeed }, fetches
 }
 
 // verifiedOnlyWithTrustRoot verifies a Skill as signed once the trust root is

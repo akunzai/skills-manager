@@ -48,9 +48,9 @@ func trustRootPath(cacheDir string) string {
 // policy without real signatures, which internal/signing's tests cover.
 var verifySkill = signing.Verify
 
-// fetchTrustedRoot fetches the Sigstore public-good trust root through TUF.
-// Tests replace it: they must not reach the network.
-var fetchTrustedRoot = func(cacheDir string) ([]byte, error) {
+// FetchTrustedRoot fetches the Sigstore public-good trust root through TUF.
+// Engine and CLI tests replace it: they must not reach the network.
+var FetchTrustedRoot = func(cacheDir string) ([]byte, error) {
 	opts := tuf.DefaultOptions().WithCachePath(filepath.Join(trustRootDir(cacheDir), "tuf"))
 	trusted, err := root.FetchTrustedRootWithOptions(opts)
 	if err != nil {
@@ -62,7 +62,7 @@ var fetchTrustedRoot = func(cacheDir string) ([]byte, error) {
 // RefreshTrustRoot fetches the Sigstore trust root into the Cache directory,
 // where Sync reads it without network access (ADR-0004).
 func RefreshTrustRoot(cacheDir string) error {
-	data, err := fetchTrustedRoot(cacheDir)
+	data, err := FetchTrustedRoot(cacheDir)
 	if err != nil {
 		return fmt.Errorf("fetch Sigstore trust root: %w", err)
 	}
@@ -247,7 +247,11 @@ func (p *remotePlanner) verify(item *SyncPlanItem) {
 		applied, _ := p.baselines.Applied(item.Name)
 		switch {
 		case policy != nil && policy.Require:
-			p.fail(item, fmt.Sprintf("unsigned, and Source %s requires signatures", item.Source))
+			reason := fmt.Sprintf("unsigned, and Source %s requires signatures", item.Source)
+			if wellKnown, ok := item.cache.(WellKnownCache); ok && wellKnown.unsignable(item.Freshness.Subpath) {
+				reason += "; a single SKILL.md entry cannot carry a signature"
+			}
+			p.fail(item, reason)
 		case applied.Signed:
 			p.fail(item, "unsigned, but it was signed when last applied")
 		}

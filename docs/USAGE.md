@@ -47,7 +47,8 @@ root, with `SKILL.md` at the root, within 100 MiB. Anything else is refused
 with exit `1` and nothing is written. Only `https://` is read, so `http://`,
 an index without `$schema` (v0.1.0, which carries no digests), `--path`,
 `--branch`, and `--url` are refused too. `skills sync` then works from the
-Cache without network access, as for a git Source.
+Cache without network access, as for a git Source. A signed archive is
+verified as in [Signed skills](SIGNING.md).
 
 `skills outdated` revalidates the index on every run (with `If-None-Match` /
 `If-Modified-Since` when the publisher sent validators; a `max-age` never
