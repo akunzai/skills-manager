@@ -52,7 +52,7 @@ func findReplacements(repoDir string, removed []string, accept func(subpath stri
 
 // removedSubpaths is the declared Skills whose subpath the Cache's commit no
 // longer has.
-func removedSubpaths(cache Cache, skills map[string]string) []string {
+func removedSubpaths(cache sourceCache, skills map[string]string) []string {
 	var removed []string
 	for _, name := range sortedSkillKeys(skills) {
 		if !cache.atHead(skills[name]).exists() {
@@ -66,7 +66,7 @@ func removedSubpaths(cache Cache, skills map[string]string) []string {
 // from the Cache's commit and covers their subpaths. Update runs this after a
 // refresh: reading SKILL.md files outside the sparse checkout may download
 // them, which Sync must never do (ADR 0004). It returns what it covered.
-func coverReplacements(cache Cache, skills map[string]string) (map[string]Replacement, error) {
+func coverReplacements(cache sourceCache, skills map[string]string) (map[string]Replacement, error) {
 	removed := removedSubpaths(cache, skills)
 	if len(removed) == 0 {
 		return nil, nil

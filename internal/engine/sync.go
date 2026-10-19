@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -276,7 +277,7 @@ func applyRemoteItem(availability *Availability, skillsDir string, item SyncPlan
 	}
 	// An unreadable Scope state is the Scope's verdict, which Apply reports
 	// once in State, not a failure of each Skill.
-	if err := baselines.Record(item.Freshness, item.CachePath, item.LocalSHA, item.Signed, item.Unverified); err != nil && !errors.Is(err, ErrNotRecorded) {
+	if err := baselines.Record(item.Freshness, cmp.Or(item.cacheIdentity, item.CachePath), item.LocalSHA, item.Signed, item.Unverified); err != nil && !errors.Is(err, ErrNotRecorded) {
 		emitSync(emit, SyncEvent{Kind: SyncStateFailed, Source: item.Source, Skill: item.Name, Err: err})
 		return SyncFailed, err
 	}

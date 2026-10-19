@@ -58,7 +58,7 @@ type FreshnessRepository struct {
 
 	// cache is the Cache observed, which Scope observation asks what its head
 	// holds and covers.
-	cache Cache
+	cache sourceCache
 }
 
 type FreshnessSnapshot struct {
@@ -192,10 +192,12 @@ func InspectFreshness(cfg *config.Config, skillsDir, cacheDir string, options Fr
 	} else {
 		for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
 			repo := cfg.Remote[source]
-			cache := NewCache(source, repo.URL, repo.Branch, cacheDir)
-			snapshot.Repositories = append(snapshot.Repositories, FreshnessRepository{
-				Source: source, URL: cache.url, Branch: cache.resolvedBranch(), CachePath: cache.dir(), LocalSHA: cache.head(), cache: cache,
-			})
+			cache := openSourceCache(source, repo, cacheDir)
+			repository := FreshnessRepository{Source: source, URL: repo.URL, CachePath: cache.dir(), LocalSHA: cache.head(), cache: cache}
+			if git, ok := cache.(Cache); ok {
+				repository.URL, repository.Branch = git.url, git.resolvedBranch()
+			}
+			snapshot.Repositories = append(snapshot.Repositories, repository)
 		}
 	}
 	if !options.ObserveScope {
@@ -221,7 +223,7 @@ func attachScopeObservations(snapshot *FreshnessSnapshot, cfg *config.Config, sk
 		coverage, coverageErr := cache.coverage()
 		for _, name := range sortedSkillKeys(repoInfo.Skills) {
 			applied, _ := baselines.Applied(name)
-			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cachePath, skillsDir, applied)
+			skill := classifyRemoteSkill(source, name, repoInfo.Skills[name], cachePath, cache.identity(), skillsDir, applied)
 			if snapshot.Repositories[i].LocalSHA != "" && coverageErr == nil && len(coverage.missing([]string{skill.Subpath})) > 0 {
 				skill.Status = SkillNotCached
 			}
@@ -309,7 +311,7 @@ func forEachBounded[T any](items []T, workers int, fn func(int, T)) {
 }
 
 func observeRemoteSource(source string, repo config.RemoteRepo, cacheDir string) FreshnessRepository {
-	return freshnessFromCache(NewCache(source, repo.URL, repo.Branch, cacheDir).observe(declaredSubpaths(repo)...))
+	return freshnessFromCache(openSourceCache(source, repo, cacheDir).observe(declaredSubpaths(repo)...))
 }
 
 func freshnessFromCache(f cacheFacts) FreshnessRepository {
@@ -342,7 +344,9 @@ func freshnessFromCache(f cacheFacts) FreshnessRepository {
 	}
 }
 
-func classifyRemoteSkill(source, name, subpath, cacheDir, skillsDir string, applied AppliedSkillState) SkillFreshness {
+// classifyRemoteSkill compares a Skill's Scope copy with its copy in the
+// Cache at cacheDir, whose Baselines record cacheIdentity.
+func classifyRemoteSkill(source, name, subpath, cacheDir, cacheIdentity, skillsDir string, applied AppliedSkillState) SkillFreshness {
 	result := SkillFreshness{Name: name, Source: source, Subpath: subpath, ScopePath: filepath.Join(skillsDir, name), CachePath: filepath.Join(cacheDir, filepath.FromSlash(subpath)), BaselineRecorded: applied.Source != ""}
 	cacheDigests, err := DigestSkillContent(result.CachePath)
 	if errors.Is(err, os.ErrNotExist) || os.IsNotExist(rootPathError(err)) {
@@ -367,7 +371,7 @@ func classifyRemoteSkill(source, name, subpath, cacheDir, skillsDir string, appl
 	result.Changes = compareDigestMaps(scopeDigests, cacheDigests)
 	if maps.Equal(scopeDigests, cacheDigests) {
 		result.Status = SkillInSync
-	} else if !result.BaselineRecorded || applied.CacheIdentity != cacheDir {
+	} else if !result.BaselineRecorded || applied.CacheIdentity != cacheIdentity {
 		result.Status = SkillUnknownBaseline
 	} else if applied.Source == source && maps.Equal(scopeDigests, applied.ContentDigests) {
 		result.Status = SkillCacheUpdateAvailable

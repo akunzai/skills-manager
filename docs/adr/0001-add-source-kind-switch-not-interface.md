@@ -12,3 +12,7 @@
 
 - A fourth `AddSourceKind` is actually proposed, not merely hypothetical.
 - The conflict-detection switch in `BuildAddPlan` itself becomes a real pain point independent of this decision.
+
+## Revisited: the well-known Source
+
+A fourth kind, `well-known`, arrived with #319 and was weighed against the interface. The switch is kept (ADR-0013): a well-known Source reuses Remote intake whole, so each switch gains one case that delegates to the remote path, and the conflict-detection switch this ADR names is unchanged.

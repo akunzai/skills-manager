@@ -80,7 +80,10 @@ type SyncPlanItem struct {
 	Freshness SkillFreshness
 	CachePath string
 	LocalSHA  string
-	cache     Cache
+	cache     sourceCache
+	// cacheIdentity is what the Skill's Baseline records it was applied
+	// from.
+	cacheIdentity string
 	// NeedsWrite is set when the Cache is not known to match the Scope copy.
 	NeedsWrite bool
 	// RenameTargetDeclared is set on a rename whose new name the Scope
@@ -217,22 +220,23 @@ func PlanSync(cfg *config.Config, scope models.Scope) (*SyncPlan, error) {
 // baseRemoteItem is the part of a remote item every plan shares; only
 // planRemoteItem and remotePlanner call it. It asks cache where it is and
 // which commit it has checked out.
-func baseRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+func baseRemoteItem(source string, cache sourceCache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	return SyncPlanItem{
-		Name:      skill.Name,
-		Kind:      config.SkillRemote,
-		Source:    source,
-		Drift:     drift,
-		Freshness: skill,
-		CachePath: cache.dir(),
-		LocalSHA:  cache.head(),
-		cache:     cache,
+		Name:          skill.Name,
+		Kind:          config.SkillRemote,
+		Source:        source,
+		Drift:         drift,
+		Freshness:     skill,
+		CachePath:     cache.dir(),
+		LocalSHA:      cache.appliedCommit(skill.Subpath),
+		cache:         cache,
+		cacheIdentity: cache.identity(),
 	}
 }
 
 // planRemoteItem is what a declared remote Skill's classified Freshness
 // alone says Sync should do; remotePlanner.reconcile adds its signature.
-func planRemoteItem(source string, cache Cache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
+func planRemoteItem(source string, cache sourceCache, skill SkillFreshness, drift AvailabilityDrift) SyncPlanItem {
 	item := baseRemoteItem(source, cache, skill, drift)
 	item.NeedsWrite = skill.Status == SkillMissing || skill.Status == SkillCacheUpdateAvailable || skill.Status == SkillUnknownBaseline
 	switch skill.Status {
@@ -244,15 +248,7 @@ func planRemoteItem(source string, cache Cache, skill SkillFreshness, drift Avai
 	switch skill.Status {
 	case SkillRemovedUpstream:
 		item.Block = SyncBlockRemovedUpstream
-		branch := cache.resolvedBranch()
-		branchDesc := ""
-		if branch != "" {
-			if cache.branch != "" {
-				branchDesc = fmt.Sprintf(" (branch %s)", branch)
-			} else {
-				branchDesc = fmt.Sprintf(" (default branch %s)", branch)
-			}
-		}
+		branchDesc := cache.where()
 		if skill.Subpath != "" && skill.Subpath != "." {
 			item.BlockReason = fmt.Sprintf("subpath %q not in Source %s%s", skill.Subpath, source, branchDesc)
 		} else {

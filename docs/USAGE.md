@@ -28,6 +28,27 @@ nothing: no Config, Scope skills directory, or Agent directory is written.
 skills add microsoft/azure-skills --path skills --list
 ```
 
+## Well-known Sources
+
+A publisher that serves an [Agent Skills Discovery](https://github.com/cloudflare/agent-skills-discovery-rfc)
+index (v0.2.0) is a Source too. Name its site, or the index itself:
+
+```sh
+skills add https://redocly.com --list
+skills add https://developers.cloudflare.com --skill agents-sdk
+skills add https://example.com/docs/.well-known/agent-skills/index.json --list
+```
+
+A URL with no path, or one ending in `/.well-known/agent-skills/index.json`,
+is a well-known Source; any other URL stays a git Source. Each Skill is
+downloaded only once declared, verified against the digest its index names,
+and an archive is unpacked only when every member is a plain file under its
+root, with `SKILL.md` at the root, within 100 MiB. Anything else is refused
+with exit `1` and nothing is written. Only `https://` is read, so `http://`,
+an index without `$schema` (v0.1.0, which carries no digests), `--path`,
+`--branch`, and `--url` are refused too. `skills sync` then works from the
+Cache without network access, as for a git Source.
+
 ## Global or project-local
 
 Global is the default. Project mode keeps the declaration beside the code so a team can reproduce it after cloning.

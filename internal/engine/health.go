@@ -364,7 +364,7 @@ func (d *Doctor) trust(baselines *Baselines) (unverified []UnverifiedSkill, stal
 		if repo.Signature == nil {
 			continue
 		}
-		cache := NewCache(source, repo.URL, repo.Branch, d.scope.CacheDir)
+		cache := openSourceCache(source, repo, d.scope.CacheDir)
 		for _, name := range slices.Sorted(maps.Keys(repo.Signature.Trusted)) {
 			subpath, declared := repo.Skills[name]
 			if !declared {

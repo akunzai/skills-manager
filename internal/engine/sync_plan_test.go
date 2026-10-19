@@ -465,7 +465,7 @@ func TestPlanDeclaredRemoteItemIsAlwaysWritten(t *testing.T) {
 	want := SyncPlanItem{
 		Name: "sample", Kind: config.SkillRemote, Source: "owner/repo",
 		Drift: drift, Freshness: skill, CachePath: cache.dir(), LocalSHA: head, cache: cache,
-		NeedsWrite: true,
+		cacheIdentity: cache.dir(), NeedsWrite: true,
 	}
 	if !reflect.DeepEqual(item, want) {
 		t.Fatalf("item = %+v; want %+v", item, want)

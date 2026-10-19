@@ -21,6 +21,11 @@ type AvailabilityOverride struct {
 	Exclude []string `json:"exclude,omitempty"`
 }
 
+// WellKnownType is the RemoteRepo type of a Source served through a
+// well-known index: URL is its base URL, each Skill maps to its index entry
+// name, and it has no branch.
+const WellKnownType = "well-known"
+
 type RemoteRepo struct {
 	Type   string            `json:"type"`
 	URL    string            `json:"url,omitempty"`
@@ -199,6 +204,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	for key, repo := range cfg.Remote {
 		if p := repo.Signature; p != nil && p.Sigstore != nil && p.CertificateChain != "" {
 			return nil, fmt.Errorf("invalid signature for Source %q: sigstore and certificateChain are exclusive", key)
+		}
+		if repo.Type == WellKnownType && (repo.URL == "" || repo.Branch != "") {
+			return nil, fmt.Errorf("invalid well-known Source %q: it needs a url and has no branch", key)
 		}
 	}
 

@@ -46,28 +46,28 @@
     },
     "remote": {
       "type": "object",
-      "description": "Remote Git/GitHub skill repositories",
+      "description": "Remote Sources: Git/GitHub/GitLab repositories, and Sources served through an Agent Skills Discovery well-known index",
       "additionalProperties": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["github", "gitlab", "git"]
+            "enum": ["github", "gitlab", "git", "well-known"]
           },
           "url": {
             "type": "string",
-            "description": "Optional custom Git clone URL"
+            "description": "Optional custom Git clone URL; for a well-known Source, its https:// base URL, which /.well-known/agent-skills/index.json is appended to"
           },
           "branch": {
             "type": "string",
-            "description": "Optional branch or tag"
+            "description": "Optional branch or tag (not for a well-known Source)"
           },
           "skills": {
             "type": "object",
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Map of skill name to its relative path within the repository"
+            "description": "Map of skill name to its relative path within the repository, or to its entry name in a well-known index"
           },
           "signature": {
             "type": "object",
@@ -110,6 +110,14 @@
           }
         },
         "required": ["skills"],
+        "if": {
+          "properties": { "type": { "const": "well-known" } },
+          "required": ["type"]
+        },
+        "then": {
+          "required": ["url"],
+          "not": { "required": ["branch"] }
+        },
         "additionalProperties": false
       }
     },
