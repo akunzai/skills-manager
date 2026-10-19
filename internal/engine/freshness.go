@@ -196,10 +196,8 @@ func InspectFreshness(cfg *config.Config, skillsDir, cacheDir string, options Fr
 		for _, source := range slices.Sorted(maps.Keys(cfg.Remote)) {
 			repo := cfg.Remote[source]
 			cache := openSourceCache(source, repo, cacheDir)
-			repository := FreshnessRepository{Source: source, URL: repo.URL, CachePath: cache.dir(), LocalSHA: cache.head(), cache: cache}
-			if git, ok := cache.(Cache); ok {
-				repository.URL, repository.Branch = git.url, git.resolvedBranch()
-			}
+			repository := FreshnessRepository{Source: source, CachePath: cache.dir(), LocalSHA: cache.head(), cache: cache}
+			repository.URL, repository.Branch = cache.described()
 			snapshot.Repositories = append(snapshot.Repositories, repository)
 		}
 	}

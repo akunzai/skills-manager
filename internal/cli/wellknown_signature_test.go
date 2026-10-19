@@ -9,6 +9,7 @@ import (
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
 	"github.com/akunzai/skills-manager/internal/signing"
+	"github.com/akunzai/skills-manager/internal/wellknowntest"
 )
 
 // The mise fixture is signed keyless by miseSigner; its trust root is served
@@ -42,7 +43,7 @@ func offlineTrustRoot(t *testing.T) *int {
 // miseArchive is the signed mise Skill as an archive entry, with its SKILL.md
 // replaced by skillMD when that is not "", and without its signature when
 // signed is false.
-func miseArchive(t *testing.T, skillMD string, signed bool) wellKnownEntry {
+func miseArchive(t *testing.T, skillMD string, signed bool) wellknowntest.Entry {
 	t.Helper()
 	read := func(name string) string {
 		data, err := os.ReadFile(filepath.Join(miseFixture, "mise", name))
@@ -54,14 +55,14 @@ func miseArchive(t *testing.T, skillMD string, signed bool) wellKnownEntry {
 	if skillMD == "" {
 		skillMD = read("SKILL.md")
 	}
-	files := []tarEntry{{Name: "SKILL.md", Body: skillMD}}
+	files := []wellknowntest.File{{Name: "SKILL.md", Body: skillMD}}
 	if signed {
-		files = append(files, tarEntry{Name: signing.FileName, Body: read(signing.FileName)})
+		files = append(files, wellknowntest.File{Name: signing.FileName, Body: read(signing.FileName)})
 	}
-	return tarGzEntry(t, "mise", "mise", files...)
+	return wellknowntest.TarGz(t, "mise", "mise", files...)
 }
 
-func wellKnownPolicy(t *testing.T, scope wellKnownScope, server *wellKnownServer) *config.SignaturePolicy {
+func wellKnownPolicy(t *testing.T, scope wellKnownScope, server *wellknowntest.Server) *config.SignaturePolicy {
 	t.Helper()
 	cfg, err := config.LoadConfig(scope.config)
 	if err != nil {
@@ -101,7 +102,7 @@ func TestCLIAddVerifiesASignedWellKnownArchiveAndTrustLetsATamperedOneThrough(t 
 	}
 
 	// A tampered artifact is blocked while planning; the Scope copy stays.
-	server.setEntries(miseArchive(t, "---\nname: mise\ndescription: tampered\n---\n", true))
+	server.SetEntries(miseArchive(t, "---\nname: mise\ndescription: tampered\n---\n", true))
 	out, err = scope.run(t, "update")
 	if ExitCode(err) != 1 || !strings.Contains(out, "Skipped mise: signature:") || *fetches != 2 {
 		t.Fatalf("update over a tampered artifact = %v (exit %d), %d fetches; want exit 1 and a fresh trust root\n%s", err, ExitCode(err), *fetches, out)
@@ -115,8 +116,8 @@ func TestCLIAddVerifiesASignedWellKnownArchiveAndTrustLetsATamperedOneThrough(t 
 	if err != nil {
 		t.Fatalf("trust: %v\n%s", err, out)
 	}
-	if tree, _ := wellKnownPolicy(t, scope, server).TrustedTree("mise"); tree != server.entries[0].Digest {
-		t.Fatalf("Trusted content = %q; want the entry digest %s", tree, server.entries[0].Digest)
+	if tree, _ := wellKnownPolicy(t, scope, server).TrustedTree("mise"); tree != server.Entries[0].Digest {
+		t.Fatalf("Trusted content = %q; want the entry digest %s", tree, server.Entries[0].Digest)
 	}
 	server.Close()
 	out, err = scope.run(t, "sync")
@@ -143,7 +144,7 @@ func TestCLIDoctorReportsTrustForAWellKnownSkillTheSourceNoLongerHas(t *testing.
 	if out, err := scope.run(t, "add", server.URL, "--skill", "mise", "-y"); err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
 	}
-	server.setEntries(miseArchive(t, "---\nname: mise\ndescription: tampered\n---\n", true))
+	server.SetEntries(miseArchive(t, "---\nname: mise\ndescription: tampered\n---\n", true))
 	if out, err := scope.run(t, "update"); ExitCode(err) != 1 {
 		t.Fatalf("update = %v; want the tampered copy blocked\n%s", err, out)
 	}
@@ -151,7 +152,7 @@ func TestCLIDoctorReportsTrustForAWellKnownSkillTheSourceNoLongerHas(t *testing.
 		t.Fatalf("trust: %v\n%s", err, out)
 	}
 
-	server.setEntries(miseArchive(t, "---\nname: mise\ndescription: tampered again\n---\n", true))
+	server.SetEntries(miseArchive(t, "---\nname: mise\ndescription: tampered again\n---\n", true))
 	if out, err := scope.run(t, "update"); ExitCode(err) != 1 {
 		t.Fatalf("update = %v; want the new copy blocked too\n%s", err, out)
 	}
@@ -169,7 +170,7 @@ func TestCLIUpdateRefusesAWellKnownSkillThatArrivesUnsigned(t *testing.T) {
 		t.Fatalf("add: %v\n%s", err, out)
 	}
 
-	server.setEntries(miseArchive(t, "---\nname: mise\ndescription: unsigned\n---\n", false))
+	server.SetEntries(miseArchive(t, "---\nname: mise\ndescription: unsigned\n---\n", false))
 	out, err := scope.run(t, "update")
 	if ExitCode(err) != 1 || !strings.Contains(out, "unsigned, but it was signed when last applied") {
 		t.Fatalf("update = %v (exit %d); want the unsigned copy refused\n%s", err, ExitCode(err), out)
@@ -181,7 +182,7 @@ func TestCLIUpdateRefusesAWellKnownSkillThatArrivesUnsigned(t *testing.T) {
 
 func TestCLISyncBlocksASkillMDEntryWhenTheSourceRequiresSignatures(t *testing.T) {
 	fetches := offlineTrustRoot(t)
-	server := newWellKnownServer(t, skillMDEntry("lint", "Lint"))
+	server := newWellKnownServer(t, wellknowntest.SkillMD("lint", "Lint"))
 	scope := newWellKnownScope(t)
 	if out, err := scope.run(t, "add", server.URL, "--skill", "lint", "-y"); err != nil || *fetches != 0 {
 		t.Fatalf("add = %v, %d fetches; want exit 0 without reaching Sigstore\n%s", err, *fetches, out)
@@ -208,7 +209,7 @@ func TestCLISyncBlocksASkillMDEntryWhenTheSourceRequiresSignatures(t *testing.T)
 }
 
 func TestCLIAddPinsATrustCertForAWellKnownSource(t *testing.T) {
-	server := newWellKnownServer(t, skillMDEntry("lint", "Lint"))
+	server := newWellKnownServer(t, wellknowntest.SkillMD("lint", "Lint"))
 	scope := newWellKnownScope(t)
 	cert := filepath.Join(scope.root, "root.pem")
 	pem, err := os.ReadFile(nvidiaRootCert)
