@@ -248,7 +248,7 @@ func (p *remotePlanner) verify(item *SyncPlanItem) {
 		switch {
 		case policy != nil && policy.Require:
 			reason := fmt.Sprintf("unsigned, and Source %s requires signatures", item.Source)
-			if wellKnown, ok := item.cache.(WellKnownCache); ok && wellKnown.unsignable(item.Freshness.Subpath) {
+			if !item.cache.canCarrySignature(item.Freshness.Subpath) {
 				reason += "; a single SKILL.md entry cannot carry a signature"
 			}
 			p.fail(item, reason)

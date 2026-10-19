@@ -167,11 +167,11 @@ func (c WellKnownCache) atHead(subpath string) headEntry {
 	return headEntry{id: entry.Digest, dir: true}
 }
 
-// unsignable reports whether the entry named subpath is a single SKILL.md,
-// which has nowhere to carry a signature.
-func (c WellKnownCache) unsignable(subpath string) bool {
+// canCarrySignature is false for an entry that is a single SKILL.md, which
+// has nowhere to carry a signature.
+func (c WellKnownCache) canCarrySignature(subpath string) bool {
 	entries, _ := c.index()
-	return entries[subpath].Type == "skill-md"
+	return entries[subpath].Type != "skill-md"
 }
 
 // coverage covers the Skills unpacked on disk.
@@ -192,6 +192,11 @@ func (c WellKnownCache) appliedCommit(subpath string) string {
 }
 
 func (c WellKnownCache) where() string { return "" }
+
+// history is not ok: the Cache keeps only the artifact the index names now.
+func (c WellKnownCache) history() (cacheHistory, bool) { return nil, false }
+
+func (c WellKnownCache) described() (string, string) { return c.base, "" }
 
 // observe asks the publisher for its index, revalidating the one this Cache
 // holds. Only the Skills of paths are compared: localSHA and remoteSHA

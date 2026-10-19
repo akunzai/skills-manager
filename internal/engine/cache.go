@@ -402,10 +402,10 @@ func (c Cache) observe(paths ...string) cacheFacts {
 // rename pairing and no external or text-converting drivers.
 var diffOptions = []string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"}
 
-// diffCommits is the patch of subpath from one commit of this Cache to
+// patch is the patch of subpath from one commit of this Cache to
 // another, with paths relative to subpath. A blob the partial clone never
 // fetched is fetched on demand, which is the only way this reaches the network.
-func (c Cache) diffCommits(from, to, subpath string) (string, error) {
+func (c Cache) patch(from, to, subpath string) (string, error) {
 	args := append(slices.Clone(diffOptions), "--src-prefix=a/", "--dst-prefix=b/")
 	subpath = cleanSparsePaths([]string{subpath})[0]
 	if subpath != "." {
@@ -422,9 +422,9 @@ func (c Cache) diffCommits(from, to, subpath string) (string, error) {
 	return string(stdout), nil
 }
 
-// readBlob reads the file at path, relative to the repository root, as
+// blob reads the file at path, relative to the repository root, as
 // commit has it. A symlink reads as its target, as DigestSkillContent hashes it.
-func (c Cache) readBlob(commit, path string) ([]byte, error) {
+func (c Cache) blob(commit, path string) ([]byte, error) {
 	stdout, stderr, err := runGitRaw(c.dir(), "cat-file", "blob", commit+":"+path)
 	if err != nil {
 		return nil, gitOpErr("read "+path+" at "+commit+" in", c.dir(), "", stderr, err)

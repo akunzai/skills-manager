@@ -90,7 +90,7 @@ func DiffSkill(cfg *config.Config, name, skillsDir, cacheDir string) (*SkillDiff
 	}
 
 	d := &SkillDiff{Skill: name, Source: source, Subpath: subpath, ScopePath: filepath.Join(skillsDir, name), CacheCommit: cache.appliedCommit(subpath)}
-	git, versioned := cache.(Cache)
+	history, versioned := cache.history()
 	baselines := OpenBaselines(skillsDir)
 	applied, recorded := baselines.Applied(name)
 	switch {
@@ -121,12 +121,12 @@ func DiffSkill(cfg *config.Config, name, skillsDir, cacheDir string) (*SkillDiff
 		return d, err
 	}
 
-	patch, err := git.diffCommits(d.BaselineCommit, head, subpath)
+	patch, err := history.patch(d.BaselineCommit, head, subpath)
 	if err != nil {
 		return nil, err
 	}
 	d.Upstream = parsePatch(patch)
-	fromBaseline := func(rel string) ([]byte, error) { return git.readBlob(d.BaselineCommit, path.Join(subpath, rel)) }
+	fromBaseline := func(rel string) ([]byte, error) { return history.blob(d.BaselineCommit, path.Join(subpath, rel)) }
 	d.Local, err = diffFiles(applied.ContentDigests, fromBaseline, scope, fromScope)
 	return d, err
 }
