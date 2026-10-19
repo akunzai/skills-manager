@@ -209,8 +209,7 @@ func (c WellKnownCache) RefreshWithProgress(_ bool, _ UpdateProgress, paths ...s
 		return err
 	}
 	state := c.state()
-	sum := sha256.Sum256(body.data)
-	state.Index = "sha256:" + hex.EncodeToString(sum[:])
+	state.Index = artifactDigest(body.data)
 	if err := c.saveState(state); err != nil {
 		return err
 	}
@@ -261,8 +260,7 @@ func (c WellKnownCache) fetchEntry(entry wellKnownEntry) error {
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256(body.data)
-	if got := "sha256:" + hex.EncodeToString(sum[:]); got != entry.Digest {
+	if got := artifactDigest(body.data); got != entry.Digest {
 		return refuse("artifact %s does not match its digest: index names %s, got %s", artifactURL, entry.Digest, got)
 	}
 	if err := os.MkdirAll(c.dir(), 0o755); err != nil {
@@ -595,14 +593,34 @@ func (u *unpacker) zip(data []byte) error {
 	return nil
 }
 
-// writeFileAtomic replaces path with data, so a reader never sees half of it.
+// artifactDigest is data's digest as an index names it.
+func artifactDigest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// writeFileAtomic replaces path with data, so a reader never sees half of it,
+// and two commands writing it at once never share a temporary file.
 func writeFileAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	_, err = tmp.Write(data)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+	}
+	return err
 }

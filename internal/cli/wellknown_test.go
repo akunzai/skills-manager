@@ -123,6 +123,8 @@ func skillMDEntry(name, description string) wellKnownEntry {
 type tarEntry struct {
 	Name, Body, Linkname string
 	Mode                 int64
+	// Hard makes a Linkname a hard link.
+	Hard bool
 }
 
 func tarGzEntry(t *testing.T, name, description string, files ...tarEntry) wellKnownEntry {
@@ -134,6 +136,9 @@ func tarGzEntry(t *testing.T, name, description string, files ...tarEntry) wellK
 		header := &tar.Header{Name: f.Name, Mode: cmpMode(f.Mode), Size: int64(len(f.Body)), Typeflag: tar.TypeReg}
 		if f.Linkname != "" {
 			header.Typeflag, header.Linkname, header.Size = tar.TypeSymlink, f.Linkname, 0
+			if f.Hard {
+				header.Typeflag = tar.TypeLink
+			}
 		}
 		if strings.HasSuffix(f.Name, "/") {
 			header.Typeflag, header.Size, header.Mode = tar.TypeDir, 0, 0o755
@@ -161,11 +166,17 @@ func zipEntry(t *testing.T, name, description string, files ...tarEntry) wellKno
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for _, f := range files {
-		w, err := zw.Create(f.Name)
+		header := &zip.FileHeader{Name: f.Name, Method: zip.Deflate}
+		body := f.Body
+		if f.Linkname != "" {
+			header.SetMode(os.ModeSymlink | 0o777)
+			body = f.Linkname
+		}
+		w, err := zw.CreateHeader(header)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := w.Write([]byte(f.Body)); err != nil {
+		if _, err := w.Write([]byte(body)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -346,35 +357,42 @@ func TestCLIAddDeclaresAndMaterializesWellKnownSkillsThatSyncKeepsOffline(t *tes
 
 func TestCLIAddRefusesAWellKnownArtifactItCannotVerify(t *testing.T) {
 	zeros := strings.Repeat("\x00", 101<<20)
-	cases := map[string]wellKnownEntry{
-		"digest mismatch": func() wellKnownEntry {
+	cases := []struct {
+		name  string
+		entry wellKnownEntry
+		want  string
+	}{
+		{"digest mismatch", func() wellKnownEntry {
 			e := skillMDEntry("bad", "Bad")
 			e.Digest = "sha256:" + strings.Repeat("0", 64)
 			return e
-		}(),
-		"path traversal": tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "../escape.md", Body: "x"}),
-		"absolute path":  tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "/etc/escape.md", Body: "x"}),
-		"symlink":        tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "link", Linkname: "SKILL.md"}),
-		"no SKILL.md":    tarGzEntry(t, "bad", "Bad", tarEntry{Name: "nested/SKILL.md", Body: skillDoc("bad")}),
-		"oversized":      tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "big.bin", Body: zeros}),
-		"http redirect":  func() wellKnownEntry { e := skillMDEntry("bad", "Bad"); e.URL = "/redirect"; return e }(),
-		"unknown archive": func() wellKnownEntry {
+		}(), "does not match its digest"},
+		{"path traversal", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "../escape.md", Body: "x"}), "climbs out"},
+		{"absolute path", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "/etc/escape.md", Body: "x"}), "not a relative path"},
+		{"symlink", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "link", Linkname: "SKILL.md"}), "not a regular file"},
+		{"hardlink", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "link", Linkname: "SKILL.md", Hard: true}), "not a regular file"},
+		{"zip traversal", zipEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "../escape.md", Body: "x"}), "climbs out"},
+		{"zip symlink", zipEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "link", Linkname: "SKILL.md"}), "not a regular file"},
+		{"no SKILL.md", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "nested/SKILL.md", Body: skillDoc("bad")}), "no SKILL.md at the archive root"},
+		{"oversized", tarGzEntry(t, "bad", "Bad", tarEntry{Name: "SKILL.md", Body: skillDoc("bad")}, tarEntry{Name: "big.bin", Body: zeros}), "exceeds 100 MiB"},
+		{"http redirect", func() wellKnownEntry { e := skillMDEntry("bad", "Bad"); e.URL = "/redirect-http"; return e }(), "only https:// is followed"},
+		{"unknown archive", func() wellKnownEntry {
 			e := skillMDEntry("bad", "Bad")
 			e.Type, e.contentType, e.URL = "archive", "text/plain", "/bad.bin"
 			return e
-		}(),
+		}(), "neither .tar.gz nor .zip"},
 	}
-	for name, entry := range cases {
-		t.Run(name, func(t *testing.T) {
-			server := newWellKnownServer(t, entry)
-			server.extra["/redirect"] = func(w http.ResponseWriter, r *http.Request) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newWellKnownServer(t, tc.entry)
+			server.extra["/redirect-http"] = func(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "http://"+r.Host+"/.well-known/agent-skills/bad/SKILL.md", http.StatusFound)
 			}
 			scope := newWellKnownScope(t)
 
 			out, err := scope.run(t, "add", server.URL, "--skill", "bad", "-y")
-			if ExitCode(err) != 1 || !strings.Contains(out, "Error:") {
-				t.Fatalf("add = %v (exit %d); want exit 1 with the reason\n%s", err, ExitCode(err), out)
+			if ExitCode(err) != 1 || !strings.Contains(out, "Error:") || !strings.Contains(out, tc.want) {
+				t.Fatalf("add = %v (exit %d); want exit 1 saying %q\n%s", err, ExitCode(err), tc.want, out)
 			}
 			if _, err := os.Stat(filepath.Join(scope.skills, "bad")); !os.IsNotExist(err) {
 				t.Fatalf("a refused Skill was Materialized: %v", err)
@@ -387,6 +405,40 @@ func TestCLIAddRefusesAWellKnownArtifactItCannotVerify(t *testing.T) {
 				t.Fatalf("an archive member escaped its Skill: %v", escaped)
 			}
 		})
+	}
+}
+
+// An archive's format comes from its Content-Type, and from its extension
+// only when the type is absent or generic; a redirect to https:// is
+// followed.
+func TestCLIAddReadsAWellKnownArchiveByContentTypeThenExtension(t *testing.T) {
+	zipped := zipEntry(t, "zipped", "Zipped", tarEntry{Name: "SKILL.md", Body: skillDoc("zipped")})
+	zipped.URL = "/.well-known/agent-skills/zipped.tar.gz"
+	generic := tarGzEntry(t, "generic", "Generic", tarEntry{Name: "SKILL.md", Body: skillDoc("generic")})
+	generic.contentType = "application/octet-stream"
+	moved := skillMDEntry("moved", "Moved")
+	moved.URL = "/redirect-https"
+	server := newWellKnownServer(t, zipped, generic, moved)
+	server.extra["/redirect-https"] = func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/.well-known/agent-skills/moved/SKILL.md", http.StatusFound)
+	}
+	server.extra["/.well-known/agent-skills/moved/SKILL.md"] = func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(moved.body)
+	}
+	scope := newWellKnownScope(t)
+
+	out, err := scope.run(t, "add", server.URL, "--all", "--agent", "claude", "-y")
+	if err != nil {
+		t.Fatalf("add --all --agent claude: %v\n%s", err, out)
+	}
+	for _, name := range []string{"zipped", "generic", "moved"} {
+		if _, err := os.Stat(filepath.Join(scope.skills, name, "SKILL.md")); err != nil {
+			t.Errorf("%s not Materialized: %v\n%s", name, err, out)
+		}
+		link := filepath.Join(scope.root, ".claude", "skills", name)
+		if _, err := os.Stat(link); err != nil {
+			t.Errorf("%s not available to Claude Code: %v", name, err)
+		}
 	}
 }
 
