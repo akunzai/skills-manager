@@ -72,12 +72,9 @@ func openGitSourceCache(t *testing.T, first string) sourceCacheFixture {
 
 func openWellKnownSourceCache(t *testing.T, first string) sourceCacheFixture {
 	t.Helper()
-	server := wellknowntest.NewServer(t, wellknowntest.SkillMDBody("sample", "Sample", first))
-	previous := WellKnownHTTPClient
-	WellKnownHTTPClient = server.Client()
-	t.Cleanup(func() { WellKnownHTTPClient = previous })
+	server, cache, _ := newWellKnownTestCache(t, wellknowntest.SkillMDBody("sample", "Sample", first))
 	return sourceCacheFixture{
-		cache:   NewWellKnownCache("example.com", server.URL, filepath.Join(t.TempDir(), "cache")),
+		cache:   cache,
 		subpath: "sample",
 		url:     server.URL,
 		version: func() string { return server.Entries[0].Digest },
@@ -140,14 +137,10 @@ func TestSourceCacheSaysWhichSkillsCanCarryASignature(t *testing.T) {
 		}
 	})
 	t.Run("well-known", func(t *testing.T) {
-		server := wellknowntest.NewServer(t,
+		_, cache, _ := newWellKnownTestCache(t,
 			wellknowntest.SkillMD("single", "Single"),
 			wellknowntest.TarGz(t, "bundle", "Bundle", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bundle")}),
 		)
-		previous := WellKnownHTTPClient
-		WellKnownHTTPClient = server.Client()
-		t.Cleanup(func() { WellKnownHTTPClient = previous })
-		cache := NewWellKnownCache("example.com", server.URL, t.TempDir())
 		if err := cache.RefreshWithProgress(true, nil, "single", "bundle"); err != nil {
 			t.Fatal(err)
 		}

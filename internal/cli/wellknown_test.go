@@ -184,60 +184,24 @@ func TestCLIAddDeclaresAndMaterializesWellKnownSkillsThatSyncKeepsOffline(t *tes
 	}
 }
 
+// Which artifacts are refused is the engine's (wellknown_cache_test.go);
+// this pins how Add reports one: exit 1, with nothing declared or
+// Materialized.
 func TestCLIAddRefusesAWellKnownArtifactItCannotVerify(t *testing.T) {
-	zeros := strings.Repeat("\x00", 101<<20)
-	cases := []struct {
-		name  string
-		entry wellknowntest.Entry
-		want  string
-	}{
-		{"digest mismatch", func() wellknowntest.Entry {
-			e := wellknowntest.SkillMD("bad", "Bad")
-			e.Digest = "sha256:" + strings.Repeat("0", 64)
-			return e
-		}(), "does not match its digest"},
-		{"path traversal", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "../escape.md", Body: "x"}), "climbs out"},
-		{"absolute path", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "/etc/escape.md", Body: "x"}), "not a relative path"},
-		{"symlink", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "link", Linkname: "SKILL.md"}), "not a regular file"},
-		{"hardlink", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "link", Linkname: "SKILL.md", Hard: true}), "not a regular file"},
-		{"zip traversal", wellknowntest.Zip(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "../escape.md", Body: "x"}), "climbs out"},
-		{"zip symlink", wellknowntest.Zip(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "link", Linkname: "SKILL.md"}), "not a regular file"},
-		{"no SKILL.md", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "nested/SKILL.md", Body: wellknowntest.SkillDoc("bad")}), "no SKILL.md at the archive root"},
-		{"oversized", wellknowntest.TarGz(t, "bad", "Bad", wellknowntest.File{Name: "SKILL.md", Body: wellknowntest.SkillDoc("bad")}, wellknowntest.File{Name: "big.bin", Body: zeros}), "exceeds 100 MiB"},
-		{"http redirect", func() wellknowntest.Entry {
-			e := wellknowntest.SkillMD("bad", "Bad")
-			e.URL = "/redirect-http"
-			return e
-		}(), "only https:// is followed"},
-		{"unknown archive", func() wellknowntest.Entry {
-			e := wellknowntest.SkillMD("bad", "Bad")
-			e.Type, e.ContentType, e.URL = "archive", "text/plain", "/bad.bin"
-			return e
-		}(), "neither .tar.gz nor .zip"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			server := newWellKnownServer(t, tc.entry)
-			server.Extra["/redirect-http"] = func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, "http://"+r.Host+"/.well-known/agent-skills/bad/SKILL.md", http.StatusFound)
-			}
-			scope := newWellKnownScope(t)
+	entry := wellknowntest.SkillMD("bad", "Bad")
+	entry.Digest = "sha256:" + strings.Repeat("0", 64)
+	server := newWellKnownServer(t, entry)
+	scope := newWellKnownScope(t)
 
-			out, err := scope.run(t, "add", server.URL, "--skill", "bad", "-y")
-			if ExitCode(err) != 1 || !strings.Contains(out, "Error:") || !strings.Contains(out, tc.want) {
-				t.Fatalf("add = %v (exit %d); want exit 1 saying %q\n%s", err, ExitCode(err), tc.want, out)
-			}
-			if _, err := os.Stat(filepath.Join(scope.skills, "bad")); !os.IsNotExist(err) {
-				t.Fatalf("a refused Skill was Materialized: %v", err)
-			}
-			if _, err := os.Stat(scope.config); !os.IsNotExist(err) {
-				t.Fatalf("a refused Skill was declared: %v", err)
-			}
-			escaped, _ := filepath.Glob(filepath.Join(scope.cache, ".well-known", "*", "escape.md"))
-			if len(escaped) > 0 {
-				t.Fatalf("an archive member escaped its Skill: %v", escaped)
-			}
-		})
+	out, err := scope.run(t, "add", server.URL, "--skill", "bad", "-y")
+	if ExitCode(err) != 1 || !strings.Contains(out, "Error:") || !strings.Contains(out, "does not match its digest") {
+		t.Fatalf("add = %v (exit %d); want exit 1 saying the digest does not match\n%s", err, ExitCode(err), out)
+	}
+	if _, err := os.Stat(filepath.Join(scope.skills, "bad")); !os.IsNotExist(err) {
+		t.Fatalf("a refused Skill was Materialized: %v", err)
+	}
+	if _, err := os.Stat(scope.config); !os.IsNotExist(err) {
+		t.Fatalf("a refused Skill was declared: %v", err)
 	}
 }
 
