@@ -268,7 +268,9 @@ func (c WellKnownCache) Refresh(force bool, paths ...string) error {
 // RefreshWithProgress revalidates the index, unless force asks for it whole,
 // stores a changed one, drops the Skills it no longer lists, and covers
 // paths. A Cache-Control max-age never skips the request: an explicit
-// command always asks the publisher.
+// command always asks the publisher. Progress is unused: a git Cache reports
+// only default-branch changes through it, and a well-known Source has no
+// branch; Update reports each Source's refresh itself.
 func (c WellKnownCache) RefreshWithProgress(force bool, _ UpdateProgress, paths ...string) error {
 	remote, err := c.fetchIndex(force)
 	if err != nil {
