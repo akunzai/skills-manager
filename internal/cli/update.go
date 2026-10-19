@@ -143,8 +143,8 @@ func updateProgress(cmd *cobra.Command, out io.Writer, quiet bool) (engine.Updat
 			}
 		case engine.UpdateRepoDone:
 			shaStr := ""
-			if len(ev.NewSHA) >= 7 {
-				shaStr = fmt.Sprintf(" (%s)", ev.NewSHA[:7])
+			if short := shortCommit(ev.NewSHA); len(short) >= 7 {
+				shaStr = fmt.Sprintf(" (%s)", short)
 			}
 			region.DoneWith(ev.Source, func() {
 				fmt.Fprintf(out, "%sUpdated %s%s%s%s.%s\n", colorGreen, colorBold, ev.Source, colorReset, shaStr, colorReset)

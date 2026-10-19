@@ -328,7 +328,10 @@ type cacheFacts struct {
 	remoteSHA     string
 	branchChanged bool
 	missing       []string
-	err           string
+	// changed names the Skills whose version differs between the Cache and
+	// the Source, when the Source says so per Skill.
+	changed []string
+	err     string
 	// cache is the Cache observed, on the branch its local checkout uses.
 	cache sourceCache
 }

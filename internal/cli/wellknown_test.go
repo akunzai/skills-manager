@@ -41,6 +41,22 @@ type wellKnownServer struct {
 	entries []wellKnownEntry
 	// extra serves additional paths, such as a redirect.
 	extra map[string]http.HandlerFunc
+	// requests logs each request as "<method> <path> <status>".
+	requests []string
+}
+
+// requested is the logged requests whose path has prefix, then clears the log.
+func (s *wellKnownServer) requested(prefix string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var matched []string
+	for _, r := range s.requests {
+		if strings.HasPrefix(strings.Fields(r)[1], prefix) {
+			matched = append(matched, r)
+		}
+	}
+	s.requests = nil
+	return matched
 }
 
 const wellKnownSchema = "https://schemas.agentskills.io/discovery/0.2.0/schema.json"
@@ -98,10 +114,23 @@ func (s *wellKnownServer) serve(w http.ResponseWriter, r *http.Request) {
 		if s.schema != "" {
 			index["$schema"] = s.schema
 		}
+		data, _ := json.Marshal(index)
+		sum := sha256.Sum256(data)
+		etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+		// A max-age the client must not take as leave to skip asking.
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			s.requests = append(s.requests, r.Method+" "+r.URL.Path+" 304")
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		s.requests = append(s.requests, r.Method+" "+r.URL.Path+" 200")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(index)
+		_, _ = w.Write(data)
 		return
 	}
+	s.requests = append(s.requests, r.Method+" "+r.URL.Path)
 	for _, entry := range s.entries {
 		if entry.URL == r.URL.Path {
 			if entry.contentType != "" {
@@ -115,7 +144,10 @@ func (s *wellKnownServer) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func skillMDEntry(name, description string) wellKnownEntry {
-	body := "---\nname: " + name + "\ndescription: " + description + "\n---\n# " + name + "\n"
+	return skillMDBody(name, description, "---\nname: "+name+"\ndescription: "+description+"\n---\n# "+name+"\n")
+}
+
+func skillMDBody(name, description, body string) wellKnownEntry {
 	return wellKnownEntry{Name: name, Type: "skill-md", Description: description, body: []byte(body), contentType: "text/markdown"}
 }
 
@@ -480,5 +512,120 @@ func TestCLIAddSkipsWellKnownEntriesOfAnUnknownType(t *testing.T) {
 	}
 	if !strings.Contains(out, `unknown type "bundle"`) || strings.Contains(out, "odd (odd)") || !strings.Contains(out, "1 skill found.") {
 		t.Fatalf("want odd skipped with a warning and one listed:\n%s", out)
+	}
+}
+
+func TestCLIOutdatedAndUpdateFollowAWellKnownSkillsDigest(t *testing.T) {
+	server := newWellKnownServer(t, skillMDEntry("one", "One"), skillMDEntry("other", "Other"))
+	scope := newWellKnownScope(t)
+	if out, err := scope.run(t, "add", server.URL, "--skill", "one", "-y"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	server.requested("")
+
+	// An unchanged index is revalidated, whatever its max-age says, and
+	// answered 304.
+	out, err := scope.run(t, "outdated")
+	if err != nil {
+		t.Fatalf("outdated on an unchanged index = %v (exit %d)\n%s", err, ExitCode(err), out)
+	}
+	if got := server.requested("/"); len(got) != 1 || got[0] != "GET /.well-known/agent-skills/index.json 304" {
+		t.Fatalf("outdated requests = %v; want one conditional index request answered 304", got)
+	}
+
+	// A new digest is outdated, and update brings it in.
+	server.setEntries(skillMDBody("one", "One", "# one, revised\n"), skillMDEntry("other", "Other, revised"))
+	out, err = scope.run(t, "outdated")
+	if ExitCode(err) != 1 || !strings.Contains(out, "one") || !strings.Contains(out, "changed upstream") {
+		t.Fatalf("outdated after a new digest = %v (exit %d); want exit 1 naming one\n%s", err, ExitCode(err), out)
+	}
+	out, err = scope.run(t, "update")
+	if err != nil {
+		t.Fatalf("update: %v\n%s", err, out)
+	}
+	if got, _ := os.ReadFile(filepath.Join(scope.skills, "one", "SKILL.md")); string(got) != "# one, revised\n" {
+		t.Fatalf("one after update = %q\n%s", got, out)
+	}
+	for _, r := range server.requested("/.well-known/agent-skills/other") {
+		t.Errorf("update downloaded an undeclared Skill: %s", r)
+	}
+	applied, _ := engine.OpenBaselines(scope.skills).Applied("one")
+	if applied.AppliedCommit != server.entries[0].Digest {
+		t.Fatalf("Baseline commit = %s; want %s", applied.AppliedCommit, server.entries[0].Digest)
+	}
+	if out, err := scope.run(t, "outdated"); err != nil {
+		t.Fatalf("outdated after update = %v (exit %d)\n%s", err, ExitCode(err), out)
+	}
+}
+
+func TestCLIUpdateProtectsADriftedWellKnownSkillAndDiffShowsTheChange(t *testing.T) {
+	server := newWellKnownServer(t, skillMDBody("one", "One", "line one\n"))
+	scope := newWellKnownScope(t)
+	if out, err := scope.run(t, "add", server.URL, "--all", "-y"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	server.setEntries(skillMDBody("one", "One", "line one\nline two\n"))
+
+	out, err := scope.run(t, "diff", "one", "--fetch")
+	if ExitCode(err) != 1 || !strings.Contains(out, "+line two") {
+		t.Fatalf("diff --fetch = %v (exit %d); want exit 1 showing +line two\n%s", err, ExitCode(err), out)
+	}
+
+	scopeCopy := filepath.Join(scope.skills, "one", "SKILL.md")
+	if err := os.WriteFile(scopeCopy, []byte("my edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = scope.run(t, "update")
+	if ExitCode(err) != 1 {
+		t.Fatalf("update over Drift = %v (exit %d); want exit 1\n%s", err, ExitCode(err), out)
+	}
+	if got, _ := os.ReadFile(scopeCopy); string(got) != "my edit\n" {
+		t.Fatalf("update overwrote the Drifted copy: %q", got)
+	}
+	// As for a git Source, only Sync's --force overwrites a local edit.
+	out, err = scope.run(t, "sync", "--force")
+	if err != nil {
+		t.Fatalf("sync --force: %v\n%s", err, out)
+	}
+	if got, _ := os.ReadFile(scopeCopy); string(got) != "line one\nline two\n" {
+		t.Fatalf("one after update --force = %q", got)
+	}
+}
+
+func TestCLIUpdateFollowsAWellKnownRenameOrReportsTheRemoval(t *testing.T) {
+	server := newWellKnownServer(t, skillMDEntry("old", "Old"), skillMDEntry("gone", "Gone"), skillMDEntry("bystander", "Bystander"))
+	scope := newWellKnownScope(t)
+	if out, err := scope.run(t, "add", server.URL, "--skill", "old", "--skill", "gone", "-y"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	successor := skillMDBody("new", "New", "---\nname: new\ndescription: New\nmetadata:\n  replaces: old\n---\n# new\n")
+	server.setEntries(successor, skillMDEntry("bystander", "Bystander"))
+
+	out, err := scope.run(t, "update")
+	if ExitCode(err) != 1 || !strings.Contains(out, "removed_upstream") || !strings.Contains(out, "skills rm -p --cache-dir ~/cache gone") {
+		t.Fatalf("update = %v (exit %d); want exit 1 naming 'skills rm gone'\n%s", err, ExitCode(err), out)
+	}
+	if _, err := os.Stat(filepath.Join(scope.skills, "new", "SKILL.md")); err != nil {
+		t.Fatalf("the successor of old was not Materialized: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(scope.skills, "old")); !os.IsNotExist(err) {
+		t.Fatalf("old was not Retired: %v", err)
+	}
+	data, _ := os.ReadFile(scope.config)
+	if !strings.Contains(string(data), `"new": "new"`) || strings.Contains(string(data), `"old"`) {
+		t.Fatalf("Config does not follow the rename:\n%s", data)
+	}
+
+	// Once nothing declared is missing, no other entry is downloaded.
+	if out, err := scope.run(t, "rm", "gone"); err != nil {
+		t.Fatalf("rm gone: %v\n%s", err, out)
+	}
+	server.setEntries(successor, skillMDBody("bystander", "Bystander", "# changed\n"))
+	server.requested("")
+	if out, err := scope.run(t, "update"); err != nil {
+		t.Fatalf("update: %v\n%s", err, out)
+	}
+	for _, r := range server.requested("/.well-known/agent-skills/bystander") {
+		t.Errorf("update downloaded an undeclared Skill with nothing to rename: %s", r)
 	}
 }

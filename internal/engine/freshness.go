@@ -54,7 +54,10 @@ type FreshnessRepository struct {
 	RemoteSHA    string                `json:"remote_sha"`
 	CachePath    string                `json:"cache_path"`
 	Error        string                `json:"error,omitempty"`
-	Skills       []SkillFreshness      `json:"skills"`
+	// Changed names the declared Skills whose version the Source has
+	// changed, for a Source that versions each Skill on its own.
+	Changed []string         `json:"changed,omitempty"`
+	Skills  []SkillFreshness `json:"skills"`
 
 	// cache is the Cache observed, which Scope observation asks what its head
 	// holds and covers.
@@ -340,6 +343,7 @@ func freshnessFromCache(f cacheFacts) FreshnessRepository {
 		RemoteSHA:    f.remoteSHA,
 		CachePath:    f.dir,
 		Error:        f.err,
+		Changed:      f.changed,
 		cache:        f.cache,
 	}
 }
