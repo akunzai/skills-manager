@@ -9,8 +9,12 @@ A named agent instruction bundle whose root contains `SKILL.md`.
 _Avoid_: package, plugin, tool
 
 **Source**:
-Where a Skill is obtained: a git repository, a local directory, or a command.
+Where a Skill is obtained: a git repository, a well-known Source, a local directory, or a command.
 _Avoid_: repo (when you mean the Source key), origin, location
+
+**Well-known Source**:
+A publisher's HTTPS site serving an Agent Skills Discovery index that lists its Skills, each with the digest of the artifact that holds it. Its Skills are remote Skills.
+_Avoid_: HTTP Source, registry, marketplace
 
 **Scope**:
 The active Global or Project configuration, its skills directory, and the root that portable local Source paths and prune must not escape. Which of the two it is comes from `-p`/`-g`, never from where its skills directory is (ADR-0012).
@@ -77,7 +81,7 @@ Whether a command left its Scope matching its Config (converged), not matching i
 _Avoid_: disposition (that is Freshness's), status, exit code
 
 **Baseline**:
-What Sync last applied a remote Skill's copy on the Scope skills directory from: the copy's content digests, its Source, Cache identity and commit. Drift protection compares that copy with its Baseline. Only a remote Skill has one; the Scope state is the file that holds them.
+What Sync last applied a remote Skill's copy on the Scope skills directory from: the copy's content digests, its Source, Cache identity, and the version applied — a commit, or a well-known Source's artifact digest. Drift protection compares that copy with its Baseline. Only a remote Skill has one; the Scope state is the file that holds them.
 _Avoid_: snapshot, lock
 
 **Sync plan**:
@@ -93,7 +97,7 @@ Who signed a remote Skill's `skill.oms.sig`: a Sigstore keyless identity and iss
 _Avoid_: publisher key, author, owner
 
 **Trusted content**:
-A remote Skill's Cache tree id that Config records because the user chose to Materialize that exact copy although its signature does not verify. It holds only for that copy: once the Source changes the Skill, it is verified again. `skills trust` records it; Retire removes it.
+A remote Skill's Cache tree id, or a well-known Skill's artifact digest, that Config records because the user chose to Materialize that exact copy although its signature does not verify. It holds only for that copy: once the Source changes the Skill, it is verified again. `skills trust` records it; Retire removes it.
 _Avoid_: override, bypass, exception
 
 **Materialize**:
@@ -109,7 +113,7 @@ Taking a Skill out of the Scope: undeclaring it and saving Config, then removing
 _Avoid_: uninstall, delete, clean up
 
 **Cache**:
-One remote Source's sparse-partial-clone working copy, from which that Source's Skills are Materialized. Every Scope shares the same Cache for a given Source.
+One remote Source's local copy, from which that Source's Skills are Materialized: a git Source's sparse-partial-clone working copy, or a well-known Source's last index and the declared Skills unpacked from verified artifacts. Every Scope shares the same Cache for a given Source.
 _Avoid_: vendor, tmp clone, cache directory (that is where Caches live, not a Cache)
 
 **Freshness**:

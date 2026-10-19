@@ -32,4 +32,20 @@
 }
 ```
 
+A Source served through a well-known index has `type: "well-known"`, its
+`https://` base URL as `url`, each Skill mapped to its entry name in the
+index, and no `branch`:
+
+```json
+"remote": {
+  "developers.cloudflare.com": {
+    "type": "well-known",
+    "url": "https://developers.cloudflare.com",
+    "skills": {
+      "agents-sdk": "agents-sdk"
+    }
+  }
+}
+```
+
 See [`skills.schema.json`](../skills.schema.json) for every field.

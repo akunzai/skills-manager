@@ -1,6 +1,6 @@
 ---
 name: skills-manager
-description: Manage skills across AI agents via the skills CLI. Triggers when adding skills (Git, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated, diff), diagnosing health issues (doctor, adopt, prune), or configuring availability policies.
+description: Manage skills across AI agents via the skills CLI. Triggers when adding skills (Git, well-known HTTPS index, local symlink, or CLI command), reconciling availability or drift (sync, update, outdated, diff), diagnosing health issues (doctor, adopt, prune), or configuring availability policies.
 ---
 
 # Skills Manager
@@ -46,7 +46,7 @@ When calling `skills` in automated scripts or tool calls:
 
 `skills.json` maintains three top-level sections:
 - `settings`: Agent availability policies (`defaultAgents`, `availability` per-skill overrides).
-- `remote`: Map of Git repositories (`<owner>/<repo>`), each with its `type` ("github", "gitlab", "git") and `skills` map (`<skill-name>: <subpath>`), and an optional `signature` (`sigstore` signer recorded on first sight, or `certificateChain` from `add --trust-cert`, plus `require`, and `trusted` content recorded by `skills trust`).
+- `remote`: Map of remote Sources: Git repositories (`<owner>/<repo>`), each with its `type` ("github", "gitlab", "git") and `skills` map (`<skill-name>: <subpath>`), and well-known Sources (`<host>`, `type: "well-known"`, `url` its `https://` base URL, `skills` map `<skill-name>: <index entry name>`, no `branch`); either kind has an optional `signature` (`sigstore` signer recorded on first sight, or `certificateChain` from `add --trust-cert`, plus `require`, and `trusted` content recorded by `skills trust`).
 - `local`: Map of local skills (`<skill-name>`), with `type: "symlink"` (`source` path) or `type: "command"` (`command`, optional `check` command).
 
 ---
@@ -69,6 +69,9 @@ skills add microsoft/azure-skills --path skills --list --json
 
 # Add all skills from a specific subpath
 skills add microsoft/azure-skills --path skills --all --yes
+
+# Add from a publisher's well-known index (https:// only; no --path/--branch/--url)
+skills add https://developers.cloudflare.com --skill agents-sdk --yes
 
 # Add a local directory as a live symlink
 skills add --symlink ./my-local-skill --yes
