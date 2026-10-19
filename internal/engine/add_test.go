@@ -5,11 +5,37 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
 )
+
+func TestClassifyAddKindRefusesAWellKnownSourceItDoesNotRead(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec AddSourceSpec
+		want string
+	}{
+		{"path", AddSourceSpec{Positional: "https://example.com", Path: "skills"}, "--path does not apply to a well-known Source"},
+		{"branch", AddSourceSpec{Positional: "https://example.com", Branch: "main"}, "--branch does not apply to a well-known Source"},
+		{"url", AddSourceSpec{Positional: "https://example.com", URL: "https://example.com/repo.git"}, "--url does not apply to a well-known Source"},
+		{"http", AddSourceSpec{Positional: "http://example.com"}, "is not served over https://"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := ClassifyAddKind(tc.spec)
+			if err == nil || !IsWellKnownRefusal(err) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ClassifyAddKind = %v; want a refusal saying %q", err, tc.want)
+			}
+		})
+	}
+
+	kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "https://example.com/.well-known/agent-skills/index.json"})
+	if err != nil || kind != AddSourceWellKnown || source != "https://example.com/.well-known/agent-skills/index.json" {
+		t.Fatalf("ClassifyAddKind(https index) = %s, %q, %v; want a well-known Source", kind, source, err)
+	}
+}
 
 func TestClassifyAddKind(t *testing.T) {
 	t.Run("empty spec", func(t *testing.T) {

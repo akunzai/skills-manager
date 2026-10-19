@@ -28,8 +28,8 @@ func runAddList(cmd *cobra.Command, kind engine.AddSourceKind, source, flagPath,
 	switch kind {
 	case engine.AddSourceSymlink:
 		return listLocalSkills(cmd, source, flagPath, jsonOutput)
-	case engine.AddSourceRemote:
-		return listRemoteSkills(cmd, source, flagURL, flagBranch, flagPath, cacheDir, jsonOutput)
+	case engine.AddSourceRemote, engine.AddSourceWellKnown:
+		return listRemoteSkills(cmd, engine.RemoteIntakeSpec(kind, source, flagURL, flagBranch, flagPath), cacheDir, jsonOutput)
 	default:
 		return fmt.Errorf("--list is not supported for this Source kind")
 	}
@@ -48,27 +48,16 @@ func listLocalSkills(cmd *cobra.Command, localPath, selectionPath string, jsonOu
 	return printAddList(cmd, models.ToTildePath(absSourcePath), discovered, descriptions, jsonOutput)
 }
 
-func listRemoteSkills(cmd *cobra.Command, rawSource, flagURL, flagBranch, flagPath, cacheDir string, jsonOutput bool) error {
+func listRemoteSkills(cmd *cobra.Command, spec models.ParsedRepoSource, cacheDir string, jsonOutput bool) error {
 	cfg, err := config.LoadConfig(ResolveScope(cmd).ConfigPath)
 	if err != nil {
 		return err
 	}
-	spec := remoteSpec(rawSource, flagURL, flagBranch, flagPath)
 	intake, err := fetchRemoteIntake(cmd, cfg, spec, cacheDir)
 	if err != nil {
 		return err
 	}
 	return printAddList(cmd, spec.SourceKey, intake.Discovered, intake.Descriptions, jsonOutput)
-}
-
-// listWellKnownSkills lists the Skills a well-known index offers. Like Add,
-// it refreshes the index in the Cache, and downloads no Skill.
-func listWellKnownSkills(cmd *cobra.Command, source models.WellKnownSource, cacheDir string, jsonOutput bool) error {
-	intake, err := fetchWellKnownIntake(cmd, source, cacheDir)
-	if err != nil {
-		return err
-	}
-	return printAddList(cmd, source.SourceKey, intake.Discovered, intake.Descriptions, jsonOutput)
 }
 
 // printAddList flattens discovered into a stable, name-then-path-sorted row

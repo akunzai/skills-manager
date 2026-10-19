@@ -425,10 +425,10 @@ func usableWellKnownEntry(entry wellKnownEntry) error {
 	return nil
 }
 
-// refusalError is something a well-known Source serves that this tool will
-// not use: an index or artifact that cannot be verified or unpacked safely.
-// It is the Source's state for the user to resolve, not a failed operation
-// (ADR-0002).
+// refusalError is a well-known Source this tool will not read: one Add is
+// given with git-only flags or not over https://, or an index or artifact
+// it serves that cannot be verified or unpacked safely. It is for the user
+// to resolve, not a failed operation (ADR-0002).
 type refusalError struct{ err error }
 
 func (e refusalError) Error() string { return e.err.Error() }
@@ -438,8 +438,8 @@ func refuse(format string, args ...any) error {
 	return refusalError{fmt.Errorf(format, args...)}
 }
 
-// IsWellKnownRefusal reports whether err is a well-known index or artifact
-// refused because it cannot be verified or unpacked safely.
+// IsWellKnownRefusal reports whether err is a well-known Source refused as
+// refusalError describes.
 func IsWellKnownRefusal(err error) bool {
 	_, ok := errors.AsType[refusalError](err)
 	return ok

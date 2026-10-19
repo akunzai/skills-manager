@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/wellknowntest"
 )
 
@@ -135,5 +136,28 @@ func TestWellKnownCacheRevalidatesItsIndexAndDropsWhatTheIndexNoLongerLists(t *t
 	}
 	if _, err := os.Stat(filepath.Join(cache.dir(), "gone")); !os.IsNotExist(err) {
 		t.Fatalf("gone is still in the Cache: %v", err)
+	}
+}
+
+func TestPrepareRemoteIntakeReadsAWellKnownSourceThroughItsIndex(t *testing.T) {
+	server, _, cacheDir := newWellKnownTestCache(t, wellknowntest.SkillMD("lint", "Lint Markdown"))
+	spec := RemoteIntakeSpec(AddSourceWellKnown, server.URL+"/.well-known/agent-skills/index.json", "", "", "")
+
+	intake, err := PrepareRemoteIntake(config.DefaultConfig(), spec, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := intake.Discovered["lint"]; len(got) != 1 || got[0] != "lint" {
+		t.Fatalf("Discovered = %v; want lint offered under its index name", intake.Discovered)
+	}
+	if intake.Descriptions["lint"] != "Lint Markdown" {
+		t.Fatalf("Descriptions = %v; want the index's description", intake.Descriptions)
+	}
+	cfg := config.DefaultConfig()
+	if err := intake.Declare(cfg, map[string]string{"lint": "lint"}); err != nil {
+		t.Fatal(err)
+	}
+	if repo := cfg.Remote[strings.TrimPrefix(server.URL, "https://")]; repo.Type != config.WellKnownType || repo.URL != server.URL || repo.Skills["lint"] != "lint" {
+		t.Fatalf("declared %+v; want lint from a well-known Source at its base URL", repo)
 	}
 }

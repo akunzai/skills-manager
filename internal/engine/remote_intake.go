@@ -30,12 +30,33 @@ type RemoteIntake struct {
 	cacheDir string
 }
 
+// RemoteIntakeSpec is the Source Remote intake reads for an Add of kind
+// remote or well-known from raw. A git Source's url, branch, and subpath
+// override what raw names; a well-known Source is its base URL alone, since
+// ClassifyAddKind refuses those flags for it.
+func RemoteIntakeSpec(kind AddSourceKind, raw, url, branch, subpath string) models.ParsedRepoSource {
+	if kind == AddSourceWellKnown {
+		source, _ := models.ParseWellKnownSource(raw)
+		return models.ParsedRepoSource{SourceKey: source.SourceKey, URL: source.URL, RepoType: config.WellKnownType}
+	}
+	spec := models.ParseRepoSource(raw)
+	spec.URL = cmp.Or(url, spec.URL)
+	spec.Branch = cmp.Or(branch, spec.Branch)
+	spec.Subpath = cmp.Or(subpath, spec.Subpath)
+	return spec
+}
+
 // PrepareRemoteIntake refreshes spec's Source into its Cache and discovers its
-// Skills under spec.Subpath, with their descriptions. With no branch in spec
-// it fetches the branch cfg declares for the Source; a different branch is
-// fetched as asked, since nothing is declared yet. It prints nothing and
-// never changes cfg.
+// Skills, with their descriptions. A git Source is discovered under
+// spec.Subpath; with no branch in spec it fetches the branch cfg declares for
+// the Source, and a different branch is fetched as asked, since nothing is
+// declared yet. A well-known Source offers each Skill its index lists under
+// the name the index gives it, and downloads them only once declared. It
+// prints nothing and never changes cfg.
 func PrepareRemoteIntake(cfg *config.Config, spec models.ParsedRepoSource, cacheDir string) (*RemoteIntake, error) {
+	if spec.RepoType == config.WellKnownType {
+		return prepareWellKnownIntake(spec, cacheDir)
+	}
 	spec.Branch = cmp.Or(spec.Branch, cfg.Remote[spec.SourceKey].Branch)
 	cache := NewCache(spec.SourceKey, spec.URL, spec.Branch, cacheDir)
 	if err := cache.Refresh(true); err != nil {
@@ -48,23 +69,21 @@ func PrepareRemoteIntake(cfg *config.Config, spec models.ParsedRepoSource, cache
 	return &RemoteIntake{Discovered: discovered, Descriptions: descriptions, spec: spec, cache: cache, cacheDir: cacheDir}, nil
 }
 
-// PrepareWellKnownIntake fetches source's well-known index into its Cache and
-// offers each Skill it lists under the name the index gives it. Skills are
-// downloaded only once declared. It prints nothing and changes no Config.
-func PrepareWellKnownIntake(source models.WellKnownSource, cacheDir string) (*RemoteIntake, error) {
-	cache := NewWellKnownCache(source.SourceKey, source.URL, cacheDir)
+// prepareWellKnownIntake is PrepareRemoteIntake for a well-known Source.
+func prepareWellKnownIntake(spec models.ParsedRepoSource, cacheDir string) (*RemoteIntake, error) {
+	cache := NewWellKnownCache(spec.SourceKey, spec.URL, cacheDir)
 	if err := cache.Refresh(true); err != nil {
 		return nil, err
 	}
 	entries, skipped, err := cache.wellKnownEntries()
 	if err != nil {
-		return nil, fmt.Errorf("read index of %s: %w", source.SourceKey, err)
+		return nil, fmt.Errorf("read index of %s: %w", spec.SourceKey, err)
 	}
 	intake := &RemoteIntake{
 		Discovered:   make(DiscoveredSkills, len(entries)),
 		Descriptions: make(DiscoveredSkillDescriptions, len(entries)),
 		Skipped:      skipped,
-		spec:         models.ParsedRepoSource{SourceKey: source.SourceKey, URL: source.URL, RepoType: config.WellKnownType},
+		spec:         spec,
 		cache:        cache,
 		cacheDir:     cacheDir,
 	}
