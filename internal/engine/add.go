@@ -39,6 +39,9 @@ type AddSourceSpec struct {
 	Positional string
 	Symlink    string
 	Command    string
+	// Path, Branch, and URL are what --path, --branch, and --url name, which
+	// only a git Source reads.
+	Path, Branch, URL string
 }
 
 // ClassifyAddKind decides the Add Source kind from parsed flags and the
@@ -54,10 +57,25 @@ func ClassifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
 	if spec.Positional == "" {
 		return "", "", fmt.Errorf("source repository or --symlink/--command required")
 	}
-	if _, ok := models.ParseWellKnownSource(spec.Positional); ok {
-		return AddSourceWellKnown, spec.Positional, nil
+	if source, ok := models.ParseWellKnownSource(spec.Positional); ok {
+		return AddSourceWellKnown, spec.Positional, checkWellKnownAdd(spec, source)
 	}
 	return AddSourceRemote, spec.Positional, nil
+}
+
+// checkWellKnownAdd refuses a well-known Source Add will not read as given:
+// one named with a git-only flag, or not over https://. It is decided before
+// the network is reached or the Scope is asked for.
+func checkWellKnownAdd(spec AddSourceSpec, source models.WellKnownSource) error {
+	for _, flag := range []struct{ name, value string }{{"path", spec.Path}, {"branch", spec.Branch}, {"url", spec.URL}} {
+		if flag.value != "" {
+			return refuse("--%s does not apply to a well-known Source", flag.name)
+		}
+	}
+	if !strings.HasPrefix(source.URL, "https://") {
+		return refuse("%s is not served over https://; well-known Sources are read only over https://", spec.Positional)
+	}
+	return nil
 }
 
 func isLocalPath(raw string) bool {
@@ -118,18 +136,15 @@ func (e branchConflictError) next() NextCommand {
 	}
 }
 
+// NewRemoteAddSource is the Source a RemoteIntake read: a well-known Source
+// when it read one through its index, else a git Source.
 func NewRemoteAddSource(intake *RemoteIntake) AddSource {
-	return AddSource{
-		Kind:   AddSourceRemote,
-		Key:    intake.spec.SourceKey,
-		Remote: intake,
+	kind := AddSourceRemote
+	if intake.spec.RepoType == config.WellKnownType {
+		kind = AddSourceWellKnown
 	}
-}
-
-// NewWellKnownAddSource is the Source a well-known RemoteIntake read.
-func NewWellKnownAddSource(intake *RemoteIntake) AddSource {
 	return AddSource{
-		Kind:   AddSourceWellKnown,
+		Kind:   kind,
 		Key:    intake.spec.SourceKey,
 		Remote: intake,
 	}

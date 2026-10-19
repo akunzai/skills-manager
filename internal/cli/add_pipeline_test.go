@@ -234,7 +234,7 @@ func TestNewRemoteIntakeAppliesTreeURLScopeBeforeDiscovery(t *testing.T) {
 
 	cmd := testCmd()
 	cmd.SetErr(new(bytes.Buffer))
-	intake, err := newRemoteIntake(cmd, config.DefaultConfig(), "https://github.com/owner/repo/tree/main/skills", origin, "", "", t.TempDir())
+	intake, err := newRemoteIntake(cmd, config.DefaultConfig(), engine.AddSourceRemote, engine.RemoteIntakeSpec(engine.AddSourceRemote, "https://github.com/owner/repo/tree/main/skills", origin, "", ""), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestAddReadsARemoteSourceOnTheChosenScopesBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	intake, err := newRemoteIntake(cmd, cfg, "owner/repo", origin, "", "", t.TempDir())
+	intake, err := newRemoteIntake(cmd, cfg, engine.AddSourceRemote, engine.RemoteIntakeSpec(engine.AddSourceRemote, "owner/repo", origin, "", ""), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

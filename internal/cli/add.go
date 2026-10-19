@@ -206,18 +206,10 @@ func newCommandIntake(skillName, command, check, description string) *addIntake 
 	}
 }
 
-// remoteSpec parses a remote Source argument and lets its flags override
-// what the argument names.
-func remoteSpec(rawSource, flagURL, flagBranch, flagPath string) models.ParsedRepoSource {
-	spec := models.ParseRepoSource(rawSource)
-	spec.URL = cmp.Or(flagURL, spec.URL)
-	spec.Branch = cmp.Or(flagBranch, spec.Branch)
-	spec.Subpath = cmp.Or(flagPath, spec.Subpath)
-	return spec
-}
-
 // fetchRemoteIntake prepares spec through Remote intake under a progress
-// region, on the branch cfg declares for it unless spec names another.
+// region, on the branch cfg declares for it unless spec names another. A
+// refused well-known Source exits 1 with what to do instead, and each Skill
+// its index lists that it cannot offer is warned about.
 func fetchRemoteIntake(cmd *cobra.Command, cfg *config.Config, spec models.ParsedRepoSource, cacheDir string) (*engine.RemoteIntake, error) {
 	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
 	region.Start(presentation.Job{Name: spec.SourceKey, Label: "Fetching " + spec.SourceKey})
@@ -225,15 +217,17 @@ func fetchRemoteIntake(cmd *cobra.Command, cfg *config.Config, spec models.Parse
 	if err != nil {
 		region.Fail(spec.SourceKey)
 		region.Stop()
-		return nil, err
+		return nil, wellKnownRefusal(cmd, err)
 	}
 	region.Done(spec.SourceKey)
 	region.Stop()
+	for _, skipped := range intake.Skipped {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%sWarning: %s%s\n", colorYellow, skipped, colorReset)
+	}
 	return intake, nil
 }
 
-func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL, flagBranch, flagPath, cacheDir string) (*addIntake, error) {
-	spec := remoteSpec(rawSource, flagURL, flagBranch, flagPath)
+func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, kind engine.AddSourceKind, spec models.ParsedRepoSource, cacheDir string) (*addIntake, error) {
 	// A Source Config declares on another branch is refused before anything
 	// is fetched or asked; Declare would refuse it only after both. add --list
 	// declares nothing, so it browses any branch.
@@ -244,8 +238,13 @@ func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL,
 	if err != nil {
 		return nil, err
 	}
-	discovered, err := discoveryResult(intake.Discovered, nil, spec.SourceKey)
-	if err != nil {
+	discovered, resourceNoun := intake.Discovered, "Repository"
+	if kind == engine.AddSourceWellKnown {
+		resourceNoun = "Source"
+		if len(discovered) == 0 {
+			return nil, fmt.Errorf("no Skills listed in %s", models.WellKnownIndexURL(spec.URL))
+		}
+	} else if discovered, err = discoveryResult(discovered, nil, spec.SourceKey); err != nil {
 		return nil, err
 	}
 	announceLoneSkill(cmd.OutOrStdout(), discovered, intake.Descriptions)
@@ -254,28 +253,12 @@ func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, rawSource, flagURL,
 		discovered: discovered,
 		labels: sourceLabels{
 			displayName:  spec.SourceKey,
-			resourceNoun: "Repository",
+			resourceNoun: resourceNoun,
 		},
 		progressLine: func(name, subpath string) string {
 			return fmt.Sprintf("Installing %s (from %s)", name, subpath)
 		},
 	}, nil
-}
-
-// wellKnownSource is the well-known Source raw names, once Add has checked it
-// may read it: over https://, with none of the git-only flags. Anything else
-// is refused (exit 1) before the network is reached.
-func wellKnownSource(cmd *cobra.Command, raw string) (models.WellKnownSource, error) {
-	source, _ := models.ParseWellKnownSource(raw)
-	for _, flag := range []string{"path", "branch", "url"} {
-		if cmd.Flags().Changed(flag) {
-			return source, refuseAdd(cmd, fmt.Sprintf("--%s does not apply to a well-known Source", flag), "")
-		}
-	}
-	if !strings.HasPrefix(source.URL, "https://") {
-		return source, refuseAdd(cmd, fmt.Sprintf("%s is not served over https://; well-known Sources are read only over https://", raw), "")
-	}
-	return source, nil
 }
 
 // refuseAdd is a Source Add will not read as given: printed with what to do
@@ -289,8 +272,9 @@ func refuseAdd(cmd *cobra.Command, reason, next string) error {
 	return exitError{message: reason, code: 1}
 }
 
-// wellKnownRefusal is err as Add reports it: a refused index or artifact
-// exits 1 with what to do instead; any other error is left as it is.
+// wellKnownRefusal is err as Add reports it: a refused well-known Source,
+// index, or artifact exits 1 with what to do instead; any other error is
+// left as it is.
 func wellKnownRefusal(cmd *cobra.Command, err error) error {
 	if err == nil || !engine.IsWellKnownRefusal(err) {
 		return err
@@ -300,48 +284,6 @@ func wellKnownRefusal(cmd *cobra.Command, err error) error {
 		next = "add the publisher's git repository as the Source instead, such as 'skills add <owner>/<repo>'"
 	}
 	return refuseAdd(cmd, err.Error(), next)
-}
-
-// fetchWellKnownIntake prepares source through Remote intake under a
-// progress region, and warns about each Skill its index lists that it cannot
-// offer.
-func fetchWellKnownIntake(cmd *cobra.Command, source models.WellKnownSource, cacheDir string) (*engine.RemoteIntake, error) {
-	region := presentation.StartRegion(cmd.ErrOrStderr(), "", 0)
-	region.Start(presentation.Job{Name: source.SourceKey, Label: "Fetching " + source.SourceKey})
-	intake, err := engine.PrepareWellKnownIntake(source, cacheDir)
-	if err != nil {
-		region.Fail(source.SourceKey)
-		region.Stop()
-		return nil, wellKnownRefusal(cmd, err)
-	}
-	region.Done(source.SourceKey)
-	region.Stop()
-	for _, skipped := range intake.Skipped {
-		fmt.Fprintf(cmd.ErrOrStderr(), "%sWarning: %s%s\n", colorYellow, skipped, colorReset)
-	}
-	return intake, nil
-}
-
-func newWellKnownIntake(cmd *cobra.Command, source models.WellKnownSource, cacheDir string) (*addIntake, error) {
-	intake, err := fetchWellKnownIntake(cmd, source, cacheDir)
-	if err != nil {
-		return nil, err
-	}
-	if len(intake.Discovered) == 0 {
-		return nil, fmt.Errorf("no Skills listed in %s", models.WellKnownIndexURL(source.URL))
-	}
-	announceLoneSkill(cmd.OutOrStdout(), intake.Discovered, intake.Descriptions)
-	return &addIntake{
-		source:     engine.NewWellKnownAddSource(intake),
-		discovered: intake.Discovered,
-		labels: sourceLabels{
-			displayName:  source.SourceKey,
-			resourceNoun: "Source",
-		},
-		progressLine: func(name, entry string) string {
-			return fmt.Sprintf("Installing %s (from %s)", name, entry)
-		},
-	}, nil
 }
 
 func newAddCmd() *cobra.Command {
@@ -404,8 +346,12 @@ func newAddCmd() *cobra.Command {
 				Positional: positional,
 				Symlink:    flagSymlink,
 				Command:    flagCommand,
+				Path:       flagPath,
+				Branch:     flagBranch,
+				URL:        flagURL,
 			})
-			if err != nil {
+			refused := engine.IsWellKnownRefusal(err)
+			if err != nil && !refused {
 				cmd.SilenceUsage = false
 				return err
 			}
@@ -414,18 +360,13 @@ func newAddCmd() *cobra.Command {
 				cmd.SilenceUsage = false
 				return fmt.Errorf("--trust-cert applies only when adding Skills from a remote Source")
 			}
-
-			var wellKnown models.WellKnownSource
-			if kind == engine.AddSourceWellKnown {
-				if wellKnown, err = wellKnownSource(cmd, source); err != nil {
-					return err
-				}
+			// A well-known Source Add will not read is refused once the flags
+			// are known to fit together, and before the Scope is asked for.
+			if refused {
+				return wellKnownRefusal(cmd, err)
 			}
 
 			if flagList {
-				if kind == engine.AddSourceWellKnown {
-					return listWellKnownSkills(cmd, wellKnown, cacheDir, flagJSON)
-				}
 				return runAddList(cmd, kind, source, flagPath, flagBranch, flagURL, cacheDir, flagJSON)
 			}
 
@@ -460,24 +401,14 @@ func newAddCmd() *cobra.Command {
 				}
 				intake := newCommandIntake(skillName, source, flagCheck, flagDescription)
 				return intake.run(cmd, addRequest{scope: scope, cfg: cfg, skills: []string{skillName}, yes: flagYes, agents: flagAgents})
-			case engine.AddSourceRemote:
+			case engine.AddSourceRemote, engine.AddSourceWellKnown:
 				trustCert, err := config.StoreTrustCertPath(flagTrustCert, scope.ConfigPath)
 				if err != nil {
 					return err
 				}
-				intake, err := newRemoteIntake(cmd, cfg, source, flagURL, flagBranch, flagPath, cacheDir)
+				intake, err := newRemoteIntake(cmd, cfg, kind, engine.RemoteIntakeSpec(kind, source, flagURL, flagBranch, flagPath), cacheDir)
 				if err != nil {
 					return withScopeFlags(err, scopeFlagsOf(cmd, scope))
-				}
-				return withScopeFlags(intake.run(cmd, addRequest{scope: scope, cfg: cfg, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert}), scopeFlagsOf(cmd, scope))
-			case engine.AddSourceWellKnown:
-				trustCert, err := config.StoreTrustCertPath(flagTrustCert, scope.ConfigPath)
-				if err != nil {
-					return err
-				}
-				intake, err := newWellKnownIntake(cmd, wellKnown, cacheDir)
-				if err != nil {
-					return err
 				}
 				err = intake.run(cmd, addRequest{scope: scope, cfg: cfg, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert})
 				return withScopeFlags(wellKnownRefusal(cmd, err), scopeFlagsOf(cmd, scope))

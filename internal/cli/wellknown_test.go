@@ -239,28 +239,24 @@ func TestCLIAddReadsAWellKnownArchiveByContentTypeThenExtension(t *testing.T) {
 	}
 }
 
+// Which well-known Sources Add refuses is the engine's (ClassifyAddKind's
+// tests); this pins how Add reports one, before the Scope is asked for, and
+// what it suggests for an index it cannot read.
 func TestCLIAddRefusesWellKnownSourcesItDoesNotRead(t *testing.T) {
 	server := newWellKnownServer(t, wellknowntest.SkillMD("one", "One"))
 	scope := newWellKnownScope(t)
 
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"path", []string{"add", server.URL, "--path", "skills", "--list"}, "--path does not apply"},
-		{"branch", []string{"add", server.URL, "--branch", "main", "-y"}, "--branch does not apply"},
-		{"http", []string{"add", strings.Replace(server.URL, "https://", "http://", 1), "--list"}, "https://"},
-	} {
-		out, err := scope.run(t, tc.args...)
-		if ExitCode(err) != 1 || !strings.Contains(out, tc.want) {
-			t.Errorf("%s: add = %v (exit %d); want exit 1 saying %q\n%s", tc.name, err, ExitCode(err), tc.want, out)
-		}
+	out, err := scope.run(t, "add", server.URL, "--branch", "main", "-y")
+	if ExitCode(err) != 1 || !strings.Contains(out, "Error: --branch does not apply") {
+		t.Fatalf("add --branch = %v (exit %d); want exit 1 saying --branch does not apply\n%s", err, ExitCode(err), out)
+	}
+	if got := server.Requested("/"); len(got) != 0 {
+		t.Fatalf("a refused Source was requested: %v", got)
 	}
 
 	server.Schema = ""
-	out, err := scope.run(t, "add", server.URL, "--list")
-	if ExitCode(err) != 1 || !strings.Contains(out, "v0.1.0") || !strings.Contains(out, "git repository") {
+	out, err = scope.run(t, "add", server.URL, "--list")
+	if ExitCode(err) != 1 || !strings.Contains(out, "v0.1.0") || !strings.Contains(out, "Next:") || !strings.Contains(out, "git repository") {
 		t.Fatalf("v0.1.0 index: add = %v (exit %d); want exit 1 naming the git Source\n%s", err, ExitCode(err), out)
 	}
 }
