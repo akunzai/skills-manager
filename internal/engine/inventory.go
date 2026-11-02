@@ -126,9 +126,8 @@ func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
 		if src == "" {
 			src = "local"
 		}
-		// A type Config does not know is a symlink, as Sync treats it.
 		rowKind := models.InventorySymlink
-		if localInfo.Type == "command" {
+		if localInfo.Type == config.SkillCommand {
 			rowKind = models.InventoryCommand
 		}
 		items[name] = &models.SkillItem{

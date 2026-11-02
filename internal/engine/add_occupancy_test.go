@@ -61,7 +61,7 @@ func TestAddSlotAndPlanShareSourceIdentityRules(t *testing.T) {
 	symlink := NewSymlinkAddSource(local, "")
 	tests := []struct {
 		name     string
-		kind     string
+		kind     config.SkillKind
 		existing string
 		source   AddSource
 		subpath  string

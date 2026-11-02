@@ -131,11 +131,11 @@ func (p *SignaturePolicy) Pinned() bool {
 }
 
 type LocalEntry struct {
-	Type        string `json:"type"` // "symlink", "command"
-	Source      string `json:"source,omitempty"`
-	Command     string `json:"command,omitempty"`
-	Check       string `json:"check,omitempty"`
-	Description string `json:"description,omitempty"`
+	Type        SkillKind `json:"type"` // SkillSymlink or SkillCommand; LoadConfig refuses any other
+	Source      string    `json:"source,omitempty"`
+	Command     string    `json:"command,omitempty"`
+	Check       string    `json:"check,omitempty"`
+	Description string    `json:"description,omitempty"`
 	// Output is where a command Source delivers its Skill: empty when the
 	// command installs it itself, CommandOutputStdout when its stdout is the
 	// SKILL.md.
@@ -217,7 +217,10 @@ func LoadConfig(configPath string) (*Config, error) {
 		}
 	}
 	for name, entry := range cfg.Local {
-		if entry.Output != "" && (entry.Type != "command" || entry.Output != CommandOutputStdout) {
+		if entry.Type != SkillSymlink && entry.Type != SkillCommand {
+			return nil, fmt.Errorf("invalid local skill %q: type must be %q or %q", name, SkillSymlink, SkillCommand)
+		}
+		if entry.Output != "" && (entry.Type != SkillCommand || entry.Output != CommandOutputStdout) {
 			return nil, fmt.Errorf("invalid local skill %q: output must be %q on a command", name, CommandOutputStdout)
 		}
 	}
@@ -311,10 +314,7 @@ func FindSkillSource(cfg *Config, skillName string) (kind SkillKind, sourceKey s
 		}
 	}
 	if entry, ok := cfg.Local[skillName]; ok {
-		if entry.Type == "command" {
-			return SkillCommand, skillName, true
-		}
-		return SkillSymlink, skillName, true
+		return entry.Type, skillName, true
 	}
 	return "", "", false
 }
@@ -367,7 +367,7 @@ func AddLocalSymlinkEntry(
 		cfg.Local = make(map[string]LocalEntry)
 	}
 	cfg.Local[skillName] = LocalEntry{
-		Type:        "symlink",
+		Type:        SkillSymlink,
 		Source:      sourcePath,
 		Description: description,
 	}
@@ -386,7 +386,7 @@ func AddLocalCommandEntry(
 		cfg.Local = make(map[string]LocalEntry)
 	}
 	cfg.Local[skillName] = LocalEntry{
-		Type:        "command",
+		Type:        SkillCommand,
 		Command:     command,
 		Check:       checkCmd,
 		Description: description,

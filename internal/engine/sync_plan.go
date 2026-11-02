@@ -207,13 +207,13 @@ func PlanSync(cfg *config.Config, scope models.Scope) (*SyncPlan, error) {
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Local)) {
-		if cfg.Local[name].Type != "symlink" {
+		if cfg.Local[name].Type != config.SkillSymlink {
 			continue
 		}
 		plan.Items = append(plan.Items, planLocalItem(cfg, scope, occupancy.Drift(name), name))
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Local)) {
-		if cfg.Local[name].Type != "command" {
+		if cfg.Local[name].Type != config.SkillCommand {
 			continue
 		}
 		plan.Items = append(plan.Items, planLocalItem(cfg, scope, occupancy.Drift(name), name))
@@ -313,7 +313,7 @@ func planLocalItem(cfg *config.Config, scope models.Scope, drift AvailabilityDri
 		Source: "local",
 		Drift:  drift,
 	}
-	if info.Type == "command" {
+	if info.Type == config.SkillCommand {
 		item.Kind = config.SkillCommand
 		item.Command = info.Command
 		item.Check = info.Check
