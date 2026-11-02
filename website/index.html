@@ -389,7 +389,7 @@
       </div>
       <div>
         <h3>Against <code>npx skills</code>: Command sources with prerequisite checks</h3>
-        <p>Skills can be CLI tools or package managers rather than Git repos. Skills Manager supports executable command sources (<code>--command</code>) paired with prerequisite verification (<code>--check</code>), tracked declaratively in <code>skills.json</code>.</p>
+        <p>Skills can be CLI tools or package managers rather than Git repos. Skills Manager supports executable command sources (<code>--command</code>) paired with prerequisite verification (<code>--check</code>), tracked declaratively in <code>skills.json</code>. A CLI that prints its skill instead of installing it takes <code>--stdout</code>: Sync writes the output as the skill&rsquo;s <code>SKILL.md</code>, adding frontmatter when the CLI prints none.</p>
       </div>
       <div>
         <h3>Against <code>npx skills</code>: Persistent availability policies</h3>
@@ -470,7 +470,11 @@
     --command "playwright-cli install --global --skills=agents" \
     --check "which playwright-cli"</span>
 
-<span class="comment"># Prerequisite is verified before execution; skips when check passes</span>
+<span class="comment"># Or capture a skill the CLI prints to stdout as its SKILL.md</span>
+<span class="prompt">$ </span><span class="cmd">skills add hc --command "hc --skill" --stdout \
+    --check "which hc"</span>
+
+<span class="comment"># The check runs first; a skill whose check fails is skipped</span>
 <span class="prompt">$ </span><span class="cmd">skills sync</span></pre>
         </div>
         <p style="margin-top: 10px; font-size: 14px; color: var(--muted);">
