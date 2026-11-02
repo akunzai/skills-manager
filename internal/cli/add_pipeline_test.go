@@ -553,7 +553,7 @@ func TestResolveSkillsToAddMarksOccupancyInThePrompt(t *testing.T) {
 		"fresh":     {"skills/fresh"},
 	}
 
-	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, &engine.AddSlotInspector{Config: cfg, Scope: Scope{SkillsDir: skillsDir}, Source: engine.NewCommandAddSource("true", "", "")})
+	_, _, err := resolveSkillsToAdd(testCmd(), discovered, selectionIntake(t.TempDir()), false, nil, prompter, true, &engine.AddSlotInspector{Config: cfg, Scope: Scope{SkillsDir: skillsDir}, Source: engine.NewCommandAddSource(config.LocalEntry{Command: "true"})})
 	if err != nil {
 		t.Fatal(err)
 	}

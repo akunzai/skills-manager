@@ -193,10 +193,8 @@ func announceLoneSkill(out io.Writer, discovered engine.DiscoveredSkills, descri
 }
 
 func newCommandIntake(skillName, command, check, description, output string) *addIntake {
-	source := engine.NewCommandAddSource(command, check, description)
-	source.Output = output
 	return &addIntake{
-		source:     source,
+		source:     engine.NewCommandAddSource(config.LocalEntry{Command: command, Check: check, Description: description, Output: output}),
 		discovered: engine.DiscoveredSkills{skillName: {"."}},
 		labels: sourceLabels{
 			displayName:  "command",

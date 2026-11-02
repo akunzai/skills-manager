@@ -31,7 +31,7 @@ func TestInspectAddSlot(t *testing.T) {
 		"dangling":      AddSlotConflict,
 		"new":           AddSlotFree,
 	} {
-		slot, err := InspectAddSlot(cfg, projectScope("", skillsDir, ""), NewCommandAddSource("true", "", ""), name, ".")
+		slot, err := InspectAddSlot(cfg, projectScope("", skillsDir, ""), NewCommandAddSource(config.LocalEntry{Command: "true"}), name, ".")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -56,7 +56,7 @@ func TestAddOccupancyDifferentSourceConflictsWithoutDisk(t *testing.T) {
 func TestAddSlotAndPlanShareSourceIdentityRules(t *testing.T) {
 	root := t.TempDir()
 	local := filepath.Join(root, "source")
-	command := NewCommandAddSource("install sample", "", "")
+	command := NewCommandAddSource(config.LocalEntry{Command: "install sample"})
 	remote := AddSource{Kind: AddSourceRemote, Key: "original/repo"}
 	symlink := NewSymlinkAddSource(local, "")
 	tests := []struct {
@@ -145,7 +145,7 @@ func TestAddPlanRejectsUninspectableOccupancy(t *testing.T) {
 			if nested {
 				skillsDir = filepath.Join(blocker, "missing", "skills")
 			}
-			source := NewCommandAddSource("true", "", "")
+			source := NewCommandAddSource(config.LocalEntry{Command: "true"})
 			_, err := InspectAddSlot(nil, projectScope("", skillsDir, ""), source, "sample", ".")
 			if err == nil || !strings.Contains(err.Error(), `Skill "sample"`) {
 				t.Fatalf("inspection error = %v", err)
@@ -163,7 +163,7 @@ func TestAddPlanRejectsUninspectableOccupancy(t *testing.T) {
 
 func TestAddSlotIsFreeWhenScopeDirectoriesAreMissing(t *testing.T) {
 	skillsDir := filepath.Join(t.TempDir(), "missing", ".agents", "skills")
-	slot, err := InspectAddSlot(nil, projectScope("", skillsDir, ""), NewCommandAddSource("true", "", ""), "sample", ".")
+	slot, err := InspectAddSlot(nil, projectScope("", skillsDir, ""), NewCommandAddSource(config.LocalEntry{Command: "true"}), "sample", ".")
 	if err != nil || slot.Occupancy != AddSlotFree {
 		t.Fatalf("slot=%v err=%v; want Free", slot, err)
 	}
@@ -186,7 +186,7 @@ func TestAddSlotChecksSymlinkedScopeDirectories(t *testing.T) {
 			if err := os.Symlink(target, link); err != nil {
 				t.Skipf("symlinks unavailable: %v", err)
 			}
-			slot, err := InspectAddSlot(nil, projectScope("", link, ""), NewCommandAddSource("true", "", ""), "sample", ".")
+			slot, err := InspectAddSlot(nil, projectScope("", link, ""), NewCommandAddSource(config.LocalEntry{Command: "true"}), "sample", ".")
 			if exists {
 				if err != nil || slot.Occupancy != AddSlotFree {
 					t.Fatalf("slot=%v err=%v; want Free", slot, err)

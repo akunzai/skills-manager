@@ -105,16 +105,12 @@ type SyncPlanItem struct {
 	LinkTarget  string
 	LinkCurrent bool
 
-	// Command Skills. Installed records whether the Skill is already present
-	// in the Scope; an installer's own state is not observable without
-	// running its check, which planning must not do.
-	Command   string
-	Check     string
+	// Command Skills. Declared is the Skill's declaration in Config.
+	// Installed records whether the Skill is already present in the Scope;
+	// an installer's own state is not observable without running its check,
+	// which planning must not do.
+	Declared  config.LocalEntry
 	Installed bool
-	// Output and Description are what a command Skill whose stdout is its
-	// SKILL.md needs to write it.
-	Output      string
-	Description string
 }
 
 // Resolve is what this item does under decision.
@@ -315,10 +311,7 @@ func planLocalItem(cfg *config.Config, scope models.Scope, drift AvailabilityDri
 	}
 	if info.Type == config.SkillCommand {
 		item.Kind = config.SkillCommand
-		item.Command = info.Command
-		item.Check = info.Check
-		item.Output = info.Output
-		item.Description = info.Description
+		item.Declared = info
 		_, err := os.Stat(filepath.Join(skillsDir, name))
 		item.Installed = err == nil
 		return item

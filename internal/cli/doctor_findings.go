@@ -232,6 +232,7 @@ func doctorFindings(p engine.DoctorReport, scopeFlags string) []Finding {
 // plain Missing one that a bare Sync re-Materializes, but doing the same to a
 // symlinked Skill only rebuilds the same link at the same broken Source, and
 // a command installer is never re-run by Sync when its check does not pass.
+// A command that prints its SKILL.md is the exception: Sync rewrites it.
 // One shared sentence would therefore be wrong for someone.
 func invalidNextAction(p engine.DoctorReport, invalid engine.InvalidSkill, flag string) string {
 	switch invalid.Kind {
@@ -239,6 +240,9 @@ func invalidNextAction(p engine.DoctorReport, invalid engine.InvalidSkill, flag 
 		source := models.ToTildePath(invalid.SourcePath)
 		return fmt.Sprintf("Next: its source %s has no SKILL.md; fix the source, or undeclare it with 'skills rm%s %s'.", source, flag, invalid.Name)
 	case models.InventoryCommand:
+		if invalid.SyncRestores {
+			return fmt.Sprintf("Next: run 'skills sync%s' to rewrite its SKILL.md from its command, or undeclare it with 'skills rm%s %s'.", flag, flag, invalid.Name)
+		}
 		return fmt.Sprintf("Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm%s %s'.", flag, invalid.Name)
 	default:
 		path := models.ToTildePath(filepath.Join(p.SkillsDir, invalid.Name))

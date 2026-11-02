@@ -314,20 +314,13 @@ func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanI
 	outcome := SyncDone
 	var applyErr error
 	if item.Kind == config.SkillCommand {
-		if item.Check != "" {
-			if _, _, err := RunCmd(item.Check, ""); err != nil {
-				emitSync(emit, SyncEvent{Kind: SyncCheckFailed, Skill: item.Name, Path: item.Check})
-				return SyncBlocked, fmt.Errorf("command check %q failed, skipping %s", item.Check, item.Name)
-			}
+		command := commandSkill{name: item.Name, entry: item.Declared}
+		if err := command.check(); err != nil {
+			emitSync(emit, SyncEvent{Kind: SyncCheckFailed, Skill: item.Name, Path: item.Declared.Check})
+			return SyncBlocked, err
 		}
 		emitSync(emit, SyncEvent{Kind: SyncCommandStart, Skill: item.Name})
-		materialize := func() error { return MaterializeCommand(item.Command) }
-		if item.Output == config.CommandOutputStdout {
-			materialize = func() error {
-				return MaterializeCommandOutput(item.Command, skillsDir, item.Name, item.Description)
-			}
-		}
-		if err := materialize(); err != nil {
+		if err := command.materialize(skillsDir); err != nil {
 			emitSync(emit, SyncEvent{Kind: SyncCommandFailed, Skill: item.Name, Err: err})
 			outcome = SyncFailed
 			applyErr = err

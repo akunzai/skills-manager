@@ -48,7 +48,7 @@ func InspectAddSlot(cfg *config.Config, scope models.Scope, source AddSource, na
 			same = source.remote() && srcKey == source.Key
 		case config.SkillCommand:
 			current = fmt.Sprintf("[command] %s", entry.Command)
-			same = source.Kind == AddSourceCommand && entry.Command == source.Command && entry.Output == source.Output
+			same = source.Kind == AddSourceCommand && commandSkill{name: name, entry: entry}.sameSource(source.Declared)
 		case config.SkillSymlink:
 			localSkillSource := source.LocalPath
 			if subpath != "" && subpath != "." {

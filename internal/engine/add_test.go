@@ -248,7 +248,7 @@ func TestApplyAddPlanReplacesConflictsOnlyOnceApproved(t *testing.T) {
 		{
 			name: "declared from another command",
 			setup: func(t *testing.T, cfg *config.Config, configPath, skillsDir string) (AddSource, func(*testing.T), func(*testing.T)) {
-				first, err := BuildAddPlan(cfg, projectScope(configPath, skillsDir, ""), NewCommandAddSource("echo first", "", ""), map[string]string{"mine": "."}, AddAvailabilityIntent{})
+				first, err := BuildAddPlan(cfg, projectScope(configPath, skillsDir, ""), NewCommandAddSource(config.LocalEntry{Command: "echo first"}), map[string]string{"mine": "."}, AddAvailabilityIntent{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -265,7 +265,7 @@ func TestApplyAddPlanReplacesConflictsOnlyOnceApproved(t *testing.T) {
 						t.Fatalf("command = %q in skills.json, %q in memory; want %q", got, cfg.Local["mine"].Command, want)
 					}
 				}
-				return NewCommandAddSource("echo second", "", ""),
+				return NewCommandAddSource(config.LocalEntry{Command: "echo second"}),
 					func(t *testing.T) { declared(t, "echo first") },
 					func(t *testing.T) { declared(t, "echo second") }
 			},
@@ -514,7 +514,7 @@ func TestApplyAddPlanCountsAFailedCheckAsBlocked(t *testing.T) {
 	project := t.TempDir()
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cfg := config.DefaultConfig()
-	plan, planErr := BuildAddPlan(cfg, projectScope(filepath.Join(project, ".agents", "skills.json"), skillsDir, ""), NewCommandAddSource("echo ok", "exit 1", ""), map[string]string{"cmd-skill": "."}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, projectScope(filepath.Join(project, ".agents", "skills.json"), skillsDir, ""), NewCommandAddSource(config.LocalEntry{Command: "echo ok", Check: "exit 1"}), map[string]string{"cmd-skill": "."}, AddAvailabilityIntent{})
 	if planErr != nil {
 		t.Fatal(planErr)
 	}

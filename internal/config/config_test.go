@@ -24,7 +24,7 @@ func TestConfigLoadAndSave(t *testing.T) {
 	// 2. Add remote skill and local skill
 	AddRemoteSkillEntry(cfg, "owner/repo", "skill-a", "skills/skill-a", "github", "")
 	AddLocalSymlinkEntry(cfg, "local-skill", "/tmp/local-skill", "a local test skill")
-	AddLocalCommandEntry(cfg, "cmd-skill", "echo install", "which echo", "a cmd skill", "")
+	AddLocalCommandEntry(cfg, "cmd-skill", LocalEntry{Command: "echo install", Check: "which echo", Description: "a cmd skill"})
 
 	if err := SaveConfig(cfg, configPath); err != nil {
 		t.Fatalf("SaveConfig failed: %v", err)
@@ -107,7 +107,7 @@ func TestAddSkillEntryReplacesConflictingSource(t *testing.T) {
 	}
 
 	// 3. Add local command skill with same name -> should replace remote
-	AddLocalCommandEntry(cfg, "my-skill", "echo hi", "", "command", "")
+	AddLocalCommandEntry(cfg, "my-skill", LocalEntry{Command: "echo hi", Description: "command"})
 	if _, ok := cfg.Remote["owner/repo"]; ok {
 		t.Fatal("expected empty remote repo to be removed")
 	}

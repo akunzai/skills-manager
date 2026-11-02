@@ -664,7 +664,7 @@ func TestApplyRemovePlanDropsConfigBeforeMaster(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	config.AddLocalCommandEntry(cfg, "sample", "echo ok", "", "", "")
+	config.AddLocalCommandEntry(cfg, "sample", config.LocalEntry{Command: "echo ok"})
 	if err := config.SaveConfig(cfg, configPath); err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ func TestApplyRemovePlanSavesConfigWhenMasterMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	config.AddLocalCommandEntry(cfg, "ghost", "echo ok", "", "", "")
+	config.AddLocalCommandEntry(cfg, "ghost", config.LocalEntry{Command: "echo ok"})
 	if err := config.SaveConfig(cfg, configPath); err != nil {
 		t.Fatal(err)
 	}
@@ -1503,7 +1503,7 @@ func TestSyncPlanApplyCommandCheckSkipsMaterialize(t *testing.T) {
 	skillsDir := filepath.Join(project, ".agents", "skills")
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude"}
-	config.AddLocalCommandEntry(cfg, "sample", "echo install", "exit 1", "", "")
+	config.AddLocalCommandEntry(cfg, "sample", config.LocalEntry{Command: "echo install", Check: "exit 1"})
 
 	var outcome SyncOutcome
 	report, err := applyPlan(t, cfg, skillsDir, t.TempDir(), SyncDecision{}, func(ev SyncEvent) {
@@ -1537,7 +1537,7 @@ func TestSyncPlanApplyCommandFailureStillAppliesAvailability(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude", "continue"}
-	config.AddLocalCommandEntry(cfg, "sample", "exit 1", "", "", "")
+	config.AddLocalCommandEntry(cfg, "sample", config.LocalEntry{Command: "exit 1"})
 	cfg.Settings.Availability["sample"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
 	for _, agent := range []string{".claude", ".continue"} {
 		plantManagedLink(t, skillsDir, filepath.Join(project, agent, "skills"), "sample")
@@ -1585,7 +1585,7 @@ func TestAddPlanCommandFailureSavesAndAppliesAvailability(t *testing.T) {
 		plantManagedLink(t, skillsDir, filepath.Join(project, agent, "skills"), "sample")
 	}
 
-	plan, planErr := BuildAddPlan(cfg, projectScope(configPath, skillsDir, ""), NewCommandAddSource("exit 1", "", ""), map[string]string{"sample": "."}, AddAvailabilityIntent{})
+	plan, planErr := BuildAddPlan(cfg, projectScope(configPath, skillsDir, ""), NewCommandAddSource(config.LocalEntry{Command: "exit 1"}), map[string]string{"sample": "."}, AddAvailabilityIntent{})
 	if planErr != nil {
 		t.Fatal(planErr)
 	}

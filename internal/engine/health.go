@@ -60,6 +60,10 @@ type InvalidSkill struct {
 	// SourcePath is where a symlinked Skill's Source resolves in its Scope;
 	// empty for other kinds.
 	SourcePath string
+	// SyncRestores reports whether a Sync rewrites the Skill's content from
+	// its Source: a remote Skill's Cache, or a command that prints it. A
+	// symlink's Source and an installer's output are the user's to fix.
+	SyncRestores bool
 }
 
 // IllegalLocalSource is a declared local symlink whose Source resolves inside

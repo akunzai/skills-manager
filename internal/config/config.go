@@ -373,25 +373,13 @@ func AddLocalSymlinkEntry(
 	}
 }
 
-func AddLocalCommandEntry(
-	cfg *Config,
-	skillName string,
-	command string,
-	checkCmd string,
-	description string,
-	output string,
-) {
+func AddLocalCommandEntry(cfg *Config, skillName string, entry LocalEntry) {
 	removeSkillRegistration(cfg, skillName)
 	if cfg.Local == nil {
 		cfg.Local = make(map[string]LocalEntry)
 	}
-	cfg.Local[skillName] = LocalEntry{
-		Type:        SkillCommand,
-		Command:     command,
-		Check:       checkCmd,
-		Description: description,
-		Output:      output,
-	}
+	entry.Type = SkillCommand
+	cfg.Local[skillName] = entry
 }
 
 func RemoveSkillEntry(cfg *Config, skillName string) bool {

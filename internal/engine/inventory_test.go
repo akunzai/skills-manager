@@ -120,7 +120,7 @@ func TestLoadInventoryClassifiesKind(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "owner/hub", "hub", "hub", "github", "")
 	config.AddRemoteSkillEntry(cfg, "group/lab", "lab", "lab", "gitlab", "")
 	config.AddLocalSymlinkEntry(cfg, "linked", "/src/linked", "")
-	config.AddLocalCommandEntry(cfg, "installed", "install-it", "", "", "")
+	config.AddLocalCommandEntry(cfg, "installed", config.LocalEntry{Command: "install-it"})
 
 	inv, err := LoadInventory(cfg, projectScope("", skillsDir, ""))
 	if err != nil {

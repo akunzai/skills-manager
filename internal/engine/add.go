@@ -26,13 +26,11 @@ const (
 // AddSource describes where a Skill is obtained and how it should be configured.
 type AddSource struct {
 	Kind        AddSourceKind
-	Key         string        // repository source key, local directory path, or command
-	Remote      *RemoteIntake // the prepared remote Source
-	LocalPath   string        // absolute path to local skill directory
-	Command     string        // installer command
-	Check       string        // command pre-check
-	Output      string        // where the command delivers the Skill (config.CommandOutputStdout or empty)
-	Description string        // description of the skill
+	Key         string            // repository source key, local directory path, or command
+	Remote      *RemoteIntake     // the prepared remote Source
+	LocalPath   string            // absolute path to local skill directory
+	Declared    config.LocalEntry // a command Skill's declaration
+	Description string            // description of a local symlink Skill
 }
 
 // AddSourceSpec is the already-parsed CLI facts used to classify an Add Source.
@@ -166,20 +164,18 @@ func NewSymlinkAddSource(absPath, description string) AddSource {
 	}
 }
 
-func NewCommandAddSource(command, check, description string) AddSource {
+func NewCommandAddSource(entry config.LocalEntry) AddSource {
 	return AddSource{
-		Kind:        AddSourceCommand,
-		Key:         command,
-		Command:     command,
-		Check:       check,
-		Description: description,
+		Kind:     AddSourceCommand,
+		Key:      entry.Command,
+		Declared: entry,
 	}
 }
 
 func (s AddSource) proposedDisplay(subpath, skillsDir string) string {
 	switch s.Kind {
 	case AddSourceCommand:
-		return fmt.Sprintf("[command] %s", s.Command)
+		return fmt.Sprintf("[command] %s", s.Declared.Command)
 	case AddSourceSymlink:
 		p := s.LocalPath
 		if subpath != "" && subpath != "." {
@@ -387,7 +383,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		case AddSourceSymlink:
 			config.AddLocalSymlinkEntry(cfg, name, plan.Scope.StoreLocalSource(resolvedLocal(subpath)), plan.Source.Description)
 		case AddSourceCommand:
-			config.AddLocalCommandEntry(cfg, name, plan.Source.Command, plan.Source.Check, plan.Source.Description, plan.Source.Output)
+			config.AddLocalCommandEntry(cfg, name, plan.Source.Declared)
 		}
 		switch plan.Availability.Kind {
 		case AddAvailabilityFollowDefaults:
@@ -422,7 +418,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		if plan.Source.Kind == AddSourceSymlink {
 			target = resolvedLocal(subpath)
 		} else if plan.Source.Kind == AddSourceCommand {
-			target = plan.Source.Command
+			target = plan.Source.Declared.Command
 		}
 		event := AddSkillEvent{
 			Name:    name,
