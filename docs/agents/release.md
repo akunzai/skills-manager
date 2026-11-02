@@ -97,31 +97,35 @@ mise run demo
 
 Review the GIF before committing it. At release time, reuse an already reviewed demo that covers the user-visible changes; do not regenerate it again. Skip regeneration when a release has no user-visible CLI change.
 
-### 2. Pre-flight Checks
+### 2. Review the Website
+
+Read `website/index.html` against the release-notes preview above. Every user-visible change should be described accurately: new flags and modes, changed behaviour, and exit contracts. Update the page through a `docs/` pull request and merge it before tagging. `pages.yml` deploys the website from `main`, separately from the tag, so the site would otherwise describe the previous release. Skip this step when the release has no user-visible change.
+
+### 3. Pre-flight Checks
 Ensure test suite passes and working tree is clean:
 ```bash
 go test -v ./...
 git status
 ```
 
-### 3. Bump Version Number
+### 4. Bump Version Number
 Update the version string in `internal/updater/updater.go`:
 - `internal/updater/updater.go`: `var Version = "X.Y.Z"`
 
-### 4. Commit and Tag
+### 5. Commit and Tag
 ```bash
 git add internal/updater/updater.go
 git commit -m "chore(release): bump version to vX.Y.Z"
 git tag -a vX.Y.Z -m "Release vX.Y.Z"
 ```
 
-### 5. Push Commit & Tag
+### 6. Push Commit & Tag
 ```bash
 git push origin main
 git push origin vX.Y.Z
 ```
 
-### 6. Approve and Verify
+### 7. Approve and Verify
 1. Once the `test` job passes, the `goreleaser` job waits on the `release` environment. Review the run and approve it (`Review deployments` on the run page, or `gh run view <run-id> --web`). Nothing is published until then; rejecting leaves the tag without a release.
 2. Confirm the release is published at `https://github.com/akunzai/skills-manager/releases`.
 3. Verify self-update detects the new release:
@@ -137,7 +141,7 @@ git push origin vX.Y.Z
    was skipped (`HOMEBREW_BUMP_TOKEN` unset — check the job log for its
    notice), bump the formula or manifest by hand instead.
 
-### 7. Milestone Management
+### 8. Milestone Management
 1. **Summarize the released milestone** with one concise sentence describing its main user-facing outcomes:
    ```bash
    gh api repos/akunzai/skills-manager/milestones/<number> --method PATCH \
