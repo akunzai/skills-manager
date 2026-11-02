@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/akunzai/skills-manager/internal/config"
@@ -38,15 +39,59 @@ type AddSourceSpec struct {
 	Positional string
 	Symlink    string
 	Command    string
-	// Path, Branch, and URL are what --path, --branch, and --url name, which
-	// only a git Source reads.
-	Path, Branch, URL string
+	// The rest are what the flags that only some kinds read name; addFlags
+	// says which kind reads which.
+	Path, Branch, URL, Check, Description, TrustCert string
+	Stdout                                           bool
+}
+
+// addFlags is which Source-specific flags each Add Source kind reads. Add
+// refuses any other: a flag it would ignore reads as if it took effect.
+var addFlags = map[AddSourceKind][]string{
+	AddSourceRemote:    {"path", "branch", "url", "trust-cert"},
+	AddSourceWellKnown: {"trust-cert"},
+	AddSourceSymlink:   {"path", "description"},
+	AddSourceCommand:   {"check", "stdout", "description"},
+}
+
+// addKindNames words each Add Source kind in a refusal.
+var addKindNames = map[AddSourceKind]string{
+	AddSourceRemote:    "git",
+	AddSourceWellKnown: "well-known",
+	AddSourceSymlink:   "symlink",
+	AddSourceCommand:   "command",
 }
 
 // ClassifyAddKind decides the Add Source kind from parsed flags and the
-// positional argument. The returned string is what the matching constructor
-// consumes: a local path, a command, or a remote Source key.
+// positional argument, and refuses a flag that kind does not read. The
+// returned string is what the matching constructor consumes: a local path, a
+// command, or a remote Source key.
 func ClassifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
+	kind, source, err := classifyAddKind(spec)
+	if err != nil {
+		return kind, source, err
+	}
+	set := []struct {
+		name string
+		set  bool
+	}{
+		{"path", spec.Path != ""}, {"branch", spec.Branch != ""}, {"url", spec.URL != ""},
+		{"check", spec.Check != ""}, {"stdout", spec.Stdout}, {"description", spec.Description != ""},
+		{"trust-cert", spec.TrustCert != ""},
+	}
+	for _, flag := range set {
+		if flag.set && !slices.Contains(addFlags[kind], flag.name) {
+			return kind, source, fmt.Errorf("--%s does not apply to a %s Source", flag.name, addKindNames[kind])
+		}
+	}
+	if kind == AddSourceWellKnown {
+		wellKnown, _ := models.ParseWellKnownSource(spec.Positional)
+		return kind, source, checkWellKnownAdd(spec, wellKnown)
+	}
+	return kind, source, nil
+}
+
+func classifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
 	if spec.Symlink != "" || (spec.Command == "" && spec.Positional != "" && isLocalPath(spec.Positional)) {
 		return AddSourceSymlink, cmp.Or(spec.Symlink, spec.Positional), nil
 	}
@@ -56,21 +101,16 @@ func ClassifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
 	if spec.Positional == "" {
 		return "", "", fmt.Errorf("source repository or --symlink/--command required")
 	}
-	if source, ok := models.ParseWellKnownSource(spec.Positional); ok {
-		return AddSourceWellKnown, spec.Positional, checkWellKnownAdd(spec, source)
+	if _, ok := models.ParseWellKnownSource(spec.Positional); ok {
+		return AddSourceWellKnown, spec.Positional, nil
 	}
 	return AddSourceRemote, spec.Positional, nil
 }
 
-// checkWellKnownAdd refuses a well-known Source Add will not read as given:
-// one named with a git-only flag, or not over https://. It is decided before
-// the network is reached or the Scope is asked for.
+// checkWellKnownAdd refuses a well-known Source Add will not read: one not
+// served over https://. It is decided before the network is reached or the
+// Scope is asked for.
 func checkWellKnownAdd(spec AddSourceSpec, source models.WellKnownSource) error {
-	for _, flag := range []struct{ name, value string }{{"path", spec.Path}, {"branch", spec.Branch}, {"url", spec.URL}} {
-		if flag.value != "" {
-			return refuse("--%s does not apply to a well-known Source", flag.name)
-		}
-	}
 	if !strings.HasPrefix(source.URL, "https://") {
 		return refuse("%s is not served over https://; well-known Sources are read only over https://", spec.Positional)
 	}

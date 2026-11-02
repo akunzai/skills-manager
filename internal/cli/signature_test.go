@@ -75,7 +75,7 @@ func TestCLIAddRefusesTrustCertForALocalSource(t *testing.T) {
 	home := isolateHome(t)
 	local := writeCLILocalSkill(t, home, "mine")
 	_, err := runCLI(t, "add", "--symlink", local, "--trust-cert", filepath.Join(home, "root.pem"), "--yes", "--global")
-	if err == nil || !strings.Contains(err.Error(), "--trust-cert applies only") {
+	if err == nil || !strings.Contains(err.Error(), "--trust-cert does not apply to a symlink Source") {
 		t.Fatalf("add error = %v, want --trust-cert refused for a local Source", err)
 	}
 }

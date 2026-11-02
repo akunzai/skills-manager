@@ -12,15 +12,51 @@ import (
 	"github.com/akunzai/skills-manager/internal/models"
 )
 
+// Each Add Source kind reads only some flags; any other is refused, as misuse
+// rather than a Source refusal, so a flag never silently has no effect.
+func TestClassifyAddKindRefusesAFlagTheKindDoesNotRead(t *testing.T) {
+	const site, repo, dir, command = "https://example.com", "owner/repo", "./mine", "tool --skill"
+	for _, tc := range []struct {
+		spec AddSourceSpec
+		want string
+	}{
+		{AddSourceSpec{Positional: site, Path: "skills"}, "--path does not apply to a well-known Source"},
+		{AddSourceSpec{Positional: site, Branch: "main"}, "--branch does not apply to a well-known Source"},
+		{AddSourceSpec{Positional: site, URL: "https://example.com/repo.git"}, "--url does not apply to a well-known Source"},
+		{AddSourceSpec{Positional: site, Description: "d"}, "--description does not apply to a well-known Source"},
+		{AddSourceSpec{Positional: repo, Description: "d"}, "--description does not apply to a git Source"},
+		{AddSourceSpec{Positional: repo, Check: "true"}, "--check does not apply to a git Source"},
+		{AddSourceSpec{Positional: repo, Stdout: true}, "--stdout does not apply to a git Source"},
+		{AddSourceSpec{Positional: dir, Branch: "main"}, "--branch does not apply to a symlink Source"},
+		{AddSourceSpec{Positional: dir, URL: "u"}, "--url does not apply to a symlink Source"},
+		{AddSourceSpec{Positional: dir, TrustCert: "root.pem"}, "--trust-cert does not apply to a symlink Source"},
+		{AddSourceSpec{Command: command, Path: "skills"}, "--path does not apply to a command Source"},
+		{AddSourceSpec{Command: command, Branch: "main"}, "--branch does not apply to a command Source"},
+		{AddSourceSpec{Command: command, TrustCert: "root.pem"}, "--trust-cert does not apply to a command Source"},
+	} {
+		_, _, err := ClassifyAddKind(tc.spec)
+		if err == nil || IsWellKnownRefusal(err) || err.Error() != tc.want {
+			t.Errorf("ClassifyAddKind(%+v) = %v; want misuse %q", tc.spec, err, tc.want)
+		}
+	}
+	for _, spec := range []AddSourceSpec{
+		{Positional: repo, Path: "skills", Branch: "main", URL: "u", TrustCert: "root.pem"},
+		{Positional: site, TrustCert: "root.pem"},
+		{Positional: dir, Path: "skills", Description: "d"},
+		{Command: command, Check: "true", Stdout: true, Description: "d"},
+	} {
+		if _, _, err := ClassifyAddKind(spec); err != nil {
+			t.Errorf("ClassifyAddKind(%+v) = %v; every flag here is read", spec, err)
+		}
+	}
+}
+
 func TestClassifyAddKindRefusesAWellKnownSourceItDoesNotRead(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		spec AddSourceSpec
 		want string
 	}{
-		{"path", AddSourceSpec{Positional: "https://example.com", Path: "skills"}, "--path does not apply to a well-known Source"},
-		{"branch", AddSourceSpec{Positional: "https://example.com", Branch: "main"}, "--branch does not apply to a well-known Source"},
-		{"url", AddSourceSpec{Positional: "https://example.com", URL: "https://example.com/repo.git"}, "--url does not apply to a well-known Source"},
 		{"http", AddSourceSpec{Positional: "http://example.com"}, "is not served over https://"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
