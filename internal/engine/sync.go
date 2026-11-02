@@ -311,6 +311,10 @@ func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanI
 		emitSync(emit, SyncEvent{Kind: SyncSourceMissing, Skill: item.Name, Path: item.SourcePath})
 		return SyncBlocked, fmt.Errorf("local symlink source missing: %s", item.SourcePath)
 	}
+	if item.Block == SyncBlockIllegalLocal {
+		emitSync(emit, SyncEvent{Kind: SyncSkipped, Skill: item.Name, Err: fmt.Errorf("%s: %s", item.Block, item.BlockReason)})
+		return SyncBlocked, fmt.Errorf("%s", item.Block)
+	}
 	outcome := SyncDone
 	var applyErr error
 	if item.Kind == config.SkillCommand {

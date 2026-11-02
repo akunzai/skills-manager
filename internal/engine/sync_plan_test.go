@@ -600,3 +600,26 @@ func TestSyncAtGlobalScopeWithMovedSkillsDirLinksTheHomeAgentDirs(t *testing.T) 
 		t.Errorf("Sync wrote an Agent directory beside the moved skills directory: %v", err)
 	}
 }
+
+// A local Source inside the skills directory is blocked by the plan itself,
+// under every decision, so no preview promises a link apply would refuse.
+func TestPlanSyncBlocksAnIllegalLocalSourceUnderEveryDecision(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	skillsDir := filepath.Join(t.TempDir(), ".agents", "skills")
+	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "mine", "SKILL.md"), []byte("# Mine\n"))
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "mine", filepath.Join(skillsDir, "mine"), "")
+
+	plan, err := PlanSync(cfg, projectScope("", skillsDir, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decision := range []SyncDecision{{}, {Force: true}, {Force: true, AllowUnknown: true}} {
+		if action, block := plan.Items[0].Resolve(decision); action != SyncActionSkip || block != SyncBlockIllegalLocal {
+			t.Fatalf("decision %+v: action %q block %q; want skip on illegal_local", decision, action, block)
+		}
+	}
+	if plan.Summary(SyncDecision{Force: true}).Converged() {
+		t.Fatal("a blocked Skill leaves the Scope unconverged")
+	}
+}

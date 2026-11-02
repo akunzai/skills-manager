@@ -43,6 +43,10 @@ const (
 	// SyncBlockRenameOccupied is a rename whose new name is already occupied
 	// on the skills directory by something Config does not declare.
 	SyncBlockRenameOccupied SyncBlock = "rename_target_occupied"
+	// SyncBlockIllegalLocal is a local symlink whose Source resolves inside
+	// the skills directory, where its link would have to replace the Source
+	// itself. Only editing Config resolves it.
+	SyncBlockIllegalLocal SyncBlock = "illegal_local"
 )
 
 // SyncDecision is the user's answer to the blocks a plan reports. It reaches
@@ -118,7 +122,7 @@ type SyncPlanItem struct {
 // Resolve is what this item does under decision.
 func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) {
 	switch item.Block {
-	case SyncBlockSourceMissing, SyncBlockCacheMissing, SyncBlockRemovedUpstream, SyncBlockRenameOccupied, SyncBlockSignature:
+	case SyncBlockSourceMissing, SyncBlockCacheMissing, SyncBlockRemovedUpstream, SyncBlockRenameOccupied, SyncBlockSignature, SyncBlockIllegalLocal:
 		return SyncActionSkip, item.Block
 	case SyncBlockLocalDrift:
 		if !decision.Force {
@@ -324,6 +328,13 @@ func planLocalItem(cfg *config.Config, scope models.Scope, drift AvailabilityDri
 	item.SourcePath = absSource
 	item.LinkPath = filepath.Join(skillsDir, name)
 	item.LinkTarget = scope.LocalSymlinkTarget(absSource)
+	// The same rule MaterializeLocalSymlink refuses on, so a preview never
+	// promises a link that apply would not make.
+	if models.LocalSourceInsideSkillsDir(absSource, skillsDir) {
+		item.Block = SyncBlockIllegalLocal
+		item.BlockReason = fmt.Sprintf("local source %s is inside the skills directory; delete the local entry for %s from skills.json and leave the directory", models.ToTildePath(absSource), name)
+		return item
+	}
 	if _, err := os.Stat(absSource); err != nil {
 		item.Block = SyncBlockSourceMissing
 		return item
