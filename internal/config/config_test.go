@@ -307,3 +307,29 @@ func TestLoadConfigRejectsAnUnknownCommandOutput(t *testing.T) {
 		}
 	}
 }
+
+// A Source's own facts live as long as the Source is declared, so re-declaring
+// its only Skill keeps them, while moving that Skill to another Source drops
+// the Source it leaves.
+func TestAddRemoteSkillEntryKeepsTheSourceItRedeclaresIn(t *testing.T) {
+	cfg := DefaultConfig()
+	AddRemoteSkillEntry(cfg, "owner/repo", "foo", "foo", "github", "")
+	repo := cfg.Remote["owner/repo"]
+	repo.Branch = "v2"
+	repo.Signature = &SignaturePolicy{Require: true, Sigstore: &SigstoreSigner{Identity: "a@example.com"}}
+	cfg.Remote["owner/repo"] = repo
+
+	AddRemoteSkillEntry(cfg, "owner/repo", "foo", "skills/foo", "github", "")
+	got := cfg.Remote["owner/repo"]
+	if got.Branch != "v2" || got.Signature == nil || !got.Signature.Require || got.Signature.Sigstore == nil {
+		t.Fatalf("re-declaring dropped the Source's facts: %#v", got)
+	}
+	if got.Skills["foo"] != "skills/foo" {
+		t.Fatalf("subpath = %q, want the new one", got.Skills["foo"])
+	}
+
+	AddRemoteSkillEntry(cfg, "other/repo", "foo", "foo", "github", "")
+	if _, ok := cfg.Remote["owner/repo"]; ok {
+		t.Fatalf("a Source left with no Skill should be dropped: %#v", cfg.Remote)
+	}
+}

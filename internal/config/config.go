@@ -327,8 +327,10 @@ func AddRemoteSkillEntry(
 	repoType string,
 	url string,
 ) {
-	// Clean up any existing registration for this skill name across local and other remotes
-	removeSkillRegistration(cfg, skillName)
+	// A Skill re-declared in the Source that already holds it keeps that
+	// Source's own facts (branch, signature policy); only another Source or a
+	// local declaration gives the name up.
+	removeSkillRegistrationExcept(cfg, skillName, source)
 
 	if cfg.Remote == nil {
 		cfg.Remote = make(map[string]RemoteRepo)
@@ -393,10 +395,20 @@ func RemoveSkillEntry(cfg *Config, skillName string) bool {
 }
 
 func removeSkillRegistration(cfg *Config, skillName string) bool {
+	return removeSkillRegistrationExcept(cfg, skillName, "")
+}
+
+// removeSkillRegistrationExcept undeclares skillName everywhere but in the
+// remote Source keep. A Source lives as long as it declares a Skill, so one
+// left with none is dropped, and its branch and signature policy with it.
+func removeSkillRegistrationExcept(cfg *Config, skillName, keep string) bool {
 	found := false
 
 	// Check remote
 	for srcKey, repo := range cfg.Remote {
+		if srcKey == keep {
+			continue
+		}
 		if _, ok := repo.Skills[skillName]; ok {
 			delete(repo.Skills, skillName)
 			found = true

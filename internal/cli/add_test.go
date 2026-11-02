@@ -243,3 +243,41 @@ func TestAddRejectsStdoutWithoutCommand(t *testing.T) {
 		t.Fatalf("error = %v; want --stdout to require --command", err)
 	}
 }
+
+// Re-adding the only Skill of a declared Source must not reset the Source: a
+// Source that requires signatures still refuses the unsigned copy, and the
+// branch it was declared on stays without --branch.
+func TestCLIReAddingASourcesOnlySkillKeepsItsPolicyAndBranch(t *testing.T) {
+	isolateHome(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	writeCLIGitSkill(t, origin, "sample")
+	branch := cliRunGit(t, origin, "rev-parse", "--abbrev-ref", "HEAD")
+
+	cfg := config.DefaultConfig()
+	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
+	repo := cfg.Remote["owner/repo"]
+	repo.Branch = branch
+	repo.Signature = &config.SignaturePolicy{Require: true}
+	cfg.Remote["owner/repo"] = repo
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "add", "owner/repo", "--url", origin, "--skill", "sample", "-p", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("an unsigned copy of a Source that requires signatures should be blocked, exit 1; got %v:\n%s", err, out)
+	}
+	saved, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := saved.Remote["owner/repo"]
+	if got.Signature == nil || !got.Signature.Require || got.Branch != branch {
+		t.Fatalf("re-adding reset the Source: %#v", got)
+	}
+}
