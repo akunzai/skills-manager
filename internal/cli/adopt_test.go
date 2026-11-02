@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -349,6 +350,24 @@ func TestCLIAdoptWordsEachEndState(t *testing.T) {
 			wantExit: 1,
 			want:     []string{"Declared mine, but left " + claudeCopy + ", " + continueCopy + " in place", "Remove them, then run 'skills sync -p'.", "1 declared with copies left"},
 			dontWant: []string{"Failed"},
+		},
+		{
+			name:     "declared and trusted a signer",
+			outcome:  engine.AdoptOutcome{AdoptItem: remote, State: engine.AdoptAdopted, Declared: true, Subpath: "sample", SourceKey: "owner/repo", SignerRecorded: "https://github.com/owner/repo/.github/workflows/sign.yml@refs/heads/main"},
+			wantExit: 0,
+			want:     []string{"Trusting https://github.com/owner/repo/.github/workflows/sign.yml@refs/heads/main as the signer of owner/repo, recorded in Config."},
+		},
+		{
+			name:     "declared without a trust root",
+			outcome:  engine.AdoptOutcome{AdoptItem: remote, State: engine.AdoptAdopted, Declared: true, Subpath: "sample", SourceKey: "owner/repo", TrustRootErr: errors.New("fetch Sigstore trust root: offline")},
+			wantExit: 0,
+			want:     []string{"Warning: fetch Sigstore trust root: offline", "skills update -p"},
+		},
+		{
+			name:     "undone keeps no trust report",
+			outcome:  engine.AdoptOutcome{AdoptItem: remote, State: engine.AdoptSkipped, Reason: "gone", SourceKey: "owner/repo", SignerRecorded: "someone"},
+			wantExit: 1,
+			dontWant: []string{"Trusting"},
 		},
 		{
 			name:     "skipped",

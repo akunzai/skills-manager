@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/models"
+	"github.com/akunzai/skills-manager/internal/signing"
 )
 
 // adoptFixture is a Project Scope whose skills directory holds Untracked
@@ -450,5 +452,59 @@ func TestCloneConfigKeepsSignaturePolicyThroughLaterChanges(t *testing.T) {
 	want := config.SignaturePolicy{Trusted: map[string]string{"sample": "tree-1"}}
 	if got := *snapshot.Remote["owner/repo"].Signature; !reflect.DeepEqual(got, want) {
 		t.Fatalf("snapshot policy = %+v, want %+v", got, want)
+	}
+}
+
+// Declaring a signed remote Skill writes trust into Config, which Adopt
+// reports as Sync and Add do: the signer it pinned, or the trust root it could
+// not fetch.
+func TestAdoptReportsTheTrustItsDeclarationRecorded(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		rootErr  error
+		wantPin  string
+		wantRoot bool
+	}{
+		{"pins the first signer", nil, testSigner.Identity, false},
+		{"trust root unavailable", errors.New("offline"), "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newAdoptFixture(t)
+			if err := os.WriteFile(filepath.Join(f.origin, "sample", signing.FileName), []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			mustGit(t, f.origin, "add", ".")
+			mustGit(t, f.origin, "commit", "-m", "sign")
+			f.untracked(t, "sample", "# Sample\n")
+			f.lock(t, map[string]string{"sample": "sample/SKILL.md"})
+			previous := FetchTrustedRoot
+			FetchTrustedRoot = func(string) ([]byte, error) {
+				if tt.rootErr != nil {
+					return nil, tt.rootErr
+				}
+				return []byte(`{"mediaType":"application/vnd.dev.sigstore.trustedroot+json;version=0.1"}`), nil
+			}
+			t.Cleanup(func() { FetchTrustedRoot = previous })
+			stubVerify(t, signedBy(testSigner))
+
+			result := f.adopt(t, config.DefaultConfig())
+
+			got := result.Skills[0]
+			// The verifier is stubbed, so it reports a signer even without
+			// a trust root; only the pinned case checks the signer.
+			if !got.Declared || got.SourceKey != "owner/repo" || (tt.wantPin != "" && got.SignerRecorded != tt.wantPin) || (got.TrustRootErr != nil) != tt.wantRoot {
+				t.Fatalf("outcome = %+v; want declared, pinned %q, trust root error %v", got, tt.wantPin, tt.wantRoot)
+			}
+			if tt.wantPin == "" {
+				return
+			}
+			saved, err := config.LoadConfig(f.configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sig := saved.Remote["owner/repo"].Signature; sig == nil || sig.Sigstore == nil || sig.Sigstore.Identity != tt.wantPin {
+				t.Fatalf("saved signature = %+v; want the reported signer pinned", sig)
+			}
+		})
 	}
 }
