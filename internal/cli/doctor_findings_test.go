@@ -424,8 +424,9 @@ func TestFindingsLeftoverMasterSymlinkNamesPrune(t *testing.T) {
 
 // An invalid folder's remedy depends on how the Skill was declared: removing a
 // remote one lets a bare Sync re-Materialize it, while a symlinked one is only
-// as valid as its Source and a command installer is not re-run by Sync. One
-// shared sentence would be wrong for two of the three.
+// as valid as its Source, a command installer is not re-run by Sync, and a
+// command that prints its SKILL.md is rewritten by a bare Sync. One shared
+// sentence would be wrong for most of them.
 func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	project := t.TempDir()
@@ -435,6 +436,7 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 		filepath.Join(skillsDir, "remoted"),
 		filepath.Join(skillsDir, "linked"),
 		filepath.Join(skillsDir, "installed"),
+		filepath.Join(skillsDir, "printed"),
 		source,
 	} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -445,7 +447,8 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "remoted", "remoted", "github", "")
 	config.AddLocalSymlinkEntry(cfg, "linked", source, "")
-	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "", "")
+	config.AddLocalCommandEntry(cfg, "installed", config.LocalEntry{Command: "install-me"})
+	config.AddLocalCommandEntry(cfg, "printed", config.LocalEntry{Command: "print-me", Output: config.CommandOutputStdout})
 
 	outcome, err := engine.NewDoctor(cfg, projectScopeOf(skillsDir)).Run(false, nil)
 	if err != nil {
@@ -455,6 +458,7 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 		"Next: remove " + models.ToTildePath(filepath.Join(skillsDir, "remoted")) + ", then run 'skills sync -p' to re-materialize it.",
 		"Next: its source " + models.ToTildePath(source) + " has no SKILL.md; fix the source, or undeclare it with 'skills rm -p linked'.",
 		"Next: its installer left no SKILL.md; re-run it manually, or undeclare it with 'skills rm -p installed'.",
+		"Next: run 'skills sync -p' to rewrite its SKILL.md from its command, or undeclare it with 'skills rm -p printed'.",
 	}
 	for _, message := range want {
 		if !containsMessage(findingsFor(outcome.Report), message) {

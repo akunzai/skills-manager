@@ -105,7 +105,7 @@ Putting one Skill from its Source onto the Scope skills directory (copy, symlink
 _Avoid_: install (when you mean the disk write only), checkout, restore
 
 **Skill kind**:
-How Config declares a Skill: remote, from a Source whose Cache it is Materialized from; local symlink, linked to a directory the user owns; or command, provided by an installer. It is the declared kind, not the kind of Source an Add proposes.
+How Config declares a Skill: remote, from a Source whose Cache it is Materialized from; local symlink, linked to a directory the user owns; or command, provided by an installer or written from its command's output. It is the declared kind, not the kind of Source an Add proposes.
 _Avoid_: source type, category
 
 **Retire**:

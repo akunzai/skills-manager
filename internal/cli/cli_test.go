@@ -524,7 +524,7 @@ func TestCLISyncPrintsCommandFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	config.AddLocalCommandEntry(cfg, "sample", "exit 1", "", "", "")
+	config.AddLocalCommandEntry(cfg, "sample", config.LocalEntry{Command: "exit 1"})
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
@@ -1881,7 +1881,7 @@ func TestCLISyncDryRunNeverEntersApply(t *testing.T) {
 	marker := filepath.Join(root, "check-ran")
 
 	cfg := config.DefaultConfig()
-	config.AddLocalCommandEntry(cfg, "tool", "touch "+filepath.Join(root, "installed"), "touch "+marker, "", "")
+	config.AddLocalCommandEntry(cfg, "tool", config.LocalEntry{Command: "touch " + filepath.Join(root, "installed"), Check: "touch " + marker})
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}

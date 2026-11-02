@@ -233,8 +233,13 @@ func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
 		case !item.IsValidSkill:
 			item.Status = models.SkillStatusInvalid
 			invalid := InvalidSkill{Name: item.Name, Kind: item.Kind, Source: item.Source}
-			if item.Kind == models.InventorySymlink {
+			switch item.Kind {
+			case models.InventorySymlink:
 				invalid.SourcePath = scope.ResolveLocalSource(item.Source)
+			case models.InventoryRemote:
+				invalid.SyncRestores = true
+			case models.InventoryCommand:
+				invalid.SyncRestores = commandSkill{name: item.Name, entry: cfg.Local[item.Name]}.syncRestores()
 			}
 			inv.invalid = append(inv.invalid, invalid)
 			inv.present = append(inv.present, presentSkill{Name: item.Name, Source: item.Source})

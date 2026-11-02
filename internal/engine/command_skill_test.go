@@ -27,7 +27,7 @@ func stdoutCommandFixture(t *testing.T, printed string) (cfg *config.Config, ski
 		t.Fatal(err)
 	}
 	cfg = config.DefaultConfig()
-	config.AddLocalCommandEntry(cfg, "tool", printFileCommand(printedPath), "", "Configured tool", config.CommandOutputStdout)
+	config.AddLocalCommandEntry(cfg, "tool", config.LocalEntry{Command: printFileCommand(printedPath), Description: "Configured tool", Output: config.CommandOutputStdout})
 	return cfg, skillsDir, filepath.Join(skillsDir, "tool", "SKILL.md")
 }
 
@@ -69,13 +69,13 @@ func TestSyncLeavesSkillMdWhenAStdoutCommandFails(t *testing.T) {
 	}
 }
 
-func TestMaterializeCommandOutputRefusesEmptyOutput(t *testing.T) {
+func TestCommandSkillRefusesEmptyOutput(t *testing.T) {
 	_, skillsDir, skillMd := stdoutCommandFixture(t, "")
 	empty := filepath.Join(t.TempDir(), "empty.md")
 	if err := os.WriteFile(empty, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := MaterializeCommandOutput(printFileCommand(empty), skillsDir, "tool", ""); err == nil {
+	if err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(empty), Output: config.CommandOutputStdout}}).materialize(skillsDir); err == nil {
 		t.Fatal("empty output should be refused")
 	}
 	if _, err := os.Stat(skillMd); !os.IsNotExist(err) {
@@ -83,7 +83,7 @@ func TestMaterializeCommandOutputRefusesEmptyOutput(t *testing.T) {
 	}
 }
 
-func TestMaterializeCommandOutputReplacesALinkRatherThanWritingThroughIt(t *testing.T) {
+func TestCommandSkillReplacesALinkRatherThanWritingThroughIt(t *testing.T) {
 	_, skillsDir, skillMd := stdoutCommandFixture(t, "")
 	elsewhere := t.TempDir()
 	mustWriteScopeStateTestFile(t, filepath.Join(elsewhere, "SKILL.md"), []byte("theirs\n"))
@@ -98,7 +98,7 @@ func TestMaterializeCommandOutputReplacesALinkRatherThanWritingThroughIt(t *test
 		t.Fatal(err)
 	}
 
-	if err := MaterializeCommandOutput(printFileCommand(printed), skillsDir, "tool", ""); err != nil {
+	if err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(printed), Output: config.CommandOutputStdout}}).materialize(skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(elsewhere, "SKILL.md")); string(got) != "theirs\n" {
@@ -106,5 +106,44 @@ func TestMaterializeCommandOutputReplacesALinkRatherThanWritingThroughIt(t *test
 	}
 	if info, err := os.Lstat(filepath.Dir(skillMd)); err != nil || !info.IsDir() {
 		t.Fatalf("skill should be a directory: %v", err)
+	}
+}
+
+func TestCommandSkillCheck(t *testing.T) {
+	for _, tt := range []struct {
+		check string
+		pass  bool
+	}{{"", true}, {"exit 0", true}, {"exit 1", false}} {
+		err := commandSkill{name: "tool", entry: config.LocalEntry{Command: "x", Check: tt.check}}.check()
+		if (err == nil) != tt.pass {
+			t.Fatalf("check %q: error = %v, want pass %v", tt.check, err, tt.pass)
+		}
+	}
+}
+
+func TestCommandSkillInstallerRunsWithoutWriting(t *testing.T) {
+	skillsDir := filepath.Join(t.TempDir(), "skills")
+	if err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: "exit 0"}}).materialize(skillsDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "tool")); !os.IsNotExist(err) {
+		t.Fatalf("an installer's Skill is its own to write: %v", err)
+	}
+	if err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: "exit 3"}}).materialize(skillsDir); err == nil {
+		t.Fatal("a failing installer should fail")
+	}
+}
+
+func TestCommandSkillIdentityAndRestore(t *testing.T) {
+	stdout := commandSkill{name: "tool", entry: config.LocalEntry{Command: "tool --skill", Check: "which tool", Output: config.CommandOutputStdout}}
+	installer := commandSkill{name: "tool", entry: config.LocalEntry{Command: "tool --skill"}}
+	if !stdout.syncRestores() || installer.syncRestores() {
+		t.Fatal("only a command that prints its SKILL.md is restored by Sync")
+	}
+	if !stdout.sameSource(config.LocalEntry{Command: "tool --skill", Output: config.CommandOutputStdout, Description: "other"}) {
+		t.Fatal("check and description are not part of the Source")
+	}
+	if stdout.sameSource(installer.entry) {
+		t.Fatal("how the command delivers the Skill is part of the Source")
 	}
 }

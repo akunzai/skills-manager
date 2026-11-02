@@ -296,7 +296,7 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 	case action == engine.SyncActionSymlink && !item.LinkCurrent:
 		fmt.Fprintf(out, "  [Dry-run] Would symlink %s -> %s\n", models.ToTildePath(item.LinkPath), models.ToTildePath(item.SourcePath))
 	case action == engine.SyncActionCommand && !item.Installed:
-		fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", item.Command)
+		fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", item.Declared.Command)
 	}
 	if len(item.Drift.Missing) > 0 {
 		fmt.Fprintf(out, "  [Dry-run] Would link %s to %s.\n", item.Name, strings.Join(item.Drift.Missing, ", "))
