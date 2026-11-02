@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -77,4 +78,46 @@ func MaterializeCommand(command string) error {
 		msg = err.Error()
 	}
 	return fmt.Errorf("%s", msg)
+}
+
+// MaterializeCommandOutput runs a command Source whose stdout is its Skill's
+// SKILL.md and writes that output to the Scope skills directory, supplying
+// frontmatter when the command printed none. A command that fails or prints
+// nothing leaves the Scope copy as it was.
+func MaterializeCommandOutput(command, skillsDir, name, description string) error {
+	stdout, stderr, err := RunCmd(command, "")
+	if err != nil {
+		return fmt.Errorf("%s", cmp.Or(stderr, stdout, err.Error()))
+	}
+	if stdout == "" {
+		return fmt.Errorf("command printed nothing to write as %s's SKILL.md", name)
+	}
+	skillDir := filepath.Join(skillsDir, name)
+	// The Skill is a directory this command owns; a link or file in its
+	// place is replaced rather than written through.
+	if info, err := os.Lstat(skillDir); err == nil && !info.IsDir() {
+		if err := os.Remove(skillDir); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		return err
+	}
+	content := withSkillFrontmatter(stdout, name, description) + "\n"
+	tmp, err := os.CreateTemp(skillDir, ".SKILL.md-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), filepath.Join(skillDir, "SKILL.md"))
 }

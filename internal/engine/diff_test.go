@@ -223,7 +223,7 @@ func TestDiffSkillRejectsWhatItCannotCompare(t *testing.T) {
 	t.Parallel()
 	f := newDiffFixture(t)
 	config.AddLocalSymlinkEntry(f.cfg, "mine", filepath.Join(f.root, "mine"), "")
-	config.AddLocalCommandEntry(f.cfg, "tool", "true", "true", "")
+	config.AddLocalCommandEntry(f.cfg, "tool", "true", "true", "", "")
 	f.cfg.Remote["owner/uncached"] = config.RemoteRepo{Type: "git", URL: f.url, Branch: "other", Skills: map[string]string{"uncached": "skills/other"}}
 
 	for name, want := range map[string]string{

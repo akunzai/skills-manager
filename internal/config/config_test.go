@@ -24,7 +24,7 @@ func TestConfigLoadAndSave(t *testing.T) {
 	// 2. Add remote skill and local skill
 	AddRemoteSkillEntry(cfg, "owner/repo", "skill-a", "skills/skill-a", "github", "")
 	AddLocalSymlinkEntry(cfg, "local-skill", "/tmp/local-skill", "a local test skill")
-	AddLocalCommandEntry(cfg, "cmd-skill", "echo install", "which echo", "a cmd skill")
+	AddLocalCommandEntry(cfg, "cmd-skill", "echo install", "which echo", "a cmd skill", "")
 
 	if err := SaveConfig(cfg, configPath); err != nil {
 		t.Fatalf("SaveConfig failed: %v", err)
@@ -107,7 +107,7 @@ func TestAddSkillEntryReplacesConflictingSource(t *testing.T) {
 	}
 
 	// 3. Add local command skill with same name -> should replace remote
-	AddLocalCommandEntry(cfg, "my-skill", "echo hi", "", "command")
+	AddLocalCommandEntry(cfg, "my-skill", "echo hi", "", "command", "")
 	if _, ok := cfg.Remote["owner/repo"]; ok {
 		t.Fatal("expected empty remote repo to be removed")
 	}
@@ -272,6 +272,21 @@ func TestLoadConfigRefusesAWellKnownSourceWithABranchOrNoURL(t *testing.T) {
 		}
 		if _, err := LoadConfig(path); err == nil {
 			t.Errorf("%s: LoadConfig accepted %s", name, repo)
+		}
+	}
+}
+
+func TestLoadConfigRejectsAnUnknownCommandOutput(t *testing.T) {
+	for _, entry := range []string{
+		`{"type": "command", "command": "x", "output": "file"}`,
+		`{"type": "symlink", "source": "/x", "output": "stdout"}`,
+	} {
+		path := filepath.Join(t.TempDir(), "skills.json")
+		if err := os.WriteFile(path, []byte(`{"version": 1, "local": {"tool": `+entry+`}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "output must be") {
+			t.Fatalf("%s: error = %v; want the output rejected", entry, err)
 		}
 	}
 }

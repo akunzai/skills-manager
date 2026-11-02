@@ -91,7 +91,7 @@ func TestPreparedUpdateRefreshFailureKeepsSyncResults(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Remote["owner/repo"] = config.RemoteRepo{URL: origin, Branch: branch, Skills: map[string]string{"sample": "sample"}}
 	cfg.Remote["owner/missing"] = config.RemoteRepo{URL: filepath.Join(root, "missing"), Branch: "main", Skills: map[string]string{"lost": "lost"}}
-	config.AddLocalCommandEntry(cfg, "broken", "exit 1", "", "")
+	config.AddLocalCommandEntry(cfg, "broken", "exit 1", "", "", "")
 	prepared, err := PrepareUpdate(cfg, projectScope(filepath.Join(root, "skills.json"), skillsDir, cacheDir), UpdateOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestPreparedUpdateReportsSyncFailureWithoutRefreshFailure(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	cfg := config.DefaultConfig()
-	config.AddLocalCommandEntry(cfg, "broken", "exit 1", "", "")
+	config.AddLocalCommandEntry(cfg, "broken", "exit 1", "", "", "")
 	prepared, err := PrepareUpdate(cfg, projectScope("", filepath.Join(root, "skills"), filepath.Join(root, "cache")), UpdateOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestPreparedUpdateConvergedScopeSkipsCommandChecks(t *testing.T) {
 	skillsDir := filepath.Join(root, "skills")
 	cfg := config.DefaultConfig()
 	cfg.Settings.Availability["installed"] = config.AvailabilityOverride{Exclude: []string{"claude"}}
-	config.AddLocalCommandEntry(cfg, "installed", "exit 1", "exit 1", "")
+	config.AddLocalCommandEntry(cfg, "installed", "exit 1", "exit 1", "", "")
 	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "installed", "SKILL.md"), []byte("# Installed\n"))
 	prepared, err := PrepareUpdate(cfg, projectScope("", skillsDir, filepath.Join(root, "cache")), UpdateOptions{}, nil)
 	if err != nil {

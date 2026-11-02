@@ -524,7 +524,7 @@ func TestCLISyncPrintsCommandFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	config.AddLocalCommandEntry(cfg, "sample", "exit 1", "", "")
+	config.AddLocalCommandEntry(cfg, "sample", "exit 1", "", "", "")
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
@@ -1881,7 +1881,7 @@ func TestCLISyncDryRunNeverEntersApply(t *testing.T) {
 	marker := filepath.Join(root, "check-ran")
 
 	cfg := config.DefaultConfig()
-	config.AddLocalCommandEntry(cfg, "tool", "touch "+filepath.Join(root, "installed"), "touch "+marker, "")
+	config.AddLocalCommandEntry(cfg, "tool", "touch "+filepath.Join(root, "installed"), "touch "+marker, "", "")
 	if err := config.SaveConfig(cfg, configFile); err != nil {
 		t.Fatal(err)
 	}
@@ -2998,6 +2998,38 @@ func TestCLICommandAddSavesWhenInstallerFails(t *testing.T) {
 	}
 	if cfg.Local["cmd-skill"].Command != "exit 1" {
 		t.Fatalf("command = %#v", cfg.Local)
+	}
+}
+
+func TestCLICommandAddWritesStdoutAsSkillMd(t *testing.T) {
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	printed := filepath.Join(home, "printed.md")
+	if err := os.WriteFile(printed, []byte("# Tool manual\n\nRuns the tool. More text.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	printCmd := "cat " + printed
+	if runtime.GOOS == "windows" {
+		printCmd = "type " + printed
+	}
+	out, err := runCLI(t, "add", "--command", printCmd, "--stdout", "--skill", "tool", "-y", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Local["tool"].Output; got != config.CommandOutputStdout {
+		t.Fatalf("output = %q, want %q", got, config.CommandOutputStdout)
+	}
+	skillMd, err := os.ReadFile(filepath.Join(skillsDir, "tool", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(strings.ReplaceAll(string(skillMd), "\r\n", "\n"), "---\nname: tool\ndescription: \"Tool manual. Runs the tool.\"\n---\n\n# Tool manual") {
+		t.Fatalf("SKILL.md = %q", skillMd)
 	}
 }
 

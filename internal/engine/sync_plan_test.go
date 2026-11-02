@@ -75,7 +75,7 @@ func planSyncFixture(t *testing.T) (cfg *config.Config, root, skillsDir, cacheDi
 	cfg = config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "sample", "sample", "git", origin)
 	config.AddLocalSymlinkEntry(cfg, "local", local, "")
-	config.AddLocalCommandEntry(cfg, "tool", "true", "touch "+checkMarker, "")
+	config.AddLocalCommandEntry(cfg, "tool", "true", "touch "+checkMarker, "", "")
 	return cfg, root, skillsDir, cacheDir, checkMarker
 }
 
@@ -340,7 +340,7 @@ func TestPlanSyncTreatsInstalledCommandSkillAsConverged(t *testing.T) {
 	// Codex is Automatically available, so no Availability link is managed and
 	// the command Skill is the only thing the plan can call work.
 	cfg.Settings.DefaultAgents = []string{"codex"}
-	config.AddLocalCommandEntry(cfg, "tool", "install-tool", "which tool", "")
+	config.AddLocalCommandEntry(cfg, "tool", "install-tool", "which tool", "", "")
 
 	plan, err := PlanSync(cfg, projectScope("", skillsDir, t.TempDir()))
 	if err != nil {
@@ -530,7 +530,7 @@ func TestSyncPreviewRetainsRefusalSnapshotWhileApplyReadsCurrentPaths(t *testing
 	configPath := filepath.Join(root, ".agents", "skills.json")
 	cfg := config.DefaultConfig()
 	cfg.Settings.DefaultAgents = []string{"claude-code", "continue"}
-	config.AddLocalCommandEntry(cfg, "sample", "exit 0", "", "")
+	config.AddLocalCommandEntry(cfg, "sample", "exit 0", "", "", "")
 	if err := os.MkdirAll(filepath.Join(skillsDir, "sample"), 0o755); err != nil {
 		t.Fatal(err)
 	}
