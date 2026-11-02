@@ -482,6 +482,14 @@ type AdoptOutcome struct {
 	// Available is the Agents declared Availability selects for a declared
 	// Skill.
 	Available []string
+	// SourceKey, SignerRecorded, and TrustRootErr are what declaring a remote
+	// Skill trusted, as Sync and Add report it: the keyless signer it pinned
+	// for the Source, if it pinned one, and a trust root it could not fetch,
+	// which leaves the Skill unverified until Update fetches it. Only a
+	// declared Skill carries them; one undone keeps none of its writes.
+	SourceKey      string
+	SignerRecorded string
+	TrustRootErr   error
 }
 
 // AdoptResult records the outcome of applying an AdoptPlan.
@@ -751,7 +759,11 @@ func (a *adoption) declare(remote *remoteAdoption, content string) error {
 			Subpath:   remote.subpath,
 			ScopePath: content,
 		}, AvailabilityDrift{})
-		a.planner.recordSigner(source)
+		a.outcome.SourceKey = source
+		if signer, changed := a.planner.recordSigner(source); changed {
+			a.outcome.SignerRecorded = signer.Identity
+		}
+		a.outcome.TrustRootErr = remote.intake.TrustRootErr
 	} else {
 		config.AddLocalSymlinkEntry(a.cfg, item.Name, a.scope.StoreLocalSource(content), "")
 	}
@@ -800,6 +812,7 @@ func (a *adoption) undo(state AdoptState, reason string) AdoptOutcome {
 		reason = errors.Join(append([]error{errors.New(reason)}, errs...)...).Error()
 	}
 	a.outcome.State, a.outcome.Reason = state, reason
+	a.outcome.SignerRecorded, a.outcome.TrustRootErr = "", nil
 	return a.outcome
 }
 

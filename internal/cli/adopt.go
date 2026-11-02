@@ -310,6 +310,12 @@ func reportAdoptOutcome(cmd *cobra.Command, out io.Writer, result engine.AdoptRe
 				fmt.Fprintf(out, "  %sFailed to adopt %s: %s; it was not declared.%s\n", colorRed, skill.Name, reason, colorReset)
 			}
 		}
+		if skill.Declared && skill.SignerRecorded != "" {
+			fmt.Fprintf(out, "    %sTrusting %s as the signer of %s, recorded in Config.%s\n", colorGreen, skill.SignerRecorded, skill.SourceKey, colorReset)
+		}
+		if skill.Declared && skill.TrustRootErr != nil {
+			fmt.Fprintf(out, "    %sWarning: %s%s\n", colorYellow, withNext(skill.TrustRootErr.Error(), "update", scopeFlagsOf(cmd, scope)), colorReset)
+		}
 		if skill.Declared && skill.OnAgentDirectories() {
 			printAdoptedAvailability(out, skill)
 		}

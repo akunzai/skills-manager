@@ -41,6 +41,10 @@ The same review proposed one more, rejected because the rule already lives in on
 
 The same review also said signature policy changes escape Adopt's undo snapshot, which shares each policy through a shallow copy of Config. That did not hold: every change already replaced the policy rather than changing it in place. Config's mutators now share that step in `updateSignature`, and a test of `cloneConfig` pins it.
 
+A November 2026 review proposed one more, rejected because the callers decide what it would share:
+
+- **Add and Adopt declare and verify a remote Skill through one Remote intake step.** Both run `Declare`, plan each Skill through a `remotePlanner`, and record the first signer. But Add plans a Skill it will write (`declared`), while Adopt plans a copy that may already match (`recorded`). Adopt also shares one planner across every Source it adopts from. A shared step would take the planner and the planning mode as parameters and keep only `recordSigner` and one condition. The real gap was that Adopt did not report the trust it wrote. Kept instead: each caller's own declaration, with `AdoptOutcome` carrying the signer it pinned and any trust root error, worded as Sync and Add word them.
+
 Revisit when a second frontend, such as a `--json` for doctor or prune, needs the same grouping or wording the CLI now owns. Presentation would then have two adapters, and a shared seam for it would be real.
 
 This does not reopen ADR-0001 (Add's Source kind switch) or ADR-0002 (exit codes express state).
