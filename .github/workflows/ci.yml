@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # A PR touching only these builds nothing; main still runs on every push.
+    # skills/ stays in: the guide SKILL.md is embedded in the binary.
+    paths-ignore:
+      - 'website/**'
+      - 'docs/**'
+      - '*.md'
 
 permissions:
   contents: read
