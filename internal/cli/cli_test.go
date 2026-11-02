@@ -1900,6 +1900,42 @@ func TestCLISyncDryRunNeverEntersApply(t *testing.T) {
 	}
 }
 
+// A command that prints its SKILL.md is pending when that file is missing,
+// even though its folder is there, and the preview names the file it writes.
+// Once the file is there it is not pending: its content is only known by
+// running the command, which planning must not do.
+func TestCLISyncDryRunPreviewsAMissingPrintedSkillMd(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	configFile, skillsDir := filepath.Join(root, "skills.json"), filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	config.AddLocalCommandEntry(cfg, "tool", config.LocalEntry{Command: "tool --skill", Output: config.CommandOutputStdout})
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("error = %v (exit %d); a missing SKILL.md is pending work, exit 1\n%s", err, ExitCode(err), out)
+	}
+	skillMd := filepath.Join(skillsDir, "tool", "SKILL.md")
+	if want := "[Dry-run] Would write " + models.ToTildePath(skillMd) + " from: tool --skill"; !strings.Contains(out, want) {
+		t.Fatalf("output does not say %q:\n%s", want, out)
+	}
+
+	if err := os.WriteFile(skillMd, []byte("---\nname: tool\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Availability may still be pending; only the write must be gone.
+	out, _ = runCLI(t, "sync", "--dry-run", "--config", configFile, "--skills-dir", skillsDir)
+	if strings.Contains(out, "Would write") {
+		t.Fatalf("previewed a write for a present SKILL.md:\n%s", out)
+	}
+}
+
 // Declining to replace a Skill without a baseline leaves it blocked while Sync
 // reconciles the rest: the Scope still does not match its Config, so it exits
 // 1 (ADR-0002), not 2 (#172).
