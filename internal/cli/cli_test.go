@@ -3191,9 +3191,20 @@ func TestCLISyncIllegalLocalSourceLeavesRealDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The plan blocks it before apply, as Doctor reports it: the Scope does
+	// not match its Config and editing Config is the next action, exit 1.
+	preview, err := runCLI(t, "sync", "-p", "--dry-run")
+	if err == nil || ExitCode(err) != 1 || strings.Contains(preview, "Would symlink") {
+		t.Fatalf("a preview must not promise the link, exit 1; got err=%v:\n%s", err, preview)
+	}
 	out, err := runCLI(t, "sync", "-p")
-	if err == nil || ExitCode(err) != 2 {
-		t.Fatalf("illegal local Source should fail Materialize with exit 2, got err=%v:\n%s", err, out)
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("illegal local Source should block with exit 1, got err=%v:\n%s", err, out)
+	}
+	for _, text := range []string{preview, out} {
+		if !strings.Contains(text, "Skipped mine: illegal_local: local source") || !strings.Contains(text, "delete the local entry for mine from skills.json") {
+			t.Fatalf("output does not name the block and its way out:\n%s", text)
+		}
 	}
 	info, lerr := os.Lstat(dest)
 	if lerr != nil || info.Mode()&os.ModeSymlink != 0 {
