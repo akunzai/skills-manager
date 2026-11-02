@@ -11,6 +11,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/models"
 )
 
 func TestGroupDiscoveredSkillsUsesSkillParentDirectories(t *testing.T) {
@@ -287,5 +288,27 @@ func TestAddRejectsJSONWithoutList(t *testing.T) {
 	cmd.SetArgs([]string{"owner/repo", "--json"})
 	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--json applies only with --list") {
 		t.Fatalf("error = %v; want --json to require --list", err)
+	}
+}
+
+// A local Skill's progress row names where it links, which ApplyAddPlan
+// resolves from the Source and subpath.
+func TestLocalIntakeProgressNamesTheLinkTarget(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "skills", "mine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skills", "mine", "SKILL.md"), []byte("---\nname: mine\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newAddCmd()
+	cmd.SetOut(io.Discard)
+	intake, err := newLocalIntake(cmd, root, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "skills", "mine")
+	if got, want := intake.progressLine(engine.AddSkillEvent{Name: "mine", Subpath: "skills/mine", Target: target}), "Linking local skill: mine -> "+models.ToTildePath(target); got != want {
+		t.Fatalf("progress = %q, want %q", got, want)
 	}
 }

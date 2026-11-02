@@ -158,12 +158,6 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 	}
 	announceLoneSkill(cmd.OutOrStdout(), discovered, descriptions)
 
-	resolvedPath := func(subpath string) string {
-		if subpath != "" && subpath != "." {
-			return filepath.Join(absSourcePath, filepath.FromSlash(subpath))
-		}
-		return absSourcePath
-	}
 	return &addIntake{
 		source:     engine.NewSymlinkAddSource(absSourcePath, description),
 		discovered: discovered,
@@ -171,8 +165,8 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 			displayName:  models.ToTildePath(absSourcePath),
 			resourceNoun: "Local directory",
 		},
-		progressLine: func(name, subpath string) string {
-			return fmt.Sprintf("Linking local skill: %s -> %s", name, models.ToTildePath(resolvedPath(subpath)))
+		progressLine: func(ev engine.AddSkillEvent) string {
+			return fmt.Sprintf("Linking local skill: %s -> %s", ev.Name, models.ToTildePath(ev.Target))
 		},
 	}, nil
 }
@@ -200,8 +194,8 @@ func newCommandIntake(skillName, command, check, description, output string) *ad
 			displayName:  "command",
 			resourceNoun: "Command",
 		},
-		progressLine: func(name, _ string) string {
-			return "Configuring command skill: " + name
+		progressLine: func(ev engine.AddSkillEvent) string {
+			return "Configuring command skill: " + ev.Name
 		},
 	}
 }
@@ -255,8 +249,8 @@ func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, kind engine.AddSour
 			displayName:  spec.SourceKey,
 			resourceNoun: resourceNoun,
 		},
-		progressLine: func(name, subpath string) string {
-			return fmt.Sprintf("Installing %s (from %s)", name, subpath)
+		progressLine: func(ev engine.AddSkillEvent) string {
+			return fmt.Sprintf("Installing %s (from %s)", ev.Name, ev.Subpath)
 		},
 	}, nil
 }

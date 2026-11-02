@@ -50,10 +50,7 @@ func InspectAddSlot(cfg *config.Config, scope models.Scope, source AddSource, na
 			current = fmt.Sprintf("[command] %s", entry.Command)
 			same = source.Kind == AddSourceCommand && commandSkill{name: name, entry: entry}.sameSource(source.Declared)
 		case config.SkillSymlink:
-			localSkillSource := source.LocalPath
-			if subpath != "" && subpath != "." {
-				localSkillSource = filepath.Join(source.LocalPath, filepath.FromSlash(subpath))
-			}
+			localSkillSource := source.localSkillPath(subpath)
 			stored := scope.StoreLocalSource(localSkillSource)
 			current = fmt.Sprintf("[symlink] %s", models.ToTildePath(entry.Source))
 			same = source.Kind == AddSourceSymlink && (entry.Source == stored || models.ToTildePath(entry.Source) == models.ToTildePath(localSkillSource))
