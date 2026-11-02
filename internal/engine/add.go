@@ -212,16 +212,21 @@ func NewCommandAddSource(entry config.LocalEntry) AddSource {
 	}
 }
 
+// localSkillPath is where the Skill at subpath of a local Source is: the
+// Source directory itself for its root.
+func (s AddSource) localSkillPath(subpath string) string {
+	if subpath == "" || subpath == "." {
+		return s.LocalPath
+	}
+	return filepath.Join(s.LocalPath, filepath.FromSlash(subpath))
+}
+
 func (s AddSource) proposedDisplay(subpath, skillsDir string) string {
 	switch s.Kind {
 	case AddSourceCommand:
 		return fmt.Sprintf("[command] %s", s.Declared.Command)
 	case AddSourceSymlink:
-		p := s.LocalPath
-		if subpath != "" && subpath != "." {
-			p = filepath.Join(s.LocalPath, filepath.FromSlash(subpath))
-		}
-		return fmt.Sprintf("[symlink] %s", models.ToTildePath(p))
+		return fmt.Sprintf("[symlink] %s", models.ToTildePath(s.localSkillPath(subpath)))
 	case AddSourceWellKnown:
 		return fmt.Sprintf("[well-known] %s (%s)", s.Key, subpath)
 	default:
@@ -326,7 +331,7 @@ func BuildAddPlan(
 type AddSkillEvent struct {
 	Name    string
 	Subpath string
-	Kind    AddSourceKind
+	// Target is where a local Skill links to, or a command Skill's command.
 	Target  string
 	Outcome SyncOutcome
 }
@@ -374,13 +379,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 	availability := NewAvailability(cfg, plan.Scope)
 	names := sortedSkillKeys(plan.Skills)
 
-	resolvedLocal := func(subpath string) string {
-		resolved := plan.Source.LocalPath
-		if subpath != "" && subpath != "." {
-			resolved = filepath.Join(resolved, filepath.FromSlash(subpath))
-		}
-		return resolved
-	}
+	resolvedLocal := plan.Source.localSkillPath
 	if plan.Source.Kind == AddSourceSymlink {
 		for _, name := range names {
 			resolved := resolvedLocal(plan.Skills[name])
@@ -463,7 +462,6 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		event := AddSkillEvent{
 			Name:    name,
 			Subpath: subpath,
-			Kind:    plan.Source.Kind,
 			Target:  target,
 		}
 		if onProgress != nil {

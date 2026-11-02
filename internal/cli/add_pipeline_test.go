@@ -190,7 +190,7 @@ func TestAddRunCancellationPrecedesMutation(t *testing.T) {
 		source:     engine.NewSymlinkAddSource(t.TempDir(), ""),
 		discovered: engine.DiscoveredSkills{"duplicate": {"plugins/duplicate", "skills/duplicate"}},
 		labels:     sourceLabels{displayName: "test", resourceNoun: "Test source"},
-		progressLine: func(string, string) string {
+		progressLine: func(engine.AddSkillEvent) string {
 			progressCalled = true
 			return ""
 		},

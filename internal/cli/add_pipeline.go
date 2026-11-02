@@ -31,7 +31,7 @@ type addIntake struct {
 	labels     sourceLabels
 	// progressLine is the row a Skill shows while Add applies it: plain text
 	// on one line, since the progress region styles and truncates it.
-	progressLine func(name, subpath string) string
+	progressLine func(ev engine.AddSkillEvent) string
 }
 
 type addRequest struct {
@@ -231,7 +231,7 @@ func (intake *addIntake) add(cmd *cobra.Command, req addRequest) error {
 	result, err := engine.ApplyAddPlan(plan, cfg, func(ev engine.AddSkillEvent) {
 		switch ev.Outcome {
 		case "":
-			region.Start(presentation.Job{Name: ev.Name, Label: intake.progressLine(ev.Name, ev.Subpath)})
+			region.Start(presentation.Job{Name: ev.Name, Label: intake.progressLine(ev)})
 		case engine.SyncDone:
 			region.Done(ev.Name)
 		default:
