@@ -276,6 +276,23 @@ func TestLoadConfigRefusesAWellKnownSourceWithABranchOrNoURL(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsAnUnknownLocalType(t *testing.T) {
+	for _, entry := range []string{
+		`{"type": "foo", "source": "/x"}`,
+		`{"type": "", "source": "/x"}`,
+		`{"source": "/x"}`,
+		`{"type": "remote", "source": "/x"}`,
+	} {
+		path := filepath.Join(t.TempDir(), "skills.json")
+		if err := os.WriteFile(path, []byte(`{"version": 1, "local": {"tool": `+entry+`}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), `type must be "symlink" or "command"`) {
+			t.Fatalf("%s: error = %v; want the type rejected", entry, err)
+		}
+	}
+}
+
 func TestLoadConfigRejectsAnUnknownCommandOutput(t *testing.T) {
 	for _, entry := range []string{
 		`{"type": "command", "command": "x", "output": "file"}`,

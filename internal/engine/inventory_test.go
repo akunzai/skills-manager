@@ -107,8 +107,7 @@ func TestLoadInventoryClassifiesOccupancy(t *testing.T) {
 }
 
 // Each row carries how it was declared, or for occupancy Config does not
-// declare, its shape on disk, so a frontend never parses a string for it. A
-// local type Config does not know is a symlink, as Sync treats it.
+// declare, its shape on disk, so a frontend never parses a string for it.
 func TestLoadInventoryClassifiesKind(t *testing.T) {
 	skillsDir := filepath.Join(t.TempDir(), "skills")
 	if err := os.MkdirAll(filepath.Join(skillsDir, "orphan"), 0o755); err != nil {
@@ -122,7 +121,6 @@ func TestLoadInventoryClassifiesKind(t *testing.T) {
 	config.AddRemoteSkillEntry(cfg, "group/lab", "lab", "lab", "gitlab", "")
 	config.AddLocalSymlinkEntry(cfg, "linked", "/src/linked", "")
 	config.AddLocalCommandEntry(cfg, "installed", "install-it", "", "", "")
-	cfg.Local["odd"] = config.LocalEntry{Type: "foo", Source: "/src/odd"}
 
 	inv, err := LoadInventory(cfg, projectScope("", skillsDir, ""))
 	if err != nil {
@@ -141,7 +139,6 @@ func TestLoadInventoryClassifiesKind(t *testing.T) {
 		"lab":       {models.InventoryRemote, "gitlab"},
 		"linked":    {models.InventorySymlink, ""},
 		"installed": {models.InventoryCommand, ""},
-		"odd":       {models.InventorySymlink, ""},
 		"orphan":    {models.InventoryUntracked, ""},
 		"leftover":  {models.InventoryUntrackedLink, ""},
 	}
