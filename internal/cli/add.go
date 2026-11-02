@@ -339,9 +339,9 @@ func newAddCmd() *cobra.Command {
 				return fmt.Errorf("--list cannot be combined with --command, --skill, --all, or --agent")
 			}
 
-			if flagStdout && flagCommand == "" {
+			if flagJSON && !flagList {
 				cmd.SilenceUsage = false
-				return fmt.Errorf("--stdout requires --command")
+				return fmt.Errorf("--json applies only with --list")
 			}
 
 			positional := ""
@@ -349,12 +349,16 @@ func newAddCmd() *cobra.Command {
 				positional = args[0]
 			}
 			kind, source, err := engine.ClassifyAddKind(engine.AddSourceSpec{
-				Positional: positional,
-				Symlink:    flagSymlink,
-				Command:    flagCommand,
-				Path:       flagPath,
-				Branch:     flagBranch,
-				URL:        flagURL,
+				Positional:  positional,
+				Symlink:     flagSymlink,
+				Command:     flagCommand,
+				Path:        flagPath,
+				Branch:      flagBranch,
+				URL:         flagURL,
+				Check:       flagCheck,
+				Description: flagDescription,
+				TrustCert:   flagTrustCert,
+				Stdout:      flagStdout,
 			})
 			refused := engine.IsWellKnownRefusal(err)
 			if err != nil && !refused {
@@ -362,7 +366,7 @@ func newAddCmd() *cobra.Command {
 				return err
 			}
 
-			if flagTrustCert != "" && ((kind != engine.AddSourceRemote && kind != engine.AddSourceWellKnown) || flagList) {
+			if flagTrustCert != "" && flagList {
 				cmd.SilenceUsage = false
 				return fmt.Errorf("--trust-cert applies only when adding Skills from a remote Source")
 			}

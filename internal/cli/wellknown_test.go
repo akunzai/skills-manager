@@ -239,16 +239,17 @@ func TestCLIAddReadsAWellKnownArchiveByContentTypeThenExtension(t *testing.T) {
 	}
 }
 
-// Which well-known Sources Add refuses is the engine's (ClassifyAddKind's
-// tests); this pins how Add reports one, before the Scope is asked for, and
-// what it suggests for an index it cannot read.
+// Which flags and well-known Sources Add refuses is the engine's
+// (ClassifyAddKind's tests); this pins how Add reports them, before the Scope
+// is asked for: a flag the Source does not read as misuse, exit 2, and an
+// index it cannot read with what it suggests instead, exit 1.
 func TestCLIAddRefusesWellKnownSourcesItDoesNotRead(t *testing.T) {
 	server := newWellKnownServer(t, wellknowntest.SkillMD("one", "One"))
 	scope := newWellKnownScope(t)
 
 	out, err := scope.run(t, "add", server.URL, "--branch", "main", "-y")
-	if ExitCode(err) != 1 || !strings.Contains(out, "Error: --branch does not apply") {
-		t.Fatalf("add --branch = %v (exit %d); want exit 1 saying --branch does not apply\n%s", err, ExitCode(err), out)
+	if ExitCode(err) != 2 || err == nil || !strings.Contains(err.Error(), "--branch does not apply to a well-known Source") {
+		t.Fatalf("add --branch = %v (exit %d); want exit 2 saying --branch does not apply\n%s", err, ExitCode(err), out)
 	}
 	if got := server.Requested("/"); len(got) != 0 {
 		t.Fatalf("a refused Source was requested: %v", got)

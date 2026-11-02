@@ -239,7 +239,7 @@ func TestCLIAddNamesALoneSkillBeforeAddingIt(t *testing.T) {
 func TestAddRejectsStdoutWithoutCommand(t *testing.T) {
 	cmd := newAddCmd()
 	cmd.SetArgs([]string{"owner/repo", "--stdout"})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--stdout requires --command") {
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--stdout does not apply to a git Source") {
 		t.Fatalf("error = %v; want --stdout to require --command", err)
 	}
 }
@@ -279,5 +279,13 @@ func TestCLIReAddingASourcesOnlySkillKeepsItsPolicyAndBranch(t *testing.T) {
 	got := saved.Remote["owner/repo"]
 	if got.Signature == nil || !got.Signature.Require || got.Branch != branch {
 		t.Fatalf("re-adding reset the Source: %#v", got)
+	}
+}
+
+func TestAddRejectsJSONWithoutList(t *testing.T) {
+	cmd := newAddCmd()
+	cmd.SetArgs([]string{"owner/repo", "--json"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--json applies only with --list") {
+		t.Fatalf("error = %v; want --json to require --list", err)
 	}
 }
