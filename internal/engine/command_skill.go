@@ -37,6 +37,23 @@ func (c commandSkill) materialize(skillsDir string) error {
 	return c.install()
 }
 
+// writePath is the SKILL.md materialize writes, or "" when an installer
+// writes the Skill itself.
+func (c commandSkill) writePath(skillsDir string) string {
+	if c.entry.Output != config.CommandOutputStdout {
+		return ""
+	}
+	return filepath.Join(skillsDir, c.name, "SKILL.md")
+}
+
+// installed reports whether the Skill is already on skillsDir: the SKILL.md a
+// printing command writes, or the folder an installer writes.
+func (c commandSkill) installed(skillsDir string) bool {
+	path := cmp.Or(c.writePath(skillsDir), filepath.Join(skillsDir, c.name))
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // syncRestores reports whether a Sync rewrites the Skill's content: true when
 // the command prints it, false when an installer owns what it writes.
 func (c commandSkill) syncRestores() bool {

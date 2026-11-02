@@ -103,14 +103,16 @@ type SyncPlanItem struct {
 	SourcePath  string
 	LinkPath    string
 	LinkTarget  string
-	LinkCurrent bool
+	linkCurrent bool
 
-	// Command Skills. Declared is the Skill's declaration in Config.
-	// Installed records whether the Skill is already present in the Scope;
+	// Command Skills. Declared is the Skill's declaration in Config, and
+	// WritePath the SKILL.md applying writes when its command prints it.
+	// installed records whether the Skill is already present in the Scope;
 	// an installer's own state is not observable without running its check,
 	// which planning must not do.
 	Declared  config.LocalEntry
-	Installed bool
+	WritePath string
+	installed bool
 }
 
 // Resolve is what this item does under decision.
@@ -142,18 +144,18 @@ func (item SyncPlanItem) Resolve(decision SyncDecision) (SyncAction, SyncBlock) 
 	return SyncActionNone, SyncBlockNone
 }
 
-// changes reports whether acting on this item would alter the Scope. A
-// command Skill already present in the Scope does not count: its installer is
-// guarded by its own check, and running that check to find out is exactly what
-// planning must not do.
-func (item SyncPlanItem) changes(action SyncAction) bool {
+// Changes reports whether acting on this item would alter the Scope, which a
+// preview and the Pending count both read. A command Skill already present in
+// the Scope does not count: its installer is guarded by its own check, and
+// running that check to find out is exactly what planning must not do.
+func (item SyncPlanItem) Changes(action SyncAction) bool {
 	switch action {
 	case SyncActionMaterialize, SyncActionRename:
 		return true
 	case SyncActionCommand:
-		return !item.Installed
+		return !item.installed
 	case SyncActionSymlink:
-		return !item.LinkCurrent
+		return !item.linkCurrent
 	}
 	return false
 }
@@ -312,8 +314,9 @@ func planLocalItem(cfg *config.Config, scope models.Scope, drift AvailabilityDri
 	if info.Type == config.SkillCommand {
 		item.Kind = config.SkillCommand
 		item.Declared = info
-		_, err := os.Stat(filepath.Join(skillsDir, name))
-		item.Installed = err == nil
+		command := commandSkill{name: name, entry: info}
+		item.WritePath = command.writePath(skillsDir)
+		item.installed = command.installed(skillsDir)
 		return item
 	}
 	absSource := scope.ResolveLocalSource(info.Source)
@@ -326,7 +329,7 @@ func planLocalItem(cfg *config.Config, scope models.Scope, drift AvailabilityDri
 		return item
 	}
 	target, err := os.Readlink(item.LinkPath)
-	item.LinkCurrent = err == nil && target == item.LinkTarget
+	item.linkCurrent = err == nil && target == item.LinkTarget
 	return item
 }
 
@@ -350,7 +353,7 @@ func (plan *SyncPlan) Pending(decision SyncDecision) []SyncPlanItem {
 		if item.Err != "" || action == SyncActionSkip || (item.Drift.Refusal() != nil) {
 			continue
 		}
-		if item.changes(action) || item.Drift.Reconcilable() {
+		if item.Changes(action) || item.Drift.Reconcilable() {
 			pending = append(pending, item)
 		}
 	}

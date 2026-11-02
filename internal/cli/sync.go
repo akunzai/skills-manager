@@ -293,9 +293,11 @@ func printSyncPlanItem(out io.Writer, item engine.SyncPlanItem, decision engine.
 		return
 	case action == engine.SyncActionMaterialize:
 		fmt.Fprintf(out, "  [Dry-run] Would sync %s from %s\n", item.Name, item.Source)
-	case action == engine.SyncActionSymlink && !item.LinkCurrent:
+	case action == engine.SyncActionSymlink && item.Changes(action):
 		fmt.Fprintf(out, "  [Dry-run] Would symlink %s -> %s\n", models.ToTildePath(item.LinkPath), models.ToTildePath(item.SourcePath))
-	case action == engine.SyncActionCommand && !item.Installed:
+	case action == engine.SyncActionCommand && item.Changes(action) && item.WritePath != "":
+		fmt.Fprintf(out, "  [Dry-run] Would write %s from: %s\n", models.ToTildePath(item.WritePath), item.Declared.Command)
+	case action == engine.SyncActionCommand && item.Changes(action):
 		fmt.Fprintf(out, "  [Dry-run] Would execute: %s\n", item.Declared.Command)
 	}
 	if len(item.Drift.Missing) > 0 {
