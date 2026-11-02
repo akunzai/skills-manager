@@ -111,6 +111,10 @@ type SyncPlanItem struct {
 	Command   string
 	Check     string
 	Installed bool
+	// Output and Description are what a command Skill whose stdout is its
+	// SKILL.md needs to write it.
+	Output      string
+	Description string
 }
 
 // Resolve is what this item does under decision.
@@ -313,6 +317,8 @@ func planLocalItem(cfg *config.Config, scope models.Scope, drift AvailabilityDri
 		item.Kind = config.SkillCommand
 		item.Command = info.Command
 		item.Check = info.Check
+		item.Output = info.Output
+		item.Description = info.Description
 		_, err := os.Stat(filepath.Join(skillsDir, name))
 		item.Installed = err == nil
 		return item

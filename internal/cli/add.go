@@ -192,9 +192,11 @@ func announceLoneSkill(out io.Writer, discovered engine.DiscoveredSkills, descri
 	}
 }
 
-func newCommandIntake(skillName, command, check, description string) *addIntake {
+func newCommandIntake(skillName, command, check, description, output string) *addIntake {
+	source := engine.NewCommandAddSource(command, check, description)
+	source.Output = output
 	return &addIntake{
-		source:     engine.NewCommandAddSource(command, check, description),
+		source:     source,
 		discovered: engine.DiscoveredSkills{skillName: {"."}},
 		labels: sourceLabels{
 			displayName:  "command",
@@ -297,6 +299,7 @@ func newAddCmd() *cobra.Command {
 		flagSymlink     string
 		flagCommand     string
 		flagCheck       string
+		flagStdout      bool
 		flagDescription string
 		flagYes         bool
 		flagList        bool
@@ -336,6 +339,11 @@ func newAddCmd() *cobra.Command {
 			if flagList && (flagCommand != "" || flagAll || len(flagSkills) > 0 || len(flagAgents) > 0) {
 				cmd.SilenceUsage = false
 				return fmt.Errorf("--list cannot be combined with --command, --skill, --all, or --agent")
+			}
+
+			if flagStdout && flagCommand == "" {
+				cmd.SilenceUsage = false
+				return fmt.Errorf("--stdout requires --command")
 			}
 
 			positional := ""
@@ -399,7 +407,11 @@ func newAddCmd() *cobra.Command {
 				} else {
 					skillName = args[0]
 				}
-				intake := newCommandIntake(skillName, source, flagCheck, flagDescription)
+				output := ""
+				if flagStdout {
+					output = config.CommandOutputStdout
+				}
+				intake := newCommandIntake(skillName, source, flagCheck, flagDescription, output)
 				return intake.run(cmd, addRequest{scope: scope, cfg: cfg, skills: []string{skillName}, yes: flagYes, agents: flagAgents})
 			case engine.AddSourceRemote, engine.AddSourceWellKnown:
 				trustCert, err := config.StoreTrustCertPath(flagTrustCert, scope.ConfigPath)
@@ -427,6 +439,7 @@ func newAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagSymlink, "symlink", "", "Path to a local Skill Source")
 	cmd.Flags().StringVar(&flagCommand, "command", "", "Command Source for the Skill")
 	cmd.Flags().StringVar(&flagCheck, "check", "", "Command to check before running the command Source")
+	cmd.Flags().BoolVar(&flagStdout, "stdout", false, "Write the command's stdout as the Skill's SKILL.md")
 	cmd.Flags().StringVar(&flagDescription, "description", "", "Description of the skill")
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompts")
 	cmd.Flags().BoolVar(&flagList, "list", false, "List a Source's Skills without adding them")

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -261,4 +262,94 @@ func walkSkillFiles(root string, skip func(path string) bool, visit func(path st
 		}
 		return visit(path)
 	})
+}
+
+// maxSkillDescription is the longest description the Agent Skills spec allows.
+const maxSkillDescription = 1024
+
+// withSkillFrontmatter is a SKILL.md printed by a command, given frontmatter
+// when it has none. Frontmatter the command printed is kept as it is; the one
+// supplied names the Skill and describes it by description, else by the
+// document's own title and first sentence, else by its name.
+func withSkillFrontmatter(content, name, description string) string {
+	if frontmatterLines(content) != nil {
+		return content
+	}
+	description = cmp.Or(description, markdownSummary(content), name)
+	if r := []rune(description); len(r) > maxSkillDescription {
+		description = string(r[:maxSkillDescription])
+	}
+	quoted := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(description)
+	return "---\nname: " + name + "\ndescription: \"" + quoted + "\"\n---\n\n" + content
+}
+
+var (
+	markdownLink     = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	sentenceEnd      = regexp.MustCompile(`[.!?](\s|$)|[。！？]`)
+	orderedListStart = regexp.MustCompile(`^\d+[.)]\s`)
+)
+
+// markdownSummary is a Markdown document's H1 and the first sentence of the
+// paragraph that follows it, as plain text, or "" when it has neither.
+func markdownSummary(content string) string {
+	var title string
+	var paragraph []string
+	inFence, inParagraph := false, false
+	for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			if inParagraph {
+				break
+			}
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if trimmed == "" {
+			if inParagraph {
+				break
+			}
+			continue
+		}
+		if heading, ok := strings.CutPrefix(trimmed, "# "); ok && title == "" && !inParagraph {
+			title = strings.TrimSpace(heading)
+			continue
+		}
+		if !inParagraph && !startsProse(trimmed) {
+			continue
+		}
+		inParagraph = true
+		paragraph = append(paragraph, trimmed)
+	}
+	parts := make([]string, 0, 2)
+	if t := plainMarkdown(title); t != "" {
+		parts = append(parts, strings.TrimRight(t, ".:;,")+".")
+	}
+	if text := plainMarkdown(strings.Join(paragraph, " ")); text != "" {
+		if loc := sentenceEnd.FindStringIndex(text); loc != nil {
+			text = strings.TrimSpace(text[:loc[1]])
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, " ")
+}
+
+// startsProse reports whether a line opens a paragraph rather than a
+// heading, list, quote, table, or HTML block.
+func startsProse(line string) bool {
+	switch line[0] {
+	case '#', '-', '*', '+', '>', '|', '<':
+		return false
+	}
+	return !orderedListStart.MatchString(line)
+}
+
+// plainMarkdown is inline Markdown as plain text: links as their text, code
+// and emphasis markers dropped, whitespace collapsed.
+func plainMarkdown(s string) string {
+	s = markdownLink.ReplaceAllString(s, "$1")
+	s = strings.NewReplacer("`", "", "**", "", "__", "").Replace(s)
+	return strings.Join(strings.Fields(s), " ")
 }

@@ -136,7 +136,14 @@ type LocalEntry struct {
 	Command     string `json:"command,omitempty"`
 	Check       string `json:"check,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Output is where a command Source delivers its Skill: empty when the
+	// command installs it itself, CommandOutputStdout when its stdout is the
+	// SKILL.md.
+	Output string `json:"output,omitempty"`
 }
+
+// CommandOutputStdout declares a command whose stdout is the Skill's SKILL.md.
+const CommandOutputStdout = "stdout"
 
 type Config struct {
 	Schema   string                `json:"$schema,omitempty"`
@@ -207,6 +214,11 @@ func LoadConfig(configPath string) (*Config, error) {
 		}
 		if repo.Type == WellKnownType && (repo.URL == "" || repo.Branch != "") {
 			return nil, fmt.Errorf("invalid well-known Source %q: it needs a url and has no branch", key)
+		}
+	}
+	for name, entry := range cfg.Local {
+		if entry.Output != "" && (entry.Type != "command" || entry.Output != CommandOutputStdout) {
+			return nil, fmt.Errorf("invalid local skill %q: output must be %q on a command", name, CommandOutputStdout)
 		}
 	}
 
@@ -367,6 +379,7 @@ func AddLocalCommandEntry(
 	command string,
 	checkCmd string,
 	description string,
+	output string,
 ) {
 	removeSkillRegistration(cfg, skillName)
 	if cfg.Local == nil {
@@ -377,6 +390,7 @@ func AddLocalCommandEntry(
 		Command:     command,
 		Check:       checkCmd,
 		Description: description,
+		Output:      output,
 	}
 }
 

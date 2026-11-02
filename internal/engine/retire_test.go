@@ -202,7 +202,7 @@ func TestRetireRemovesOnlyWhatMaterializeWroteForTheKind(t *testing.T) {
 		kept    bool
 	}{
 		{"command Skill directory", func(cfg *config.Config, _ string) {
-			config.AddLocalCommandEntry(cfg, "sample", "true", "", "")
+			config.AddLocalCommandEntry(cfg, "sample", "true", "", "", "")
 		}, plantDirectory, false},
 		{"local Skill link", func(cfg *config.Config, skillsDir string) {
 			config.AddLocalSymlinkEntry(cfg, "sample", filepath.Join(filepath.Dir(skillsDir), "source"), "")

@@ -445,7 +445,7 @@ func TestFindingsInvalidNextActionFollowsHowTheSkillWasDeclared(t *testing.T) {
 	cfg := config.DefaultConfig()
 	config.AddRemoteSkillEntry(cfg, "owner/repo", "remoted", "remoted", "github", "")
 	config.AddLocalSymlinkEntry(cfg, "linked", source, "")
-	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "")
+	config.AddLocalCommandEntry(cfg, "installed", "install-me", "", "", "")
 
 	outcome, err := engine.NewDoctor(cfg, projectScopeOf(skillsDir)).Run(false, nil)
 	if err != nil {

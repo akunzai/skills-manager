@@ -29,7 +29,7 @@ func TestCLISyncAvailabilityRemediesUseTheSameScope(t *testing.T) {
 					cfg.Settings.DefaultAgents = append(cfg.Settings.DefaultAgents, "claude-code")
 				}
 				for _, name := range []string{"alpha", "beta"} {
-					config.AddLocalCommandEntry(cfg, name, "exit 0", "", "")
+					config.AddLocalCommandEntry(cfg, name, "exit 0", "", "", "")
 					path := filepath.Join(skillsDir, name)
 					if err := os.MkdirAll(path, 0o755); err != nil {
 						t.Fatal(err)

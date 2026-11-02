@@ -47,7 +47,7 @@ When calling `skills` in automated scripts or tool calls:
 `skills.json` maintains three top-level sections:
 - `settings`: Agent availability policies (`defaultAgents`, `availability` per-skill overrides).
 - `remote`: Map of remote Sources: Git repositories (`<owner>/<repo>`), each with its `type` ("github", "gitlab", "git") and `skills` map (`<skill-name>: <subpath>`), and well-known Sources (`<host>`, `type: "well-known"`, `url` its `https://` base URL, `skills` map `<skill-name>: <index entry name>`, no `branch`); either kind has an optional `signature` (`sigstore` signer recorded on first sight, or `certificateChain` from `add --trust-cert`, plus `require`, and `trusted` content recorded by `skills trust`).
-- `local`: Map of local skills (`<skill-name>`), with `type: "symlink"` (`source` path) or `type: "command"` (`command`, optional `check` command).
+- `local`: Map of local skills (`<skill-name>`), with `type: "symlink"` (`source` path) or `type: "command"` (`command`, optional `check` command, and `output: "stdout"` when the command prints the SKILL.md rather than installing it).
 
 ---
 
@@ -81,6 +81,10 @@ skills add akunzai/agent-skills --skill agents-md --agent claude,antigravity --y
 
 # Add from CLI command installer (with prerequisite check)
 skills add --command "playwright-cli install --global --skills=agents" --check "which playwright-cli" playwright-cli --yes
+
+# Add from a CLI that prints its skill to stdout (written to <skills-dir>/<name>/SKILL.md;
+# frontmatter is supplied from --description, else the H1 and first sentence, when missing)
+skills add --command "hc --skill" --stdout --check "which hc" hc --yes
 
 # Overwrite or migrate an existing skill to a new source (e.g., remote -> CLI command)
 skills add --command "playwright-cli install --global --skills=agents" playwright-cli --yes

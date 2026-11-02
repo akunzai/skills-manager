@@ -143,6 +143,11 @@
             "type": "string",
             "description": "Command to install the skill (for command type)"
           },
+          "output": {
+            "type": "string",
+            "enum": ["stdout"],
+            "description": "Where the command delivers the skill: \"stdout\" writes its output as <skills-dir>/<name>/SKILL.md, adding frontmatter when missing (for command type)"
+          },
           "description": {
             "type": "string",
             "description": "Optional description of the skill"

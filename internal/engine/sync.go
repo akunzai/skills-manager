@@ -321,7 +321,13 @@ func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanI
 			}
 		}
 		emitSync(emit, SyncEvent{Kind: SyncCommandStart, Skill: item.Name})
-		if err := MaterializeCommand(item.Command); err != nil {
+		materialize := func() error { return MaterializeCommand(item.Command) }
+		if item.Output == config.CommandOutputStdout {
+			materialize = func() error {
+				return MaterializeCommandOutput(item.Command, skillsDir, item.Name, item.Description)
+			}
+		}
+		if err := materialize(); err != nil {
 			emitSync(emit, SyncEvent{Kind: SyncCommandFailed, Skill: item.Name, Err: err})
 			outcome = SyncFailed
 			applyErr = err

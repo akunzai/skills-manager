@@ -31,6 +31,7 @@ type AddSource struct {
 	LocalPath   string        // absolute path to local skill directory
 	Command     string        // installer command
 	Check       string        // command pre-check
+	Output      string        // where the command delivers the Skill (config.CommandOutputStdout or empty)
 	Description string        // description of the skill
 }
 
@@ -386,7 +387,7 @@ func ApplyAddPlan(plan AddPlan, cfg *config.Config, onProgress func(AddSkillEven
 		case AddSourceSymlink:
 			config.AddLocalSymlinkEntry(cfg, name, plan.Scope.StoreLocalSource(resolvedLocal(subpath)), plan.Source.Description)
 		case AddSourceCommand:
-			config.AddLocalCommandEntry(cfg, name, plan.Source.Command, plan.Source.Check, plan.Source.Description)
+			config.AddLocalCommandEntry(cfg, name, plan.Source.Command, plan.Source.Check, plan.Source.Description, plan.Source.Output)
 		}
 		switch plan.Availability.Kind {
 		case AddAvailabilityFollowDefaults:
