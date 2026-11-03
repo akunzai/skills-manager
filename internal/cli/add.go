@@ -406,9 +406,6 @@ func newAddCmd() *cobra.Command {
 				output := ""
 				if flagStdout {
 					output = config.CommandOutputStdout
-					if flagDescription == "" {
-						fmt.Fprintf(cmd.ErrOrStderr(), "%sWarning: no --description provided; falling back to skill name if the command does not output frontmatter. Use --description to specify triggers and boundaries for agents.%s\n", colorYellow, colorReset)
-					}
 				}
 				intake := newCommandIntake(skillName, source, flagCheck, flagDescription, output)
 				return intake.run(cmd, addRequest{scope: scope, cfg: cfg, skills: []string{skillName}, yes: flagYes, agents: flagAgents})

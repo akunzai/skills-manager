@@ -3100,6 +3100,34 @@ func TestCLICommandAddStdoutOverridesDescription(t *testing.T) {
 	}
 }
 
+func TestCLICommandAddStdoutPreservesFrontmatterWithoutWarning(t *testing.T) {
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	printed := filepath.Join(home, "printed.md")
+	if err := os.WriteFile(printed, []byte("---\nname: tool\ndescription: \"Original description\"\n---\n\n# Tool manual\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	printCmd := "cat " + printed
+	if runtime.GOOS == "windows" {
+		printCmd = "type " + printed
+	}
+	out, err := runCLI(t, "add", "--command", printCmd, "--stdout", "--skill", "tool", "-y", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Warning: no --description provided") {
+		t.Fatalf("unexpected warning in output: %s", out)
+	}
+	skillMd, err := os.ReadFile(filepath.Join(skillsDir, "tool", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(strings.ReplaceAll(string(skillMd), "\r\n", "\n"), "---\nname: tool\ndescription: \"Original description\"\n---\n\n# Tool manual") {
+		t.Fatalf("SKILL.md = %q", skillMd)
+	}
+}
+
 func TestCLICommandAddCheckFailureStillSaves(t *testing.T) {
 	home := isolateHome(t)
 	configFile := filepath.Join(home, ".agents", "skills.json")

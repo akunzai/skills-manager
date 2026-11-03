@@ -411,6 +411,8 @@ func printSyncEvent(out io.Writer, ev engine.SyncEvent, scopeFlags string) {
 		fmt.Fprintf(out, "%sCommand check '%s' failed, skipping %s%s\n", colorDim, ev.Path, ev.Skill, colorReset)
 	case engine.SyncCommandFailed:
 		fmt.Fprintf(out, "%sFailed to run installer for %s: %s%s\n", colorRed, ev.Skill, errorReasons(ev.Err), colorReset)
+	case engine.SyncCommandFallback:
+		fmt.Fprintf(out, "%sWarning: no --description provided; falling back to skill name. Use --description to specify triggers and boundaries for agents.%s\n", colorYellow, colorReset)
 	case engine.SyncRenamed:
 		fmt.Fprintf(out, "%sRenamed %s%s%s to %s%s%s, as its Source declares.%s\n", colorGreen, colorBold, ev.Skill, colorReset+colorGreen, colorBold, ev.Target, colorReset+colorGreen, colorReset)
 	case engine.SyncRenameFailed:
