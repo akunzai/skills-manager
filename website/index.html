@@ -389,7 +389,7 @@
       </div>
       <div>
         <h3>Against <code>npx skills</code>: Command sources with prerequisite checks</h3>
-        <p>Skills can be CLI tools or package managers rather than Git repos. Skills Manager supports executable command sources (<code>--command</code>) paired with prerequisite verification (<code>--check</code>), tracked declaratively in <code>skills.json</code>. A CLI that prints its skill instead of installing it takes <code>--stdout</code>: Sync writes the output as the skill&rsquo;s <code>SKILL.md</code>, adding frontmatter when the CLI prints none.</p>
+        <p>Skills can be CLI tools or package managers rather than Git repos. Skills Manager supports executable command sources (<code>--command</code>) paired with prerequisite verification (<code>--check</code>), tracked declaratively in <code>skills.json</code>. A CLI that prints its skill instead of installing it takes <code>--stdout</code>: Sync writes the output as the skill&rsquo;s <code>SKILL.md</code>, adding frontmatter when the CLI prints none or overriding its description with <code>--description</code>.</p>
       </div>
       <div>
         <h3>Against <code>npx skills</code>: Persistent availability policies</h3>
@@ -472,6 +472,7 @@
 
 <span class="comment"># Or capture a skill the CLI prints to stdout as its SKILL.md</span>
 <span class="prompt">$ </span><span class="cmd">skills add hc --command "hc --skill" --stdout \
+    --description "Run programs and coding agents in persistent, headless terminals with herdr-core (hc). Launch background tasks or agents, inspect state, and delegate tasks." \
     --check "which hc"</span>
 
 <span class="comment"># The check runs first; a skill whose check fails is skipped</span>

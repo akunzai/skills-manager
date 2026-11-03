@@ -131,11 +131,12 @@ func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
 			rowKind = models.InventoryCommand
 		}
 		items[name] = &models.SkillItem{
-			Name:        name,
-			Kind:        rowKind,
-			Source:      src,
-			Description: localInfo.Description,
-			Agents:      availability.ManagedAgents(name),
+			Name:                  name,
+			Kind:                  rowKind,
+			Source:                src,
+			Description:           localInfo.Description,
+			DescriptionOverridden: localInfo.Description != "",
+			Agents:                availability.ManagedAgents(name),
 		}
 	}
 
@@ -182,6 +183,9 @@ func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
 			skillMd := filepath.Join(fullPath, "SKILL.md")
 			if _, err := os.Stat(skillMd); err == nil {
 				item.IsValidSkill = true
+				if item.Description == "" {
+					item.Description = readSkillFrontmatter(skillMd).Description
+				}
 			}
 		}
 	}
@@ -196,6 +200,7 @@ func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
 		if item.InstalledPath == "" {
 			item.InstalledPath = filepath.Join(baseSkills, item.Name)
 		}
+		item.DescriptionMissing = item.Description == "" || item.Description == item.Name
 		result = append(result, *item)
 	}
 

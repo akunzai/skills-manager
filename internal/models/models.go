@@ -676,11 +676,13 @@ type SkillItem struct {
 	Subpath  string
 	// InstalledPath is always set: the Skill's path on the skills directory
 	// if it is on disk, otherwise the path it would take there.
-	InstalledPath string
-	IsInstalled   bool
-	IsValidSkill  bool
-	Agents        []string
-	Description   string
+	InstalledPath         string
+	IsInstalled           bool
+	IsValidSkill          bool
+	Agents                []string
+	Description           string
+	DescriptionMissing    bool
+	DescriptionOverridden bool
 	// Status is how the Skill's entry on the Scope skills directory was
 	// classified, one of the SkillStatus values.
 	Status SkillStatus

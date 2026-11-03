@@ -41,6 +41,30 @@ When calling `skills` in automated scripts or tool calls:
 - **Non-interactive Source Replacement**: When overwriting or migrating an existing skill (e.g. from a remote Git repository to a local CLI command), pass `-y` to automatically accept the replacement plan.
 - **Never bypass a signature block**: A `signature:` reason on a skipped Skill means its `skill.oms.sig` did not verify, so it was not written. Report it; do not edit `signature` in `skills.json`, delete the signature, or re-add the Source to get past it. If the reason names `skills update`, run that and retry. Never run `skills trust` on your own: it installs content whose signature does not verify, so only the human decides, after seeing the reason. A `!` / `[unverified]` mark in `skills ls` is such content.
 - **Self-update only on request**: Run `skills self-update` only when the human explicitly asks. A TTY notice that a newer release exists is not a request. On a Homebrew or mise install, self-update runs that package manager's upgrade command after a confirmation, which `--yes` answers; a Scoop install only names `scoop update skills-manager`.
+- **Supply explicit `--description` for command skills**: Commands wrapped as skills (`skills add --command "..." --skill <name>`) should always specify `--description "..."`. Without `--description`, if the command does not output frontmatter, the skill description falls back to its name. If provided, `--description` overrides any default description the command prints.
+
+### Authoring Skill Descriptions for AI Agents
+
+When wrapping CLI tools as command skills, agents should generate an optimal description using this pattern:
+
+> **Skill Description Template**:
+> `[Core capability summary]. [Specific command verbs/actions]. Use when [trigger conditions, env vars, tasks]. Does NOT [boundaries/counter-indications, alternative tools].`
+
+A high-impact description answers three questions (<1024 chars):
+1. **Capabilities**: What exact tasks, CLI flags, or subcommands does it execute?
+2. **Triggers & Context**: When should an agent activate this skill (`$ENV_VAR`, file patterns, user intents)?
+3. **Boundaries & Anti-triggers**: What does it NOT do? Which other tools, legacy CLIs, or GUI apps does it explicitly avoid conflicting with?
+
+**Example prompt for generating a description from tool help**:
+```
+You are authoring a concise, high-impact `description` for an AI Agent Skill (<1024 chars).
+Given the command's `--help` or manual, generate a single-paragraph description answering:
+1. Capabilities: What exact tasks, CLI flags, or subcommands does it perform?
+2. Triggers: Under what user requests, environment variables, or files should an agent activate this skill?
+3. Boundaries & Anti-triggers: What does it NOT do? Which other tools, legacy CLIs, or GUI apps does it avoid conflicting with?
+
+Format: [Core capability summary]. [Specific command verbs/actions]. Use when [trigger conditions, env vars, tasks]. Does NOT [boundaries/counter-indications, alternative tools].
+```
 
 ## Configuration Structure (`skills.json`)
 

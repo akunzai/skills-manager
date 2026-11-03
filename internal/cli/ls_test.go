@@ -198,6 +198,8 @@ func TestCLILsJSONExactContract(t *testing.T) {
     "agents": [
       "claude-code"
     ],
+    "description": "",
+    "descriptionOverridden": false,
     "installed": true,
     "name": "sample",
     "path": %q,
@@ -328,5 +330,94 @@ func TestLsSourceTypeKeepsTheJSONContract(t *testing.T) {
 		if got := lsSourceType(tc.item); got != tc.want {
 			t.Errorf("lsSourceType(%#v) = %q; want %q", tc.item, got, tc.want)
 		}
+	}
+}
+
+func TestCLILsDescriptionStatusAndJSON(t *testing.T) {
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+
+	// 1. Skill with regular description
+	regularDir := filepath.Join(skillsDir, "regular")
+	if err := os.MkdirAll(regularDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(regularDir, "SKILL.md"), []byte("---\nname: regular\ndescription: Does regular things.\n---\n# Regular\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Skill with no description (fallback to name)
+	noDescDir := filepath.Join(skillsDir, "nodesc")
+	if err := os.MkdirAll(noDescDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(noDescDir, "SKILL.md"), []byte("---\nname: nodesc\ndescription: nodesc\n---\n# NoDesc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Skill with overridden description
+	overriddenDir := filepath.Join(skillsDir, "overridden")
+	if err := os.MkdirAll(overriddenDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overriddenDir, "SKILL.md"), []byte("---\nname: overridden\ndescription: Overridden custom text.\n---\n# Overridden\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	config.AddLocalSymlinkEntry(cfg, "regular", filepath.Join(home, "src-reg"), "")
+	config.AddLocalSymlinkEntry(cfg, "nodesc", filepath.Join(home, "src-nodesc"), "")
+	config.AddLocalCommandEntry(cfg, "overridden", config.LocalEntry{
+		Command:     "echo hi",
+		Description: "Overridden custom text.",
+		Output:      config.CommandOutputStdout,
+	})
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify table output
+	out, err := runCLI(t, "ls", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"regular", "Installed",
+		"nodesc", "Installed (no desc)",
+		"overridden", "Installed (override)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ls output missing %q:\n%s", want, out)
+		}
+	}
+
+	// Verify JSON output
+	jsonOut, err := runCLI(t, "ls", "--json", "--config", configFile, "--skills-dir", skillsDir)
+	if err != nil {
+		t.Fatalf("ls --json: %v\n%s", err, jsonOut)
+	}
+	var items []lsJSONItem
+	if err := json.Unmarshal([]byte(jsonOut), &items); err != nil {
+		t.Fatalf("parse ls --json: %v\n%s", err, jsonOut)
+	}
+	itemMap := make(map[string]lsJSONItem)
+	for _, it := range items {
+		itemMap[it.Name] = it
+	}
+
+	reg := itemMap["regular"]
+	if reg.Description != "Does regular things." || reg.DescriptionOverridden {
+		t.Fatalf("regular: %+v", reg)
+	}
+
+	nd := itemMap["nodesc"]
+	if nd.Description != "nodesc" || nd.DescriptionOverridden {
+		t.Fatalf("nodesc: %+v", nd)
+	}
+
+	ov := itemMap["overridden"]
+	if ov.Description != "Overridden custom text." || !ov.DescriptionOverridden {
+		t.Fatalf("overridden: %+v", ov)
 	}
 }

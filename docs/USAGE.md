@@ -60,6 +60,18 @@ Skill leaves the index, Update reads the other entries' `SKILL.md` for one
 whose `metadata.replaces` names it and follows that Rename; with none, the
 Skill is reported as removed upstream and `skills rm` is the way out.
 
+## Command Sources
+
+Skills can also come from CLI commands (`--command`) rather than Git repositories or well-known indices. When a CLI tool prints its `SKILL.md` to stdout, use `--stdout` to capture it:
+
+```sh
+skills add hc --command "hc --skill" --stdout \
+  --description "Run programs and coding agents in persistent, headless terminals with herdr-core (hc). Launch background tasks or agents, inspect state, and delegate tasks." \
+  --check "which hc"
+```
+
+If the command output omits frontmatter, Skills Manager wraps it using `--description` (or falls back to the skill name). If the command output already contains YAML frontmatter, `--description` explicitly overrides its description, allowing users to disambiguate tool roles or add routing boundaries for AI agents.
+
 ## Global or project-local
 
 Global is the default. Project mode keeps the declaration beside the code so a team can reproduce it after cloning.
@@ -119,7 +131,9 @@ Universal agents that read the central skills directory directly do not need lin
 | Remove a skill | `skills rm <skill>` |
 | Print or install AI agent guide | `skills guide [--install]` |
 
-Every operational command accepts `-p` (or `--project`). Structured consumers can use `skills ls --json`; interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
+Every operational command accepts `-p` (or `--project`). Interactive terminals use standard Unicode marks, while redirected output and `TERM=dumb` fall back to plain text.
+
+`skills ls` lists installed and configured skills. In the table view, `STATUS` distinguishes healthy skills (`Installed`), skills with a locally overridden description in `skills.json` (`Installed (override)`), and skills lacking description prose (`Installed (no desc)`). Structured consumers can use `skills ls --json`, which includes each skill's `description` and a boolean `descriptionOverridden` indicating whether an explicit local description was configured.
 
 For remote Skills, the normal flow is `skills outdated`, then `skills update`. When nothing changed, Update prints one line and asks nothing, so it fits a shell startup file. Sync, including the one Update runs, protects known local changes and unknown baselines; inspect them first with `skills diff <skill>`, or explicitly overwrite with `skills sync --force`. `skills diff` shows what the Source changed since the copy was applied and what was changed locally; it reads the existing Cache unless `--fetch` refreshes the Source first, and exits `0` with nothing to show, `1` with differences, and `2` when it cannot compare. `sync --dry-run` is a non-mutating freshness gate: it reports what Sync would do without writing anything, and without running a skill's own commands.
 

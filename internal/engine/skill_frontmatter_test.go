@@ -107,42 +107,30 @@ func writeTestFile(t *testing.T, path string, data []byte) {
 }
 
 func TestWithSkillFrontmatter(t *testing.T) {
+	herdr := "---\nname: herdr\ndescription: Control Herdr\n---\n# Herdr"
+	herdrMultiline := "---\nname: herdr\ndescription: >-\n  Control Herdr\n  multiline\nmetadata:\n  replaces: old\n---\n# Herdr"
 	herdrApp := "# herdr-app: drive the person's window\n\nHerdr shows spaces, tabs and panes. herdr-core (`hc`) runs their terminals\nand keeps them alive.\n\n## Usage\n"
 	tests := []struct {
 		name, content, description, want string
 	}{
-		{"printed frontmatter is kept", "---\nname: herdr\ndescription: Control Herdr\n---\n# Herdr", "configured", "---\nname: herdr\ndescription: Control Herdr\n---\n# Herdr"},
-		{"configured description wins", herdrApp, "Drive the window", "---\nname: tool\ndescription: \"Drive the window\"\n---\n\n" + herdrApp},
-		{"title and first sentence", herdrApp, "", "---\nname: tool\ndescription: \"herdr-app: drive the person's window. Herdr shows spaces, tabs and panes.\"\n---\n\n" + herdrApp},
-		{"no prose falls back to the name", "just text with no title", "", "---\nname: tool\ndescription: \"just text with no title\"\n---\n\njust text with no title"},
+		{"printed frontmatter is kept when description is empty", herdr, "", herdr},
+		{"printed frontmatter description is overridden", herdr, "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\n---\n# Herdr"},
+		{"multiline frontmatter description is overridden", herdrMultiline, "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\nmetadata:\n  replaces: old\n---\n# Herdr"},
+		{"multiline description with blank lines is replaced completely", "---\nname: herdr\ndescription: |\n  first line\n\n  second line\nmetadata:\n  foo: bar\n---\n# Herdr", "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\nmetadata:\n  foo: bar\n---\n# Herdr"},
+		{"nested description under metadata is preserved and top-level appended", "---\nname: herdr\nmetadata:\n  description: nested\n---\n# Herdr", "Custom desc", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: \"Custom desc\"\n---\n# Herdr"},
+		{"nested description under metadata is not matched when top-level exists", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: old top\n---\n# Herdr", "Custom desc", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: \"Custom desc\"\n---\n# Herdr"},
+		{"frontmatter without description has it appended", "---\nname: herdr\n---\n# Herdr", "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\n---\n# Herdr"},
+		{"configured description wins on unfrontmattered content", herdrApp, "Drive the window", "---\nname: tool\ndescription: \"Drive the window\"\n---\n\n" + herdrApp},
+		{"unconfigured falls back to the name", herdrApp, "", "---\nname: tool\ndescription: \"tool\"\n---\n\n" + herdrApp},
+		{"no prose falls back to the name", "just text with no title", "", "---\nname: tool\ndescription: \"tool\"\n---\n\njust text with no title"},
 		{"empty summary falls back to the name", "```\ncode\n```", "", "---\nname: tool\ndescription: \"tool\"\n---\n\n```\ncode\n```"},
-		{"quotes and backslashes are escaped", "# A \"quoted\" \\ title", "", "---\nname: tool\ndescription: \"A \\\"quoted\\\" \\\\ title.\"\n---\n\n# A \"quoted\" \\ title"},
+		{"quotes and backslashes in description are escaped", "# A title", "A \"quoted\" \\ desc", "---\nname: tool\ndescription: \"A \\\"quoted\\\" \\\\ desc\"\n---\n\n# A title"},
+		{"newlines in description are normalized to spaces", "# A title", "Line 1\nLine 2\r\nLine 3", "---\nname: tool\ndescription: \"Line 1 Line 2 Line 3\"\n---\n\n# A title"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := withSkillFrontmatter(tt.content, "tool", tt.description); got != tt.want {
 				t.Fatalf("got\n%q\nwant\n%q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMarkdownSummary(t *testing.T) {
-	tests := []struct {
-		name, content, want string
-	}{
-		{"hc manual", "# hc manual (herdr-core)\n\nThe current manual for herdr-core's CLI, `hc`. It is not `herdr`, the older\nterminal multiplexer.\n", "hc manual (herdr-core). The current manual for herdr-core's CLI, hc."},
-		{"title only", "# Title\n\n## Section\n", "Title."},
-		{"paragraph only", "Runs things. Then more.", "Runs things."},
-		{"skips lists, quotes and code before prose", "# T\n\n- item\n> quote\n```\n# not a title\n```\n1. step\n\nSee [docs](https://x) for **more**!\n", "T. See docs for more!"},
-		{"paragraph ends at a blank line", "# T\n\nfirst line\nsecond line\n\nnext paragraph.", "T. first line second line"},
-		{"CJK sentence end", "# 標題\n\n第一句。第二句。", "標題. 第一句。"},
-		{"nothing to summarize", "", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := markdownSummary(tt.content); got != tt.want {
-				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
 	}
