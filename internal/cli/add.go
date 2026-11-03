@@ -406,6 +406,9 @@ func newAddCmd() *cobra.Command {
 				output := ""
 				if flagStdout {
 					output = config.CommandOutputStdout
+					if flagDescription == "" {
+						fmt.Fprintf(cmd.ErrOrStderr(), "%sWarning: no --description provided; falling back to skill name if the command does not output frontmatter. Use --description to specify triggers and boundaries for agents.%s\n", colorYellow, colorReset)
+					}
 				}
 				intake := newCommandIntake(skillName, source, flagCheck, flagDescription, output)
 				return intake.run(cmd, addRequest{scope: scope, cfg: cfg, skills: []string{skillName}, yes: flagYes, agents: flagAgents})
@@ -436,7 +439,7 @@ func newAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagCommand, "command", "", "Command Source for the Skill")
 	cmd.Flags().StringVar(&flagCheck, "check", "", "Command to check before running the command Source")
 	cmd.Flags().BoolVar(&flagStdout, "stdout", false, "Write the command's stdout as the Skill's SKILL.md")
-	cmd.Flags().StringVar(&flagDescription, "description", "", "Description of the skill")
+	cmd.Flags().StringVar(&flagDescription, "description", "", "Description of the skill; overrides command output frontmatter")
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompts")
 	cmd.Flags().BoolVar(&flagList, "list", false, "List a Source's Skills without adding them")
 	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output machine-readable JSON (with --list)")

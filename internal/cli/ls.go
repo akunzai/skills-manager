@@ -23,18 +23,20 @@ import (
 // byte for byte identical: a struct marshals in field declaration order,
 // where a map's string keys were already sorted.
 type lsJSONItem struct {
-	Agents     []string           `json:"agents"`
-	Installed  bool               `json:"installed"`
-	Name       string             `json:"name"`
-	Path       string             `json:"path"`
-	Scope      string             `json:"scope"`
-	Signed     bool               `json:"signed"`
-	Source     string             `json:"source"`
-	SourceType string             `json:"sourceType"`
-	Status     models.SkillStatus `json:"status"`
-	Subpath    string             `json:"subpath"`
-	Unverified bool               `json:"unverified"`
-	Valid      bool               `json:"valid"`
+	Agents                []string           `json:"agents"`
+	Description           string             `json:"description"`
+	DescriptionOverridden bool               `json:"descriptionOverridden"`
+	Installed             bool               `json:"installed"`
+	Name                  string             `json:"name"`
+	Path                  string             `json:"path"`
+	Scope                 string             `json:"scope"`
+	Signed                bool               `json:"signed"`
+	Source                string             `json:"source"`
+	SourceType            string             `json:"sourceType"`
+	Status                models.SkillStatus `json:"status"`
+	Subpath               string             `json:"subpath"`
+	Unverified            bool               `json:"unverified"`
+	Valid                 bool               `json:"valid"`
 }
 
 func stringRuneLen(s string) int {
@@ -93,6 +95,11 @@ func newLsCmd() *cobra.Command {
 		Use:     "ls",
 		Aliases: []string{"list"},
 		Short:   "List installed and configured skills",
+		Long: `List installed and configured skills.
+
+Displays each skill's status: Installed, Installed (override) for skills with
+a locally overridden description, Installed (no desc) when lacking routing prose,
+or problem states (Missing, Stub, Broken link, Invalid).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past flag parsing, every failure below is a runtime problem rather
 			// than misuse, so reporting it with a usage dump would mislead.
@@ -166,18 +173,20 @@ func newLsCmd() *cobra.Command {
 				outList := make([]lsJSONItem, 0, len(skills))
 				for _, s := range skills {
 					outList = append(outList, lsJSONItem{
-						Name:       s.Name,
-						Path:       models.ToTildePath(s.InstalledPath),
-						Scope:      scopeLabel,
-						Agents:     s.Agents,
-						Source:     models.ToTildePath(s.Source),
-						SourceType: lsSourceType(s),
-						Subpath:    s.Subpath,
-						Installed:  s.IsInstalled,
-						Valid:      s.IsValidSkill,
-						Status:     s.Status,
-						Signed:     s.Signed,
-						Unverified: s.Unverified,
+						Name:                  s.Name,
+						Description:           s.Description,
+						DescriptionOverridden: s.DescriptionOverridden,
+						Path:                  models.ToTildePath(s.InstalledPath),
+						Scope:                 scopeLabel,
+						Agents:                s.Agents,
+						Source:                models.ToTildePath(s.Source),
+						SourceType:            lsSourceType(s),
+						Subpath:               s.Subpath,
+						Installed:             s.IsInstalled,
+						Valid:                 s.IsValidSkill,
+						Status:                s.Status,
+						Signed:                s.Signed,
+						Unverified:            s.Unverified,
 					})
 				}
 				data, _ := json.MarshalIndent(outList, "", "  ")
@@ -332,6 +341,10 @@ func lsStatus(s models.SkillItem) (string, func(presentation.Style) string) {
 		return "Broken link", red
 	case !s.IsValidSkill:
 		return "Invalid (No SKILL.md)", red
+	case s.DescriptionOverridden:
+		return "Installed (override)", green
+	case s.DescriptionMissing:
+		return "Installed (no desc)", yellow
 	default:
 		return "Installed", green
 	}

@@ -72,20 +72,41 @@ func readSkillFrontmatter(path string) skillFrontmatter {
 	return declared
 }
 
+// splitFrontmatter splits content into its frontmatter lines, the trailing
+// content after the closing "---", and whether a UTF-8 BOM was present. When
+// content has no valid frontmatter block, ok is false.
+func splitFrontmatter(content string) (lines []string, rest string, hasBOM bool, ok bool) {
+	hasBOM = strings.HasPrefix(content, "\xef\xbb\xbf")
+	content = strings.TrimPrefix(content, "\xef\xbb\xbf")
+	allLines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	if len(allLines) == 0 || strings.TrimRight(allLines[0], " \t") != "---" {
+		return nil, "", false, false
+	}
+	for i := 1; i < len(allLines); i++ {
+		if strings.TrimRight(allLines[i], " \t") == "---" {
+			return allLines[1:i], strings.Join(allLines[i+1:], "\n"), hasBOM, true
+		}
+	}
+	return nil, "", false, false
+}
+
 // frontmatterLines is the frontmatter of a SKILL.md: the lines between a
 // first line of "---" and the next line of "---", or nil when there is none.
 func frontmatterLines(content string) []string {
-	content = strings.TrimPrefix(content, "\xef\xbb\xbf")
-	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
-	if strings.TrimRight(lines[0], " \t") != "---" {
+	lines, _, _, ok := splitFrontmatter(content)
+	if !ok {
 		return nil
 	}
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimRight(lines[i], " \t") == "---" {
-			return lines[1:i]
-		}
+	return lines
+}
+
+// isTopLevelKey reports whether line is an unindented YAML key matching expectedKey.
+func isTopLevelKey(line, expectedKey string) bool {
+	if line == "" || line[0] == ' ' || line[0] == '\t' {
+		return false
 	}
-	return nil
+	key, _, ok := strings.Cut(line, ":")
+	return ok && strings.TrimSpace(key) == expectedKey
 }
 
 // indentedBlock is the leading lines that are indented or blank: the value
@@ -267,89 +288,65 @@ func walkSkillFiles(root string, skip func(path string) bool, visit func(path st
 // maxSkillDescription is the longest description the Agent Skills spec allows.
 const maxSkillDescription = 1024
 
-// withSkillFrontmatter is a SKILL.md printed by a command, given frontmatter
-// when it has none. Frontmatter the command printed is kept as it is; the one
-// supplied names the Skill and describes it by description, else by the
-// document's own title and first sentence, else by its name.
-func withSkillFrontmatter(content, name, description string) string {
-	if frontmatterLines(content) != nil {
-		return content
-	}
-	description = cmp.Or(description, markdownSummary(content), name)
+// formatFrontmatterDescription sanitizes and truncates a description to
+// fit the maxSkillDescription rune limit and formats it as a quoted YAML line.
+func formatFrontmatterDescription(description string) string {
+	description = strings.ReplaceAll(strings.ReplaceAll(description, "\r\n", " "), "\n", " ")
 	if r := []rune(description); len(r) > maxSkillDescription {
 		description = string(r[:maxSkillDescription])
 	}
 	quoted := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(description)
-	return "---\nname: " + name + "\ndescription: \"" + quoted + "\"\n---\n\n" + content
+	return `description: "` + quoted + `"`
 }
 
-var (
-	markdownLink     = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
-	sentenceEnd      = regexp.MustCompile(`[.!?](\s|$)|[。！？]`)
-	orderedListStart = regexp.MustCompile(`^\d+[.)]\s`)
-)
-
-// markdownSummary is a Markdown document's H1 and the first sentence of the
-// paragraph that follows it, as plain text, or "" when it has neither.
-func markdownSummary(content string) string {
-	var title string
-	var paragraph []string
-	inFence, inParagraph := false, false
-	for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
-			if inParagraph {
-				break
-			}
-			continue
+// withSkillFrontmatter is a SKILL.md printed by a command, given frontmatter
+// when it has none, or having its frontmatter description overridden when
+// description is non-empty. When content has frontmatter and description is empty,
+// the printed frontmatter is kept as it is.
+func withSkillFrontmatter(content, name, description string) string {
+	fmLines, rest, hasBOM, ok := splitFrontmatter(content)
+	if ok {
+		if description == "" {
+			return content
 		}
-		if inFence {
-			continue
-		}
-		if trimmed == "" {
-			if inParagraph {
-				break
-			}
-			continue
-		}
-		if heading, ok := strings.CutPrefix(trimmed, "# "); ok && title == "" && !inParagraph {
-			title = strings.TrimSpace(heading)
-			continue
-		}
-		if !inParagraph && !startsProse(trimmed) {
-			continue
-		}
-		inParagraph = true
-		paragraph = append(paragraph, trimmed)
+		return overrideFrontmatterLines(fmLines, rest, description, hasBOM)
 	}
-	parts := make([]string, 0, 2)
-	if t := plainMarkdown(title); t != "" {
-		parts = append(parts, strings.TrimRight(t, ".:;,")+".")
-	}
-	if text := plainMarkdown(strings.Join(paragraph, " ")); text != "" {
-		if loc := sentenceEnd.FindStringIndex(text); loc != nil {
-			text = strings.TrimSpace(text[:loc[1]])
-		}
-		parts = append(parts, text)
-	}
-	return strings.Join(parts, " ")
+	descLine := formatFrontmatterDescription(cmp.Or(description, name))
+	return "---\nname: " + name + "\n" + descLine + "\n---\n\n" + content
 }
 
-// startsProse reports whether a line opens a paragraph rather than a
-// heading, list, quote, table, or HTML block.
-func startsProse(line string) bool {
-	switch line[0] {
-	case '#', '-', '*', '+', '>', '|', '<':
-		return false
+// overrideFrontmatterDescription replaces the description in an existing
+// frontmatter block with description, or appends it if none was declared.
+func overrideFrontmatterDescription(content, description string) string {
+	fmLines, rest, hasBOM, ok := splitFrontmatter(content)
+	if !ok {
+		return content
 	}
-	return !orderedListStart.MatchString(line)
+	return overrideFrontmatterLines(fmLines, rest, description, hasBOM)
 }
 
-// plainMarkdown is inline Markdown as plain text: links as their text, code
-// and emphasis markers dropped, whitespace collapsed.
-func plainMarkdown(s string) string {
-	s = markdownLink.ReplaceAllString(s, "$1")
-	s = strings.NewReplacer("`", "", "**", "", "__", "").Replace(s)
-	return strings.Join(strings.Fields(s), " ")
+func overrideFrontmatterLines(lines []string, rest, description string, hasBOM bool) string {
+	descLine := formatFrontmatterDescription(description)
+	var newFmLines []string
+	found := false
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if !found && isTopLevelKey(line, "description") {
+			found = true
+			newFmLines = append(newFmLines, descLine)
+			block := indentedBlock(lines[i+1:])
+			i += len(block)
+			continue
+		}
+		newFmLines = append(newFmLines, line)
+	}
+	if !found {
+		newFmLines = append(newFmLines, descLine)
+	}
+
+	result := "---\n" + strings.Join(newFmLines, "\n") + "\n---\n" + rest
+	if hasBOM {
+		result = "\xef\xbb\xbf" + result
+	}
+	return result
 }
