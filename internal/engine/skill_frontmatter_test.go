@@ -112,25 +112,30 @@ func TestWithSkillFrontmatter(t *testing.T) {
 	herdrApp := "# herdr-app: drive the person's window\n\nHerdr shows spaces, tabs and panes. herdr-core (`hc`) runs their terminals\nand keeps them alive.\n\n## Usage\n"
 	tests := []struct {
 		name, content, description, want string
+		fellBack                         bool
 	}{
-		{"printed frontmatter is kept when description is empty", herdr, "", herdr},
-		{"printed frontmatter description is overridden", herdr, "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\n---\n# Herdr"},
-		{"multiline frontmatter description is overridden", herdrMultiline, "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\nmetadata:\n  replaces: old\n---\n# Herdr"},
-		{"multiline description with blank lines is replaced completely", "---\nname: herdr\ndescription: |\n  first line\n\n  second line\nmetadata:\n  foo: bar\n---\n# Herdr", "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\nmetadata:\n  foo: bar\n---\n# Herdr"},
-		{"nested description under metadata is preserved and top-level appended", "---\nname: herdr\nmetadata:\n  description: nested\n---\n# Herdr", "Custom desc", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: \"Custom desc\"\n---\n# Herdr"},
-		{"nested description under metadata is not matched when top-level exists", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: old top\n---\n# Herdr", "Custom desc", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: \"Custom desc\"\n---\n# Herdr"},
-		{"frontmatter without description has it appended", "---\nname: herdr\n---\n# Herdr", "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\n---\n# Herdr"},
-		{"configured description wins on unfrontmattered content", herdrApp, "Drive the window", "---\nname: tool\ndescription: \"Drive the window\"\n---\n\n" + herdrApp},
-		{"unconfigured falls back to the name", herdrApp, "", "---\nname: tool\ndescription: \"tool\"\n---\n\n" + herdrApp},
-		{"no prose falls back to the name", "just text with no title", "", "---\nname: tool\ndescription: \"tool\"\n---\n\njust text with no title"},
-		{"empty summary falls back to the name", "```\ncode\n```", "", "---\nname: tool\ndescription: \"tool\"\n---\n\n```\ncode\n```"},
-		{"quotes and backslashes in description are escaped", "# A title", "A \"quoted\" \\ desc", "---\nname: tool\ndescription: \"A \\\"quoted\\\" \\\\ desc\"\n---\n\n# A title"},
-		{"newlines in description are normalized to spaces", "# A title", "Line 1\nLine 2\r\nLine 3", "---\nname: tool\ndescription: \"Line 1 Line 2 Line 3\"\n---\n\n# A title"},
+		{"printed frontmatter is kept when description is empty", herdr, "", herdr, false},
+		{"printed frontmatter description is overridden", herdr, "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\n---\n# Herdr", false},
+		{"multiline frontmatter description is overridden", herdrMultiline, "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\nmetadata:\n  replaces: old\n---\n# Herdr", false},
+		{"multiline description with blank lines is replaced completely", "---\nname: herdr\ndescription: |\n  first line\n\n  second line\nmetadata:\n  foo: bar\n---\n# Herdr", "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\nmetadata:\n  foo: bar\n---\n# Herdr", false},
+		{"nested description under metadata is preserved and top-level appended", "---\nname: herdr\nmetadata:\n  description: nested\n---\n# Herdr", "Custom desc", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: \"Custom desc\"\n---\n# Herdr", false},
+		{"nested description under metadata is not matched when top-level exists", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: old top\n---\n# Herdr", "Custom desc", "---\nname: herdr\nmetadata:\n  description: nested\ndescription: \"Custom desc\"\n---\n# Herdr", false},
+		{"frontmatter without description has it appended", "---\nname: herdr\n---\n# Herdr", "Custom desc", "---\nname: herdr\ndescription: \"Custom desc\"\n---\n# Herdr", false},
+		{"configured description wins on unfrontmattered content", herdrApp, "Drive the window", "---\nname: tool\ndescription: \"Drive the window\"\n---\n\n" + herdrApp, false},
+		{"unconfigured falls back to the name", herdrApp, "", "---\nname: tool\ndescription: \"tool\"\n---\n\n" + herdrApp, true},
+		{"no prose falls back to the name", "just text with no title", "", "---\nname: tool\ndescription: \"tool\"\n---\n\njust text with no title", true},
+		{"empty summary falls back to the name", "```\ncode\n```", "", "---\nname: tool\ndescription: \"tool\"\n---\n\n```\ncode\n```", true},
+		{"quotes and backslashes in description are escaped", "# A title", "A \"quoted\" \\ desc", "---\nname: tool\ndescription: \"A \\\"quoted\\\" \\\\ desc\"\n---\n\n# A title", false},
+		{"newlines in description are normalized to spaces", "# A title", "Line 1\nLine 2\r\nLine 3", "---\nname: tool\ndescription: \"Line 1 Line 2 Line 3\"\n---\n\n# A title", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := withSkillFrontmatter(tt.content, "tool", tt.description); got != tt.want {
+			got, fellBack := withSkillFrontmatter(tt.content, "tool", tt.description)
+			if got != tt.want {
 				t.Fatalf("got\n%q\nwant\n%q", got, tt.want)
+			}
+			if fellBack != tt.fellBack {
+				t.Fatalf("fellBack = %v, want %v", fellBack, tt.fellBack)
 			}
 		})
 	}

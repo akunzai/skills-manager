@@ -302,17 +302,20 @@ func formatFrontmatterDescription(description string) string {
 // withSkillFrontmatter is a SKILL.md printed by a command, given frontmatter
 // when it has none, or having its frontmatter description overridden when
 // description is non-empty. When content has frontmatter and description is empty,
-// the printed frontmatter is kept as it is.
-func withSkillFrontmatter(content, name, description string) string {
+// the printed frontmatter is kept as it is. It reports whether the description
+// fell back to the Skill name because content had no frontmatter and no description
+// was provided.
+func withSkillFrontmatter(content, name, description string) (string, bool) {
 	fmLines, rest, hasBOM, ok := splitFrontmatter(content)
 	if ok {
 		if description == "" {
-			return content
+			return content, false
 		}
-		return overrideFrontmatterLines(fmLines, rest, description, hasBOM)
+		return overrideFrontmatterLines(fmLines, rest, description, hasBOM), false
 	}
+	fellBack := description == ""
 	descLine := formatFrontmatterDescription(cmp.Or(description, name))
-	return "---\nname: " + name + "\n" + descLine + "\n---\n\n" + content
+	return "---\nname: " + name + "\n" + descLine + "\n---\n\n" + content, fellBack
 }
 
 // overrideFrontmatterDescription replaces the description in an existing

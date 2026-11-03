@@ -27,6 +27,10 @@ const (
 	SyncCheckFailed     = "check_failed"
 	SyncCommandStart    = "command_start"
 	SyncCommandFailed   = "command_failed"
+	// SyncCommandFallback is emitted when a command Skill's stdout has no
+	// frontmatter and no --description was given, so its description falls
+	// back to the Skill name.
+	SyncCommandFallback = "command_fallback"
 	SyncSkipped         = "skipped"
 	SyncRenamed         = "renamed"
 	SyncRenameFailed    = "rename_failed"
@@ -324,10 +328,13 @@ func applyLocalItem(availability *Availability, skillsDir string, item SyncPlanI
 			return SyncBlocked, err
 		}
 		emitSync(emit, SyncEvent{Kind: SyncCommandStart, Skill: item.Name})
-		if err := command.materialize(skillsDir); err != nil {
+		fellBack, err := command.materialize(skillsDir)
+		if err != nil {
 			emitSync(emit, SyncEvent{Kind: SyncCommandFailed, Skill: item.Name, Err: err})
 			outcome = SyncFailed
 			applyErr = err
+		} else if fellBack {
+			emitSync(emit, SyncEvent{Kind: SyncCommandFallback, Skill: item.Name})
 		}
 	} else {
 		if err := MaterializeLocalSymlink(item.Name, item.LinkTarget, skillsDir); err != nil {

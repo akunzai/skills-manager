@@ -30,11 +30,13 @@ func (c commandSkill) check() error {
 
 // materialize runs the command and puts the Skill on skillsDir the way its
 // declaration says the command delivers it. The caller runs check first.
-func (c commandSkill) materialize(skillsDir string) error {
+// It reports whether a stdout command fell back to the Skill name as its
+// description.
+func (c commandSkill) materialize(skillsDir string) (bool, error) {
 	if c.entry.Output == config.CommandOutputStdout {
 		return c.writeOutput(skillsDir)
 	}
-	return c.install()
+	return false, c.install()
 }
 
 // writePath is the SKILL.md materialize writes, or "" when an installer
@@ -87,41 +89,45 @@ func (c commandSkill) install() error {
 // that output to the Scope skills directory, supplying frontmatter when the
 // command printed none. A command that fails or prints nothing leaves the
 // Scope copy as it was.
-func (c commandSkill) writeOutput(skillsDir string) error {
+func (c commandSkill) writeOutput(skillsDir string) (bool, error) {
 	name := c.name
 	stdout, stderr, err := RunCmd(c.entry.Command, "")
 	if err != nil {
-		return fmt.Errorf("%s", cmp.Or(stderr, stdout, err.Error()))
+		return false, fmt.Errorf("%s", cmp.Or(stderr, stdout, err.Error()))
 	}
 	if stdout == "" {
-		return fmt.Errorf("command printed nothing to write as %s's SKILL.md", name)
+		return false, fmt.Errorf("command printed nothing to write as %s's SKILL.md", name)
 	}
 	skillDir := filepath.Join(skillsDir, name)
 	// The Skill is a directory this command owns; a link or file in its
 	// place is replaced rather than written through.
 	if info, err := os.Lstat(skillDir); err == nil && !info.IsDir() {
 		if err := os.Remove(skillDir); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		return err
+		return false, err
 	}
-	content := withSkillFrontmatter(stdout, name, c.entry.Description) + "\n"
+	content, fellBack := withSkillFrontmatter(stdout, name, c.entry.Description)
+	content += "\n"
 	tmp, err := os.CreateTemp(skillDir, ".SKILL.md-*")
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
-		return err
+		return false, err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
-		return err
+		return false, err
 	}
-	return os.Rename(tmp.Name(), filepath.Join(skillDir, "SKILL.md"))
+	if err := os.Rename(tmp.Name(), filepath.Join(skillDir, "SKILL.md")); err != nil {
+		return false, err
+	}
+	return fellBack, nil
 }

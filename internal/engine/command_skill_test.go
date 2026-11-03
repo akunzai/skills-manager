@@ -75,7 +75,7 @@ func TestCommandSkillRefusesEmptyOutput(t *testing.T) {
 	if err := os.WriteFile(empty, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(empty), Output: config.CommandOutputStdout}}).materialize(skillsDir); err == nil {
+	if _, err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(empty), Output: config.CommandOutputStdout}}).materialize(skillsDir); err == nil {
 		t.Fatal("empty output should be refused")
 	}
 	if _, err := os.Stat(skillMd); !os.IsNotExist(err) {
@@ -98,7 +98,7 @@ func TestCommandSkillReplacesALinkRatherThanWritingThroughIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(printed), Output: config.CommandOutputStdout}}).materialize(skillsDir); err != nil {
+	if _, err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(printed), Output: config.CommandOutputStdout}}).materialize(skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(elsewhere, "SKILL.md")); string(got) != "theirs\n" {
@@ -123,14 +123,50 @@ func TestCommandSkillCheck(t *testing.T) {
 
 func TestCommandSkillInstallerRunsWithoutWriting(t *testing.T) {
 	skillsDir := filepath.Join(t.TempDir(), "skills")
-	if err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: "exit 0"}}).materialize(skillsDir); err != nil {
+	if _, err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: "exit 0"}}).materialize(skillsDir); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "tool")); !os.IsNotExist(err) {
 		t.Fatalf("an installer's Skill is its own to write: %v", err)
 	}
-	if err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: "exit 3"}}).materialize(skillsDir); err == nil {
+	if _, err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: "exit 3"}}).materialize(skillsDir); err == nil {
 		t.Fatal("a failing installer should fail")
+	}
+}
+
+func TestCommandSkillMaterializeReportsFallback(t *testing.T) {
+	skillsDir := filepath.Join(t.TempDir(), "skills")
+	unfrontmattered := filepath.Join(t.TempDir(), "unfrontmattered.md")
+	if err := os.WriteFile(unfrontmattered, []byte("# Tool\nManual\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frontmattered := filepath.Join(t.TempDir(), "frontmattered.md")
+	if err := os.WriteFile(frontmattered, []byte("---\nname: tool\ndescription: desc\n---\n# Tool\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fellBack, err := (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(unfrontmattered), Output: config.CommandOutputStdout}}).materialize(skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fellBack {
+		t.Fatal("expected fallback to skill name when no frontmatter and no description")
+	}
+
+	fellBack, err = (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(frontmattered), Output: config.CommandOutputStdout}}).materialize(skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fellBack {
+		t.Fatal("unexpected fallback when frontmatter exists")
+	}
+
+	fellBack, err = (commandSkill{name: "tool", entry: config.LocalEntry{Command: printFileCommand(unfrontmattered), Description: "custom", Output: config.CommandOutputStdout}}).materialize(skillsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fellBack {
+		t.Fatal("unexpected fallback when description is provided")
 	}
 }
 
