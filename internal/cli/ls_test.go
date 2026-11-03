@@ -365,9 +365,19 @@ func TestCLILsDescriptionStatusAndJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// 4. Symlink with config description note, but real SKILL.md from target
+	symlinkDir := filepath.Join(skillsDir, "symlink-with-desc")
+	if err := os.MkdirAll(symlinkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(symlinkDir, "SKILL.md"), []byte("---\nname: symlink-with-desc\ndescription: Frontmatter from target.\n---\n# Target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	cfg := config.DefaultConfig()
 	config.AddLocalSymlinkEntry(cfg, "regular", filepath.Join(home, "src-reg"), "")
 	config.AddLocalSymlinkEntry(cfg, "nodesc", filepath.Join(home, "src-nodesc"), "")
+	config.AddLocalSymlinkEntry(cfg, "symlink-with-desc", filepath.Join(home, "src-sym"), "Note in skills.json")
 	config.AddLocalCommandEntry(cfg, "overridden", config.LocalEntry{
 		Command:     "echo hi",
 		Description: "Overridden custom text.",
@@ -385,6 +395,7 @@ func TestCLILsDescriptionStatusAndJSON(t *testing.T) {
 	for _, want := range []string{
 		"regular", "Installed",
 		"nodesc", "Installed (no desc)",
+		"symlink-with-desc", "Installed",
 		"overridden", "Installed (override)",
 	} {
 		if !strings.Contains(out, want) {
@@ -414,6 +425,11 @@ func TestCLILsDescriptionStatusAndJSON(t *testing.T) {
 	nd := itemMap["nodesc"]
 	if nd.Description != "nodesc" || nd.DescriptionOverridden {
 		t.Fatalf("nodesc: %+v", nd)
+	}
+
+	sym := itemMap["symlink-with-desc"]
+	if sym.Description != "Frontmatter from target." || sym.DescriptionOverridden {
+		t.Fatalf("symlink-with-desc: %+v", sym)
 	}
 
 	ov := itemMap["overridden"]
