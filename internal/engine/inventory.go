@@ -130,12 +130,15 @@ func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
 		if localInfo.Type == config.SkillCommand {
 			rowKind = models.InventoryCommand
 		}
+		isOverridden := localInfo.Type == config.SkillCommand &&
+			localInfo.Output == config.CommandOutputStdout &&
+			localInfo.Description != ""
 		items[name] = &models.SkillItem{
 			Name:                  name,
 			Kind:                  rowKind,
 			Source:                src,
 			Description:           localInfo.Description,
-			DescriptionOverridden: localInfo.Description != "",
+			DescriptionOverridden: isOverridden,
 			Agents:                availability.ManagedAgents(name),
 		}
 	}
@@ -183,8 +186,8 @@ func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
 			skillMd := filepath.Join(fullPath, "SKILL.md")
 			if _, err := os.Stat(skillMd); err == nil {
 				item.IsValidSkill = true
-				if item.Description == "" {
-					item.Description = readSkillFrontmatter(skillMd).Description
+				if fm := readSkillFrontmatter(skillMd); fm.Description != "" && !item.DescriptionOverridden {
+					item.Description = fm.Description
 				}
 			}
 		}
