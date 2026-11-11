@@ -312,3 +312,58 @@ func TestLocalIntakeProgressNamesTheLinkTarget(t *testing.T) {
 		t.Fatalf("progress = %q, want %q", got, want)
 	}
 }
+
+// A Gist is declared under gist.github.com/<id> whichever form names it, and
+// its root SKILL.md is its one Skill, Materialized with the files beside it.
+func TestCLIAddDeclaresAGistByItsID(t *testing.T) {
+	isolateHome(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	skillsDir := filepath.Join(project, ".agents", "skills")
+	cacheDir := filepath.Join(project, "cache")
+	origin := filepath.Join(project, "origin")
+	if err := os.MkdirAll(origin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(origin, "SKILL.md"), []byte("---\nname: shared\ndescription: A shared Skill\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(origin, "helper.sh"), []byte("echo hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitCLIGitRepo(t, origin)
+
+	const id = "f55ddefadc6aa709b1e51b9d9c4f08ef"
+	out, err := runCLI(t, "add", "https://gist.github.com/someone/"+id, "--url", origin, "--skill", "shared", "-p", "-y", "--config", configFile, "--skills-dir", skillsDir, "--cache-dir", cacheDir)
+	if err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	saved, err := config.LoadConfig(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, ok := saved.Remote["gist.github.com/"+id]
+	if !ok || repo.Skills["shared"] != "." || repo.Type != "git" {
+		t.Fatalf("Gist declared as %#v; want gist.github.com/%s with Skill shared at its root", saved.Remote, id)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "shared", "helper.sh")); err != nil {
+		t.Fatalf("the Gist's sibling file was not Materialized: %v", err)
+	}
+}
+
+// A Gist revision is not followed by Update, so Add refuses it rather than
+// silently tracking the latest revision instead.
+func TestCLIAddRefusesAGistRevision(t *testing.T) {
+	isolateHome(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	out, err := runCLI(t, "add", "https://gist.github.com/someone/f55ddefadc6aa709b1e51b9d9c4f08ef/0123abcd", "-p", "-y", "--config", configFile, "--cache-dir", filepath.Join(project, "cache"))
+	if err == nil || ExitCode(err) != 1 || !strings.Contains(out+err.Error(), "gist:<id>") {
+		t.Fatalf("a Gist revision should be refused with exit 1 naming the supported forms; got %v:\n%s", err, out)
+	}
+	if _, err := os.Stat(configFile); err == nil {
+		t.Fatal("a refused Add wrote Config")
+	}
+}

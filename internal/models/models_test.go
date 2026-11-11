@@ -358,6 +358,67 @@ func TestParseRepoSource(t *testing.T) {
 	}
 }
 
+func TestParseGistSource(t *testing.T) {
+	const id = "f55ddefadc6aa709b1e51b9d9c4f08ef"
+	tests := []struct {
+		raw     string
+		wantID  string
+		wantURL string // "" is the HTTPS clone URL the id implies
+	}{
+		{"https://gist.github.com/someone/" + id, id, ""},
+		{"https://gist.github.com/" + id, id, ""},
+		{"https://gist.github.com/" + id + ".git", id, ""},
+		{"https://Gist.GitHub.com/someone/" + id + "/#file-skill-md", id, ""},
+		{"gist:" + id, id, ""},
+		{"GIST:" + id, id, ""},
+		{"git@gist.github.com:" + id + ".git", id, "git@gist.github.com:" + id + ".git"},
+		{"https://gist.github.com/1234567", "1234567", ""},
+	}
+	for _, tt := range tests {
+		got, ok, err := ParseGistSource(tt.raw)
+		if !ok || err != nil {
+			t.Errorf("ParseGistSource(%q) = ok %v, err %v; want a Gist", tt.raw, ok, err)
+			continue
+		}
+		wantURL := tt.wantURL
+		if wantURL == "" {
+			wantURL = "https://gist.github.com/" + tt.wantID + ".git"
+		}
+		want := ParsedRepoSource{SourceKey: "gist.github.com/" + tt.wantID, URL: wantURL, RepoType: "git"}
+		if got != want {
+			t.Errorf("ParseGistSource(%q) = %+v; want %+v", tt.raw, got, want)
+		}
+		if parsed := ParseRepoSource(tt.raw); parsed != want {
+			t.Errorf("ParseRepoSource(%q) = %+v; want %+v", tt.raw, parsed, want)
+		}
+	}
+
+	// The key a Gist is declared under implies its HTTPS clone URL, so
+	// Config need not record one.
+	if implied := ParseRepoSource("gist.github.com/" + id); implied.URL != "https://gist.github.com/"+id+".git" {
+		t.Errorf("ParseRepoSource(key).URL = %q", implied.URL)
+	}
+
+	for _, raw := range []string{
+		"https://gist.github.com/someone/" + id + "/0123abcd",
+		"https://gist.github.com/someone/" + id + "/raw/SKILL.md",
+		"https://gist.github.com/someone",
+		"https://gist.github.com/",
+		"gist:",
+		"gist:someone/" + id,
+	} {
+		if _, ok, err := ParseGistSource(raw); !ok || err == nil {
+			t.Errorf("ParseGistSource(%q) = ok %v, err %v; want a refused Gist", raw, ok, err)
+		}
+	}
+
+	for _, raw := range []string{id, "owner/repo", "https://github.com/owner/repo", "gitlab:g/p"} {
+		if _, ok, _ := ParseGistSource(raw); ok {
+			t.Errorf("ParseGistSource(%q) took it for a Gist", raw)
+		}
+	}
+}
+
 func TestDefaultCacheDir(t *testing.T) {
 	cache := DefaultCacheDir()
 	if cache == "" {

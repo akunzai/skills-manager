@@ -70,7 +70,7 @@ Format: [Core capability summary]. [Specific command verbs/actions]. Use when [t
 
 `skills.json` maintains three top-level sections:
 - `settings`: Agent availability policies (`defaultAgents`, `availability` per-skill overrides).
-- `remote`: Map of remote Sources: Git repositories (`<owner>/<repo>`), each with its `type` ("github", "gitlab", "git") and `skills` map (`<skill-name>: <subpath>`), and well-known Sources (`<host>`, `type: "well-known"`, `url` its `https://` base URL, `skills` map `<skill-name>: <index entry name>`, no `branch`); either kind has an optional `signature` (`sigstore` signer recorded on first sight, or `certificateChain` from `add --trust-cert`, plus `require`, and `trusted` content recorded by `skills trust`).
+- `remote`: Map of remote Sources: Git repositories (`<owner>/<repo>`, or `gist.github.com/<id>` for a Gist), each with its `type` ("github", "gitlab", "git") and `skills` map (`<skill-name>: <subpath>`), and well-known Sources (`<host>`, `type: "well-known"`, `url` its `https://` base URL, `skills` map `<skill-name>: <index entry name>`, no `branch`); either kind has an optional `signature` (`sigstore` signer recorded on first sight, or `certificateChain` from `add --trust-cert`, plus `require`, and `trusted` content recorded by `skills trust`).
 - `local`: Map of local skills (`<skill-name>`), with `type: "symlink"` (`source` path) or `type: "command"` (`command`, optional `check` command, and `output: "stdout"` when the command prints the SKILL.md rather than installing it).
 
 ---
@@ -96,6 +96,9 @@ skills add microsoft/azure-skills --path skills --all --yes
 
 # Add from a publisher's well-known index (https:// only; no --path/--branch/--url)
 skills add https://developers.cloudflare.com --skill agents-sdk --yes
+
+# Add a Skill shared as a GitHub Gist (declared as gist.github.com/<id>)
+skills add gist:<id> --yes
 
 # Add a local directory as a live symlink
 skills add --symlink ./my-local-skill --yes

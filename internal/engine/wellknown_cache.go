@@ -427,9 +427,9 @@ func usableWellKnownEntry(entry wellKnownEntry) error {
 	return nil
 }
 
-// refusalError is a well-known Source this tool will not read: one Add is
-// given with git-only flags or not over https://, or an index or artifact
-// it serves that cannot be verified or unpacked safely. It is for the user
+// refusalError is a Source this tool will not read: a well-known one not
+// over https://, or an index or artifact it serves that cannot be verified
+// or unpacked safely, or a Gist form such as a revision URL. It is for the user
 // to resolve, not a failed operation (ADR-0002).
 type refusalError struct{ err error }
 
