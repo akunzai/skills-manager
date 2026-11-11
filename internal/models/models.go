@@ -1,6 +1,8 @@
 package models
 
 import (
+	"cmp"
+	"fmt"
 	"maps"
 	"net/url"
 	"os"
@@ -422,8 +424,61 @@ type ParsedRepoSource struct {
 
 var sshURLRegex = regexp.MustCompile(`^git@([^:]+):(.+?)(?:\.git)?$`)
 
+// gistHost serves GitHub Gists; a Gist is the git repository
+// https://gist.github.com/<id>.git.
+const gistHost = "gist.github.com"
+
+var gistIDRegex = regexp.MustCompile(`^[0-9a-fA-F]+$`)
+
+// ParseGistSource reads raw as a GitHub Gist: https://gist.github.com/<id>
+// or /<user>/<id>, gist:<id>, or git@gist.github.com:<id>.git. A Gist is
+// keyed gist.github.com/<id>, never by its owner, so it neither changes
+// with an owner's rename nor shares the GitHub owner/repo namespace; that
+// key implies its HTTPS clone URL. ok reports whether raw names a Gist at
+// all, and err a Gist form this tool does not read, such as a revision or
+// raw-file URL. A bare id is not taken for a Gist.
+func ParseGistSource(raw string) (source ParsedRepoSource, ok bool, err error) {
+	raw = strings.TrimSpace(raw)
+	var id, sshURL string
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.HasPrefix(lower, "gist:"):
+		id = raw[len("gist:"):]
+	case strings.HasPrefix(lower, "git@"+gistHost+":"):
+		id = strings.TrimSuffix(raw[len("git@"+gistHost+":"):], ".git")
+		sshURL = raw
+	case strings.HasPrefix(lower, "https://"), strings.HasPrefix(lower, "http://"):
+		u, perr := url.Parse(raw)
+		if perr != nil || !strings.EqualFold(u.Hostname(), gistHost) {
+			return ParsedRepoSource{}, false, nil
+		}
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) > 2 {
+			return ParsedRepoSource{}, true, fmt.Errorf("%s is not a Gist this tool reads; use https://gist.github.com/<id> or gist:<id>, which follow the Gist's latest revision", raw)
+		}
+		id = strings.TrimSuffix(parts[len(parts)-1], ".git")
+	default:
+		return ParsedRepoSource{}, false, nil
+	}
+	if !gistIDRegex.MatchString(id) {
+		return ParsedRepoSource{}, true, fmt.Errorf("%s does not name a Gist id; use https://gist.github.com/<id> or gist:<id>", raw)
+	}
+	id = strings.ToLower(id)
+	return ParsedRepoSource{
+		SourceKey: gistHost + "/" + id,
+		URL:       cmp.Or(sshURL, "https://"+gistHost+"/"+id+".git"),
+		RepoType:  "git",
+	}, true, nil
+}
+
 func ParseRepoSource(raw string) ParsedRepoSource {
 	raw = strings.TrimSpace(raw)
+
+	// 0. A GitHub Gist. A form ParseGistSource refuses falls through;
+	// Add refuses it before it is parsed here.
+	if gist, ok, err := ParseGistSource(raw); ok && err == nil {
+		return gist
+	}
 
 	// 1. Prefix: gitlab:group/project
 	if strings.HasPrefix(strings.ToLower(raw), "gitlab:") {

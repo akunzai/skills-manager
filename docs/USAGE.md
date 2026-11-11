@@ -60,6 +60,20 @@ Skill leaves the index, Update reads the other entries' `SKILL.md` for one
 whose `metadata.replaces` names it and follows that Rename; with none, the
 Skill is reported as removed upstream and `skills rm` is the way out.
 
+## Gist Sources
+
+A GitHub Gist holding a `SKILL.md` is a git Source with one Skill at its root.
+Name it by URL or by id:
+
+```sh
+skills add gist:<id>
+skills add https://gist.github.com/<user>/<id>
+```
+
+It is declared as `gist.github.com/<id>`, whichever form named it, and Update
+follows the Gist's latest revision. A revision or raw-file URL is refused with
+exit `1`; a bare id without `gist:` is not taken for a Gist.
+
 ## Command Sources
 
 Skills can also come from CLI commands (`--command`) rather than Git repositories or well-known indices. When a CLI tool prints its `SKILL.md` to stdout, use `--stdout` to capture it:

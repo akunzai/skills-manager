@@ -104,6 +104,9 @@ func classifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
 	if _, ok := models.ParseWellKnownSource(spec.Positional); ok {
 		return AddSourceWellKnown, spec.Positional, nil
 	}
+	if _, ok, err := models.ParseGistSource(spec.Positional); ok && err != nil {
+		return AddSourceRemote, spec.Positional, refusalError{err}
+	}
 	return AddSourceRemote, spec.Positional, nil
 }
 
@@ -127,7 +130,7 @@ func isLocalPath(raw string) bool {
 		return true
 	}
 	if !strings.HasPrefix(raw, "git@") && !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") &&
-		!strings.HasPrefix(raw, "github:") && !strings.HasPrefix(raw, "gitlab:") {
+		!strings.HasPrefix(raw, "github:") && !strings.HasPrefix(raw, "gitlab:") && !strings.HasPrefix(raw, "gist:") {
 		expanded := models.ExpandUser(raw)
 		if info, err := os.Stat(expanded); err == nil && info.IsDir() {
 			return true
