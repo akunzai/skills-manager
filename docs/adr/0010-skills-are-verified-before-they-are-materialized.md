@@ -12,6 +12,8 @@ A user who has reviewed a Skill that does not verify can still choose it, throug
 
 Keyless verification needs the Sigstore trust root. Add and Update, which already reach the network, fetch it through TUF into the Cache directory (`.sigstore/trusted_root.json`) whenever a Skill they just fetched is signed; Sync reads that file and nothing else, so ADR-0004's offline rule holds. Update also fetches a missing one for any selected Source with a signed Skill, even one already current, and Add reports a fetch that failed, so a missing trust root blocks a signed Skill with `update` as the next action and one plain Update clears it.
 
+`skills use` prints an undeclared remote Skill's `SKILL.md` for an Agent to read, which hands it over as surely as Materializing it, so it verifies the Cache copy the same way first and prints nothing that does not verify. It declares no Source, so there is no Config to pin a Signer in and no Baseline to compare against: a keyless signature is checked against a freshly fetched trust root and accepted from any identity, and that identity is named on stderr, never recorded. This is not the rejected "integrity without a Signer" below, since nothing records or displays the Skill as trusted afterwards; the user reads the Signer and decides. `--trust-cert` checks a certificate chain as Add does, and Trusted content does not apply.
+
 Rejected:
 
 - **Verifying at Materialize time only.** The block would not appear in the Sync plan's preview, and Add would save its declaration before learning it cannot be written.

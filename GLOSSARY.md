@@ -145,7 +145,7 @@ Declaring selected Skills from one Source in a Scope's Config, then Materializin
 _Avoid_: install (when you mean the whole Add), import, register
 
 **Remote intake**:
-Fetching a remote Source into its Cache, discovering its Skills, and declaring the chosen ones in a Scope's Config. Listing a remote Source's Skills stops before the declaration.
+Fetching a remote Source into its Cache, discovering its Skills, and declaring the chosen ones in a Scope's Config. Listing a remote Source's Skills stops before the declaration, and `skills use` stops after verifying one Skill's Cache copy and printing its SKILL.md.
 _Avoid_: import, install, fetch
 
 **Adopt**:
