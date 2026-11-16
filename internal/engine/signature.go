@@ -79,9 +79,9 @@ func RefreshTrustRoot(cacheDir string) error {
 // ensureTrustRoot makes the signed Skills among dirs verifiable offline. It
 // fetches the trust root when one of them is signed and either none is cached
 // or refresh asks for a current one, as after fetching those Skills. Skills
-// that are all unsigned never reach Sigstore. Add and Update, the commands
-// that reach the network, both go through here, so a trust root one of them
-// could not fetch is fetched by the next Update (ADR-0010).
+// that are all unsigned never reach Sigstore. Add, Update, and Use, the
+// commands that reach the network, all go through here, so a trust root one
+// of them could not fetch is fetched by the next Update (ADR-0010).
 func ensureTrustRoot(cacheDir string, refresh bool, dirs ...string) error {
 	if !anySigned(dirs...) {
 		return nil
@@ -294,16 +294,7 @@ func (p *remotePlanner) block(item *SyncPlanItem, reason, next string) {
 // signer this operation saw for it.
 func (p *remotePlanner) trust(source string, policy *config.SignaturePolicy) (signing.Trust, error) {
 	if policy != nil && policy.CertificateChain != "" {
-		path := config.ResolveTrustCertPath(policy.CertificateChain, p.configPath)
-		pem, err := os.ReadFile(path)
-		if err != nil {
-			return signing.Trust{}, fmt.Errorf("read trusted certificate: %w", err)
-		}
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(pem) {
-			return signing.Trust{}, fmt.Errorf("no certificate in %s", policy.CertificateChain)
-		}
-		return signing.Trust{Roots: roots}, nil
+		return certificateChainTrust(config.ResolveTrustCertPath(policy.CertificateChain, p.configPath), policy.CertificateChain)
 	}
 	trust := signing.Trust{TrustedRoot: p.root()}
 	if policy != nil && policy.Sigstore != nil {
@@ -312,4 +303,18 @@ func (p *remotePlanner) trust(source string, policy *config.SignaturePolicy) (si
 		trust.Sigstore = &signer
 	}
 	return trust, nil
+}
+
+// certificateChainTrust trusts the PEM certificates at path, which messages
+// name as display.
+func certificateChainTrust(path, display string) (signing.Trust, error) {
+	pem, err := os.ReadFile(path)
+	if err != nil {
+		return signing.Trust{}, fmt.Errorf("read trusted certificate: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(pem) {
+		return signing.Trust{}, fmt.Errorf("no certificate in %s", display)
+	}
+	return signing.Trust{Roots: roots}, nil
 }

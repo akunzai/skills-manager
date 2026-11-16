@@ -186,6 +186,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newUpdateCmd())
 	root.AddCommand(newDiffCmd())
 	root.AddCommand(newCatCmd())
+	root.AddCommand(newUseCmd())
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newSelfUpdateCmd())
 	root.AddCommand(newInitCmd())

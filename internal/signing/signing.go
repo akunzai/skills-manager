@@ -101,7 +101,7 @@ func Verify(dir string, trust Trust) (Result, error) {
 	case trust.Roots != nil:
 		payload, err = verifyChain(raw, trust)
 	case chain:
-		return Result{}, errors.New("signed with a certificate chain; add the Source with --trust-cert to trust it")
+		return Result{}, errors.New("signed with a certificate chain; pass --trust-cert to trust it")
 	default:
 		payload, signer, err = verifyKeyless(data, trust)
 	}

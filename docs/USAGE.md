@@ -138,6 +138,7 @@ Universal agents that read the central skills directory directly do not need lin
 | Inspect remote → Cache → Scope freshness | `skills outdated` |
 | Show a remote skill's upstream and local changes | `skills diff <skill>` |
 | Print the `SKILL.md` an Agent reads | `skills cat <skill>` |
+| Print a remote Skill's `SKILL.md` without adding it | `skills use <source> [-s <skill>]` |
 | Refresh remote Sources, then sync the Scope | `skills update` |
 | Diagnose drift | `skills doctor` |
 | Repair diagnosed health issues | `skills doctor --fix` |
@@ -153,6 +154,8 @@ Every operational command accepts `-p` (or `--project`). Interactive terminals u
 For remote Skills, the normal flow is `skills outdated`, then `skills update`. When nothing changed, Update prints one line and asks nothing, so it fits a shell startup file. Sync, including the one Update runs, protects known local changes and unknown baselines; inspect them first with `skills diff <skill>`, or explicitly overwrite with `skills sync --force`. `skills diff` shows what the Source changed since the copy was applied and what was changed locally; it reads the existing Cache unless `--fetch` refreshes the Source first, and exits `0` with nothing to show, `1` with differences, and `2` when it cannot compare. `sync --dry-run` is a non-mutating freshness gate: it reports what Sync would do without writing anything, and without running a skill's own commands.
 
 `skills cat <skill>` prints a skill's `SKILL.md` exactly as it is on the Scope skills directory — the copy Agents read, local changes included — so it can be redirected or piped into an Agent (`skills cat my-skill | claude`). It reads any skill `skills ls` lists there, declared or Untracked, and only the Scope `-g`/`-p` selects. It exits `0` when it prints, `1` with nothing on stdout when the skill is not readable on disk (stderr names the next action, `skills sync` or `skills doctor`), and `2` when no skill has that name in the Scope.
+
+`skills use <source>` prints one Skill's `SKILL.md` from a remote Source that is not declared — Git, Gist, or well-known, in the forms `skills add` takes, with `--path`, `--branch`, `--url`, and `--trust-cert` — so it can be piped into an Agent (`skills use owner/repo -s my-skill | claude`) without adding it. It declares nothing and touches no Scope; like `skills add --list`, it only refreshes the Cache. A Source with one Skill needs no `-s`; with several, `-s` names one. Only `SKILL.md` is printed, so a Skill that relies on its `scripts/` or `references/` needs `skills add`. A signed Skill is verified first and not printed if it does not verify; a keyless Signer is named on stderr and not recorded. It exits `0` when it prints, `1` with nothing on stdout when the Skill's signature does not verify or there is no `SKILL.md` (stderr says which), and `2` when the Source or the Sigstore trust root cannot be fetched, or for a usage error, such as several Skills and no `-s`. `-g`, `-p`, `--config`, and `--skills-dir` have no effect on it.
 
 When upgrading from a legacy branchless Cache layout, `skills doctor --fix` removes affected Cache entries without touching the network; the next `skills update` fetches a branch-aware Cache in their place. Doctor does not run Sync automatically.
 
