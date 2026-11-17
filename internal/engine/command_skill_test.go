@@ -183,3 +183,39 @@ func TestCommandSkillIdentityAndRestore(t *testing.T) {
 		t.Fatal("how the command delivers the Skill is part of the Source")
 	}
 }
+
+// A stdout command Skill's declared description overrides the one it prints,
+// and what is shown is what its SKILL.md carries: on one line, at most
+// maxSkillDescription runes. Any other command Skill's description is shown
+// as declared.
+func TestCommandSkillDescriptionIsTheOneWritten(t *testing.T) {
+	long := strings.Repeat("x", maxSkillDescription+10)
+	for _, tc := range []struct {
+		name       string
+		entry      config.LocalEntry
+		want       string
+		overridden bool
+	}{
+		{"stdout, multi-line", config.LocalEntry{Output: config.CommandOutputStdout, Description: "Line one\nline two\r\nthree"}, "Line one line two three", true},
+		{"stdout, long", config.LocalEntry{Output: config.CommandOutputStdout, Description: long}, long[:maxSkillDescription], true},
+		{"stdout, none", config.LocalEntry{Output: config.CommandOutputStdout}, "", false},
+		{"installer", config.LocalEntry{Description: "Line one\nline two"}, "Line one\nline two", false},
+	} {
+		got, overridden := commandSkill{name: "tool", entry: tc.entry}.description()
+		if got != tc.want || overridden != tc.overridden {
+			t.Errorf("%s: description() = %q, %v; want %q, %v", tc.name, got, overridden, tc.want, tc.overridden)
+		}
+	}
+
+	cfg, skillsDir, skillMd := stdoutCommandFixture(t, "---\nname: tool\ndescription: Printed.\n---\n# Tool\n")
+	entry := cfg.Local["tool"]
+	entry.Description = "Says hi\nover two lines"
+	cfg.Local["tool"] = entry
+	if _, err := applyPlan(t, cfg, skillsDir, "", SyncDecision{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	shown, _ := commandSkill{name: "tool", entry: entry}.description()
+	if written := readSkillFrontmatter(skillMd).Description; written != shown {
+		t.Fatalf("SKILL.md carries %q; description() = %q", written, shown)
+	}
+}

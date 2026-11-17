@@ -380,7 +380,7 @@ func TestCLILsDescriptionStatusAndJSON(t *testing.T) {
 	config.AddLocalSymlinkEntry(cfg, "symlink-with-desc", filepath.Join(home, "src-sym"), "Note in skills.json")
 	config.AddLocalCommandEntry(cfg, "overridden", config.LocalEntry{
 		Command:     "echo hi",
-		Description: "Overridden custom text.",
+		Description: "Overridden custom\ntext.",
 		Output:      config.CommandOutputStdout,
 	})
 	if err := config.SaveConfig(cfg, configFile); err != nil {
@@ -433,6 +433,7 @@ func TestCLILsDescriptionStatusAndJSON(t *testing.T) {
 	}
 
 	ov := itemMap["overridden"]
+	// As its SKILL.md carries it: on one line.
 	if ov.Description != "Overridden custom text." || !ov.DescriptionOverridden {
 		t.Fatalf("overridden: %+v", ov)
 	}
