@@ -343,7 +343,8 @@ func TestCLILsDescriptionStatusAndJSON(t *testing.T) {
 	if err := os.MkdirAll(regularDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(regularDir, "SKILL.md"), []byte("---\nname: regular\ndescription: Does regular things.\n---\n# Regular\n"), 0o644); err != nil {
+	// Double-quoted, as an Agent's YAML parser reads it: "Does \"regular\" things."
+	if err := os.WriteFile(filepath.Join(regularDir, "SKILL.md"), []byte("---\nname: regular\ndescription: \"Does \\\"regular\\\" things.\"\n---\n# Regular\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -418,7 +419,7 @@ func TestCLILsDescriptionStatusAndJSON(t *testing.T) {
 	}
 
 	reg := itemMap["regular"]
-	if reg.Description != "Does regular things." || reg.DescriptionOverridden {
+	if reg.Description != `Does "regular" things.` || reg.DescriptionOverridden {
 		t.Fatalf("regular: %+v", reg)
 	}
 
