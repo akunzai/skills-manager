@@ -107,8 +107,14 @@ jobs:
       # cgo and a C toolchain on Windows, which makes it a job that turns red
       # when a runner image changes rather than when the code does, and the
       # only concurrency here has no platform-specific branch.
+      #
+      # engine and cli tests are mostly sequential and bound by spawning git,
+      # so each is built once and its tests split across processes that use
+      # the cores sequential tests leave idle. The script prints build and
+      # per-shard times.
       - name: Run tests
-        run: go test ./...
+        shell: bash
+        run: scripts/test-shards.sh 4 ./internal/engine ./internal/cli
 
       - name: Build binary
         run: go build -v -o bin/ ./cmd/skills
