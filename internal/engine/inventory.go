@@ -127,18 +127,17 @@ func LoadInventory(cfg *config.Config, scope models.Scope) (Inventory, error) {
 			src = "local"
 		}
 		rowKind := models.InventorySymlink
+		description, overridden := localInfo.Description, false
 		if localInfo.Type == config.SkillCommand {
 			rowKind = models.InventoryCommand
+			description, overridden = commandSkill{name: name, entry: localInfo}.description()
 		}
-		isOverridden := localInfo.Type == config.SkillCommand &&
-			localInfo.Output == config.CommandOutputStdout &&
-			localInfo.Description != ""
 		items[name] = &models.SkillItem{
 			Name:                  name,
 			Kind:                  rowKind,
 			Source:                src,
-			Description:           localInfo.Description,
-			DescriptionOverridden: isOverridden,
+			Description:           description,
+			DescriptionOverridden: overridden,
 			Agents:                availability.ManagedAgents(name),
 		}
 	}

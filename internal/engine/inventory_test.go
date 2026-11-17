@@ -265,3 +265,26 @@ func TestAvailableToIncludesAutomaticAgentsAndDeclaredAvailability(t *testing.T)
 		t.Fatalf("AvailableTo(continue) = %#v; want none, continue is neither Automatic nor declared", got)
 	}
 }
+
+// Inventory shows a stdout command Skill's description as its SKILL.md
+// carries it, not as Config spells it.
+func TestLoadInventoryShowsACommandSkillsWrittenDescription(t *testing.T) {
+	cfg := config.DefaultConfig()
+	config.AddLocalCommandEntry(cfg, "printed", config.LocalEntry{Command: "print-it", Output: config.CommandOutputStdout, Description: "First line\nsecond line"})
+	config.AddLocalCommandEntry(cfg, "installed", config.LocalEntry{Command: "install-it", Description: "First line\nsecond line"})
+
+	inv, err := LoadInventory(cfg, projectScope("", filepath.Join(t.TempDir(), "skills"), ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]models.SkillItem)
+	for _, item := range inv.SkillItems(nil) {
+		got[item.Name] = item
+	}
+	if p := got["printed"]; p.Description != "First line second line" || !p.DescriptionOverridden {
+		t.Errorf("printed = %q, overridden %v; want the written description, overridden", p.Description, p.DescriptionOverridden)
+	}
+	if i := got["installed"]; i.Description != "First line\nsecond line" || i.DescriptionOverridden {
+		t.Errorf("installed = %q, overridden %v; want the declared description", i.Description, i.DescriptionOverridden)
+	}
+}

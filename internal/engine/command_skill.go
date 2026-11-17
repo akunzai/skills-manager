@@ -62,6 +62,17 @@ func (c commandSkill) syncRestores() bool {
 	return c.entry.Output == config.CommandOutputStdout
 }
 
+// description is the Skill's description as an Agent reads it, and whether
+// it overrides the one the command prints: a stdout command's declared
+// description is written into its SKILL.md's frontmatter, so it is shown as
+// written. Any other command Skill's description is shown as declared.
+func (c commandSkill) description() (shown string, overridden bool) {
+	if c.entry.Output != config.CommandOutputStdout || c.entry.Description == "" {
+		return c.entry.Description, false
+	}
+	return frontmatterDescription(c.entry.Description), true
+}
+
 // sameSource reports whether entry declares this Skill from the same Source.
 // The check is a prerequisite, not part of the Source, and the description
 // only words it; the command and how it delivers the Skill are its identity.

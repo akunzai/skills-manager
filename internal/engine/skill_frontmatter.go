@@ -288,15 +288,21 @@ func walkSkillFiles(root string, skip func(path string) bool, visit func(path st
 // maxSkillDescription is the longest description the Agent Skills spec allows.
 const maxSkillDescription = 1024
 
-// formatFrontmatterDescription sanitizes and truncates a description to
-// fit the maxSkillDescription rune limit and formats it as a quoted YAML line.
+// formatFrontmatterDescription is the frontmatter line for description: as
+// frontmatterDescription carries it, double-quoted.
 func formatFrontmatterDescription(description string) string {
+	quoted := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(frontmatterDescription(description))
+	return `description: "` + quoted + `"`
+}
+
+// frontmatterDescription is description as a SKILL.md's frontmatter carries
+// it: on one line, at most maxSkillDescription runes.
+func frontmatterDescription(description string) string {
 	description = strings.ReplaceAll(strings.ReplaceAll(description, "\r\n", " "), "\n", " ")
 	if r := []rune(description); len(r) > maxSkillDescription {
 		description = string(r[:maxSkillDescription])
 	}
-	quoted := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(description)
-	return `description: "` + quoted + `"`
+	return description
 }
 
 // withSkillFrontmatter is a SKILL.md printed by a command, given frontmatter
