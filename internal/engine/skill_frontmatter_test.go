@@ -18,6 +18,12 @@ func TestReadSkillFrontmatter(t *testing.T) {
 		{"name and description", "---\nname: my-awesome-skill\ndescription: Does awesome stuff\n---\n\n# My Awesome Skill\n", skillFrontmatter{Name: "my-awesome-skill", Description: "Does awesome stuff"}},
 		{"quoted values", "---\nname: \"quoted\"\ndescription: 'Says: hi'\n---\n", skillFrontmatter{Name: "quoted", Description: "Says: hi"}},
 		{"name keeps its leading valid characters", "---\nname: foo (beta)\n---\n", skillFrontmatter{Name: "foo"}},
+		{"double-quoted escapes", "---\nname: a\ndescription: \"Say \\\"hi\\\" to C:\\\\tmp\\tnow \\u00e9\\x41\"\n---\n", skillFrontmatter{Name: "a", Description: "Say \"hi\" to C:\\tmp now \u00e9A"}},
+		{"double-quoted unknown escape kept", "---\nname: a\ndescription: \"a \\q b\"\n---\n", skillFrontmatter{Name: "a", Description: "a \\q b"}},
+		{"single-quoted doubled quote", "---\nname: a\ndescription: 'It''s here, C:\\tmp'\n---\n", skillFrontmatter{Name: "a", Description: "It's here, C:\\tmp"}},
+		{"escaped control characters shown as spaces", "---\nname: a\ndescription: \"red \\e[31mtext\\x1b[0m\\nnext\"\n---\n", skillFrontmatter{Name: "a", Description: "red  [31mtext [0m next"}},
+		{"block scalar that looks quoted", "---\nname: a\ndescription: |\n  \"keeps \\n as written\"\n---\n", skillFrontmatter{Name: "a", Description: "keeps \\n as written"}},
+		{"plain backslash kept", "---\nname: a\ndescription: Uses C:\\tmp and \"quotes\"\n---\n", skillFrontmatter{Name: "a", Description: "Uses C:\\tmp and \"quotes\""}},
 		{"unquoted colon in description", "---\nname: a\ndescription: Use when the user says: do it\n---\n", skillFrontmatter{Name: "a", Description: "Use when the user says: do it"}},
 		{"hash is not a comment", "---\nname: a\ndescription: Covers foo #bar\n---\n", skillFrontmatter{Name: "a", Description: "Covers foo #bar"}},
 		{"dashes inside a value", "---\nname: a\ndescription: before --- after\n---\nbody\n", skillFrontmatter{Name: "a", Description: "before --- after"}},
@@ -138,5 +144,18 @@ func TestWithSkillFrontmatter(t *testing.T) {
 				t.Fatalf("fellBack = %v, want %v", fellBack, tt.fellBack)
 			}
 		})
+	}
+}
+
+// A description written into frontmatter reads back as an Agent reads it.
+func TestFrontmatterDescriptionRoundTrips(t *testing.T) {
+	for _, description := range []string{`Say "hi"`, `C:\tmp\new`, `ends with \`, `"`, `It's`, "two\nlines"} {
+		path := filepath.Join(t.TempDir(), "SKILL.md")
+		if err := os.WriteFile(path, []byte("---\nname: a\n"+formatFrontmatterDescription(description)+"\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := readSkillFrontmatter(path).Description, frontmatterDescription(description); got != want {
+			t.Errorf("%q reads back as %q; want %q", description, got, want)
+		}
 	}
 }

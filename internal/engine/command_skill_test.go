@@ -209,7 +209,7 @@ func TestCommandSkillDescriptionIsTheOneWritten(t *testing.T) {
 
 	cfg, skillsDir, skillMd := stdoutCommandFixture(t, "---\nname: tool\ndescription: Printed.\n---\n# Tool\n")
 	entry := cfg.Local["tool"]
-	entry.Description = "Says hi\nover two lines"
+	entry.Description = "Says \"hi\" to C:\\tmp\nover two lines"
 	cfg.Local["tool"] = entry
 	if _, err := applyPlan(t, cfg, skillsDir, "", SyncDecision{}, nil); err != nil {
 		t.Fatal(err)

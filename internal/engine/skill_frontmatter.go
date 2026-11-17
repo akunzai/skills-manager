@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // skillFrontmatter is what a SKILL.md's frontmatter declares about its Skill.
@@ -132,7 +135,82 @@ func scalarValue(value string, block []string) string {
 			parts = append(parts, line)
 		}
 	}
-	return unquote(strings.Join(parts, " "))
+	joined := strings.Join(parts, " ")
+	if isBlockIndicator(value) {
+		return unquote(joined)
+	}
+	return displayable(scalarString(joined))
+}
+
+// displayable is s with each control character, which an escape can
+// produce, as a space: a description is shown on one terminal line, and a
+// Source must not reach the terminal with escape sequences.
+func displayable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+// scalarString is a one-line YAML flow scalar's string as an Agent's YAML
+// parser reads it: a double-quoted one with its escapes resolved, a
+// single-quoted one with ” read as ', and a plain one as it is. An escape
+// YAML does not define, or a malformed hex escape, is kept as written rather
+// than failing the whole frontmatter. Lines of a multi-line scalar are
+// joined by scalarValue with a space before this reads them.
+func scalarString(value string) string {
+	if len(value) < 2 || value[0] != value[len(value)-1] {
+		return value
+	}
+	switch value[0] {
+	case '\'':
+		return strings.ReplaceAll(value[1:len(value)-1], "''", "'")
+	case '"':
+		return unescapeDoubleQuoted(value[1 : len(value)-1])
+	}
+	return value
+}
+
+// doubleQuotedEscapes are YAML's single-character double-quoted escapes.
+var doubleQuotedEscapes = map[byte]string{
+	'0': "\x00", 'a': "\a", 'b': "\b", 't': "\t", '\t': "\t", 'n': "\n", 'v': "\v",
+	'f': "\f", 'r': "\r", 'e': "\x1b", ' ': " ", '"': `"`, '/': "/", '\\': `\`,
+	'N': "\u0085", '_': "\u00a0", 'L': "\u2028", 'P': "\u2029",
+}
+
+// hexEscapeDigits is how many hex digits follow each YAML hex escape.
+var hexEscapeDigits = map[byte]int{'x': 2, 'u': 4, 'U': 8}
+
+// unescapeDoubleQuoted resolves the escapes of a double-quoted scalar's
+// body.
+func unescapeDoubleQuoted(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		c := s[i+1]
+		if r, ok := doubleQuotedEscapes[c]; ok {
+			b.WriteString(r)
+			i++
+			continue
+		}
+		if n, ok := hexEscapeDigits[c]; ok && i+2+n <= len(s) {
+			if code, err := strconv.ParseUint(s[i+2:i+2+n], 16, 32); err == nil && utf8.ValidRune(rune(code)) {
+				b.WriteRune(rune(code))
+				i += 1 + n
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 func isBlockIndicator(value string) bool {
