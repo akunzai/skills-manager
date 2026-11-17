@@ -64,12 +64,6 @@ Use reads no Scope, so -g, -p, --config, and --skills-dir have no effect.`,
 			}
 			spec := engine.RemoteIntakeSpec(kind, source, flagURL, flagBranch, flagPath)
 			listHint := useListHint(args[0], flagURL, flagBranch, flagPath)
-			// A Skill use will not print is its state, exit 1 without an
-			// Error: prefix; a failure to read the Source is exit 2 (ADR-0002).
-			blocked := func(state string) error {
-				fmt.Fprintf(cmd.ErrOrStderr(), "%s.\n", state)
-				return exitError{message: state, code: 1}
-			}
 			// An empty Config: use reads no Scope, so no declared branch
 			// applies. No progress is drawn, so stderr stays quiet on success.
 			intake, err := engine.PrepareRemoteIntake(config.DefaultConfig(), spec, ResolveScope(cmd).CacheDir)
@@ -79,11 +73,9 @@ Use reads no Scope, so -g, -p, --config, and --skills-dir have no effect.`,
 			if err != nil {
 				return err
 			}
-			for _, skipped := range intake.Skipped {
-				fmt.Fprintf(cmd.ErrOrStderr(), "%sWarning: %s%s\n", colorYellow, skipped, colorReset)
-			}
-			if len(intake.Discovered) == 0 {
-				return blocked(fmt.Sprintf("%s has no SKILL.md", spec.SourceKey))
+			warnSkipped(cmd, intake)
+			if err := intake.NoSkills(); err != nil {
+				return reportNoSkills(cmd, err)
 			}
 			name, subpath, err := useSkill(intake.Discovered, flagSkill, spec.SourceKey, listHint)
 			if err != nil {
@@ -92,7 +84,9 @@ Use reads no Scope, so -g, -p, --config, and --skills-dir have no effect.`,
 			used, err := intake.Use(subpath, flagTrustCert)
 			var notPrinted *engine.UseBlockedError
 			if errors.As(err, &notPrinted) {
-				return blocked(fmt.Sprintf("%s from %s is not printed: %s", name, spec.SourceKey, notPrinted.Reason))
+				// A Skill use will not print is its state; a failure to read
+				// the Source is exit 2 (ADR-0002).
+				return reportState(cmd, fmt.Sprintf("%s from %s is not printed: %s", name, spec.SourceKey, notPrinted.Reason), "")
 			}
 			if err != nil {
 				return fmt.Errorf("%s: %w", spec.SourceKey, err)

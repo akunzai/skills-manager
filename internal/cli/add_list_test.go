@@ -177,8 +177,8 @@ func TestCLIAddListEmptyResultExitsOne(t *testing.T) {
 	if err == nil || ExitCode(err) != 1 {
 		t.Fatalf("error = %v (exit %d); want exit 1\n%s", err, ExitCode(err), out)
 	}
-	if !strings.Contains(out, "No Skills found") {
-		t.Fatalf("expected a 'No Skills found' state message, got:\n%s", out)
+	if !strings.Contains(out, "has no SKILL.md.") {
+		t.Fatalf("expected a 'has no SKILL.md' state message, got:\n%s", out)
 	}
 }
 
