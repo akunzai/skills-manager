@@ -34,8 +34,8 @@ func TestClassifyAddKindRefusesAFlagTheKindDoesNotRead(t *testing.T) {
 		{AddSourceSpec{Command: command, Branch: "main"}, "--branch does not apply to a command Source"},
 		{AddSourceSpec{Command: command, TrustCert: "root.pem"}, "--trust-cert does not apply to a command Source"},
 	} {
-		_, _, err := ClassifyAddKind(tc.spec)
-		if err == nil || IsWellKnownRefusal(err) || err.Error() != tc.want {
+		_, err := ClassifyAddKind(tc.spec)
+		if err == nil || IsSourceRefusal(err) || err.Error() != tc.want {
 			t.Errorf("ClassifyAddKind(%+v) = %v; want misuse %q", tc.spec, err, tc.want)
 		}
 	}
@@ -45,7 +45,7 @@ func TestClassifyAddKindRefusesAFlagTheKindDoesNotRead(t *testing.T) {
 		{Positional: dir, Path: "skills", Description: "d"},
 		{Command: command, Check: "true", Stdout: true, Description: "d"},
 	} {
-		if _, _, err := ClassifyAddKind(spec); err != nil {
+		if _, err := ClassifyAddKind(spec); err != nil {
 			t.Errorf("ClassifyAddKind(%+v) = %v; every flag here is read", spec, err)
 		}
 	}
@@ -60,14 +60,15 @@ func TestClassifyAddKindRefusesAWellKnownSourceItDoesNotRead(t *testing.T) {
 		{"http", AddSourceSpec{Positional: "http://example.com"}, "is not served over https://"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := ClassifyAddKind(tc.spec)
-			if err == nil || !IsWellKnownRefusal(err) || !strings.Contains(err.Error(), tc.want) {
+			_, err := ClassifyAddKind(tc.spec)
+			if err == nil || !IsSourceRefusal(err) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("ClassifyAddKind = %v; want a refusal saying %q", err, tc.want)
 			}
 		})
 	}
 
-	kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "https://example.com/.well-known/agent-skills/index.json"})
+	c, err := ClassifyAddKind(AddSourceSpec{Positional: "https://example.com/.well-known/agent-skills/index.json"})
+	kind, source := c.Kind, c.Arg
 	if err != nil || kind != AddSourceWellKnown || source != "https://example.com/.well-known/agent-skills/index.json" {
 		t.Fatalf("ClassifyAddKind(https index) = %s, %q, %v; want a well-known Source", kind, source, err)
 	}
@@ -75,14 +76,15 @@ func TestClassifyAddKindRefusesAWellKnownSourceItDoesNotRead(t *testing.T) {
 
 func TestClassifyAddKind(t *testing.T) {
 	t.Run("empty spec", func(t *testing.T) {
-		_, _, err := ClassifyAddKind(AddSourceSpec{})
+		_, err := ClassifyAddKind(AddSourceSpec{})
 		if err == nil {
 			t.Fatal("empty spec succeeded")
 		}
 	})
 
 	t.Run("symlink flag wins over command", func(t *testing.T) {
-		kind, source, err := ClassifyAddKind(AddSourceSpec{Symlink: "/tmp/local", Command: "echo hi", Positional: "owner/repo"})
+		c, err := ClassifyAddKind(AddSourceSpec{Symlink: "/tmp/local", Command: "echo hi", Positional: "owner/repo"})
+		kind, source := c.Kind, c.Arg
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +94,8 @@ func TestClassifyAddKind(t *testing.T) {
 	})
 
 	t.Run("command when no symlink", func(t *testing.T) {
-		kind, source, err := ClassifyAddKind(AddSourceSpec{Command: "npx foo", Positional: "my-skill"})
+		c, err := ClassifyAddKind(AddSourceSpec{Command: "npx foo", Positional: "my-skill"})
+		kind, source := c.Kind, c.Arg
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,7 +105,8 @@ func TestClassifyAddKind(t *testing.T) {
 	})
 
 	t.Run("remote positional", func(t *testing.T) {
-		kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "owner/repo"})
+		c, err := ClassifyAddKind(AddSourceSpec{Positional: "owner/repo"})
+		kind, source := c.Kind, c.Arg
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +117,8 @@ func TestClassifyAddKind(t *testing.T) {
 
 	for _, raw := range []string{"/abs/skill", "~/skill", "./rel", "../up", `.\win`, `..\win`, `C:\drive`, "D:/drive"} {
 		t.Run("prefix "+raw, func(t *testing.T) {
-			kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: raw})
+			c, err := ClassifyAddKind(AddSourceSpec{Positional: raw})
+			kind, source := c.Kind, c.Arg
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +134,8 @@ func TestClassifyAddKind(t *testing.T) {
 		if err := os.Mkdir("local-skill", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "local-skill"})
+		c, err := ClassifyAddKind(AddSourceSpec{Positional: "local-skill"})
+		kind, source := c.Kind, c.Arg
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,7 +152,8 @@ func TestClassifyAddKind(t *testing.T) {
 		if err := os.Mkdir("git@example.com", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		kind, source, err := ClassifyAddKind(AddSourceSpec{Positional: "git@example.com"})
+		c, err := ClassifyAddKind(AddSourceSpec{Positional: "git@example.com"})
+		kind, source := c.Kind, c.Arg
 		if err != nil {
 			t.Fatal(err)
 		}

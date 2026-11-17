@@ -475,7 +475,8 @@ func ParseRepoSource(raw string) ParsedRepoSource {
 	raw = strings.TrimSpace(raw)
 
 	// 0. A GitHub Gist. A form ParseGistSource refuses falls through;
-	// Add refuses it before it is parsed here.
+	// ParseSource refuses it for a raw Source string before it is parsed
+	// here.
 	if gist, ok, err := ParseGistSource(raw); ok && err == nil {
 		return gist
 	}

@@ -339,7 +339,8 @@ func TestReadInstallerLockNormalisesSkillPathAndIgnoresNonGitSources(t *testing.
     "dir": {"source": "https://gitlab.com/group/project", "sourceType": "gitlab", "skillPath": "skills/dir/"},
     "root": {"source": "owner/root", "sourceType": "github", "skillPath": "SKILL.md"},
     "escape": {"source": "owner/repo", "sourceType": "github", "skillPath": "../x/SKILL.md"},
-    "local": {"source": "/tmp/somewhere", "sourceType": "local"}
+    "local": {"source": "/tmp/somewhere", "sourceType": "local"},
+    "gistless": {"source": "https://gist.github.com/someone", "sourceType": "github"}
   },
   "dismissed": {"findSkillsPrompt": true}
 }`))
@@ -355,6 +356,9 @@ func TestReadInstallerLockNormalisesSkillPathAndIgnoresNonGitSources(t *testing.
 		"root":   {Source: "owner/root", RepoType: "github", URL: "https://github.com/owner/root.git", Subpath: "."},
 		"escape": {Source: "owner/repo", RepoType: "github", URL: "https://github.com/owner/repo.git"},
 		"local":  {},
+		// A Gist form this tool refuses names no remote Source, never the
+		// GitHub owner someone.
+		"gistless": {},
 	}
 	if !reflect.DeepEqual(records, want) {
 		t.Fatalf("records = %#v\nwant %#v", records, want)

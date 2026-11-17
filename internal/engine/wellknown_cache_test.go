@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/akunzai/skills-manager/internal/config"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/wellknowntest"
 )
 
@@ -67,7 +68,7 @@ func TestWellKnownCacheRefusesAnArtifactItCannotVerify(t *testing.T) {
 			}
 
 			err := cache.Cover("bad")
-			if err == nil || !IsWellKnownRefusal(err) || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || !IsSourceRefusal(err) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Cover(bad) = %v; want a refusal saying %q", err, tc.want)
 			}
 			if left, _ := os.ReadDir(cache.dir()); len(left) > 0 {
@@ -141,7 +142,11 @@ func TestWellKnownCacheRevalidatesItsIndexAndDropsWhatTheIndexNoLongerLists(t *t
 
 func TestPrepareRemoteIntakeReadsAWellKnownSourceThroughItsIndex(t *testing.T) {
 	server, _, cacheDir := newWellKnownTestCache(t, wellknowntest.SkillMD("lint", "Lint Markdown"))
-	spec := RemoteIntakeSpec(AddSourceWellKnown, server.URL+"/.well-known/agent-skills/index.json", "", "", "")
+	source, err := models.ParseRemoteSource(server.URL + "/.well-known/agent-skills/index.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := RemoteIntakeSpec(source, "", "", "")
 
 	intake, err := PrepareRemoteIntake(config.DefaultConfig(), spec, cacheDir)
 	if err != nil {

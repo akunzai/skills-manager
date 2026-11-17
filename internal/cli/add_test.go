@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -351,6 +352,35 @@ func TestCLIAddDeclaresAGistByItsID(t *testing.T) {
 		t.Fatalf("the Gist's sibling file was not Materialized: %v", err)
 	}
 }
+
+// Anything on the Gist host is a Gist or refused, so the host itself is
+// refused before any well-known index is fetched from it.
+func TestCLIAddRefusesTheGistHostWithoutFetching(t *testing.T) {
+	isolateHome(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	saved := engine.WellKnownHTTPClient
+	engine.WellKnownHTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("fetched %s", r.URL)
+		return nil, errors.New("no network")
+	})}
+	t.Cleanup(func() { engine.WellKnownHTTPClient = saved })
+
+	configFile := filepath.Join(project, ".agents", "skills.json")
+	for _, raw := range []string{"https://gist.github.com/", "HTTPS://Gist.GitHub.com"} {
+		out, err := runCLI(t, "add", raw, "-p", "-y", "--config", configFile, "--cache-dir", filepath.Join(project, "cache"))
+		if ExitCode(err) != 1 || !strings.Contains(out+err.Error(), "gist:<id>") {
+			t.Fatalf("add %s: got %v:\n%s; want a refusal naming the Gist forms, exit 1", raw, err, out)
+		}
+	}
+	if _, err := os.Stat(configFile); err == nil {
+		t.Fatal("a refused Add wrote Config")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // A Gist revision is not followed by Update, so Add refuses it rather than
 // silently tracking the latest revision instead.

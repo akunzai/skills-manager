@@ -79,12 +79,23 @@ func ReadInstallerLock(lockPath string) (map[string]InstallerLockRecord, error) 
 		record := InstallerLockRecord{}
 		switch strings.ToLower(entry.SourceType) {
 		case "github", "gitlab", "git":
-			parsed := models.ParseRepoSource(cmp.Or(entry.Source, entry.SourceURL))
+			// A Source form this tool refuses names no remote Source. The
+			// record's type says git, so a URL that would otherwise read as
+			// a well-known site is still read as a repository.
+			raw := cmp.Or(entry.Source, entry.SourceURL)
+			source, err := models.ParseRemoteSource(raw)
+			if err != nil {
+				break
+			}
+			repo := source.Repo
+			if source.Kind != models.SourceGit {
+				repo = models.ParseRepoSource(raw)
+			}
 			record = InstallerLockRecord{
-				Source:   parsed.SourceKey,
-				RepoType: parsed.RepoType,
-				URL:      cmp.Or(entry.SourceURL, parsed.URL),
-				Branch:   cmp.Or(entry.Ref, parsed.Branch),
+				Source:   repo.SourceKey,
+				RepoType: repo.RepoType,
+				URL:      cmp.Or(entry.SourceURL, repo.URL),
+				Branch:   cmp.Or(entry.Ref, repo.Branch),
 				Subpath:  skillDirSubpath(entry.SkillPath),
 			}
 		}

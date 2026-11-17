@@ -427,26 +427,6 @@ func usableWellKnownEntry(entry wellKnownEntry) error {
 	return nil
 }
 
-// refusalError is a Source this tool will not read: a well-known one not
-// over https://, or an index or artifact it serves that cannot be verified
-// or unpacked safely, or a Gist form such as a revision URL. It is for the user
-// to resolve, not a failed operation (ADR-0002).
-type refusalError struct{ err error }
-
-func (e refusalError) Error() string { return e.err.Error() }
-func (e refusalError) Unwrap() error { return e.err }
-
-func refuse(format string, args ...any) error {
-	return refusalError{fmt.Errorf(format, args...)}
-}
-
-// IsWellKnownRefusal reports whether err is a well-known Source refused as
-// refusalError describes.
-func IsWellKnownRefusal(err error) bool {
-	_, ok := errors.AsType[refusalError](err)
-	return ok
-}
-
 // errWellKnownV1 is an index with no $schema: v0.1.0, which carries no
 // digests, so nothing it names can be verified.
 var errWellKnownV1 = errors.New("is an Agent Skills Discovery v0.1.0 index, which carries no digests to verify its Skills against")

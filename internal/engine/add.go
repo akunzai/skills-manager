@@ -3,7 +3,6 @@ package engine
 import (
 	"cmp"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -62,15 +61,26 @@ var addKindNames = map[AddSourceKind]string{
 	AddSourceCommand:   "command",
 }
 
+// ClassifiedSource is an Add Source as ClassifyAddKind decided it.
+type ClassifiedSource struct {
+	Kind AddSourceKind
+	// Arg is what the kind's constructor consumes: a local path, a
+	// command, or the remote Source as given.
+	Arg string
+	// Parsed is the positional Source parsed once, which RemoteIntakeSpec
+	// reads for a remote or well-known kind.
+	Parsed models.Source
+}
+
 // ClassifyAddKind decides the Add Source kind from parsed flags and the
-// positional argument, and refuses a flag that kind does not read. The
-// returned string is what the matching constructor consumes: a local path, a
-// command, or a remote Source key.
-func ClassifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
-	kind, source, err := classifyAddKind(spec)
+// positional argument, and refuses a flag that kind does not read. A Source
+// string this tool will not read is refused (IsSourceRefusal).
+func ClassifyAddKind(spec AddSourceSpec) (ClassifiedSource, error) {
+	source, err := classifyAddKind(spec)
 	if err != nil {
-		return kind, source, err
+		return source, err
 	}
+	kind := source.Kind
 	set := []struct {
 		name string
 		set  bool
@@ -81,33 +91,40 @@ func ClassifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
 	}
 	for _, flag := range set {
 		if flag.set && !slices.Contains(addFlags[kind], flag.name) {
-			return kind, source, fmt.Errorf("--%s does not apply to a %s Source", flag.name, addKindNames[kind])
+			return source, fmt.Errorf("--%s does not apply to a %s Source", flag.name, addKindNames[kind])
 		}
 	}
 	if kind == AddSourceWellKnown {
-		wellKnown, _ := models.ParseWellKnownSource(spec.Positional)
-		return kind, source, checkWellKnownAdd(spec, wellKnown)
+		return source, checkWellKnownAdd(spec, source.Parsed.WellKnown)
 	}
-	return kind, source, nil
+	return source, nil
 }
 
-func classifyAddKind(spec AddSourceSpec) (AddSourceKind, string, error) {
-	if spec.Symlink != "" || (spec.Command == "" && spec.Positional != "" && isLocalPath(spec.Positional)) {
-		return AddSourceSymlink, cmp.Or(spec.Symlink, spec.Positional), nil
+func classifyAddKind(spec AddSourceSpec) (ClassifiedSource, error) {
+	if spec.Symlink != "" {
+		return ClassifiedSource{Kind: AddSourceSymlink, Arg: spec.Symlink}, nil
+	}
+	var parsed models.Source
+	if spec.Command == "" && spec.Positional != "" {
+		var err error
+		if parsed, err = models.ParseSource(spec.Positional); err != nil {
+			return ClassifiedSource{Kind: AddSourceRemote, Arg: spec.Positional, Parsed: parsed}, refusalError{err}
+		}
+		if parsed.Kind == models.SourceLocal {
+			return ClassifiedSource{Kind: AddSourceSymlink, Arg: spec.Positional}, nil
+		}
 	}
 	if spec.Command != "" {
-		return AddSourceCommand, spec.Command, nil
+		return ClassifiedSource{Kind: AddSourceCommand, Arg: spec.Command}, nil
 	}
 	if spec.Positional == "" {
-		return "", "", fmt.Errorf("source repository or --symlink/--command required")
+		return ClassifiedSource{}, fmt.Errorf("source repository or --symlink/--command required")
 	}
-	if _, ok := models.ParseWellKnownSource(spec.Positional); ok {
-		return AddSourceWellKnown, spec.Positional, nil
+	kind := AddSourceRemote
+	if parsed.Kind == models.SourceWellKnown {
+		kind = AddSourceWellKnown
 	}
-	if _, ok, err := models.ParseGistSource(spec.Positional); ok && err != nil {
-		return AddSourceRemote, spec.Positional, refusalError{err}
-	}
-	return AddSourceRemote, spec.Positional, nil
+	return ClassifiedSource{Kind: kind, Arg: spec.Positional, Parsed: parsed}, nil
 }
 
 // checkWellKnownAdd refuses a well-known Source Add will not read: one not
@@ -118,25 +135,6 @@ func checkWellKnownAdd(spec AddSourceSpec, source models.WellKnownSource) error 
 		return refuse("%s is not served over https://; well-known Sources are read only over https://", spec.Positional)
 	}
 	return nil
-}
-
-func isLocalPath(raw string) bool {
-	if strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "~") ||
-		strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../") ||
-		strings.HasPrefix(raw, `.\`) || strings.HasPrefix(raw, `..\`) {
-		return true
-	}
-	if len(raw) >= 3 && ((raw[0] >= 'a' && raw[0] <= 'z') || (raw[0] >= 'A' && raw[0] <= 'Z')) && raw[1] == ':' && (raw[2] == '/' || raw[2] == '\\') {
-		return true
-	}
-	if !strings.HasPrefix(raw, "git@") && !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") &&
-		!strings.HasPrefix(raw, "github:") && !strings.HasPrefix(raw, "gitlab:") && !strings.HasPrefix(raw, "gist:") {
-		expanded := models.ExpandUser(raw)
-		if info, err := os.Stat(expanded); err == nil && info.IsDir() {
-			return true
-		}
-	}
-	return false
 }
 
 // AddBranch is the branch a remote Source is declared on in cfg. A
