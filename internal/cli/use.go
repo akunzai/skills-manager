@@ -42,33 +42,33 @@ Use reads no Scope, so -g, -p, --config, and --skills-dir have no effect.`,
 		Example: "  skills use owner/repo --skill my-skill | claude\n  skills use gist:0123456789abcdef",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			kind, source, err := engine.ClassifyAddKind(engine.AddSourceSpec{
+			classified, err := engine.ClassifyAddKind(engine.AddSourceSpec{
 				Positional: args[0],
 				Path:       flagPath,
 				Branch:     flagBranch,
 				URL:        flagURL,
 				TrustCert:  flagTrustCert,
 			})
-			refused := engine.IsWellKnownRefusal(err)
+			refused := engine.IsSourceRefusal(err)
 			if err != nil && !refused {
 				return err
 			}
-			if kind != engine.AddSourceRemote && kind != engine.AddSourceWellKnown {
+			if kind := classified.Kind; kind != engine.AddSourceRemote && kind != engine.AddSourceWellKnown {
 				cmd.SilenceUsage = true
 				return fmt.Errorf("%s is not a remote Source; print a declared Skill with 'skills cat'", args[0])
 			}
 			// Past argument checks, every failure is a runtime problem.
 			cmd.SilenceUsage = true
 			if refused {
-				return wellKnownRefusal(cmd, err)
+				return sourceRefusal(cmd, err)
 			}
-			spec := engine.RemoteIntakeSpec(kind, source, flagURL, flagBranch, flagPath)
+			spec := engine.RemoteIntakeSpec(classified.Parsed, flagURL, flagBranch, flagPath)
 			listHint := useListHint(args[0], flagURL, flagBranch, flagPath)
 			// An empty Config: use reads no Scope, so no declared branch
 			// applies. No progress is drawn, so stderr stays quiet on success.
 			intake, err := engine.PrepareRemoteIntake(config.DefaultConfig(), spec, ResolveScope(cmd).CacheDir)
-			if engine.IsWellKnownRefusal(err) {
-				return wellKnownRefusal(cmd, err)
+			if engine.IsSourceRefusal(err) {
+				return sourceRefusal(cmd, err)
 			}
 			if err != nil {
 				return err

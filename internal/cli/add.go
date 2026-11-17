@@ -250,7 +250,7 @@ func fetchRemoteIntake(cmd *cobra.Command, cfg *config.Config, spec models.Parse
 	if err != nil {
 		region.Fail(spec.SourceKey)
 		region.Stop()
-		return nil, wellKnownRefusal(cmd, err)
+		return nil, sourceRefusal(cmd, err)
 	}
 	region.Done(spec.SourceKey)
 	region.Stop()
@@ -301,11 +301,11 @@ func refuseAdd(cmd *cobra.Command, reason, next string) error {
 	return exitError{message: reason, code: 1}
 }
 
-// wellKnownRefusal is err as Add reports it: a refused well-known Source,
-// index, or artifact exits 1 with what to do instead; any other error is
-// left as it is.
-func wellKnownRefusal(cmd *cobra.Command, err error) error {
-	if err == nil || !engine.IsWellKnownRefusal(err) {
+// sourceRefusal is err as Add reports it: a refused Source form, or a
+// refused well-known index or artifact, exits 1 with what to do instead; any
+// other error is left as it is.
+func sourceRefusal(cmd *cobra.Command, err error) error {
+	if err == nil || !engine.IsSourceRefusal(err) {
 		return err
 	}
 	next := ""
@@ -377,7 +377,7 @@ func newAddCmd() *cobra.Command {
 			if len(args) > 0 {
 				positional = args[0]
 			}
-			kind, source, err := engine.ClassifyAddKind(engine.AddSourceSpec{
+			classified, err := engine.ClassifyAddKind(engine.AddSourceSpec{
 				Positional:  positional,
 				Symlink:     flagSymlink,
 				Command:     flagCommand,
@@ -389,7 +389,8 @@ func newAddCmd() *cobra.Command {
 				TrustCert:   flagTrustCert,
 				Stdout:      flagStdout,
 			})
-			refused := engine.IsWellKnownRefusal(err)
+			kind, source := classified.Kind, classified.Arg
+			refused := engine.IsSourceRefusal(err)
 			if err != nil && !refused {
 				cmd.SilenceUsage = false
 				return err
@@ -399,14 +400,14 @@ func newAddCmd() *cobra.Command {
 				cmd.SilenceUsage = false
 				return fmt.Errorf("--trust-cert applies only when adding Skills from a remote Source")
 			}
-			// A well-known Source Add will not read is refused once the flags
+			// A Source Add will not read is refused once the flags
 			// are known to fit together, and before the Scope is asked for.
 			if refused {
-				return wellKnownRefusal(cmd, err)
+				return sourceRefusal(cmd, err)
 			}
 
 			if flagList {
-				return runAddList(cmd, kind, source, flagPath, flagBranch, flagURL, cacheDir, flagJSON)
+				return runAddList(cmd, classified, flagPath, flagBranch, flagURL, cacheDir, flagJSON)
 			}
 
 			scope, err := resolveAddScope(cmd, flagYes)
@@ -449,12 +450,12 @@ func newAddCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				intake, err := newRemoteIntake(cmd, cfg, kind, engine.RemoteIntakeSpec(kind, source, flagURL, flagBranch, flagPath), cacheDir)
+				intake, err := newRemoteIntake(cmd, cfg, kind, engine.RemoteIntakeSpec(classified.Parsed, flagURL, flagBranch, flagPath), cacheDir)
 				if err != nil {
 					return withScopeFlags(err, scopeFlagsOf(cmd, scope))
 				}
 				err = intake.run(cmd, addRequest{scope: scope, cfg: cfg, all: flagAll, skills: flagSkills, yes: flagYes, agents: flagAgents, trustCert: trustCert})
-				return withScopeFlags(wellKnownRefusal(cmd, err), scopeFlagsOf(cmd, scope))
+				return withScopeFlags(sourceRefusal(cmd, err), scopeFlagsOf(cmd, scope))
 			default:
 				return fmt.Errorf("unsupported Add Source kind %q", kind)
 			}

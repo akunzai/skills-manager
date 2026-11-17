@@ -24,12 +24,12 @@ type addListRow struct {
 // them: it never writes Config, the Scope skills directory, Scope state, or
 // an Agent directory. A remote Source's Cache is still refreshed, exactly as
 // Add does (ADR-0004/0005), so a later 'skills add' reuses it.
-func runAddList(cmd *cobra.Command, kind engine.AddSourceKind, source, flagPath, flagBranch, flagURL, cacheDir string, jsonOutput bool) error {
-	switch kind {
+func runAddList(cmd *cobra.Command, source engine.ClassifiedSource, flagPath, flagBranch, flagURL, cacheDir string, jsonOutput bool) error {
+	switch source.Kind {
 	case engine.AddSourceSymlink:
-		return listLocalSkills(cmd, source, flagPath, jsonOutput)
+		return listLocalSkills(cmd, source.Arg, flagPath, jsonOutput)
 	case engine.AddSourceRemote, engine.AddSourceWellKnown:
-		return listRemoteSkills(cmd, engine.RemoteIntakeSpec(kind, source, flagURL, flagBranch, flagPath), cacheDir, jsonOutput)
+		return listRemoteSkills(cmd, engine.RemoteIntakeSpec(source.Parsed, flagURL, flagBranch, flagPath), cacheDir, jsonOutput)
 	default:
 		return fmt.Errorf("--list is not supported for this Source kind")
 	}

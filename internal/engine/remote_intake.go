@@ -30,16 +30,16 @@ type RemoteIntake struct {
 	cacheDir string
 }
 
-// RemoteIntakeSpec is the Source Remote intake reads for an Add of kind
-// remote or well-known from raw. A git Source's url, branch, and subpath
-// override what raw names; a well-known Source is its base URL alone, since
-// ClassifyAddKind refuses those flags for it.
-func RemoteIntakeSpec(kind AddSourceKind, raw, url, branch, subpath string) models.ParsedRepoSource {
-	if kind == AddSourceWellKnown {
-		source, _ := models.ParseWellKnownSource(raw)
-		return models.ParsedRepoSource{SourceKey: source.SourceKey, URL: source.URL, RepoType: config.WellKnownType}
+// RemoteIntakeSpec is the Source Remote intake reads for a remote or
+// well-known Source, from its parse (ClassifiedSource.Parsed). A git
+// Source's url, branch, and subpath override what it names; a well-known
+// Source is its base URL alone, since ClassifyAddKind refuses those flags
+// for it.
+func RemoteIntakeSpec(source models.Source, url, branch, subpath string) models.ParsedRepoSource {
+	if source.Kind == models.SourceWellKnown {
+		return models.ParsedRepoSource{SourceKey: source.WellKnown.SourceKey, URL: source.WellKnown.URL, RepoType: config.WellKnownType}
 	}
-	spec := models.ParseRepoSource(raw)
+	spec := source.Repo
 	spec.URL = cmp.Or(url, spec.URL)
 	spec.Branch = cmp.Or(branch, spec.Branch)
 	spec.Subpath = cmp.Or(subpath, spec.Subpath)

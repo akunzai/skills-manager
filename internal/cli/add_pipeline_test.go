@@ -13,6 +13,7 @@ import (
 
 	"github.com/akunzai/skills-manager/internal/config"
 	"github.com/akunzai/skills-manager/internal/engine"
+	"github.com/akunzai/skills-manager/internal/models"
 	"github.com/akunzai/skills-manager/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -234,7 +235,7 @@ func TestNewRemoteIntakeAppliesTreeURLScopeBeforeDiscovery(t *testing.T) {
 
 	cmd := testCmd()
 	cmd.SetErr(new(bytes.Buffer))
-	intake, err := newRemoteIntake(cmd, config.DefaultConfig(), engine.AddSourceRemote, engine.RemoteIntakeSpec(engine.AddSourceRemote, "https://github.com/owner/repo/tree/main/skills", origin, "", ""), t.TempDir())
+	intake, err := newRemoteIntake(cmd, config.DefaultConfig(), engine.AddSourceRemote, engine.RemoteIntakeSpec(mustParseSource(t, "https://github.com/owner/repo/tree/main/skills"), origin, "", ""), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +277,7 @@ func TestAddReadsARemoteSourceOnTheChosenScopesBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	intake, err := newRemoteIntake(cmd, cfg, engine.AddSourceRemote, engine.RemoteIntakeSpec(engine.AddSourceRemote, "owner/repo", origin, "", ""), t.TempDir())
+	intake, err := newRemoteIntake(cmd, cfg, engine.AddSourceRemote, engine.RemoteIntakeSpec(mustParseSource(t, "owner/repo"), origin, "", ""), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,4 +736,13 @@ func TestAddRunEarlySourcePathCancellationPreservesDeclaration(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(scope.globalSkills, "alpha")); !os.IsNotExist(err) {
 		t.Fatalf("cancelled Add materialized alpha: %v", err)
 	}
+}
+
+func mustParseSource(t *testing.T, raw string) models.Source {
+	t.Helper()
+	source, err := models.ParseRemoteSource(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
 }
