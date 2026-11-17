@@ -441,7 +441,13 @@
 <span class="prompt">$ </span><span class="cmd">skills add anthropics/skills --agent claude,antigravity --yes</span>
 
 <span class="comment"># Add a skill from a publisher's well-known index, no git needed</span>
-<span class="prompt">$ </span><span class="cmd">skills add https://developers.cloudflare.com --skill agents-sdk</span></pre>
+<span class="prompt">$ </span><span class="cmd">skills add https://developers.cloudflare.com --skill agents-sdk</span>
+
+<span class="comment"># Add a skill from a GitHub Gist, declared by its id</span>
+<span class="prompt">$ </span><span class="cmd">skills add gist:0123456789abcdef</span>
+
+<span class="comment"># Pipe a remote skill into an agent without adding it</span>
+<span class="prompt">$ </span><span class="cmd">skills use akunzai/agent-skills -s agents-md | claude</span></pre>
         </div>
         <p style="margin-top: 10px; font-size: 14px; color: var(--muted);">
           Remote sources are cached locally; duplicate copies are deduplicated automatically. A site URL is read as an <a href="https://github.com/cloudflare/agent-skills-discovery-rfc">Agent Skills Discovery</a> index over HTTPS.
@@ -554,8 +560,8 @@
           </tr>
           <tr>
             <td><code>skills add</code></td>
-            <td>Declare skills from Git, a well-known index, local symlink, or command</td>
-            <td><code>0</code> added, <code>1</code> blocked</td>
+            <td>Declare skills from Git, a GitHub Gist, a well-known index, local symlink, or command</td>
+            <td><code>0</code> added, <code>1</code> blocked or no skills offered</td>
           </tr>
           <tr>
             <td><code>skills add &lt;source&gt; --trust-cert &lt;pem&gt;</code></td>
@@ -581,6 +587,16 @@
             <td><code>skills ls</code></td>
             <td>Inspect declared skills, sources, and agent availability</td>
             <td><code>0</code> clean</td>
+          </tr>
+          <tr>
+            <td><code>skills cat &lt;skill&gt;</code></td>
+            <td>Print a skill&rsquo;s <code>SKILL.md</code> as Agents read it, to pipe into an agent</td>
+            <td><code>0</code> printed, <code>1</code> not readable on disk</td>
+          </tr>
+          <tr>
+            <td><code>skills use &lt;source&gt;</code></td>
+            <td>Print a remote skill&rsquo;s <code>SKILL.md</code> without adding it, to pipe into an agent</td>
+            <td><code>0</code> printed, <code>1</code> not verified or no skills offered</td>
           </tr>
           <tr>
             <td><code>skills agents</code></td>
