@@ -2,6 +2,7 @@ package cli
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -121,10 +122,45 @@ func discoveryResult(discovered engine.DiscoveredSkills, err error, sourceKey st
 	if err != nil {
 		return nil, fmt.Errorf("discover skills in %s: %w", sourceKey, err)
 	}
-	if len(discovered) == 0 {
-		return nil, fmt.Errorf("no SKILL.md found in %s", sourceKey)
-	}
 	return discovered, nil
+}
+
+// reportState states what stands in the way on stderr, and the way out when
+// there is one. It is a state, not a failure, so it exits 1 without an
+// Error: prefix (ADR-0002).
+func reportState(cmd *cobra.Command, state, next string) error {
+	writeState(cmd.ErrOrStderr(), state, next)
+	return exitError{message: state, code: 1}
+}
+
+func writeState(w io.Writer, state, next string) {
+	fmt.Fprintf(w, "%s.\n", state)
+	if next != "" {
+		fmt.Fprintf(w, "Next: %s.\n", next)
+	}
+}
+
+// noSkillsState is the sentence for a Source that offers no Skills, and the
+// way out when a subpath narrowed discovery.
+func noSkillsState(err error) (state, next string) {
+	if none, ok := errors.AsType[*engine.NoSkillsError](err); ok && none.Subpath != "" {
+		next = fmt.Sprintf("try a path wider than %s, or none", none.Subpath)
+	}
+	return err.Error(), next
+}
+
+// reportNoSkills states a Source that offers no Skills on stderr, exit 1.
+func reportNoSkills(cmd *cobra.Command, err error) error {
+	state, next := noSkillsState(err)
+	return reportState(cmd, state, next)
+}
+
+// warnSkipped warns of each Skill a well-known index lists but intake could
+// not offer.
+func warnSkipped(cmd *cobra.Command, intake *engine.RemoteIntake) {
+	for _, skipped := range intake.Skipped {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%sWarning: %s%s\n", colorYellow, skipped, colorReset)
+	}
 }
 
 // localSourceDir is localPath as an absolute directory, and as the
@@ -155,6 +191,9 @@ func newLocalIntake(cmd *cobra.Command, localPath, description, selectionPath st
 	discovered, err = discoveryResult(discovered, err, displayPath)
 	if err != nil {
 		return nil, err
+	}
+	if err := engine.NoSkillsInDirectory(discovered, models.ToTildePath(absSourcePath), selectionPath); err != nil {
+		return nil, reportNoSkills(cmd, err)
 	}
 	announceLoneSkill(cmd.OutOrStdout(), discovered, descriptions)
 
@@ -215,9 +254,7 @@ func fetchRemoteIntake(cmd *cobra.Command, cfg *config.Config, spec models.Parse
 	}
 	region.Done(spec.SourceKey)
 	region.Stop()
-	for _, skipped := range intake.Skipped {
-		fmt.Fprintf(cmd.ErrOrStderr(), "%sWarning: %s%s\n", colorYellow, skipped, colorReset)
-	}
+	warnSkipped(cmd, intake)
 	return intake, nil
 }
 
@@ -232,14 +269,12 @@ func newRemoteIntake(cmd *cobra.Command, cfg *config.Config, kind engine.AddSour
 	if err != nil {
 		return nil, err
 	}
+	if err := intake.NoSkills(); err != nil {
+		return nil, reportNoSkills(cmd, err)
+	}
 	discovered, resourceNoun := intake.Discovered, "Repository"
 	if kind == engine.AddSourceWellKnown {
 		resourceNoun = "Source"
-		if len(discovered) == 0 {
-			return nil, fmt.Errorf("no Skills listed in %s", models.WellKnownIndexURL(spec.URL))
-		}
-	} else if discovered, err = discoveryResult(discovered, nil, spec.SourceKey); err != nil {
-		return nil, err
 	}
 	announceLoneSkill(cmd.OutOrStdout(), discovered, intake.Descriptions)
 	return &addIntake{

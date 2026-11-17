@@ -45,7 +45,8 @@ func listLocalSkills(cmd *cobra.Command, localPath, selectionPath string, jsonOu
 	if err != nil {
 		return fmt.Errorf("discover skills in %s: %w", displayPath, err)
 	}
-	return printAddList(cmd, models.ToTildePath(absSourcePath), discovered, descriptions, jsonOutput)
+	display := models.ToTildePath(absSourcePath)
+	return printAddList(cmd, display, discovered, descriptions, jsonOutput, engine.NoSkillsInDirectory(discovered, display, selectionPath))
 }
 
 func listRemoteSkills(cmd *cobra.Command, spec models.ParsedRepoSource, cacheDir string, jsonOutput bool) error {
@@ -57,15 +58,17 @@ func listRemoteSkills(cmd *cobra.Command, spec models.ParsedRepoSource, cacheDir
 	if err != nil {
 		return err
 	}
-	return printAddList(cmd, spec.SourceKey, intake.Discovered, intake.Descriptions, jsonOutput)
+	return printAddList(cmd, spec.SourceKey, intake.Discovered, intake.Descriptions, jsonOutput, intake.NoSkills())
 }
 
 // printAddList flattens discovered into a stable, name-then-path-sorted row
 // list and prints it, following ADR-0002's codes for a read-only browse: 0
-// with at least one Skill listed, 1 with none. A discovery or fetch failure
-// is reported by the caller's error instead, and defaults to exit code 2.
-func printAddList(cmd *cobra.Command, displayName string, discovered engine.DiscoveredSkills, descriptions engine.DiscoveredSkillDescriptions, jsonOutput bool) error {
-	var rows []addListRow
+// with at least one Skill listed, 1 when none is the Source's state (a
+// *engine.NoSkillsError in noSkills), stated on stdout with the list it stands for. A
+// discovery or fetch failure is reported by the caller's error instead, and
+// defaults to exit code 2.
+func printAddList(cmd *cobra.Command, displayName string, discovered engine.DiscoveredSkills, descriptions engine.DiscoveredSkillDescriptions, jsonOutput bool, noSkills error) error {
+	rows := []addListRow{}
 	for _, name := range slices.Sorted(maps.Keys(discovered)) {
 		paths := slices.Clone(discovered[name])
 		slices.Sort(paths)
@@ -82,8 +85,9 @@ func printAddList(cmd *cobra.Command, displayName string, discovered engine.Disc
 			return err
 		}
 		fmt.Fprintln(out, string(data))
-	case len(rows) == 0:
-		fmt.Fprintf(out, "%sNo Skills found in %s.%s\n", colorYellow, displayName, colorReset)
+	case noSkills != nil:
+		state, next := noSkillsState(noSkills)
+		writeState(out, state, next)
 	default:
 		fmt.Fprintf(out, "%sSkills in %s:%s\n\n", colorBold, displayName, colorReset)
 		for _, row := range rows {
@@ -96,8 +100,8 @@ func printAddList(cmd *cobra.Command, displayName string, discovered engine.Disc
 		fmt.Fprintf(out, "\n%s found.\n", countOf(len(rows), "skill"))
 	}
 
-	if len(rows) == 0 {
-		return exitError{message: fmt.Sprintf("no Skills found in %s", displayName), code: 1}
+	if noSkills != nil {
+		return exitError{message: noSkills.Error(), code: 1}
 	}
 	return nil
 }

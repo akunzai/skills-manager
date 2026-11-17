@@ -23,6 +23,11 @@ non-interactive Add requires an explicit scope.
 To see what a Source offers before declaring anything, add `--list` (`--json`
 for scripts). It honors `--path` and `--branch` the same way and changes
 nothing: no Config, Scope skills directory, or Agent directory is written.
+A Source that offers no Skills is a state, not an error: Add states it
+(`<Source> has no SKILL.md.`, or `<index URL> lists no Skills.` for a
+well-known index), on stderr or, with `--list`, with the list on stdout, and
+exits `1`, adding a `Next:` line naming a wider path when a subpath (from
+`--path` or the Source itself) narrowed it.
 
 ```sh
 skills add microsoft/azure-skills --path skills --list
