@@ -130,20 +130,16 @@ func DefaultCacheDir() string {
 }
 
 // projectKnownAgents returns mapping of agent names to their project-level
-// skills directory. Cursor is not here: it reads project .agents/skills
-// directly, same as at Global Scope (cursor.com/docs/skills#skill-directories).
-// Grok is here for Project only: Global reads ~/.agents/skills
-// (docs.x.ai/build/features/skills-plugins-marketplaces); Project discovers
-// ./.grok/skills instead.
+// skills directory. Only Agents that do not read project .agents/skills
+// directly belong here. Grok is here for Project only: Global reads
+// ~/.agents/skills (docs.x.ai/build/features/skills-plugins-marketplaces);
+// Project discovers ./.grok/skills instead.
 func projectKnownAgents(projectRoot string) map[string]string {
 	return map[string]string{
 		"claude-code": filepath.Join(projectRoot, ".claude", "skills"),
 		"continue":    filepath.Join(projectRoot, ".continue", "skills"),
-		"cline":       filepath.Join(projectRoot, ".cline", "skills"),
 		"firebender":  filepath.Join(projectRoot, ".firebender", "skills"),
 		"grok":        filepath.Join(projectRoot, ".grok", "skills"),
-		"roo":         filepath.Join(projectRoot, ".roo", "skills"),
-		"windsurf":    filepath.Join(projectRoot, ".codeium", "windsurf", "skills"),
 	}
 }
 
@@ -203,21 +199,53 @@ func (a Agents) IsReserved(agent, name string) bool {
 func leftoverAgentSkillDirs(isProject bool, root string) map[string]string {
 	if isProject {
 		return map[string]string{
-			"codex": filepath.Join(root, ".codex", "skills"),
+			"cline":    filepath.Join(root, ".cline", "skills"),
+			"codex":    filepath.Join(root, ".codex", "skills"),
+			"roo":      filepath.Join(root, ".roo", "skills"),
+			"windsurf": filepath.Join(root, ".codeium", "windsurf", "skills"),
 		}
 	}
 	xdgConfig := ResolveEnvPath("XDG_CONFIG_HOME", "~/.config")
 	grokHome := ResolveEnvPath("GROK_HOME", "~/.grok")
+	autohandHome := ResolveEnvPath("AUTOHAND_HOME", "~/.autohand")
+	vibeHome := ResolveEnvPath("VIBE_HOME", "~/.vibe")
+
+	openclawDir := ExpandUser("~/.openclaw/skills")
+	if _, err := os.Stat(ExpandUser("~/.clawdbot")); err == nil {
+		openclawDir = ExpandUser("~/.clawdbot/skills")
+	} else if _, err := os.Stat(ExpandUser("~/.moltbot")); err == nil {
+		openclawDir = ExpandUser("~/.moltbot/skills")
+	}
+
 	return map[string]string{
-		"amp":            ExpandUser("~/.amp/skills"),
-		"codex":          ExpandUser("~/.codex/skills"),
-		"cursor":         ExpandUser("~/.cursor/skills"),
-		"gemini-cli":     ExpandUser("~/.gemini/skills"),
-		"github-copilot": ExpandUser("~/.copilot/skills"),
-		"grok":           filepath.Join(grokHome, "skills"),
-		"muse-code":      filepath.Join(xdgConfig, "muse", "skills"),
-		"opencode":       filepath.Join(xdgConfig, "opencode", "skills"),
-		"zed":            filepath.Join(xdgConfig, "zed", "skills"),
+		"amp":             ExpandUser("~/.amp/skills"),
+		"antigravity-cli": ExpandUser("~/.gemini/antigravity-cli/skills"),
+		"augment":         ExpandUser("~/.augment/skills"),
+		"autohand-code":   filepath.Join(autohandHome, "skills"),
+		"cline":           ExpandUser("~/.cline/skills"),
+		"codex":           ExpandUser("~/.codex/skills"),
+		"crush":           ExpandUser("~/.config/crush/skills"),
+		"cursor":          ExpandUser("~/.cursor/skills"),
+		"devin":           filepath.Join(xdgConfig, "devin", "skills"),
+		"droid":           ExpandUser("~/.factory/skills"),
+		"gemini-cli":      ExpandUser("~/.gemini/skills"),
+		"github-copilot":  ExpandUser("~/.copilot/skills"),
+		"goose":           filepath.Join(xdgConfig, "goose", "skills"),
+		"grok":            filepath.Join(grokHome, "skills"),
+		"junie":           ExpandUser("~/.junie/skills"),
+		"kilo":            ExpandUser("~/.kilocode/skills"),
+		"mistral-vibe":    filepath.Join(vibeHome, "skills"),
+		"muse-code":       filepath.Join(xdgConfig, "muse", "skills"),
+		"openclaw":        openclawDir,
+		"opencode":        filepath.Join(xdgConfig, "opencode", "skills"),
+		"openhands":       ExpandUser("~/.openhands/skills"),
+		"pi":              ExpandUser("~/.pi/agent/skills"),
+		"pochi":           ExpandUser("~/.pochi/skills"),
+		"qwen-code":       ExpandUser("~/.qwen/skills"),
+		"roo":             ExpandUser("~/.roo/skills"),
+		"rovodev":         ExpandUser("~/.rovodev/skills"),
+		"windsurf":        ExpandUser("~/.codeium/windsurf/skills"),
+		"zed":             filepath.Join(xdgConfig, "zed", "skills"),
 	}
 }
 
@@ -244,11 +272,8 @@ func automaticallyAvailableAgents(isProject bool) []string {
 var knownAgentSkillDirTemplates = map[string]string{
 	"adal":            "~/.adal/skills",
 	"aider-desk":      "~/.aider-desk/skills",
-	"antigravity-cli": "~/.gemini/antigravity-cli/skills",
 	"astrbot":         "~/.astrbot/data/skills",
-	"augment":         "~/.augment/skills",
 	"bob":             "~/.bob/skills",
-	"cline":           "~/.cline/skills",
 	"codearts-agent":  "~/.codeartsdoer/skills",
 	"codebuddy":       "~/.codebuddy/skills",
 	"codemaker":       "~/.codemaker/skills",
@@ -256,15 +281,11 @@ var knownAgentSkillDirTemplates = map[string]string{
 	"command-code":    "~/.commandcode/skills",
 	"continue":        "~/.continue/skills",
 	"cortex":          "~/.snowflake/cortex/skills",
-	"crush":           "~/.config/crush/skills",
-	"droid":           "~/.factory/skills",
 	"firebender":      "~/.firebender/skills",
 	"forgecode":       "~/.forge/skills",
 	"iflow-cli":       "~/.iflow/skills",
 	"inference-sh":    "~/.inferencesh/skills",
 	"jazz":            "~/.jazz/skills",
-	"junie":           "~/.junie/skills",
-	"kilo":            "~/.kilocode/skills",
 	"kimchi":          "~/.config/kimchi/harness/skills",
 	"kiro-cli":        "~/.kiro/skills",
 	"kode":            "~/.kode/skills",
@@ -275,52 +296,30 @@ var knownAgentSkillDirTemplates = map[string]string{
 	"mux":             "~/.mux/skills",
 	"neovate":         "~/.neovate/skills",
 	"ona":             "~/.ona/skills",
-	"openhands":       "~/.openhands/skills",
-	"pi":              "~/.pi/agent/skills",
-	"pochi":           "~/.pochi/skills",
 	"posit-assistant": "~/.posit/assistant/skills",
 	"qoder":           "~/.qoder/skills",
 	"qoder-cn":        "~/.qoder-cn/skills",
-	"qwen-code":       "~/.qwen/skills",
 	"reasonix":        "~/.reasonix/skills",
-	"roo":             "~/.roo/skills",
-	"rovodev":         "~/.rovodev/skills",
 	"tabnine-cli":     "~/.tabnine/agent/skills",
 	"terramind":       "~/.terramind/skills",
 	"tinycloud":       "~/.tinycloud/skills",
 	"trae":            "~/.trae/skills",
 	"trae-cn":         "~/.trae-cn/skills",
-	"windsurf":        "~/.codeium/windsurf/skills",
 	"zcode":           "~/.zcode/skills",
 	"zencoder":        "~/.zencoder/skills",
 }
 
 func knownAgents() map[string]string {
-	xdgConfig := ResolveEnvPath("XDG_CONFIG_HOME", "~/.config")
 	claudeHome := ResolveEnvPath("CLAUDE_CONFIG_DIR", "~/.claude")
-	vibeHome := ResolveEnvPath("VIBE_HOME", "~/.vibe")
 	hermesHome := ResolveEnvPath("HERMES_HOME", "~/.hermes")
-	autohandHome := ResolveEnvPath("AUTOHAND_HOME", "~/.autohand")
 
-	openclawDir := ExpandUser("~/.openclaw/skills")
-	if _, err := os.Stat(ExpandUser("~/.clawdbot")); err == nil {
-		openclawDir = ExpandUser("~/.clawdbot/skills")
-	} else if _, err := os.Stat(ExpandUser("~/.moltbot")); err == nil {
-		openclawDir = ExpandUser("~/.moltbot/skills")
-	}
-
-	known := make(map[string]string, len(knownAgentSkillDirTemplates)+7)
+	known := make(map[string]string, len(knownAgentSkillDirTemplates)+2)
 	for agent, template := range knownAgentSkillDirTemplates {
 		known[agent] = ExpandUser(template)
 	}
 
-	known["autohand-code"] = filepath.Join(autohandHome, "skills")
 	known["claude-code"] = filepath.Join(claudeHome, "skills")
-	known["devin"] = filepath.Join(xdgConfig, "devin", "skills")
-	known["goose"] = filepath.Join(xdgConfig, "goose", "skills")
 	known["hermes-agent"] = filepath.Join(hermesHome, "skills")
-	known["mistral-vibe"] = filepath.Join(vibeHome, "skills")
-	known["openclaw"] = openclawDir
 
 	return known
 }
@@ -338,72 +337,105 @@ const (
 const scopeBoth = scopeGlobal | scopeProject
 
 // universalAgentScopes lists, per Agent, the Scope(s) confirmed (against each
-// tool's own documentation) to read the master skills directory directly:
-// Global ~/.agents/skills, Project .agents/skills. An Agent that reads its own
-// dedicated directory instead — in either Scope — is not listed for that
-// Scope, even if some other tool with a similar name is.
+// tool's own documentation or source) to read the master skills directory
+// directly: Global ~/.agents/skills, Project .agents/skills. An Agent that reads
+// its own dedicated directory instead — in either Scope — is not listed for
+// that Scope, even if some other tool with a similar name is.
 //
-// A handful of entries are Scope-split because the same Agent's Global and
+// A pair of entries are Scope-split because the same Agent's Global and
 // Project behavior differ:
-//   - antigravity-cli: Project reads .agents/skills; Global reads its own
-//     ~/.gemini/antigravity-cli/skills instead — a different tool from the
-//     Antigravity IDE, which reads ~/.gemini/skills
-//     (antigravity.google/docs/cli/plugins#sharing-global-skills).
 //   - grok: Global reads ~/.agents/skills; Project discovers ./.grok/skills
 //     (docs.x.ai/build/features/skills-plugins-marketplaces).
 //   - replit: confirmed only for Project (docs.replit.com); Replit Agent runs
 //     in the cloud with no local Global skills directory to read.
 //
-// muse-code reads the master skills directory in both Scopes and keeps a
-// leftover-only user root at $XDG_CONFIG_HOME/muse/skills
-// (dev.meta.ai/docs/muse-code/extending/).
+// Authoritative references for scopeBoth additions beyond the original set:
+//   - antigravity-cli: github.com/google-antigravity/antigravity-cli/releases/tag/1.5.16
+//   - augment: docs.augmentcode.com/cli/skills
+//   - autohand-code: github.com/autohandai/code-cli/blob/main/docs/agent-skills.md
+//   - cline: github.com/cline/cline/blob/main/apps/vscode/src/core/storage/skill-directories.ts
+//   - crush: github.com/charmbracelet/crush/blob/main/internal/config/load.go
+//   - devin & windsurf (Devin Desktop): docs.devin.ai/cli/extensibility/skills/overview,
+//     docs.devin.ai/desktop/devin-desktop-faq, docs.devin.ai/desktop/devin-local/customizations
+//   - droid: docs.factory.ai/cli/configuration/skills
+//   - goose: github.com/block/goose/blob/main/documentation/docs/guides/context-engineering/using-skills.md
+//   - junie: junie.jetbrains.com/docs/agent-skills.html
+//   - kilo: github.com/Kilo-Org/kilocode/blob/main/packages/kilo-docs/pages/customize/skills.md
+//   - mistral-vibe: github.com/mistralai/mistral-vibe (vibe/core/config/harness_files/_harness_manager.py,
+//     vibe/core/paths/_local_config_files.py)
+//   - muse-code: dev.meta.ai/docs/muse-code/extending/
+//   - openclaw: github.com/openclaw/openclaw/blob/main/docs/tools/skills.md
+//   - openhands: github.com/OpenHands/software-agent-sdk/blob/main/openhands-sdk/openhands/sdk/skills/skill.py
+//   - pi: github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md
+//   - pochi: github.com/TabbyML/pochi/blob/main/packages/docs/content/docs/skills.mdx
+//   - qwen-code: github.com/QwenLM/qwen-code/blob/main/docs/users/features/skills.md
+//   - roo: github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/features/skills.mdx
+//   - rovodev: support.atlassian.com/rovo/docs/extend-rovo-dev-cli-with-agent-skills/
 var universalAgentScopes = map[string]agentScope{
 	"amp":             scopeBoth,
-	"antigravity-cli": scopeProject,
+	"antigravity-cli": scopeBoth,
+	"augment":         scopeBoth,
+	"autohand-code":   scopeBoth,
+	"cline":           scopeBoth,
 	"codex":           scopeBoth,
+	"crush":           scopeBoth,
 	"cursor":          scopeBoth,
+	"devin":           scopeBoth,
+	"droid":           scopeBoth,
 	"gemini-cli":      scopeBoth,
 	"github-copilot":  scopeBoth,
+	"goose":           scopeBoth,
 	"grok":            scopeGlobal,
+	"junie":           scopeBoth,
+	"kilo":            scopeBoth,
 	"kimi-code-cli":   scopeBoth,
+	"mistral-vibe":    scopeBoth,
 	"muse-code":       scopeBoth,
+	"openclaw":        scopeBoth,
 	"opencode":        scopeBoth,
+	"openhands":       scopeBoth,
+	"pi":              scopeBoth,
+	"pochi":           scopeBoth,
+	"qwen-code":       scopeBoth,
 	"replit":          scopeProject,
+	"roo":             scopeBoth,
+	"rovodev":         scopeBoth,
 	"warp":            scopeBoth,
+	"windsurf":        scopeBoth,
 	"zed":             scopeBoth,
 	"universal":       scopeBoth,
 }
 
 var agentAliases = map[string]string{
 	// Non-universal aliases
-	"claude":    "claude-code",
-	"roo-code":  "roo",
-	"vibe":      "mistral-vibe",
-	"hermes":    "hermes-agent",
-	"autohand":  "autohand-code",
-	"aider":     "aider-desk",
-	"codearts":  "codearts-agent",
-	"iflow":     "iflow-cli",
-	"kiro":      "kiro-cli",
-	"kilocode":  "kilo",
-	"minimax":   "minimax-code",
-	"posit":     "posit-assistant",
-	"positai":   "posit-assistant",
-	"tabnine":   "tabnine-cli",
-	"factory":   "droid",
-	"forge":     "forgecode",
-	"clawdbot":  "openclaw",
-	"moltbot":   "openclaw",
-	"opendevin": "openhands",
-	"qwen":      "qwen-code",
-	"zenflow":   "zencoder",
+	"claude":   "claude-code",
+	"hermes":   "hermes-agent",
+	"aider":    "aider-desk",
+	"codearts": "codearts-agent",
+	"iflow":    "iflow-cli",
+	"kiro":     "kiro-cli",
+	"minimax":  "minimax-code",
+	"posit":    "posit-assistant",
+	"positai":  "posit-assistant",
+	"tabnine":  "tabnine-cli",
+	"forge":    "forgecode",
+	"zenflow":  "zencoder",
 	// Universal aliases
-	"gemini":      "gemini-cli",
 	"antigravity": "antigravity-cli",
+	"autohand":    "autohand-code",
+	"clawdbot":    "openclaw",
+	"copilot":     "github-copilot",
+	"factory":     "droid",
+	"gemini":      "gemini-cli",
+	"kilocode":    "kilo",
 	"kimi":        "kimi-code-cli",
 	"kimi-code":   "kimi-code-cli",
-	"copilot":     "github-copilot",
+	"moltbot":     "openclaw",
 	"muse":        "muse-code",
+	"opendevin":   "openhands",
+	"qwen":        "qwen-code",
+	"roo-code":    "roo",
+	"vibe":        "mistral-vibe",
 }
 
 func NormalizeAgentName(name string) string {

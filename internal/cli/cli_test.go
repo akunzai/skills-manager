@@ -690,10 +690,10 @@ func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
 		}
 	}
 
-	for _, agent := range []string{"claude", "augment"} {
+	for _, agent := range []string{"claude", "firebender"} {
 		plantManagedAgentLink(t, globalScopeOf(skillsDir), "configured", agent)
 	}
-	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "augment")
+	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "firebender")
 	independent := filepath.Join(home, ".continue", "skills", "configured")
 	if err := os.MkdirAll(independent, 0755); err != nil {
 		t.Fatal(err)
@@ -721,10 +721,10 @@ func TestCLIPruneRemovesOnlyManagedItems(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(skillsDir, "orphan")); err != nil {
 		t.Fatal("untracked real master directory must survive prune --yes")
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "orphan")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(home, ".firebender", "skills", "orphan")); !os.IsNotExist(err) {
 		t.Fatal("managed link for removed master skill should be removed")
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "configured")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(home, ".firebender", "skills", "configured")); !os.IsNotExist(err) {
 		t.Fatal("unconfigured managed link should be removed")
 	}
 	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "configured")); err != nil {
@@ -749,16 +749,16 @@ func TestCLIPruneSkillsOnlyKeepsConfiguredSkillLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	plantManagedAgentLink(t, globalScopeOf(skillsDir), "configured", "augment")
-	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "augment")
+	plantManagedAgentLink(t, globalScopeOf(skillsDir), "configured", "firebender")
+	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "firebender")
 
 	if _, err := runCLI(t, "prune", "--skills-only", "--yes", "--config", configFile, "--skills-dir", skillsDir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "configured")); err != nil {
+	if _, err := os.Lstat(filepath.Join(home, ".firebender", "skills", "configured")); err != nil {
 		t.Fatal("--skills-only must keep links for configured skills")
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "orphan")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(home, ".firebender", "skills", "orphan")); !os.IsNotExist(err) {
 		t.Fatal("--skills-only must remove links for a removed master skill")
 	}
 }
@@ -1218,9 +1218,9 @@ func TestCLIDoctorIgnoresUnusedEmptyAgentDirs(t *testing.T) {
 	}
 
 	claudeDir := filepath.Join(home, ".claude", "skills")
-	crushDir := filepath.Join(home, ".config", "crush", "skills")
+	kimchiDir := filepath.Join(home, ".config", "kimchi", "harness", "skills")
 	jazzDir := filepath.Join(home, ".jazz", "skills")
-	for _, dir := range []string{claudeDir, crushDir, jazzDir} {
+	for _, dir := range []string{claudeDir, kimchiDir, jazzDir} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1231,8 +1231,8 @@ func TestCLIDoctorIgnoresUnusedEmptyAgentDirs(t *testing.T) {
 	if !strings.Contains(out, "[claude-code]") {
 		t.Fatalf("expected configured claude-code in doctor output, got:\n%s", out)
 	}
-	if strings.Contains(out, "[crush]") {
-		t.Fatalf("did not expect unused crush as a healthy harness, got:\n%s", out)
+	if strings.Contains(out, "[kimchi]") {
+		t.Fatalf("did not expect unused kimchi as a healthy harness, got:\n%s", out)
 	}
 	if strings.Contains(out, "[jazz]") {
 		t.Fatalf("did not expect unused jazz as a healthy harness, got:\n%s", out)
@@ -1258,9 +1258,9 @@ func TestCLIDoctorFixRemovesLeftoverEmptyAgentDirs(t *testing.T) {
 	}
 
 	claudeDir := filepath.Join(home, ".claude", "skills")
-	crushDir := filepath.Join(home, ".config", "crush", "skills")
+	kimchiDir := filepath.Join(home, ".config", "kimchi", "harness", "skills")
 	jazzDir := filepath.Join(home, ".jazz", "skills")
-	for _, dir := range []string{claudeDir, crushDir, jazzDir} {
+	for _, dir := range []string{claudeDir, kimchiDir, jazzDir} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1271,8 +1271,8 @@ func TestCLIDoctorFixRemovesLeftoverEmptyAgentDirs(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".jazz")); !os.IsNotExist(err) {
 		t.Fatal("expected leftover ~/.jazz to be removed")
 	}
-	if _, err := os.Stat(filepath.Join(home, ".config", "crush")); !os.IsNotExist(err) {
-		t.Fatal("expected leftover ~/.config/crush to be removed")
+	if _, err := os.Stat(filepath.Join(home, ".config", "kimchi")); !os.IsNotExist(err) {
+		t.Fatal("expected leftover ~/.config/kimchi to be removed")
 	}
 	if _, err := os.Stat(claudeDir); err != nil {
 		t.Fatal("configured claude skills dir must remain")
@@ -3512,7 +3512,7 @@ func TestCLIPruneInteractivePickerSelectsMasterWithLinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(orphan, "SKILL.md"), []byte("# Orphan\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "augment")
+	plantManagedAgentLink(t, globalScopeOf(skillsDir), "orphan", "firebender")
 	if err := config.SaveConfig(config.DefaultConfig(), configFile); err != nil {
 		t.Fatal(err)
 	}
@@ -3535,7 +3535,7 @@ func TestCLIPruneInteractivePickerSelectsMasterWithLinks(t *testing.T) {
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Fatal("selected master directory should be removed")
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".augment", "skills", "orphan")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(home, ".firebender", "skills", "orphan")); !os.IsNotExist(err) {
 		t.Fatal("the master's managed link should be removed too")
 	}
 }
@@ -4181,6 +4181,86 @@ func TestCLIAddListBrowsesAnotherBranchOfADeclaredSource(t *testing.T) {
 	out, err := runCLI(t, "add", "owner/repo", "--url", origin, "--branch", defaultBranch, "--list", "--config", configFile, "--cache-dir", cacheDir)
 	if err != nil || !strings.Contains(out, "sample") {
 		t.Fatalf("add --list on another branch = %v; want sample listed:\n%s", err, out)
+	}
+}
+
+func TestCLIAntigravityCLIIsAutomaticAndCleansLeftoverLinks(t *testing.T) {
+	home := isolateHome(t)
+	configFile := filepath.Join(home, ".agents", "skills.json")
+	skillsDir := filepath.Join(home, ".agents", "skills")
+	srcDir := filepath.Join(t.TempDir(), "alpha")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "SKILL.md"), []byte("---\nname: alpha\ndescription: alpha\n---\n# Alpha\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Settings.DefaultAgents = []string{"claude-code", "antigravity-cli"}
+	config.AddLocalSymlinkEntry(cfg, "alpha", srcDir, "")
+	if err := config.SaveConfig(cfg, configFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Policy mutations targeting antigravity / antigravity-cli are refused.
+	for _, args := range [][]string{
+		{"config", "set", "defaultAgents", "antigravity", "--config", configFile, "--skills-dir", skillsDir},
+		{"agents", "alpha", "include", "antigravity-cli", "--config", configFile, "--skills-dir", skillsDir},
+	} {
+		out, err := runCLI(t, args...)
+		if err == nil || !strings.Contains(out+err.Error(), "antigravity-cli is automatically available and does not need an agent policy") {
+			t.Fatalf("runCLI(%v) = (%q, %v); want automatically available refusal", args, out, err)
+		}
+	}
+
+	// Sync must not create links under ~/.gemini/antigravity-cli/skills.
+	if out, err := runCLI(t, "sync", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("sync failed: %v\n%s", err, out)
+	}
+	antigravityDir := filepath.Join(home, ".gemini", "antigravity-cli", "skills")
+	if _, err := os.Lstat(filepath.Join(antigravityDir, "alpha")); !os.IsNotExist(err) {
+		t.Fatalf("sync must not link into %s", antigravityDir)
+	}
+
+	// Previously managed links under ~/.gemini/antigravity-cli/skills are
+	// reported as leftover occupancy and removed by doctor --fix, while
+	// unmanaged directories stay untouched and existing skills.json references
+	// are not flagged as unknown agents.
+	if err := os.MkdirAll(antigravityDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(antigravityDir, filepath.Join(skillsDir, "alpha"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rel, filepath.Join(antigravityDir, "alpha")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	manualDir := filepath.Join(antigravityDir, "manual")
+	if err := os.MkdirAll(manualDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, "doctor", "--config", configFile, "--skills-dir", skillsDir)
+	if err == nil {
+		t.Fatalf("doctor should report leftover link as actionable finding, got:\n%s", out)
+	}
+	if strings.Contains(strings.ToLower(out), "unknown agent") {
+		t.Fatalf("existing antigravity-cli entry must not be reported as unknown agent:\n%s", out)
+	}
+	if !strings.Contains(out, "antigravity-cli") {
+		t.Fatalf("expected leftover finding mentioning antigravity-cli, got:\n%s", out)
+	}
+
+	if out, err := runCLI(t, "doctor", "--fix", "--config", configFile, "--skills-dir", skillsDir); err != nil {
+		t.Fatalf("doctor --fix failed: %v\n%s", err, out)
+	}
+	if _, err := os.Lstat(filepath.Join(antigravityDir, "alpha")); !os.IsNotExist(err) {
+		t.Fatal("expected leftover managed link under ~/.gemini/antigravity-cli/skills to be removed")
+	}
+	if _, err := os.Stat(manualDir); err != nil {
+		t.Fatal("unmanaged directory under ~/.gemini/antigravity-cli/skills must remain untouched")
 	}
 }
 

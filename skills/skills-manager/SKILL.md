@@ -106,7 +106,7 @@ skills add gist:<id> --yes
 skills add --symlink ./my-local-skill --yes
 
 # Add with custom agent availability overrides
-skills add akunzai/agent-skills --skill agents-md --agent claude,antigravity --yes
+skills add akunzai/agent-skills --skill agents-md --agent claude,continue --yes
 
 # Add from CLI command installer (with prerequisite check)
 skills add --command "playwright-cli install --global --skills=agents" --check "which playwright-cli" playwright-cli --yes
@@ -207,16 +207,16 @@ Control which agents have access to which skills.
 skills agents agents-md
 
 # Set per-skill overrides
-skills agents agents-md include antigravity
+skills agents agents-md include continue
 skills agents agents-md exclude claude
 skills agents agents-md follow-defaults
 
 # Manage global default agents
 skills config
-skills config set defaultAgents claude,antigravity
+skills config set defaultAgents claude,continue
 
 # Project Scope availability overrides:
-skills -p agents agents-md include antigravity
+skills -p agents agents-md include continue
 ```
 
 **Completion criterion**: `skills ls` reflects the target agents under `AGENTS` and `skills doctor` exits `0`.

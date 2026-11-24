@@ -122,10 +122,10 @@ Defaults cover the common case. Per-skill policy handles the exceptions without 
 
 ```sh
 skills config
-skills config set defaultAgents claude,antigravity
+skills config set defaultAgents claude,continue
 
 skills agents agents-md
-skills agents agents-md include antigravity
+skills agents agents-md include continue
 skills agents agents-md exclude claude
 skills agents agents-md follow-defaults
 ```

@@ -238,7 +238,7 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, ".continue", "skills"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	blockedParent := filepath.Join(project, ".roo")
+	blockedParent := filepath.Join(project, ".firebender")
 	if err := os.MkdirAll(filepath.Join(blockedParent, "skills"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +258,8 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 	for _, f := range findings {
 		if strings.Contains(f.Message, "Removed leftover empty agent directory") {
 			removedMsg = f.Message
-			if strings.Contains(removedMsg, "roo") {
-				t.Errorf("Removed finding %q wrongly names roo, which failed to remove", removedMsg)
+			if strings.Contains(removedMsg, "firebender") {
+				t.Errorf("Removed finding %q wrongly names firebender, which failed to remove", removedMsg)
 			}
 		}
 	}
@@ -269,11 +269,11 @@ func TestFindingsLeftoverPartialFailureNamesOnlyWhatSucceeded(t *testing.T) {
 	if !strings.Contains(removedMsg, "continue") {
 		t.Errorf("Removed finding %q does not name continue", removedMsg)
 	}
-	if !containsMessage(findings, "Failed to remove leftover roo dir") {
-		t.Errorf("expected a Failed finding for roo, got %#v", findings)
+	if !containsMessage(findings, "Failed to remove leftover firebender dir") {
+		t.Errorf("expected a Failed finding for firebender, got %#v", findings)
 	}
 	if outcome.Remaining != 1 {
-		t.Errorf("Remaining = %d; want fresh diagnosis to retain roo", outcome.Remaining)
+		t.Errorf("Remaining = %d; want fresh diagnosis to retain firebender", outcome.Remaining)
 	}
 }
 
