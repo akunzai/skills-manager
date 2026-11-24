@@ -52,16 +52,14 @@ func TestIsAutomaticIsScopeAware(t *testing.T) {
 	project := (Scope{IsProject: true, Root: t.TempDir()}).Agents()
 	global := (Scope{}).Agents()
 
-	for _, agent := range []string{"antigravity-cli", "replit"} {
-		if global.IsAutomatic(agent) {
-			t.Errorf("expected %s to not be Automatically available at Global Scope", agent)
-		}
-		if !project.IsAutomatic(agent) {
-			t.Errorf("expected %s to be Automatically available at Project Scope", agent)
-		}
+	if global.IsAutomatic("replit") {
+		t.Errorf("expected replit to not be Automatically available at Global Scope")
+	}
+	if !project.IsAutomatic("replit") {
+		t.Errorf("expected replit to be Automatically available at Project Scope")
 	}
 
-	// grok is the inverse split of antigravity-cli: Global reads
+	// grok is Global-only Automatically available: Global reads
 	// ~/.agents/skills; Project uses ./.grok/skills.
 	if !global.IsAutomatic("grok") {
 		t.Errorf("expected grok to be Automatically available at Global Scope")
@@ -69,20 +67,49 @@ func TestIsAutomaticIsScopeAware(t *testing.T) {
 	if project.IsAutomatic("grok") {
 		t.Errorf("expected grok to not be Automatically available at Project Scope")
 	}
-	if !global.IsAutomatic("muse") || !project.IsAutomatic("muse-code") {
-		t.Errorf("expected muse-code to be Automatically available in both Scopes")
+
+	for _, agent := range []string{
+		"antigravity",
+		"antigravity-cli",
+		"augment",
+		"autohand-code",
+		"cline",
+		"crush",
+		"devin",
+		"droid",
+		"goose",
+		"junie",
+		"kilo",
+		"mistral-vibe",
+		"muse",
+		"muse-code",
+		"openclaw",
+		"openhands",
+		"pi",
+		"pochi",
+		"qwen-code",
+		"roo",
+		"rovodev",
+		"windsurf",
+	} {
+		if !global.IsAutomatic(agent) || !project.IsAutomatic(agent) {
+			t.Errorf("expected %s to be Automatically available in both Scopes (global=%v project=%v)",
+				agent, global.IsAutomatic(agent), project.IsAutomatic(agent))
+		}
 	}
 
-	// cline reads its own directory in every Scope (docs.cline.bot), not
-	// .agents/skills, so it must never be Automatically available.
-	if global.IsAutomatic("cline") || project.IsAutomatic("cline") {
-		t.Errorf("expected cline to not be Automatically available in any Scope")
+	// firebender and continue still read their own directories in every
+	// Scope, so they must never be Automatically available.
+	for _, agent := range []string{"firebender", "continue"} {
+		if global.IsAutomatic(agent) || project.IsAutomatic(agent) {
+			t.Errorf("expected %s to not be Automatically available in any Scope", agent)
+		}
 	}
 }
 
 func TestAutomaticAgentsAreScopeAwareAndSorted(t *testing.T) {
 	project := (Scope{IsProject: true, Root: t.TempDir()}).Agents().Automatic()
-	for _, want := range []string{"antigravity-cli", "codex", "muse-code", "replit"} {
+	for _, want := range []string{"antigravity-cli", "cline", "codex", "goose", "muse-code", "pi", "replit", "roo"} {
 		if !slices.Contains(project, want) {
 			t.Fatalf("Project Automatically available Agents missing %q: %#v", want, project)
 		}
@@ -98,13 +125,13 @@ func TestAutomaticAgentsAreScopeAwareAndSorted(t *testing.T) {
 	}
 
 	global := (Scope{}).Agents().Automatic()
-	for _, want := range []string{"codex", "grok", "muse-code"} {
+	for _, want := range []string{"antigravity-cli", "cline", "codex", "goose", "grok", "muse-code", "pi", "roo", "windsurf"} {
 		if !slices.Contains(global, want) {
 			t.Fatalf("Global Automatically available Agents missing %q: %#v", want, global)
 		}
 	}
-	if slices.Contains(global, "antigravity-cli") {
-		t.Fatalf("antigravity-cli is Project-only Automatically available: %#v", global)
+	if slices.Contains(global, "replit") {
+		t.Fatalf("replit is Project-only Automatically available: %#v", global)
 	}
 }
 
@@ -158,12 +185,6 @@ func TestKnownDirsExpandsPlainTemplatesUnderHome(t *testing.T) {
 	}
 }
 
-// cline and antigravity-cli were previously misclassified as Automatically
-// available at Global Scope; they need a real linkable dir there instead
-// (docs.cline.bot; antigravity-cli's own dir confirmed live via its skills
-// panel — antigravity.google/docs/cli/plugins#sharing-global-skills).
-// github-copilot is not here: confirmed live via `copilot skill list` to read
-// ~/.agents/skills at Global Scope too, so it stays universal in both.
 func TestKnownDirsIncludesReclassifiedGlobalAgents(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -171,22 +192,42 @@ func TestKnownDirsIncludesReclassifiedGlobalAgents(t *testing.T) {
 
 	got := (Scope{}).Agents().KnownDirs()
 	for agent, want := range map[string]string{
-		"cline":           filepath.Join(home, ".cline", "skills"),
-		"antigravity-cli": filepath.Join(home, ".gemini", "antigravity-cli", "skills"),
-		"firebender":      filepath.Join(home, ".firebender", "skills"),
+		"continue":     filepath.Join(home, ".continue", "skills"),
+		"firebender":   filepath.Join(home, ".firebender", "skills"),
+		"hermes-agent": filepath.Join(home, ".hermes", "skills"),
+		"kiro-cli":     filepath.Join(home, ".kiro", "skills"),
 	} {
 		if got[agent] != want {
 			t.Errorf("KnownDirs()[%q] = %q; want %q", agent, got[agent], want)
 		}
 	}
-	if _, ok := got["github-copilot"]; ok {
-		t.Errorf("github-copilot should not be a Global known dir; it is Automatically available")
-	}
-	if _, ok := got["grok"]; ok {
-		t.Errorf("grok should not be a Global known dir; it is Automatically available")
-	}
-	if _, ok := got["muse-code"]; ok {
-		t.Errorf("muse-code should not be a Global known dir; it is Automatically available")
+	for _, automatic := range []string{
+		"antigravity-cli",
+		"augment",
+		"autohand-code",
+		"cline",
+		"crush",
+		"devin",
+		"droid",
+		"github-copilot",
+		"goose",
+		"grok",
+		"junie",
+		"kilo",
+		"mistral-vibe",
+		"muse-code",
+		"openclaw",
+		"openhands",
+		"pi",
+		"pochi",
+		"qwen-code",
+		"roo",
+		"rovodev",
+		"windsurf",
+	} {
+		if _, ok := got[automatic]; ok {
+			t.Errorf("%s should not be a Global known dir; it is Automatically available", automatic)
+		}
 	}
 }
 
@@ -194,11 +235,10 @@ func TestProjectKnownDirsOmitCursorButIncludeFirebender(t *testing.T) {
 	projectRoot := filepath.FromSlash("/path/to/my-project")
 	agents := (Scope{IsProject: true, Root: projectRoot}).Agents().KnownDirs()
 
-	if _, ok := agents["cursor"]; ok {
-		t.Errorf("cursor should not be a Project linkable dir; it reads .agents/skills directly in both Scopes")
-	}
-	if _, ok := agents["muse-code"]; ok {
-		t.Errorf("muse-code should not be a Project linkable dir; it reads .agents/skills directly")
+	for _, automatic := range []string{"antigravity-cli", "cline", "cursor", "muse-code", "roo", "windsurf"} {
+		if _, ok := agents[automatic]; ok {
+			t.Errorf("%s should not be a Project linkable dir; it reads .agents/skills directly", automatic)
+		}
 	}
 	wantFirebender := filepath.Join(projectRoot, ".firebender", "skills")
 	if agents["firebender"] != wantFirebender {
@@ -232,13 +272,38 @@ func TestLeftoverRootsHonorGrokAndMuseRoots(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	grokHome := filepath.Join(home, "custom-grok")
 	t.Setenv("GROK_HOME", grokHome)
+	autohandHome := filepath.Join(home, "custom-autohand")
+	t.Setenv("AUTOHAND_HOME", autohandHome)
+	vibeHome := filepath.Join(home, "custom-vibe")
+	t.Setenv("VIBE_HOME", vibeHome)
 
 	got := (Scope{}).Agents().LeftoverRoots()
-	if got["grok"] != filepath.Join(grokHome, "skills") {
-		t.Errorf(`LeftoverRoots()["grok"] = %q; want under GROK_HOME`, got["grok"])
+	wants := map[string]string{
+		"antigravity-cli": filepath.Join(home, ".gemini", "antigravity-cli", "skills"),
+		"augment":         filepath.Join(home, ".augment", "skills"),
+		"autohand-code":   filepath.Join(autohandHome, "skills"),
+		"cline":           filepath.Join(home, ".cline", "skills"),
+		"crush":           filepath.Join(home, ".config", "crush", "skills"),
+		"devin":           filepath.Join(xdg, "devin", "skills"),
+		"droid":           filepath.Join(home, ".factory", "skills"),
+		"goose":           filepath.Join(xdg, "goose", "skills"),
+		"grok":            filepath.Join(grokHome, "skills"),
+		"junie":           filepath.Join(home, ".junie", "skills"),
+		"kilo":            filepath.Join(home, ".kilocode", "skills"),
+		"mistral-vibe":    filepath.Join(vibeHome, "skills"),
+		"muse-code":       filepath.Join(xdg, "muse", "skills"),
+		"openhands":       filepath.Join(home, ".openhands", "skills"),
+		"pi":              filepath.Join(home, ".pi", "agent", "skills"),
+		"pochi":           filepath.Join(home, ".pochi", "skills"),
+		"qwen-code":       filepath.Join(home, ".qwen", "skills"),
+		"roo":             filepath.Join(home, ".roo", "skills"),
+		"rovodev":         filepath.Join(home, ".rovodev", "skills"),
+		"windsurf":        filepath.Join(home, ".codeium", "windsurf", "skills"),
 	}
-	if got["muse-code"] != filepath.Join(xdg, "muse", "skills") {
-		t.Errorf(`LeftoverRoots()["muse-code"] = %q; want under XDG_CONFIG_HOME/muse`, got["muse-code"])
+	for agent, want := range wants {
+		if got[agent] != want {
+			t.Errorf(`LeftoverRoots()[%q] = %q; want %q`, agent, got[agent], want)
+		}
 	}
 }
 
@@ -251,31 +316,40 @@ func TestScopeAgentsLeftoverRootsOmitKnownDirs(t *testing.T) {
 		t.Fatal("linkable Global Agent must not be a leftover root")
 	}
 
-	project := (Scope{IsProject: true, Root: t.TempDir()}).Agents()
+	projectRoot := t.TempDir()
+	project := (Scope{IsProject: true, Root: projectRoot}).Agents()
 	if _, ok := project.KnownDirs()["grok"]; !ok {
 		t.Fatal("Project Grok is a known dir")
 	}
 	if _, ok := project.LeftoverRoots()["grok"]; ok {
 		t.Fatal("Project Grok known dir must not also be a leftover root")
 	}
-	if _, ok := project.LeftoverRoots()["codex"]; !ok {
-		t.Fatal("Project Codex leftover root missing")
+	projectLeftover := project.LeftoverRoots()
+	for agent, want := range map[string]string{
+		"cline":    filepath.Join(projectRoot, ".cline", "skills"),
+		"codex":    filepath.Join(projectRoot, ".codex", "skills"),
+		"roo":      filepath.Join(projectRoot, ".roo", "skills"),
+		"windsurf": filepath.Join(projectRoot, ".codeium", "windsurf", "skills"),
+	} {
+		if projectLeftover[agent] != want {
+			t.Errorf("Project LeftoverRoots()[%q] = %q; want %q", agent, projectLeftover[agent], want)
+		}
 	}
 }
 
-func TestKnownDirsProbeOpenclawForks(t *testing.T) {
+func TestLeftoverRootsProbeOpenclawForks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	if got, want := (Scope{}).Agents().KnownDirs()["openclaw"], filepath.Join(home, ".openclaw", "skills"); got != want {
+	if got, want := (Scope{}).Agents().LeftoverRoots()["openclaw"], filepath.Join(home, ".openclaw", "skills"); got != want {
 		t.Errorf("openclaw with no fork installed = %q; want %q", got, want)
 	}
 
 	if err := os.MkdirAll(filepath.Join(home, ".clawdbot"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := (Scope{}).Agents().KnownDirs()["openclaw"], filepath.Join(home, ".clawdbot", "skills"); got != want {
+	if got, want := (Scope{}).Agents().LeftoverRoots()["openclaw"], filepath.Join(home, ".clawdbot", "skills"); got != want {
 		t.Errorf("openclaw with clawdbot installed = %q; want %q", got, want)
 	}
 }

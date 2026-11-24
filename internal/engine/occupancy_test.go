@@ -33,7 +33,7 @@ func agentHealthFor(t *testing.T, observation Occupancy, agent string) AgentHeal
 func TestObserveOccupancyClassifiesConfiguredEntries(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "healthy")
 	mustWriteScopeStateTestFile(t, filepath.Join(skillsDir, "alpha", "SKILL.md"), []byte("# Alpha\n"))
-	agentDir := filepath.Join(home, ".config", "goose", "skills")
+	agentDir := filepath.Join(home, ".firebender", "skills")
 
 	plantManagedLink(t, skillsDir, agentDir, "healthy")
 	// A managed link whose target has been removed is leftover occupancy of
@@ -50,10 +50,10 @@ func TestObserveOccupancyClassifiesConfiguredEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	observation := globalAgentDirs(t, skillsDir, "goose").ObserveOccupancy()
+	observation := globalAgentDirs(t, skillsDir, "firebender").ObserveOccupancy()
 
-	if got, want := agentHealthFor(t, observation, "goose"), (AgentHealth{
-		Name:            "goose",
+	if got, want := agentHealthFor(t, observation, "firebender"), (AgentHealth{
+		Name:            "firebender",
 		Dir:             agentDir,
 		UnmanagedBroken: []string{"foreign"},
 		Physical:        []string{"manual"},
@@ -79,24 +79,24 @@ func TestObserveOccupancyLeavesAgentReservedEntriesAlone(t *testing.T) {
 	t.Run("not a stray directory", func(t *testing.T) {
 		home, skillsDir := globalSkillsHome(t, "alpha")
 		claudeDir := filepath.Join(home, ".claude", "skills")
-		gooseDir := filepath.Join(home, ".config", "goose", "skills")
+		firebenderDir := filepath.Join(home, ".firebender", "skills")
 		for _, dir := range []string{
 			filepath.Join(claudeDir, "Synced", "account"),
 			filepath.Join(claudeDir, "manual"),
-			filepath.Join(gooseDir, "synced"),
+			filepath.Join(firebenderDir, "synced"),
 		} {
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				t.Fatal(err)
 			}
 		}
 
-		observation := globalAgentDirs(t, skillsDir, "claude", "goose").ObserveOccupancy()
+		observation := globalAgentDirs(t, skillsDir, "claude", "firebender").ObserveOccupancy()
 
 		if got := agentHealthFor(t, observation, "claude-code").Physical; !reflect.DeepEqual(got, []string{"manual"}) {
 			t.Fatalf("claude-code Physical = %#v; want [manual]", got)
 		}
-		if got := agentHealthFor(t, observation, "goose").Physical; !reflect.DeepEqual(got, []string{"synced"}) {
-			t.Fatalf("goose Physical = %#v; want [synced]", got)
+		if got := agentHealthFor(t, observation, "firebender").Physical; !reflect.DeepEqual(got, []string{"synced"}) {
+			t.Fatalf("firebender Physical = %#v; want [synced]", got)
 		}
 	})
 
@@ -107,12 +107,12 @@ func TestObserveOccupancyLeavesAgentReservedEntriesAlone(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(home, ".claude", "skills", "synced", "account"), 0755); err != nil {
 			t.Fatal(err)
 		}
-		gooseLink := plantManagedLink(t, skillsDir, filepath.Join(home, ".config", "goose", "skills"), "synced")
+		firebenderLink := plantManagedLink(t, skillsDir, filepath.Join(home, ".firebender", "skills"), "synced")
 
-		observation := globalAgentDirs(t, skillsDir, "claude", "goose").ObserveOccupancy()
+		observation := globalAgentDirs(t, skillsDir, "claude", "firebender").ObserveOccupancy()
 
-		if len(observation.Leftover.Paths) != 1 || observation.Leftover.Paths[0].Path != gooseLink {
-			t.Fatalf("Leftover = %#v; want only the goose link", observation.Leftover.Paths)
+		if len(observation.Leftover.Paths) != 1 || observation.Leftover.Paths[0].Path != firebenderLink {
+			t.Fatalf("Leftover = %#v; want only the firebender link", observation.Leftover.Paths)
 		}
 	})
 
@@ -144,7 +144,7 @@ func TestObserveOccupancyLeavesAgentReservedEntriesAlone(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		observation := globalAgentDirs(t, skillsDir, "goose").ObserveOccupancy()
+		observation := globalAgentDirs(t, skillsDir, "firebender").ObserveOccupancy()
 
 		for _, dir := range observation.Leftover.Empty {
 			if dir.Name == "claude-code" {
@@ -159,35 +159,35 @@ func TestObserveOccupancyLeavesAgentReservedEntriesAlone(t *testing.T) {
 // empty.
 func TestObserveOccupancyReportsOnlyUnselectedEmptyDirs(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
-	goose := filepath.Join(home, ".config", "goose", "skills")
-	devin := filepath.Join(home, ".config", "devin", "skills")
+	firebender := filepath.Join(home, ".firebender", "skills")
+	cont := filepath.Join(home, ".continue", "skills")
 	hermes := filepath.Join(home, ".hermes", "skills")
-	for _, dir := range []string{goose, devin, hermes} {
+	for _, dir := range []string{firebender, cont, hermes} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	mustWriteScopeStateTestFile(t, filepath.Join(devin, ".DS_Store"), []byte("x"))
+	mustWriteScopeStateTestFile(t, filepath.Join(cont, ".DS_Store"), []byte("x"))
 	mustWriteScopeStateTestFile(t, filepath.Join(hermes, "keep"), []byte("x"))
 
-	observation := globalAgentDirs(t, skillsDir, "goose").ObserveOccupancy()
+	observation := globalAgentDirs(t, skillsDir, "firebender").ObserveOccupancy()
 
-	if want := []AgentDir{{Name: "devin", Dir: devin}}; !reflect.DeepEqual(observation.Leftover.Empty, want) {
+	if want := []AgentDir{{Name: "continue", Dir: cont}}; !reflect.DeepEqual(observation.Leftover.Empty, want) {
 		t.Fatalf("Empty = %#v; want %#v", observation.Leftover.Empty, want)
 	}
 }
 
 func TestObserveOccupancyReportsUnusableConfiguredDirOnly(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
-	goose := filepath.Join(home, ".config", "goose", "skills")
-	mustWriteScopeStateTestFile(t, goose, []byte("not a directory"))
+	firebender := filepath.Join(home, ".firebender", "skills")
+	mustWriteScopeStateTestFile(t, firebender, []byte("not a directory"))
 	// A leftover root is a convention, not a guarantee: unreadable is skipped.
 	mustWriteScopeStateTestFile(t, filepath.Join(home, ".codex", "skills"), []byte("not a directory"))
 
-	observation := globalAgentDirs(t, skillsDir, "claude", "goose").ObserveOccupancy()
+	observation := globalAgentDirs(t, skillsDir, "claude", "firebender").ObserveOccupancy()
 
-	if want := []AgentHealth{{Name: "goose", Dir: goose, Unusable: "not a directory"}}; !reflect.DeepEqual(observation.Agents, want) {
-		t.Fatalf("Agents = %#v; want only the unusable goose dir (claude's is missing)", observation.Agents)
+	if want := []AgentHealth{{Name: "firebender", Dir: firebender, Unusable: "not a directory"}}; !reflect.DeepEqual(observation.Agents, want) {
+		t.Fatalf("Agents = %#v; want only the unusable firebender dir (claude's is missing)", observation.Agents)
 	}
 	if len(observation.Leftover.Paths) != 0 {
 		t.Fatalf("Leftover = %#v; want nothing", observation.Leftover.Paths)
@@ -449,7 +449,7 @@ func TestLeftoverOccupancyFiltersArePureTransforms(t *testing.T) {
 func TestObserveOccupancyLeftoverRootWinsOverAKnownAgentSharingIt(t *testing.T) {
 	home, skillsDir := globalSkillsHome(t, "alpha")
 	t.Setenv("GROK_HOME", filepath.Join(home, ".claude"))
-	availability := globalAgentDirs(t, skillsDir, "goose")
+	availability := globalAgentDirs(t, skillsDir, "firebender")
 	config.AddLocalSymlinkEntry(availability.cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
 	link := plantManagedLink(t, skillsDir, filepath.Join(home, ".claude", "skills"), "alpha")
 
@@ -519,15 +519,15 @@ func TestObserveOccupancyListsUnmanagedPathsOnEveryLinkableAgentDirectory(t *tes
 	availability := globalAgentDirs(t, skillsDir, "claude")
 	config.AddLocalSymlinkEntry(availability.cfg, "alpha", filepath.Join(skillsDir, "alpha"), "")
 	claude := filepath.Join(home, ".claude", "skills")
-	goose := filepath.Join(home, ".config", "goose", "skills")
+	firebender := filepath.Join(home, ".firebender", "skills")
 	elsewhere := filepath.Join(home, "src", "linked")
 	for _, dir := range []string{
-		filepath.Join(claude, "alpha"),   // Foreign Drift of a declared Skill
-		filepath.Join(claude, "mine"),    // Unmanaged directory
-		filepath.Join(claude, "synced"),  // reserved by the Agent
-		filepath.Join(claude, ".hidden"), // not a Skill
-		filepath.Join(goose, "alpha"),    // declared, but not selected on goose
-		filepath.Join(goose, "theirs"),   // on an Agent directory no policy configures
+		filepath.Join(claude, "alpha"),      // Foreign Drift of a declared Skill
+		filepath.Join(claude, "mine"),       // Unmanaged directory
+		filepath.Join(claude, "synced"),     // reserved by the Agent
+		filepath.Join(claude, ".hidden"),    // not a Skill
+		filepath.Join(firebender, "alpha"),  // declared, but not selected on firebender
+		filepath.Join(firebender, "theirs"), // on an Agent directory no policy configures
 		elsewhere,
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -541,7 +541,7 @@ func TestObserveOccupancyListsUnmanagedPathsOnEveryLinkableAgentDirectory(t *tes
 	if err := os.Symlink(filepath.Join(home, "gone"), filepath.Join(claude, "dangling")); err != nil {
 		t.Fatal(err)
 	}
-	plantManagedLink(t, skillsDir, goose, "removed")
+	plantManagedLink(t, skillsDir, firebender, "removed")
 
 	got := availability.ObserveOccupancy().Unmanaged
 
@@ -549,8 +549,8 @@ func TestObserveOccupancyListsUnmanagedPathsOnEveryLinkableAgentDirectory(t *tes
 		{Agent: "claude-code", Name: "dangling", Path: filepath.Join(claude, "dangling"), Symlink: true, Dangling: true},
 		{Agent: "claude-code", Name: "linked", Path: filepath.Join(claude, "linked"), Symlink: true},
 		{Agent: "claude-code", Name: "mine", Path: filepath.Join(claude, "mine")},
-		{Agent: "goose", Name: "alpha", Path: filepath.Join(goose, "alpha")},
-		{Agent: "goose", Name: "theirs", Path: filepath.Join(goose, "theirs")},
+		{Agent: "firebender", Name: "alpha", Path: filepath.Join(firebender, "alpha")},
+		{Agent: "firebender", Name: "theirs", Path: filepath.Join(firebender, "theirs")},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Unmanaged = %#v\nwant %#v", got, want)

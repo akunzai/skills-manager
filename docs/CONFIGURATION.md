@@ -10,7 +10,7 @@
     "defaultAgents": ["claude-code"],
     "availability": {
       "agents-md": {
-        "include": ["antigravity-cli"]
+        "include": ["continue"]
       }
     }
   },
